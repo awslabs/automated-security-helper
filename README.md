@@ -28,7 +28,7 @@ The security helper supports the following vectors:
         * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts ipynb files into Python executables. Code scan with Saftey and Bandit.
 * Infrastructure
     * Teraform; Cloudformation
-        *   **[checkov]**(https://github.com/bridgecrewio/checkov)
+        *   **[checkov](https://github.com/bridgecrewio/checkov)**
         *   **[cfn_nag](https://github.com/stelligent/cfn_nag)** with custom rules
         *   **[cdk-nag](https://github.com/cdklabs/cdk-nag)** transforming Cloudformation to CDK, and run cdk-nag
 
