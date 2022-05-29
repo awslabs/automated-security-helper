@@ -29,8 +29,10 @@ bandit -ll -r . > py_report_result.txt 2>&1
 BRC=$?
 RC=$(bumprc $RC $BRC)
 
-safety check >> py_report_result.txt 2>&1
+
+grype dir:. >> py_report_result.txt 2>&1
 SRC=$?
 RC=$(bumprc $RC $SRC)
+
 
 exit $RC
