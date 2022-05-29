@@ -1,0 +1,11 @@
+# Get Python Image
+FROM public.ecr.aws/bitnami/python:latest
+
+# Instal prerequisites
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir bandit safety nbconvert jupyterlab
+
+WORKDIR /app
+VOLUME /app
+
+CMD bash -C /utils/py-docker-execute.sh

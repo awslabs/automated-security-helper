@@ -1,0 +1,16 @@
+# Get Ubuntu Image
+FROM public.ecr.aws/ubuntu/ubuntu:latest
+
+ENV TZ=Europe/London
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Instal prerequisites
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y git-all python3 python3-pip ruby-full && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install -U checkov && gem install cfn-nag
+WORKDIR /app
+
+CMD bash -C /utils/yaml-docker-execute.sh

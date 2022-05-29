@@ -1,0 +1,7 @@
+# Get NPM Image
+FROM public.ecr.aws/docker/library/node:latest
+
+WORKDIR /app
+VOLUME /app
+
+CMD bash -C /utils/js-docker-execute.sh
