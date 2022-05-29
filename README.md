@@ -23,7 +23,7 @@ The security helper supports the following vectors:
         * **[git-secrets](https://github.com/awslabs/git-secrets)** - Find api keys, passwords, AWS keys in the code
     * Python
         * **[bandit](https://github.com/PyCQA/bandit)** - Find common security issues in the code.
-        * **[safety](https://github.com/pyupio/safety)** - Checks for vulnerabilities in 3rd party open source packages .
+        * **[grype](https://github.com/anchore/grype)** - finds security vulnerabiliyies in Python code.
     * Jupyter Notebook
         * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts ipynb files into Python executables. Code scan with Saftey and Bandit.
 * Infrastructure
