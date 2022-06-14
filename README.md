@@ -85,7 +85,7 @@ OPTIONS:
   A: ASH on a windows machine
   - Install a Windows Subsystem for Linux (WSL) with an [Ubuntu distribution](https://docs.microsoft.com/en-us/windows/wsl/install). Be sure to use the WSL 2.
   - Install Docker Desktop for windows and activate the [integration the WSL](https://docs.docker.com/desktop/windows/wsl/)
-  - Clone this git repo from a windows terminal via VPN (while in vpn it'll not connect to the repo directly from Ubuntu WSL).
+  - Clone this git repository.
   - Execute the helper tool from the folder downloaded in the previous step from the Ubuntu WSL.
   
 ## Security
