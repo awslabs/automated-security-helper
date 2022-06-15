@@ -25,6 +25,8 @@ The security helper supports the following vectors:
         * **[bandit](https://github.com/PyCQA/bandit)** - Find common security issues in the code.
     * Jupyter Notebook
         * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts ipynb files into Python executables. Code scan with Bandit.
+    * JavaScript; NodeJS
+        * **[npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit)** - checks for vulnerabilities in Javascript and NodeJS.
 * Infrastructure
     * Teraform; Cloudformation
         *   **[checkov](https://github.com/bridgecrewio/checkov)**
