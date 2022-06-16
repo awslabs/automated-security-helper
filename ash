@@ -107,7 +107,7 @@ fi
 # shellcheck disable=SC2120
 # Find all possible extensions in the $SOURCE_DIR directory
 map_extensions_anf_files() {
-  all_files=$(find "${SOURCE_DIR}" -type f -name '*' -not -path "./cdk.out/*") # $SOURCE_DIR comes from user input
+  all_files=$(find "${SOURCE_DIR}" \( -path '*/node_modules*' -prune -o -path '*/cdk.out*' -prune \) -o -type f -name '*') # $SOURCE_DIR comes from user input
   extenstions_found=()
   files_found=()
 
