@@ -26,6 +26,7 @@ PY_EXTENSIONS=("py" "pyc" "ipynb")
 INFRA_EXTENSIONS=("yaml" "yml" "tf" "json" "dockerfile")
 CFN_EXTENSIONS=("yaml" "yml" "json")
 JS_EXTENSIONS=("js")
+GRYPE_EXTENSIONS=("js" "py")
 
 # Look for specific files
 CDK_FILENAMES=("cdk.json")
@@ -232,6 +233,7 @@ run_security_check "Dockerfile-yaml" "${INFRA_EXTENSIONS[@]}"
 run_security_check "Dockerfile-js" "${JS_EXTENSIONS[@]}"
 search_file_content "${CFN_EXTENSIONS}" || echo "No CFN files found"
 run_security_check "Dockerfile-cdk" "${CFN_EXTENSIONS[@]}"
+run_security_check "Dockerfile-grype" "${GRYPE_EXTENSIONS[@]}"
 
 # Cleanup any previous file
 rm -f "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"

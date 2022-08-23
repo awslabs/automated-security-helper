@@ -3,8 +3,7 @@ FROM public.ecr.aws/bitnami/python:latest
 
 # Instal prerequisites
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir bandit nbconvert jupyterlab && \
-    curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+    pip install --no-cache-dir bandit nbconvert jupyterlab
 
 WORKDIR /app
 VOLUME /app

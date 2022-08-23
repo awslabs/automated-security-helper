@@ -22,12 +22,13 @@ bumprc() { # return the higher absolute value of the inputs
 
 RC=0
 
-# Convert any Jupyter notebook files to python
-/utils/identifyipynb.sh
 
-bandit -ll -r . > py_report_result.txt 2>&1
-BRC=$?
-RC=$(bumprc $RC $BRC)
+grype dir:. > grype_report_result.txt 2>&1
+SRC=$?
+RC=$(bumprc $RC $SRC)
 
+syft . >> grype_report_result.txt 2>&1
+SRC=$?
+RC=$(bumprc $RC $SRC)
 
 exit $RC
