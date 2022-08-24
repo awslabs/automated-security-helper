@@ -22,11 +22,15 @@ The security helper supports the following vectors:
     * Git
         * **[git-secrets](https://github.com/awslabs/git-secrets)** - Find api keys, passwords, AWS keys in the code
     * Python
-        * **[bandit](https://github.com/PyCQA/bandit)** - Find common security issues in the code.
+        * **[bandit](https://github.com/PyCQA/bandit)** - finds common security issues in Python code.
+        * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Python code.
+        * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Python code.
     * Jupyter Notebook
-        * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts ipynb files into Python executables. Code scan with Bandit.
+        * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts Jupyter Notebook (ipynb) files into Python executables. Code scan with Bandit.
     * JavaScript; NodeJS
         * **[npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit)** - checks for vulnerabilities in Javascript and NodeJS.
+        * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Javascript and NodeJS.
+        * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Javascript and NodeJS.
 * Infrastructure
     * Teraform; Cloudformation
         *   **[checkov](https://github.com/bridgecrewio/checkov)**
