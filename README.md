@@ -32,7 +32,7 @@ The security helper supports the following vectors:
         * **[Grype](https://github.com/anchore/grype)** - checks for vulnerabilities in Javascript and NodeJS.
         * **[Syft](https://github.com/anchore/grype)** - generates a Software Bill of Materials (SBOM) for Javascript and NodeJS.
 * Infrastructure
-    * Teraform; Cloudformation
+    * Terraform; Cloudformation
         *   **[checkov](https://github.com/bridgecrewio/checkov)**
         *   **[cfn_nag](https://github.com/stelligent/cfn_nag)** with custom rules
         *   **[cdk-nag](https://github.com/cdklabs/cdk-nag)** transforming Cloudformation to CDK, and run cdk-nag
