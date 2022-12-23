@@ -14,7 +14,7 @@ by providing a fast and easy tool to conduct preliminary security check as early
 
 * It is not a replacement of a human review nor standards.
 * It uses light, open source tools to maintain its flexibility and ability to run from anywhere.
-
+* ASH is cloning and running different open-source tools, such as: git-secrets, badnit, Semgrep, Grype, Syft, nbconvert, npm-audit, checkov, cdk-nag and cfn-nag. Please review the tools LICENSE before usage.
 ## Supported frameworks
 The security helper supports the following vectors:
 
