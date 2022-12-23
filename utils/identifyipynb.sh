@@ -25,6 +25,7 @@ RC=0
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
 # Find Jupyter files and convert them to python file for safety and bandit scans.
 echo "Looking for Jupyter notebook files"
+
 for file in $(find . -iname "*.ipynb" -not -path "*/cdk.out/*" -not -path "*/node_modules*");
 do
     echo "Found $file"

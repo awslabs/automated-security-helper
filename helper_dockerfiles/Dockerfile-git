@@ -1,5 +1,5 @@
 # Get Ubuntu Image
-FROM public.ecr.aws/ubuntu/ubuntu:latest
+FROM public.ecr.aws/bitnami/python:latest
 
 # Instal prerequisites
 RUN apt-get update && \

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 set -e
 START_TIME=$(date +%s)
+VERSION=("1.0.0-e-23Dec2022")
 
 print_usage() {
   echo "NAME:"
@@ -10,13 +11,14 @@ print_usage() {
   echo "SYNOPSIS:"
   echo -e "\t$(basename $0) [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir"
   echo "OPTIONS:"
-  echo -e "\t-p | --preserve-report   Add timestamp to the final report file to avoid overriding it after multiple executions"
+  echo -e "\t-v | --version           Prints version number.\n"
+  echo -e "\t-p | --preserve-report   Add timestamp to the final report file to avoid overriding it after multiple executions."
   echo -e "\t--source-dir             Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)"
   echo -e "\t--output-dir             Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
+  echo -e "\t--ext | -extension       Force a file extension to scan. Defaults to identify files automatically."
   echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
-  echo -e "\t-q | --quiet             Don't print verbose text about the build process.\n"
-  echo -e "\t-c | --no-color          Don't print colorized output"
-  echo -e "\t-q | --quiet             Don't print verbose text about the build process.\n"
+  echo -e "\t-q | --quiet             Don't print verbose text about the build process."
+  echo -e "\t-c | --no-color          Don't print colorized output."
   echo -e "For more information please visit https://github.com/aws-samples/automated-security-helper"
 }
 
@@ -26,10 +28,7 @@ PY_EXTENSIONS=("py" "pyc" "ipynb")
 INFRA_EXTENSIONS=("yaml" "yml" "tf" "json" "dockerfile")
 CFN_EXTENSIONS=("yaml" "yml" "json")
 JS_EXTENSIONS=("js")
-GRYPE_EXTENSIONS=("js" "py")
-
-# Look for specific files
-CDK_FILENAMES=("cdk.json")
+GRYPE_EXTENSIONS=("js" "py" "java" "go" "cs")
 
 DOCKERFILE_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"helper_dockerfiles"
 UTILS_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"utils"
@@ -44,6 +43,7 @@ HIGHEST_RC=0
 # Initialize options
 #
 COLOR_OUTPUT="true"
+FORCED_EXT="false"
 
 while (("$#")); do
   case $1 in
@@ -54,6 +54,10 @@ while (("$#")); do
   --output-dir)
     shift
     OUTPUT_DIR="$1"
+    ;;
+  --ext | -extenstion)
+    shift
+    FORCED_EXT="$1"
     ;;
   --force)
     DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} --no-cache"
@@ -68,6 +72,11 @@ while (("$#")); do
   --no-color | -c)
     COLOR_OUTPUT="false"
     ;;
+  --version | -v)
+    echo -n "ASH version $VERSION"
+    EXITCODE=0
+    exit $EXITCODE
+    ;;
   *)
     print_usage
     exit 1
@@ -75,11 +84,6 @@ while (("$#")); do
   esac
   shift
 done
-
-print_found_msg() {
-  EXTENSIONS=$1
-  echo -e "${LPURPLE}Found one of ${EXTENSIONS} items in your source dir${NC}"
-}
 
 TIMESTAMP=$(date +%s)
 USERID=$(echo -n "$(whoami)$(hostname)" | openssl dgst -sha512)
@@ -133,18 +137,14 @@ map_extensions_anf_files() {
 # Try to locate specific extension type (ie yaml, py) from all the extensions found in $SOURCE_DIR
 search_extension() {
   items_to_search=("$@") # passed as parameter to the function
-  item_found=false
+  local item_found=0
   for item in "${items_to_search[@]}"; do
-    if [[ "${extenstions_found[*]}" =~ ${item} || "${files_found[*]}" =~ ${item} ]]; then
-      item_found=true
+    if [[ "${extenstions_found[*]}" =~ ${item} ]]; then
+      local item_found=1
+      echo "$item_found"
+      break
     fi
   done
-}
-
-search_file_content() {
-  items_to_search=("$@") # passed as parameter to the function
-  item_found=false
-  cfn_files=$(grep -lri 'AWSTemplateFormatVersion' ${SOURCE_DIR} --exclude-dir="cdk.out")
 }
 
 # Validate the input and set default values
@@ -162,16 +162,14 @@ validate_input() {
 # The first argument passed to this method is the dockerfile that executes the actual scan
 # The remaining arguments (can be treated as *args in python) are the extensions we wish to scan for
 run_security_check() {
-  EXTENSIONS_USED=( "${EXTENSIONS_USED[@]}" "$1" )
-  echo "EXTENSIONS_USED is " $1
-  DOCKERFILE_TO_EXECUTE="$1"
-  ITEMS_TO_SCAN=("${@:2}") # take all the array of commands which are the extensions to scan (slice 2nd to end)
-  RUNTIME_CONTAINER_NAME="scan-$RANDOM"
-
-  search_extension "${ITEMS_TO_SCAN[@]}" # First lets verify this extension even exists in the $SOURCE_DIR directory
-  if [[ $item_found == "true" ]]; then
-    print_found_msg "${ITEMS_TO_SCAN}"
-
+  local EXTENSIONS_USED=( "${EXTENSIONS_USED[@]}" "$1" )
+  local DOCKERFILE_TO_EXECUTE="$1"
+  local ITEMS_TO_SCAN=("${@:2}") # take all the array of commands which are the extensions to scan (slice 2nd to end)
+  local RUNTIME_CONTAINER_NAME="scan-$RANDOM"
+   # First lets verify this extension even exists in the $SOURCE_DIR directory
+  #echo "${EXTENSIONS_USED[@]}" $(search_extension "${ITEMS_TO_SCAN[@]}")
+  if [[ " ${ITEMS_TO_SCAN[*]} " =~ " ${FORCED_EXT} " ]] || [[ $(search_extension "${ITEMS_TO_SCAN[@]}") == "1" ]]; then
+    echo -e "${LPURPLE}Found one of: ${RED}"${ITEMS_TO_SCAN[@]}" ${LPURPLE}items in your source dir,${NC} ${GREEN}running $1 ...${NC}"
     docker build -t "${RUNTIME_CONTAINER_NAME}" -f "${DOCKERFILE_LOCATION}"/"${DOCKERFILE_TO_EXECUTE}" ${DOCKER_EXTRA_ARGS} "${SOURCE_DIR}" > /dev/null
     set +e # the scan will fail the command if it finds any finding. we don't want it to stop our script execution
     docker run --name "${RUNTIME_CONTAINER_NAME}" -v "${CFNRULES_LOCATION}":/cfnrules -v "${UTILS_LOCATION}":/utils -v "${SOURCE_DIR}":/app "${RUNTIME_CONTAINER_NAME}"
@@ -227,13 +225,16 @@ do
 done
 unset IFS
 
-run_security_check "Dockerfile-git" "${GIT_EXTENSIONS[@]}"
-run_security_check "Dockerfile-py" "${PY_EXTENSIONS[@]}"
-run_security_check "Dockerfile-yaml" "${INFRA_EXTENSIONS[@]}"
-run_security_check "Dockerfile-js" "${JS_EXTENSIONS[@]}"
-search_file_content "${CFN_EXTENSIONS}" || echo "No CFN files found"
+echo -e "ASH version $VERSION\n"
+
+run_security_check "Dockerfile-git" "${GIT_EXTENSIONS[@]}" & 
+run_security_check "Dockerfile-py" "${PY_EXTENSIONS[@]}" &
+run_security_check "Dockerfile-yaml" "${INFRA_EXTENSIONS[@]}" &
+run_security_check "Dockerfile-js" "${JS_EXTENSIONS[@]}" &
+run_security_check "Dockerfile-grype" "${GRYPE_EXTENSIONS[@]}" &
 run_security_check "Dockerfile-cdk" "${CFN_EXTENSIONS[@]}"
-run_security_check "Dockerfile-grype" "${GRYPE_EXTENSIONS[@]}"
+wait
+
 
 # Cleanup any previous file
 rm -f "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"

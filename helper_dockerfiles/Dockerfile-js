@@ -1,5 +1,5 @@
 # Get NPM Image
-FROM public.ecr.aws/docker/library/node:latest
+FROM public.ecr.aws/docker/library/node:18.0.0
 
 WORKDIR /app
 VOLUME /app

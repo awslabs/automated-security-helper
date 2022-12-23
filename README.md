@@ -23,14 +23,26 @@ The security helper supports the following vectors:
         * **[git-secrets](https://github.com/awslabs/git-secrets)** - Find api keys, passwords, AWS keys in the code
     * Python
         * **[bandit](https://github.com/PyCQA/bandit)** - finds common security issues in Python code.
-        * **[Grype](https://github.com/anchore/grype)** - checks for vulnerabilities in Python code.
-        * **[Syft](https://github.com/anchore/grype)** - generates a Software Bill of Materials (SBOM) for Python code.
+        * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Python code.
+        * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Python code.
+        * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Python code.
     * Jupyter Notebook
         * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts Jupyter Notebook (ipynb) files into Python executables. Code scan with Bandit.
     * JavaScript; NodeJS
         * **[npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit)** - checks for vulnerabilities in Javascript and NodeJS.
-        * **[Grype](https://github.com/anchore/grype)** - checks for vulnerabilities in Javascript and NodeJS.
-        * **[Syft](https://github.com/anchore/grype)** - generates a Software Bill of Materials (SBOM) for Javascript and NodeJS.
+        * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in JavaScript code.
+        * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Javascript and NodeJS.
+        * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Javascript and NodeJS.
+    * Go
+        * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Golang code.
+        * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Golang.
+        * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Golang.
+    * C#
+        * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in C# code.
+    * Java
+        * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Java code.
+        * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Java.
+        * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Java.
 * Infrastructure
     * Terraform; Cloudformation
         *   **[checkov](https://github.com/bridgecrewio/checkov)**
@@ -68,6 +80,9 @@ ash --output-dir /my/remote/files
 # Force rebuild the entire framework to obtain latests changes and up-to-date database
 ash --force
 
+# Force run scan for Python code
+ash --source-dir . --ext py
+
 * All commands can be used together.
 ```
 
@@ -78,9 +93,11 @@ NAME:
 SYNOPSIS:
         ash [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir
 OPTIONS:
+        -v | --version           Prints version number.
         -p | --preserve-report   Add timestamp to the final report file to avoid overriding it after multiple executions
         --source-dir             Path to the directory containing the code/files you wish to scan. Defaults to $(pwd)
         --output-dir             Path to the directory that will contain the report of the scans. Defaults to $(pwd)
+        --ext | -extension       Force a file extension to scan. Defaults to identify files automatically.
         --force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date.
          -q | --quiet            Don't print verbose text about the build process.
 
