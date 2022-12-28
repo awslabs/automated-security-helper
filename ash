@@ -213,10 +213,6 @@ run_security_check() {
 }
 
 
-
-validate_input
-map_extensions_anf_files
-
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
 # Extract all zip files to temp dir before scanning
 for zipfile in $(find "${SOURCE_DIR}" -iname "*.zip");
@@ -224,6 +220,9 @@ do
   unzip ${QUIET_OUTPUT} -d "${SOURCE_DIR}"/$(basename "${zipfile%.*}") $zipfile
 done
 unset IFS
+
+validate_input
+map_extensions_anf_files
 
 echo -e "ASH version $VERSION\n"
 
