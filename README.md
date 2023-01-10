@@ -37,6 +37,8 @@ The security helper supports the following vectors:
         * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Golang code.
         * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Golang.
         * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Golang.
+    * Bash
+        * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Bash code.
     * C#
         * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in C# code.
     * Java

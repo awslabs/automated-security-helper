@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 set -e
 START_TIME=$(date +%s)
-VERSION=("1.0.0-e-23Dec2022")
+VERSION=("1.0.1-e-10Jan2023")
 
 print_usage() {
   echo "NAME:"
@@ -28,7 +28,7 @@ PY_EXTENSIONS=("py" "pyc" "ipynb")
 INFRA_EXTENSIONS=("yaml" "yml" "tf" "json" "dockerfile")
 CFN_EXTENSIONS=("yaml" "yml" "json")
 JS_EXTENSIONS=("js")
-GRYPE_EXTENSIONS=("js" "py" "java" "go" "cs")
+GRYPE_EXTENSIONS=("js" "py" "java" "go" "cs" "sh")
 
 DOCKERFILE_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"helper_dockerfiles"
 UTILS_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"utils"
@@ -85,9 +85,6 @@ while (("$#")); do
   shift
 done
 
-TIMESTAMP=$(date +%s)
-USERID=$(echo -n "$(whoami)$(hostname)" | openssl dgst -sha512)
-TOOLID=$(basename "$0")
 EXTENSIONS_USED=()
 
 if [[ $COLOR_OUTPUT = "true" ]]; then
