@@ -1,5 +1,5 @@
 # Get Ubuntu Image
-FROM public.ecr.aws/ubuntu/ubuntu:latest
+FROM public.ecr.aws/bitnami/python:latest
 
 ENV TZ=Europe/London
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -7,7 +7,7 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 # Instal prerequisites
 RUN apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y git-all python3 python3-pip ruby-full && \
+    apt-get install -y ruby-full && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install -U checkov && gem install cfn-nag

@@ -31,4 +31,8 @@ syft . >> grype_report_result.txt 2>&1
 SRC=$?
 RC=$(bumprc $RC $SRC)
 
+semgrep --config=auto . >> grype_report_result.txt 2>&1
+CRC=$?
+RC=$(bumprc $RC $CRC)
+
 exit $RC

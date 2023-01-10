@@ -29,5 +29,4 @@ bandit -ll -r . > py_report_result.txt 2>&1
 BRC=$?
 RC=$(bumprc $RC $BRC)
 
-
 exit $RC
