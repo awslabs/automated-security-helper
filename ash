@@ -4,6 +4,7 @@
 set -e
 START_TIME=$(date +%s)
 VERSION=("1.0.1-e-10Jan2023")
+OCI_RUNNER="docker"
 
 print_usage() {
   echo "NAME:"
@@ -19,6 +20,7 @@ print_usage() {
   echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
   echo -e "\t-q | --quiet             Don't print verbose text about the build process."
   echo -e "\t-c | --no-color          Don't print colorized output."
+  echo -e "\t-f | --finch             Use finch instead of docker to run the containerized tools"
   echo -e "For more information please visit https://github.com/aws-samples/automated-security-helper"
 }
 
@@ -71,6 +73,9 @@ while (("$#")); do
     ;;
   --no-color | -c)
     COLOR_OUTPUT="false"
+    ;;
+  --finch | -f)
+    OCI_RUNNER="finch"
     ;;
   --version | -v)
     echo -n "ASH version $VERSION"
@@ -167,9 +172,9 @@ run_security_check() {
   #echo "${EXTENSIONS_USED[@]}" $(search_extension "${ITEMS_TO_SCAN[@]}")
   if [[ " ${ITEMS_TO_SCAN[*]} " =~ " ${FORCED_EXT} " ]] || [[ $(search_extension "${ITEMS_TO_SCAN[@]}") == "1" ]]; then
     echo -e "${LPURPLE}Found one of: ${RED}"${ITEMS_TO_SCAN[@]}" ${LPURPLE}items in your source dir,${NC} ${GREEN}running $1 ...${NC}"
-    docker build -t "${RUNTIME_CONTAINER_NAME}" -f "${DOCKERFILE_LOCATION}"/"${DOCKERFILE_TO_EXECUTE}" ${DOCKER_EXTRA_ARGS} "${SOURCE_DIR}" > /dev/null
+    ${OCI_RUNNER} build -t "${RUNTIME_CONTAINER_NAME}" -f "${DOCKERFILE_LOCATION}"/"${DOCKERFILE_TO_EXECUTE}" ${DOCKER_EXTRA_ARGS} "${SOURCE_DIR}" > /dev/null
     set +e # the scan will fail the command if it finds any finding. we don't want it to stop our script execution
-    docker run --name "${RUNTIME_CONTAINER_NAME}" -v "${CFNRULES_LOCATION}":/cfnrules -v "${UTILS_LOCATION}":/utils -v "${SOURCE_DIR}":/app "${RUNTIME_CONTAINER_NAME}"
+    ${OCI_RUNNER} run --name "${RUNTIME_CONTAINER_NAME}" -v "${CFNRULES_LOCATION}":/cfnrules -v "${UTILS_LOCATION}":/utils -v "${SOURCE_DIR}":/app "${RUNTIME_CONTAINER_NAME}"
     #
     # capture the return code of the command invoked through docker
     #
@@ -204,8 +209,8 @@ run_security_check() {
 
     set -e # from this point, any failure will halt the execution.
 
-    docker rm "${RUNTIME_CONTAINER_NAME}" >/dev/null # Let's keep it a clean environment
-    docker rmi "${RUNTIME_CONTAINER_NAME}" >/dev/null # Let's keep it a clean environment
+    ${OCI_RUNNER} rm "${RUNTIME_CONTAINER_NAME}" >/dev/null # Let's keep it a clean environment
+    ${OCI_RUNNER} rmi "${RUNTIME_CONTAINER_NAME}" >/dev/null # Let's keep it a clean environment
   fi
 }
 
