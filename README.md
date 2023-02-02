@@ -115,7 +115,11 @@ OPTIONS:
   - Execute the helper tool from the folder downloaded in the previous step from the Ubuntu WSL.
 
 * Q: How to run `ash` with [finch](https://aws.amazon.com/blogs/opensource/introducing-finch-an-open-source-client-for-container-development/) or another OCI compatible tool.
-  A: You can configure the OCI compatible tool to use with by using the environment variable `ASH_OCI_RUNNER`
+  A: You can configure the OCI compatible tool to use with by using the environment variable `ASH_OCI_RUNNER`. For example to run `finch` as the default container runner platform you can set up this value with:
+
+```
+export ASH_OCI_RUNNER=finch
+```
 
   
 ## Security
