@@ -97,6 +97,7 @@ SYNOPSIS:
 OPTIONS:
         -v | --version           Prints version number.
         -p | --preserve-report   Add timestamp to the final report file to avoid overriding it after multiple executions
+        -f | --finch             Use finch instead of docker to run the containerized tools.
         --source-dir             Path to the directory containing the code/files you wish to scan. Defaults to $(pwd)
         --output-dir             Path to the directory that will contain the report of the scans. Defaults to $(pwd)
         --ext | -extension       Force a file extension to scan. Defaults to identify files automatically.
@@ -112,6 +113,10 @@ OPTIONS:
   - Install Docker Desktop for windows and activate the [integration the WSL](https://docs.docker.com/desktop/windows/wsl/)
   - Clone this git repository.
   - Execute the helper tool from the folder downloaded in the previous step from the Ubuntu WSL.
+
+* Q: How to run `ash` with [finch](https://aws.amazon.com/blogs/opensource/introducing-finch-an-open-source-client-for-container-development/) or another OCI compatible tool.
+  A: You can configure the OCI compatible tool to use with by using the environment variable `ASH_OCI_RUNNER`
+
   
 ## Security
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
