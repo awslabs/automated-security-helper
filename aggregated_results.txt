@@ -1,0 +1,379 @@
+#############################################
+Start of  /Users/rapg/Documents/source/aegon-cf-stacksets/templates//cdk_report_result.txt
+#############################################
+[Error at /cfn-to-cdk/--app--AWSConfigDelegatedAdmin--AWSConfigDelegatedAdmin.yml/ConfigLoggingS3Bucket] AwsSolutions-S10: The S3 Bucket or bucket policy does not require requests to use SSL.
+
+[Error at /cfn-to-cdk/--app--AWSConfigDelegatedAdmin--AWSConfigDelegatedAdmin.yml/ConfigLoggingS3BucketPolicy] AwsSolutions-S10: The S3 Bucket or bucket policy does not require requests to use SSL.
+
+[Error at /cfn-to-cdk/--app--AWSConfigDelegatedAdmin--AWSConfigAggregator.yml/AggregatorRole] AwsSolutions-IAM4[Policy::arn:aws:iam::aws:policy/service-role/AWSConfigRoleForOrganizations]: The IAM user, role, or group uses AWS managed policies.
+
+[Error at /cfn-to-cdk/--app--DeleteAWSConfigRecorder--DeleteAWSConfigRecorder.yml/LambdaExecutionRole] AwsSolutions-IAM5[Resource::arn:aws:logs:*:*:*]: The IAM entity contains wildcard permissions and does not have a cdk-nag rule suppression with evidence for those permission.
+
+[Error at /cfn-to-cdk/--app--DeleteAWSConfigRecorder--DeleteAWSConfigRecorder.yml/LambdaExecutionRole] AwsSolutions-IAM5[Action::config:DescribeDeliveryChannels*]: The IAM entity contains wildcard permissions and does not have a cdk-nag rule suppression with evidence for those permission.
+
+[Error at /cfn-to-cdk/--app--DeleteAWSConfigRecorder--DeleteAWSConfigRecorder.yml/LambdaExecutionRole] AwsSolutions-IAM5[Resource::*]: The IAM entity contains wildcard permissions and does not have a cdk-nag rule suppression with evidence for those permission.
+
+[Info at /cfn-to-cdk/--app--AWSConfigBaseline--EnableAWSConfigForOrganizations.yml/$Mappings/Settings] Consider making this CfnMapping a lazy mapping by providing `lazy: true`: either no findInMap was called or every findInMap could be immediately resolved without using Fn::FindInMap
+[Error at /cfn-to-cdk/--app--SFN--StepFunctionsPipelineGitOps.yaml/StackInstancesRole] AwsSolutions-IAM4[Policy::arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]: The IAM user, role, or group uses AWS managed policies.
+
+[Error at /cfn-to-cdk/--app--SFN--StepFunctionsPipelineGitOps.yaml/StackInstancesRole] AwsSolutions-IAM5[Resource::arn:aws:cloudformation:<AWS::Region>:<AWS::AccountId>:stackset/*:*]: The IAM entity contains wildcard permissions and does not have a cdk-nag rule suppression with evidence for those permission.
+
+[Error at /cfn-to-cdk/--app--SFN--StepFunctionsPipelineGitOps.yaml/StackInstancesRole] AwsSolutions-IAM5[Resource::*]: The IAM entity contains wildcard permissions and does not have a cdk-nag rule suppression with evidence for those permission.
+
+[Error at /cfn-to-cdk/--app--SFN--StepFunctionsPipelineGitOps.yaml/StatesExecutionRole] AwsSolutions-IAM5[Resource::*]: The IAM entity contains wildcard permissions and does not have a cdk-nag rule suppression with evidence for those permission.
+
+[Error at /cfn-to-cdk/--app--SFN--StepFunctionsPipelineGitOps.yaml/StackSetOrchestrationStateMachine] AwsSolutions-SF1: The Step Function does not log "ALL" events to CloudWatch Logs.
+
+[Error at /cfn-to-cdk/--app--SFN--StepFunctionsPipelineGitOps.yaml/StackSetOrchestrationStateMachine] AwsSolutions-SF2: The Step Function does not have X-Ray tracing enabled.
+
+
+Found errors
+#############################################
+End of  /Users/rapg/Documents/source/aegon-cf-stacksets/templates//cdk_report_result.txt
+#############################################
+
+
+#############################################
+Start of  /Users/rapg/Documents/source/aegon-cf-stacksets/templates//grype_report_result.txt
+#############################################
+/utils/grype-docker-execute.sh: line 26: grype: command not found
+/utils/grype-docker-execute.sh: line 30: syft: command not found
+METRICS: Using configs from the Registry (like --config=p/ci) reports pseudonymous rule metrics to semgrep.dev.
+To disable Registry rule metrics, use "--metrics=off".
+Using configs only from local files (like --config=xyz.yml) does not enable metrics.
+
+More information: https://semgrep.dev/docs/metrics
+
+Semgrep rule registry URL is https://semgrep.dev/registry.
+
+Scanning across multiple languages:
+    <multilang> | 51 rules × 24 files
+           yaml | 25 rules ×  5 files
+
+
+
+(need more rules? `semgrep login` for additional free Semgrep Registry rules)
+
+Ran 1020 rules on 12 files: 0 findings.
+
+A new version of Semgrep is available. See https://semgrep.dev/docs/upgrading
+If Semgrep missed a finding, please send us feedback to let us know!
+  $ semgrep shouldafound --help
+#############################################
+End of  /Users/rapg/Documents/source/aegon-cf-stacksets/templates//grype_report_result.txt
+#############################################
+
+
+#############################################
+Start of  /Users/rapg/Documents/source/aegon-cf-stacksets/templates//yaml_report_result.txt
+#############################################
+
+
+       _               _              
+   ___| |__   ___  ___| | _______   __
+  / __| '_ \ / _ \/ __| |/ / _ \ \ / /
+ | (__| | | |  __/ (__|   < (_) \ V / 
+  \___|_| |_|\___|\___|_|\_\___/ \_/  
+                                      
+By bridgecrew.io | version: 2.2.304 
+Update available 2.2.304 -> 2.2.327
+Run pip3 install -U checkov to update 
+
+
+cloudformation scan results:
+
+Passed checks: 54, Failed checks: 0, Skipped checks: 6
+
+Check: CKV_AWS_33: "Ensure KMS key policy does not contain wildcard (*) principal"
+	PASSED for resource: AWS::KMS::Key.S3KMSKey
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:37-91
+	Guide: https://docs.bridgecrew.io/docs/ensure-kms-key-policy-does-not-contain-wildcard-principal
+Check: CKV_AWS_7: "Ensure rotation for customer created CMKs is enabled"
+	PASSED for resource: AWS::KMS::Key.S3KMSKey
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:37-91
+	Guide: https://docs.bridgecrew.io/docs/logging_8
+Check: CKV_AWS_57: "Ensure the S3 bucket does not allow WRITE permissions to everyone"
+	PASSED for resource: AWS::S3::Bucket.ConfigLoggingS3Bucket
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:93-130
+	Guide: https://docs.bridgecrew.io/docs/s3_2-acl-write-permissions-everyone
+Check: CKV_AWS_54: "Ensure S3 bucket has block public policy enabled"
+	PASSED for resource: AWS::S3::Bucket.ConfigLoggingS3Bucket
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:93-130
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_s3_20
+Check: CKV_AWS_55: "Ensure S3 bucket has ignore public ACLs enabled"
+	PASSED for resource: AWS::S3::Bucket.ConfigLoggingS3Bucket
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:93-130
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_s3_21
+Check: CKV_AWS_53: "Ensure S3 bucket has block public ACLS enabled"
+	PASSED for resource: AWS::S3::Bucket.ConfigLoggingS3Bucket
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:93-130
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_s3_19
+Check: CKV_AWS_20: "Ensure the S3 bucket does not allow READ permissions to everyone"
+	PASSED for resource: AWS::S3::Bucket.ConfigLoggingS3Bucket
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:93-130
+	Guide: https://docs.bridgecrew.io/docs/s3_1-acl-read-permissions-everyone
+Check: CKV_AWS_19: "Ensure the S3 bucket has server-side-encryption enabled"
+	PASSED for resource: AWS::S3::Bucket.ConfigLoggingS3Bucket
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:93-130
+	Guide: https://docs.bridgecrew.io/docs/s3_14-data-encrypted-at-rest
+Check: CKV_AWS_21: "Ensure the S3 bucket has versioning enabled"
+	PASSED for resource: AWS::S3::Bucket.ConfigLoggingS3Bucket
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:93-130
+	Guide: https://docs.bridgecrew.io/docs/s3_16-enable-versioning
+Check: CKV_AWS_56: "Ensure S3 bucket has 'restrict_public_bucket' enabled"
+	PASSED for resource: AWS::S3::Bucket.ConfigLoggingS3Bucket
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:93-130
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_s3_22
+Check: CKV_AWS_18: "Ensure the S3 bucket has access logging enabled"
+	PASSED for resource: AWS::S3::Bucket.ConfigLoggingS3Bucket
+	File: /AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml:93-130
+	Guide: https://docs.bridgecrew.io/docs/s3_13-enable-logging
+Check: CKV_AWS_61: "Ensure AWS IAM policy does not allow assume role permission across all services"
+	PASSED for resource: AWS::IAM::Role.AggregatorRole
+	File: /AWSConfigDelegatedAdmin/AWSConfigAggregator.yml:28-52
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_iam_45
+Check: CKV_AWS_108: "Ensure IAM policies does not allow data exfiltration"
+	PASSED for resource: AWS::IAM::Role.AggregatorRole
+	File: /AWSConfigDelegatedAdmin/AWSConfigAggregator.yml:28-52
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-data-exfiltration
+Check: CKV_AWS_60: "Ensure IAM role allows only specific services or principals to assume it"
+	PASSED for resource: AWS::IAM::Role.AggregatorRole
+	File: /AWSConfigDelegatedAdmin/AWSConfigAggregator.yml:28-52
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_iam_44
+Check: CKV_AWS_109: "Ensure IAM policies does not allow permissions management without constraints"
+	PASSED for resource: AWS::IAM::Role.AggregatorRole
+	File: /AWSConfigDelegatedAdmin/AWSConfigAggregator.yml:28-52
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-permissions-management-resource-exposure-without-constraint
+Check: CKV_AWS_110: "Ensure IAM policies does not allow privilege escalation"
+	PASSED for resource: AWS::IAM::Role.AggregatorRole
+	File: /AWSConfigDelegatedAdmin/AWSConfigAggregator.yml:28-52
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-does-not-allow-privilege-escalation
+Check: CKV_AWS_107: "Ensure IAM policies does not allow credentials exposure"
+	PASSED for resource: AWS::IAM::Role.AggregatorRole
+	File: /AWSConfigDelegatedAdmin/AWSConfigAggregator.yml:28-52
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-credentials-exposure
+Check: CKV_AWS_111: "Ensure IAM policies does not allow write access without constraints"
+	PASSED for resource: AWS::IAM::Role.AggregatorRole
+	File: /AWSConfigDelegatedAdmin/AWSConfigAggregator.yml:28-52
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-write-access-without-constraint
+Check: CKV_AWS_115: "Ensure that AWS Lambda function is configured for function-level concurrent execution limit"
+	PASSED for resource: AWS::Lambda::Function.CustomFunction
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:11-82
+	Guide: https://docs.bridgecrew.io/docs/ensure-that-aws-lambda-function-is-configured-for-function-level-concurrent-execution-limit
+Check: CKV_AWS_45: "Ensure no hard-coded secrets exist in lambda environment"
+	PASSED for resource: AWS::Lambda::Function.CustomFunction
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:11-82
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_secrets_3
+Check: CKV_AWS_173: "Check encryption settings for Lambda environmental variable"
+	PASSED for resource: AWS::Lambda::Function.CustomFunction
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:11-82
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_serverless_5
+Check: CKV_AWS_61: "Ensure AWS IAM policy does not allow assume role permission across all services"
+	PASSED for resource: AWS::IAM::Role.LambdaExecutionRole
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:85-119
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_iam_45
+Check: CKV_AWS_62: "Ensure no IAM policies that allow full "*-*" administrative privileges are not created"
+	PASSED for resource: AWS::IAM::Role.LambdaExecutionRole
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:85-119
+	Guide: https://docs.bridgecrew.io/docs/iam_47
+Check: CKV_AWS_108: "Ensure IAM policies does not allow data exfiltration"
+	PASSED for resource: AWS::IAM::Role.LambdaExecutionRole
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:85-119
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-data-exfiltration
+Check: CKV_AWS_60: "Ensure IAM role allows only specific services or principals to assume it"
+	PASSED for resource: AWS::IAM::Role.LambdaExecutionRole
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:85-119
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_iam_44
+Check: CKV_AWS_109: "Ensure IAM policies does not allow permissions management without constraints"
+	PASSED for resource: AWS::IAM::Role.LambdaExecutionRole
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:85-119
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-permissions-management-resource-exposure-without-constraint
+Check: CKV_AWS_110: "Ensure IAM policies does not allow privilege escalation"
+	PASSED for resource: AWS::IAM::Role.LambdaExecutionRole
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:85-119
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-does-not-allow-privilege-escalation
+Check: CKV_AWS_63: "Ensure no IAM policies documents allow "*" as a statement's actions"
+	PASSED for resource: AWS::IAM::Role.LambdaExecutionRole
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:85-119
+	Guide: https://docs.bridgecrew.io/docs/iam_48
+Check: CKV_AWS_107: "Ensure IAM policies does not allow credentials exposure"
+	PASSED for resource: AWS::IAM::Role.LambdaExecutionRole
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:85-119
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-credentials-exposure
+Check: CKV_AWS_111: "Ensure IAM policies does not allow write access without constraints"
+	PASSED for resource: AWS::IAM::Role.LambdaExecutionRole
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:85-119
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-write-access-without-constraint
+Check: CKV_AWS_61: "Ensure AWS IAM policy does not allow assume role permission across all services"
+	PASSED for resource: AWS::IAM::Role.StackInstancesRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:18-58
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_iam_45
+Check: CKV_AWS_62: "Ensure no IAM policies that allow full "*-*" administrative privileges are not created"
+	PASSED for resource: AWS::IAM::Role.StackInstancesRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:18-58
+	Guide: https://docs.bridgecrew.io/docs/iam_47
+Check: CKV_AWS_108: "Ensure IAM policies does not allow data exfiltration"
+	PASSED for resource: AWS::IAM::Role.StackInstancesRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:18-58
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-data-exfiltration
+Check: CKV_AWS_60: "Ensure IAM role allows only specific services or principals to assume it"
+	PASSED for resource: AWS::IAM::Role.StackInstancesRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:18-58
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_iam_44
+Check: CKV_AWS_109: "Ensure IAM policies does not allow permissions management without constraints"
+	PASSED for resource: AWS::IAM::Role.StackInstancesRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:18-58
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-permissions-management-resource-exposure-without-constraint
+Check: CKV_AWS_110: "Ensure IAM policies does not allow privilege escalation"
+	PASSED for resource: AWS::IAM::Role.StackInstancesRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:18-58
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-does-not-allow-privilege-escalation
+Check: CKV_AWS_63: "Ensure no IAM policies documents allow "*" as a statement's actions"
+	PASSED for resource: AWS::IAM::Role.StackInstancesRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:18-58
+	Guide: https://docs.bridgecrew.io/docs/iam_48
+Check: CKV_AWS_107: "Ensure IAM policies does not allow credentials exposure"
+	PASSED for resource: AWS::IAM::Role.StackInstancesRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:18-58
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-credentials-exposure
+Check: CKV_AWS_111: "Ensure IAM policies does not allow write access without constraints"
+	PASSED for resource: AWS::IAM::Role.StackInstancesRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:18-58
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-write-access-without-constraint
+Check: CKV_AWS_115: "Ensure that AWS Lambda function is configured for function-level concurrent execution limit"
+	PASSED for resource: AWS::Lambda::Function.CreateUpdateDeleteStackInstances
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:60-173
+	Guide: https://docs.bridgecrew.io/docs/ensure-that-aws-lambda-function-is-configured-for-function-level-concurrent-execution-limit
+Check: CKV_AWS_45: "Ensure no hard-coded secrets exist in lambda environment"
+	PASSED for resource: AWS::Lambda::Function.CreateUpdateDeleteStackInstances
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:60-173
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_secrets_3
+Check: CKV_AWS_173: "Check encryption settings for Lambda environmental variable"
+	PASSED for resource: AWS::Lambda::Function.CreateUpdateDeleteStackInstances
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:60-173
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_serverless_5
+Check: CKV_AWS_115: "Ensure that AWS Lambda function is configured for function-level concurrent execution limit"
+	PASSED for resource: AWS::Lambda::Function.VerifyStackInstanceStatus
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:175-254
+	Guide: https://docs.bridgecrew.io/docs/ensure-that-aws-lambda-function-is-configured-for-function-level-concurrent-execution-limit
+Check: CKV_AWS_45: "Ensure no hard-coded secrets exist in lambda environment"
+	PASSED for resource: AWS::Lambda::Function.VerifyStackInstanceStatus
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:175-254
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_secrets_3
+Check: CKV_AWS_173: "Check encryption settings for Lambda environmental variable"
+	PASSED for resource: AWS::Lambda::Function.VerifyStackInstanceStatus
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:175-254
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_serverless_5
+Check: CKV_AWS_61: "Ensure AWS IAM policy does not allow assume role permission across all services"
+	PASSED for resource: AWS::IAM::Role.StatesExecutionRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:256-300
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_iam_45
+Check: CKV_AWS_62: "Ensure no IAM policies that allow full "*-*" administrative privileges are not created"
+	PASSED for resource: AWS::IAM::Role.StatesExecutionRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:256-300
+	Guide: https://docs.bridgecrew.io/docs/iam_47
+Check: CKV_AWS_108: "Ensure IAM policies does not allow data exfiltration"
+	PASSED for resource: AWS::IAM::Role.StatesExecutionRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:256-300
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-data-exfiltration
+Check: CKV_AWS_60: "Ensure IAM role allows only specific services or principals to assume it"
+	PASSED for resource: AWS::IAM::Role.StatesExecutionRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:256-300
+	Guide: https://docs.bridgecrew.io/docs/bc_aws_iam_44
+Check: CKV_AWS_109: "Ensure IAM policies does not allow permissions management without constraints"
+	PASSED for resource: AWS::IAM::Role.StatesExecutionRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:256-300
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-permissions-management-resource-exposure-without-constraint
+Check: CKV_AWS_110: "Ensure IAM policies does not allow privilege escalation"
+	PASSED for resource: AWS::IAM::Role.StatesExecutionRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:256-300
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-does-not-allow-privilege-escalation
+Check: CKV_AWS_63: "Ensure no IAM policies documents allow "*" as a statement's actions"
+	PASSED for resource: AWS::IAM::Role.StatesExecutionRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:256-300
+	Guide: https://docs.bridgecrew.io/docs/iam_48
+Check: CKV_AWS_107: "Ensure IAM policies does not allow credentials exposure"
+	PASSED for resource: AWS::IAM::Role.StatesExecutionRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:256-300
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-credentials-exposure
+Check: CKV_AWS_111: "Ensure IAM policies does not allow write access without constraints"
+	PASSED for resource: AWS::IAM::Role.StatesExecutionRole
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:256-300
+	Guide: https://docs.bridgecrew.io/docs/ensure-iam-policies-do-not-allow-write-access-without-constraint
+Check: CKV_AWS_116: "Ensure that AWS Lambda function is configured for a Dead Letter Queue(DLQ)"
+	SKIPPED for resource: AWS::Lambda::Function.CustomFunction
+	Suppress comment: No DLQ needed for this cleanup lambda, stack will fail on error
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:11-82
+	Guide: https://docs.bridgecrew.io/docs/ensure-that-aws-lambda-function-is-configured-for-a-dead-letter-queue-dlq
+Check: CKV_AWS_117: "Ensure that AWS Lambda function is configured inside a VPC"
+	SKIPPED for resource: AWS::Lambda::Function.CustomFunction
+	Suppress comment: Lambda function used to call AWS Endpoint allowed over public internet.
+	File: /DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml:11-82
+	Guide: https://docs.bridgecrew.io/docs/ensure-that-aws-lambda-function-is-configured-inside-a-vpc-1
+Check: CKV_AWS_116: "Ensure that AWS Lambda function is configured for a Dead Letter Queue(DLQ)"
+	SKIPPED for resource: AWS::Lambda::Function.CreateUpdateDeleteStackInstances
+	Suppress comment: No DLQ needed for this cleanup lambda, stack will fail on error
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:60-173
+	Guide: https://docs.bridgecrew.io/docs/ensure-that-aws-lambda-function-is-configured-for-a-dead-letter-queue-dlq
+Check: CKV_AWS_117: "Ensure that AWS Lambda function is configured inside a VPC"
+	SKIPPED for resource: AWS::Lambda::Function.CreateUpdateDeleteStackInstances
+	Suppress comment: Lambda function used to call AWS Endpoint allowed over public internet.
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:60-173
+	Guide: https://docs.bridgecrew.io/docs/ensure-that-aws-lambda-function-is-configured-inside-a-vpc-1
+Check: CKV_AWS_116: "Ensure that AWS Lambda function is configured for a Dead Letter Queue(DLQ)"
+	SKIPPED for resource: AWS::Lambda::Function.VerifyStackInstanceStatus
+	Suppress comment: No DLQ needed for this cleanup lambda, stack will fail on error
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:175-254
+	Guide: https://docs.bridgecrew.io/docs/ensure-that-aws-lambda-function-is-configured-for-a-dead-letter-queue-dlq
+Check: CKV_AWS_117: "Ensure that AWS Lambda function is configured inside a VPC"
+	SKIPPED for resource: AWS::Lambda::Function.VerifyStackInstanceStatus
+	Suppress comment: Lambda function used to call AWS Endpoint allowed over public internet.
+	File: /SFN/StepFunctionsPipelineGitOps.yaml:175-254
+	Guide: https://docs.bridgecrew.io/docs/ensure-that-aws-lambda-function-is-configured-inside-a-vpc-1
+
+------------------------------------------------------------
+./AWSConfigDelegatedAdmin/AWSConfigDelegatedAdmin.yml
+------------------------------------------------------------------------------------------------------------------------
+[31m| FAIL FATAL[0m
+[31m|[0m
+[31m| #<ArgumentError: invalid byte sequence in US-ASCII>[0m
+
+Failures count: 1
+Warnings count: 0
+------------------------------------------------------------
+./AWSConfigDelegatedAdmin/AWSConfigAggregator.yml
+------------------------------------------------------------------------------------------------------------------------
+[31m| FAIL FATAL[0m
+[31m|[0m
+[31m| #<ArgumentError: invalid byte sequence in US-ASCII>[0m
+
+Failures count: 1
+Warnings count: 0
+------------------------------------------------------------
+./DeleteAWSConfigRecorder/DeleteAWSConfigRecorder.yml
+------------------------------------------------------------------------------------------------------------------------
+[31m| FAIL FATAL[0m
+[31m|[0m
+[31m| #<ArgumentError: invalid byte sequence in US-ASCII>[0m
+
+Failures count: 1
+Warnings count: 0
+------------------------------------------------------------
+./AWSConfigBaseline/EnableAWSConfigForOrganizations.yml
+------------------------------------------------------------------------------------------------------------------------
+[31m| FAIL FATAL[0m
+[31m|[0m
+[31m| #<ArgumentError: invalid byte sequence in US-ASCII>[0m
+
+Failures count: 1
+Warnings count: 0
+------------------------------------------------------------
+./SFN/StepFunctionsPipelineGitOps.yaml
+------------------------------------------------------------
+Failures count: 0
+Warnings count: 0
+#############################################
+End of  /Users/rapg/Documents/source/aegon-cf-stacksets/templates//yaml_report_result.txt
+#############################################
+
+
