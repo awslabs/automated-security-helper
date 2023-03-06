@@ -1,4 +1,15 @@
-<a name="1.0.1-e-10Jan2023"></a>
+<a name="1.0.5-e-06Mar2023"></a>
+
+# 1.0.5-e-06Mar2023
+### Automated Security Helper
+
+* hardcoded Checkov config
+* Fix return code for the different Docker containers
+* Fix image for ARM based machines
+* Added Finch support
+
+<!-- CHANGELOG SPLIT MARKER -->
+
 # 1.0.1-e-10Jan2023
 ### Automated Security Helper
 ASH version 1.0.1-e-10Jan2023 is out!
