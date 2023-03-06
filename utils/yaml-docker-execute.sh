@@ -22,9 +22,14 @@ bumprc() { # return the higher absolute value of the inputs
 
 RC=0
 
-checkov --download-external-modules True -d . > yaml_report_result.txt 2>&1
+#checkov --download-external-modules True -d . > yaml_report_result.txt 2>&1
+CHECKOV_CONFIG='ash-checkov-config.yml'
+checkov --download-external-modules True -d . --create-config "${CHECKOV_CONFIG}" &> /dev/null
+checkov --config-file "${CHECKOV_CONFIG}" > yaml_report_result.txt 2>&1
 CHRC=$?
 RC=$(bumprc $RC $CHRC)
+# remove the file before cfn_nag scanning so that it doesn't confuse the nag scanner
+rm "${CHECKOV_CONFIG}"
 
 cfn_nag_scan --rule-directory /cfnrules --input-path . >> yaml_report_result.txt 2>&1
 CRC=$?

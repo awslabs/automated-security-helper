@@ -1,5 +1,6 @@
 # Get Python Image
-FROM public.ecr.aws/bitnami/python:latest
+#FROM public.ecr.aws/bitnami/python:latest
+FROM --platform=linux/amd64 public.ecr.aws/bitnami/python:latest
 
 # Instal prerequisites
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin && \

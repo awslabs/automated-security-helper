@@ -1,5 +1,6 @@
 # Get Ubuntu Image
-FROM public.ecr.aws/bitnami/python:latest
+#FROM public.ecr.aws/bitnami/python:latest
+FROM --platform=linux/amd64 public.ecr.aws/bitnami/python:latest
 
 ENV TZ=Europe/London
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone

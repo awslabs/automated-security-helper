@@ -3,13 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 set -e
 START_TIME=$(date +%s)
-VERSION=("1.0.2-e-03Feb2023")
-
+VERSION=("1.0.5-e-06Mar2023")
 OCI_RUNNER="docker"
 
 # Overrides default OCI Runner used by ASH
 [ ! -z "$ASH_OCI_RUNNER" ] && OCI_RUNNER="$ASH_OCI_RUNNER"
-
 
 print_usage() {
   echo "NAME:"
@@ -25,6 +23,7 @@ print_usage() {
   echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
   echo -e "\t-q | --quiet             Don't print verbose text about the build process."
   echo -e "\t-c | --no-color          Don't print colorized output."
+  echo -e "\t-q | --quiet             Don't print verbose text about the build process"
   echo -e "\t-f | --finch             Use finch instead of docker to run the containerized tools.\n"
   echo -e "For more information please visit https://github.com/aws-samples/automated-security-helper"
 }
@@ -49,6 +48,7 @@ HIGHEST_RC=0
 #
 # Initialize options
 #
+
 COLOR_OUTPUT="true"
 FORCED_EXT="false"
 
@@ -66,9 +66,6 @@ while (("$#")); do
     shift
     FORCED_EXT="$1"
     ;;
-  --finch | -f)
-    OCI_RUNNER="finch"
-    ;;
   --force)
     DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} --no-cache"
     ;;
@@ -81,6 +78,9 @@ while (("$#")); do
     ;;
   --no-color | -c)
     COLOR_OUTPUT="false"
+    ;;
+  --finch | -f)
+    OCI_RUNNER="finch"
     ;;
   --version | -v)
     echo -n "ASH version $VERSION"
@@ -95,7 +95,6 @@ while (("$#")); do
   shift
 done
 
-EXTENSIONS_USED=()
 
 if [[ $COLOR_OUTPUT = "true" ]]; then
   LPURPLE='\033[1;35m'
@@ -169,14 +168,17 @@ validate_input() {
 # The first argument passed to this method is the dockerfile that executes the actual scan
 # The remaining arguments (can be treated as *args in python) are the extensions we wish to scan for
 run_security_check() {
-  local EXTENSIONS_USED=( "${EXTENSIONS_USED[@]}" "$1" )
   local DOCKERFILE_TO_EXECUTE="$1"
   local ITEMS_TO_SCAN=("${@:2}") # take all the array of commands which are the extensions to scan (slice 2nd to end)
   local RUNTIME_CONTAINER_NAME="scan-$RANDOM"
+
+  local RETURN_CODE=0
+
    # First lets verify this extension even exists in the $SOURCE_DIR directory
-  #echo "${EXTENSIONS_USED[@]}" $(search_extension "${ITEMS_TO_SCAN[@]}")
+  echo -e "${LPURPLE}Items to scan for in ${GREEN}${DOCKERFILE_TO_EXECUTE}${LPURPLE} are: [ ${RED}${ITEMS_TO_SCAN[@]}${LPURPLE} ]${NC}"
+
   if [[ " ${ITEMS_TO_SCAN[*]} " =~ " ${FORCED_EXT} " ]] || [[ $(search_extension "${ITEMS_TO_SCAN[@]}") == "1" ]]; then
-    echo -e "${LPURPLE}Found one of: ${RED}"${ITEMS_TO_SCAN[@]}" ${LPURPLE}items in your source dir,${NC} ${GREEN}running $1 ...${NC}"
+    echo -e "${LPURPLE}Found one or more of: [ ${RED}"${ITEMS_TO_SCAN[@]}"${LPURPLE} ] items in source dir,${NC} ${GREEN}running ${DOCKERFILE_TO_EXECUTE} ...${NC}"
     ${OCI_RUNNER} build -t "${RUNTIME_CONTAINER_NAME}" -f "${DOCKERFILE_LOCATION}"/"${DOCKERFILE_TO_EXECUTE}" ${DOCKER_EXTRA_ARGS} "${SOURCE_DIR}" > /dev/null
     set +e # the scan will fail the command if it finds any finding. we don't want it to stop our script execution
     ${OCI_RUNNER} run --name "${RUNTIME_CONTAINER_NAME}" -v "${CFNRULES_LOCATION}":/cfnrules -v "${UTILS_LOCATION}":/utils -v "${SOURCE_DIR}":/app "${RUNTIME_CONTAINER_NAME}"
@@ -198,12 +200,6 @@ run_security_check() {
         let RETURN_CODE=RETURN_CODE*-1
       fi
 
-      #
-      # Capture the highest return code from the tools run
-      #
-      if [[ $RETURN_CODE -gt $HIGHEST_RC ]]; then
-        HIGHEST_RC=$RETURN_CODE
-      fi
     else
 
       #
@@ -216,7 +212,27 @@ run_security_check() {
 
     ${OCI_RUNNER} rm "${RUNTIME_CONTAINER_NAME}" >/dev/null # Let's keep it a clean environment
     ${OCI_RUNNER} rmi "${RUNTIME_CONTAINER_NAME}" >/dev/null # Let's keep it a clean environment
+  else
+    echo -e "${LPURPLE}Found ${CYAN}none${LPURPLE} of: [ ${RED}"${ITEMS_TO_SCAN[@]}"${LPURPLE} ] items in source dir, ${CYAN}skipping run${LPURPLE} of ${GREEN}${DOCKERFILE_TO_EXECUTE}${NC}"
+    RETURN_CODE=0
   fi
+
+  #
+  # This function was invoked from the main line processing of the ash script.
+  # At that invocation (see below), the invocation is made with a trailing &
+  # which spawns a sub-process and runs the function (really a copy of the parent process)
+  # in the background.
+  #
+  # To propagate the return code from running the scan to the parent process, this function
+  # needs to "exit ${RETURN_CODE}" rather than setting a global shell variable.
+  # Setting the global shell variable in a sub-process will have no effect on the value
+  # in the parent process.
+  #
+  # Return the status by exiting the sub-process with the return code.
+  #
+
+  # echo -e "${LPURPLE}Just before exsiting $1 - RC = ${RETURN_CODE}${NC}"
+  exit ${RETURN_CODE}
 }
 
 
@@ -226,6 +242,7 @@ for zipfile in $(find "${SOURCE_DIR}" -iname "*.zip");
 do
   unzip ${QUIET_OUTPUT} -d "${SOURCE_DIR}"/$(basename "${zipfile%.*}") $zipfile
 done
+
 unset IFS
 
 validate_input
@@ -233,14 +250,92 @@ map_extensions_anf_files
 
 echo -e "ASH version $VERSION\n"
 
-run_security_check "Dockerfile-git" "${GIT_EXTENSIONS[@]}" & 
-run_security_check "Dockerfile-py" "${PY_EXTENSIONS[@]}" &
-run_security_check "Dockerfile-yaml" "${INFRA_EXTENSIONS[@]}" &
-run_security_check "Dockerfile-js" "${JS_EXTENSIONS[@]}" &
-run_security_check "Dockerfile-grype" "${GRYPE_EXTENSIONS[@]}" &
-run_security_check "Dockerfile-cdk" "${CFN_EXTENSIONS[@]}"
-wait
+#
+# set up some variables for use further down
+#
+typeset -a JOBS JOBS_RC
+typeset -i i
 
+#
+# Collect all the jobs to be run into a list that can be looped through
+#
+JOB_NAMES=("Dockerfile-git" "Dockerfile-py" "Dockerfile-yaml" "Dockerfile-js" "Dockerfile-grype" "Dockerfile-cdk")
+
+#
+# Loop through the checks to start, grabbing the right extensions to add in
+# and start the check as a background process
+#
+i=0
+for jobName in ${JOB_NAMES[@]}; do
+  if [ ${jobName} == 'Dockerfile-git' ]; then
+    JOB_EXTENSIONS=(${GIT_EXTENSIONS[@]})
+  elif [ ${jobName} == 'Dockerfile-py' ]; then
+    JOB_EXTENSIONS=(${PY_EXTENSIONS[@]})
+  elif [ ${jobName} == 'Dockerfile-yaml' ]; then
+    JOB_EXTENSIONS=(${INFRA_EXTENSIONS[@]})
+  elif [ ${jobName} == 'Dockerfile-js' ]; then
+    JOB_EXTENSIONS=(${JS_EXTENSIONS[@]})
+  elif [ ${jobName} == 'Dockerfile-grype' ]; then
+    JOB_EXTENSIONS=(${GRYPE_EXTENSIONS[@]})
+  elif [ ${jobName} == 'Dockerfile-cdk' ]; then
+    JOB_EXTENSIONS=(${CFN_EXTENSIONS[@]})
+  fi
+
+  # echo -e "${GREEN}run_security_check "${jobName}" "${JOB_EXTENSIONS[@]}" &${NC}"
+
+  run_security_check "${jobName}" "${JOB_EXTENSIONS[@]}" &
+
+  JOBS[${i}]=$!
+  i=${i}+1
+done
+
+#
+# Now that the jobs are started, wait for each job to finish, capturing the
+# return code from the background process.  The return code is set by the
+# "exit ${RETURN_CODE}" at the end of the run_security_check() function.
+#
+i=0
+for pid in ${JOBS[@]}; do
+  echo -e "${CYAN}waiting on ${GREEN}${JOB_NAMES[${i}]}${CYAN} to finish ...${NC}"
+  WAIT_ERR=0
+  while wait ${pid} || WAIT_ERR=$?; do
+    #
+    # This check allows for the "wait" to fail for some reason, if so
+    # it will return code 127, which we know will not be returned by the
+    # run_security_check() sub-process.
+    #
+    # So, loop on a wait until the wait succeeds for the job we're waiting on.
+    #
+    if [ ${WAIT_ERR} -ne 127 ]; then
+      JOBS_RC[${i}]=${WAIT_ERR}
+      break
+    else
+      echo -e "${RED}wait had and error, re-waiting ...${NC}"
+    fi
+  done
+  echo -e "${GREEN}${JOB_NAMES[${i}]}${CYAN} finished with return code ${JOBS_RC[${i}]}${NC}"
+  i=$i+1
+done
+
+#
+# Now that all the jobs are complete, display a final report of
+# the return code status for each job that was run.
+#
+i=0
+echo -e "${CYAN}Jobs return code report:${NC}"
+for pid in ${JOBS[@]}; do
+  REPORT_COLOR=${GREEN}
+  if [ ${JOBS_RC[${i}]} -ne 0 ]; then
+    REPORT_COLOR=${RED}
+    if [ ${JOBS_RC[${i}]} -gt ${HIGHEST_RC} ]; then
+      HIGHEST_RC=${JOBS_RC[${i}]}
+    fi
+  else
+    REPORT_COLOR=${GREEN}
+  fi
+  printf "${REPORT_COLOR}%32s${CYAN} : %3d${NC}\\n" "${JOB_NAMES[${i}]}" "${JOBS_RC[${i}]}"
+  i=$i+1
+done
 
 # Cleanup any previous file
 rm -f "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"
@@ -288,6 +383,7 @@ fi
 
 END_TIME=$(date +%s)
 TOTAL_EXECUTION=$((END_TIME-START_TIME))
+
 
 
 RCCOLOR=${GREEN}
