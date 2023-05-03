@@ -11,6 +11,7 @@ RUN apt-get update && \
     apt-get install -y curl && \
     rm -rf /var/lib/apt/lists/*
 RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py
+RUN pip install --no-cache-dir --upgrade pip
 RUN npm install -g aws-cdk
 RUN python3 -m pip install -U aws-cdk-lib cdk-nag jinja2
 WORKDIR /app

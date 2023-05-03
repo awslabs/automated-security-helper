@@ -3,8 +3,49 @@
 # SPDX-License-Identifier: Apache-2.0
 set -e
 START_TIME=$(date +%s)
-VERSION=("1.0.5-e-06Mar2023")
+VERSION=("1.0.8-e-25Apr2023")
 OCI_RUNNER="docker"
+
+#
+# Version check
+#
+# Based on the version type, (internal or external),
+# attempt to use git ls-remote to obtain the latest tag (version)
+# from the appropriate Git repository.  If found, check
+# it against the script version.  If different, suggest the
+# user update to the version in the Git repository
+# which presumes that the Git repository has a version higher
+# than the current script version.
+#
+version_check() {
+  _ASHTYPE="${VERSION%-*}" # remove the date portion
+  _ASHTYPE="${_ASHTYPE#*-}" # remove the version number portion
+  _GITREPO="git@github.com:aws-samples/automated-security-helper.git"
+
+  #
+  # list the tag values and sort based on "version sort"
+  # take the "latest/highest" version
+  #
+  _REPO_VERSION=$(git ls-remote --tags "${_GITREPO}" 2>/dev/null \
+                  | cut -f2 | cut -f3 -d"/" \
+                  | grep -E "\^\{\}" | sed -E "s/\^\{\}//" \
+                  | grep -v "version1.0"| sort -Vr \
+                  | head -1 )
+
+  #
+  # use VERSION as the script version
+  #
+  _SCRIPT_VERSION="${VERSION}"
+
+  if [ -n "${_REPO_VERSION}" ]; then # found a version
+    if [ "${_REPO_VERSION}" != "${_SCRIPT_VERSION}" ]; then
+      echo "ASH version ${_SCRIPT_VERSION} is different from repository version ${_REPO_VERSION} ... consider upgrading"
+    else
+      # the ":" below allows the else/fi clause to remain, even if there is no operation listed
+      : #   echo "repo version is ${_REPO_VERSION}, current version is ${_SCRIPT_VERSION}"
+    fi
+  fi
+}
 
 # Overrides default OCI Runner used by ASH
 [ ! -z "$ASH_OCI_RUNNER" ] && OCI_RUNNER="$ASH_OCI_RUNNER"
@@ -23,10 +64,17 @@ print_usage() {
   echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
   echo -e "\t-q | --quiet             Don't print verbose text about the build process."
   echo -e "\t-c | --no-color          Don't print colorized output."
+  echo -e "\t-n | --no-telemetry      Opt out of sending telemetry information about the running of ash."
   echo -e "\t-q | --quiet             Don't print verbose text about the build process"
   echo -e "\t-f | --finch             Use finch instead of docker to run the containerized tools.\n"
   echo -e "For more information please visit https://github.com/aws-samples/automated-security-helper"
 }
+
+#
+# Attempt to check the current version of ASH against what is found in
+# the appropriate Git repository.
+#
+version_check
 
 # Look for extensions
 GIT_EXTENSIONS=("git")
@@ -48,7 +96,6 @@ HIGHEST_RC=0
 #
 # Initialize options
 #
-
 COLOR_OUTPUT="true"
 FORCED_EXT="false"
 
@@ -83,7 +130,7 @@ while (("$#")); do
     OCI_RUNNER="finch"
     ;;
   --version | -v)
-    echo -n "ASH version $VERSION"
+    echo "ASH version $VERSION"
     EXITCODE=0
     exit $EXITCODE
     ;;
@@ -94,7 +141,6 @@ while (("$#")); do
   esac
   shift
 done
-
 
 if [[ $COLOR_OUTPUT = "true" ]]; then
   LPURPLE='\033[1;35m'
@@ -117,9 +163,9 @@ fi
 
 # shellcheck disable=SC2120
 # Find all possible extensions in the $SOURCE_DIR directory
-map_extensions_anf_files() {
+map_extensions_and_files() {
   all_files=$(find "${SOURCE_DIR}" \( -path '*/node_modules*' -prune -o -path '*/cdk.out*' -prune \) -o -type f -name '*') # $SOURCE_DIR comes from user input
-  extenstions_found=()
+  extensions_found=()
   files_found=()
 
   for file in $all_files; do
@@ -129,8 +175,8 @@ map_extensions_anf_files() {
     filename="${file##*/}" # extract the base filename plus extension
 
     # add only new extensions, skipping already-found ones.
-    if [[ ! "${extenstions_found[*]}" =~ ${extension} ]]; then
-      extenstions_found+=("$extension")
+    if [[ ! "${extensions_found[*]}" =~ ${extension} ]]; then
+      extensions_found+=("$extension")
     fi
 
     # add only new files, skipping already-found ones.
@@ -145,7 +191,7 @@ search_extension() {
   items_to_search=("$@") # passed as parameter to the function
   local item_found=0
   for item in "${items_to_search[@]}"; do
-    if [[ "${extenstions_found[*]}" =~ ${item} ]]; then
+    if [[ "${extensions_found[*]}" =~ ${item} ]]; then
       local item_found=1
       echo "$item_found"
       break
@@ -245,16 +291,30 @@ done
 
 unset IFS
 
+all_files='' # Variable will be populated inside 'map_extensions_and_files' block
+
 validate_input
-map_extensions_anf_files
+map_extensions_and_files
 
 echo -e "ASH version $VERSION\n"
+
+TOTAL_FILES=$(echo "$all_files" | wc -l)
+
+echo -e "ASH found ${TOTAL_FILES} file(s) in the source directory..."
+if [ $TOTAL_FILES -gt 1000 ]; then
+  echo -e "${RED}Depending on your machine this might take a while...${NC}"
+  for i in {1..5}
+  do
+    echo -n "." && sleep 1
+  done
+  echo -e "Starting now!";
+fi
 
 #
 # set up some variables for use further down
 #
 typeset -a JOBS JOBS_RC
-typeset -i i
+typeset -i i j
 
 #
 # Collect all the jobs to be run into a list that can be looped through
@@ -298,6 +358,7 @@ i=0
 for pid in ${JOBS[@]}; do
   echo -e "${CYAN}waiting on ${GREEN}${JOB_NAMES[${i}]}${CYAN} to finish ...${NC}"
   WAIT_ERR=0
+  j=5 # number of times to re-try a failed wait
   while wait ${pid} || WAIT_ERR=$?; do
     #
     # This check allows for the "wait" to fail for some reason, if so
@@ -310,10 +371,21 @@ for pid in ${JOBS[@]}; do
       JOBS_RC[${i}]=${WAIT_ERR}
       break
     else
-      echo -e "${RED}wait had and error, re-waiting ...${NC}"
+      j=${j}-1
+      if [ ${j} -gt 0 ]; then
+        echo -e "${RED}wait had and error, ${j} retries left, re-waiting ...${NC}"
+      else
+        JOBS_RC[${i}]=${WAIT_ERR}
+        echo -e "${RED}wait had and error, ${j} retries left, skipping wait for ${GREEN}${JOB_NAMES[${i}]}${RED} ...${NC}"
+        break
+      fi
     fi
   done
-  echo -e "${GREEN}${JOB_NAMES[${i}]}${CYAN} finished with return code ${JOBS_RC[${i}]}${NC}"
+  if [ ${JOBS_RC[${i}]} -ne 127 ]; then
+    echo -e "${GREEN}${JOB_NAMES[${i}]}${CYAN} finished with return code ${JOBS_RC[${i}]}${NC}"
+  else
+    echo -e "${GREEN}${JOB_NAMES[${i}]}${RED} wait for completion failed${NC}"
+  fi
   i=$i+1
 done
 
@@ -380,10 +452,6 @@ unset IFS
 else
   echo -e "${GREEN}No extensions were found, nothing to scan at the moment.${NC}"
 fi
-
-END_TIME=$(date +%s)
-TOTAL_EXECUTION=$((END_TIME-START_TIME))
-
 
 
 RCCOLOR=${GREEN}

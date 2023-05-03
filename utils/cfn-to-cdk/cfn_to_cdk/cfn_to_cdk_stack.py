@@ -9,6 +9,6 @@ class CfnToCdkStack(cdk.Stack):
         super().__init__(scope, construct_id, **kwargs)
 
     
-        template0 = cfn_inc.CfnInclude(self, "/app/test.yaml",  
-                template_file="/app/test.yaml")
+        template0 = cfn_inc.CfnInclude(self, "/app/simple_s3.yaml",  
+                template_file="/app/simple_s3.yaml")
     

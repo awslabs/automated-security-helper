@@ -22,17 +22,29 @@ bumprc() { # return the higher absolute value of the inputs
 
 RC=0
 
+touch grype_report_result.txt
+echo -e "\n>>>>>> Begin Grype output >>>>>>\n" >>grype_report_result.txt
 
-grype dir:. > grype_report_result.txt 2>&1
+grype -f medium dir:. >>grype_report_result.txt 2>&1
 SRC=$?
 RC=$(bumprc $RC $SRC)
 
-syft . >> grype_report_result.txt 2>&1
+echo -e "\n<<<<<< End Grype output <<<<<<\n" >>grype_report_result.txt
+
+echo -e "\n>>>>>> Begin Syft output >>>>>>\n" >>grype_report_result.txt
+
+syft . >>grype_report_result.txt 2>&1
 SRC=$?
 RC=$(bumprc $RC $SRC)
 
-semgrep --config=auto . >> grype_report_result.txt 2>&1
+echo -e "\n<<<<<< End Syft output <<<<<<\n" >>grype_report_result.txt
+
+echo -e "\n>>>>>> Begin Semgrep output >>>>>>\n" >>grype_report_result.txt
+
+semgrep --config=auto . >>grype_report_result.txt 2>&1
 CRC=$?
 RC=$(bumprc $RC $CRC)
+
+echo -e "\n<<<<<< End Semgrep output <<<<<<\n" >>grype_report_result.txt
 
 exit $RC
