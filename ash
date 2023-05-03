@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 set -e
 START_TIME=$(date +%s)
-VERSION=("1.0.8-e-25Apr2023")
+VERSION=("1.0.8-e-03May2023")
 OCI_RUNNER="docker"
 
 #

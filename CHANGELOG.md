@@ -1,4 +1,15 @@
-<a name="1.0.5-e-06Mar2023"></a>
+<a name="1.0.8-e-03May2023"></a>
+# 1.0.8-e-03May2023
+### Automated Security Helper
+
+* Cloud9 Quickstart
+* Remove cdk virtual env
+* README reformat
+* Pre-commit hook guidance
+* Fix Grype error code
+* Minor bug fixes
+
+<!-- CHANGELOG SPLIT MARKER -->
 
 # 1.0.5-e-06Mar2023
 ### Automated Security Helper
