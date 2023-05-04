@@ -229,7 +229,7 @@ OPTIONS:
 
 * Q: How to run `ash` in a CI/CD pipline?
 
-  A: Check the [ASH Pipeline solution](https://github.com/aws-samples/automated-security-helper)
+  A: Check the [ASH Pipeline solution](https://github.com/aws-samples/automated-security-helper-pipeline)
 
 * Q: How to run `ash` with [finch](https://aws.amazon.com/blogs/opensource/introducing-finch-an-open-source-client-for-container-development/)
   or another OCI compatible tool.
