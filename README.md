@@ -151,7 +151,7 @@ To configure a git repository to use the `ash` hook, start with the following `p
 
 ```yaml
   - repo: git@github.com:aws-samples/automated-security-helper.git
-    rev: '1.0.7-i-13Apr2023' # update with the latest tagged version in the repository
+    rev: '1.0.8-e-03May2023' # update with the latest tagged version in the repository
     hooks:
     - id: ash
       name: scan files using ash
