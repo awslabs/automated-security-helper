@@ -1,4 +1,4 @@
-Description:  Quickstart template for spinning up a Cloud9 with the Automated Security Helperhttps://github.com/aws-samples/automated-security-helper (ash-c9-1u5fh360r)
+Description:  Quickstart template for spinning up a Cloud9 with the Automated Security Helper https://github.com/aws-samples/automated-security-helper (ash-c9-1u5fh360r)
 
 Parameters:
   EnvironmentName:
