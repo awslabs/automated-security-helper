@@ -144,7 +144,7 @@ by running `pre-commit run --hook-stage manual ash` in build automation stage.
 When using `pre-commit`, run the `pre-commit` commands while in a folder/directory within the git repository that is
 configured with `pre-commit` hooks.
 
-Refer to the [pre-commit-hooks](./.precommit-config-hooks.yaml) file for information about the `pre-commit`
+Refer to the [pre-commit-hooks](./.pre-commit-hooks.yaml) file for information about the `pre-commit`
 hook itself.
 
 To configure a git repository to use the `ash` hook, start with the following `pre-commit-config` configuration:
@@ -160,7 +160,7 @@ To configure a git repository to use the `ash` hook, start with the following `p
       # args: [ "-f" ]
 ```
 
-Once the `.pre-commit-config.yaml` file is updated, the `ash` tool can be run using the following command:
+Once the `.pre-commit-hooks.yaml` file is updated, the `ash` tool can be run using the following command:
 
 ```bash
 pre-commit run --hook-stage manual ash
