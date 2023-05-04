@@ -28,7 +28,7 @@
 # running the ASH tool on MacOS, where "finch" is
 # used as the containerd user interface is:
 #   - repo: git@github.com:aws-samples/automated-security-helper.git
-#     rev: '1.0.7-i-13Apr2023'
+#     rev: '1.0.8-e-03May2023'
 #     hooks:
 #     - id: ash
 #       name: scan files using ash
