@@ -23,8 +23,6 @@ print_usage() {
   echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
   echo -e "\t-q | --quiet             Don't print verbose text about the build process."
   echo -e "\t-c | --no-color          Don't print colorized output."
-
-  echo -e "\t-q | --quiet             Don't print verbose text about the build process"
   echo -e "\t-f | --finch             Use finch instead of docker to run the containerized tools.\n"
   echo -e "For more information please visit https://github.com/aws-samples/automated-security-helper"
 }
