@@ -9,11 +9,12 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y curl && \
+    apt-get install -y python3-venv && \
     rm -rf /var/lib/apt/lists/*
 RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py
+RUN npm install -g cdk
 RUN pip install --no-cache-dir --upgrade pip
-RUN npm install -g aws-cdk
-RUN python3 -m pip install -U aws-cdk-lib cdk-nag jinja2
+RUN python3 -m pip install -U aws-cdk-lib cdk-nag jinja2 constructs jsii
 WORKDIR /app
 
 CMD bash -C /utils/cdk-docker-execute.sh

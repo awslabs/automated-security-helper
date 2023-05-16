@@ -22,17 +22,58 @@ bumprc() { # return the higher absolute value of the inputs
 
 RC=0
 
-#checkov --download-external-modules True -d . > yaml_report_result.txt 2>&1
-CHECKOV_CONFIG='ash-checkov-config.yml'
-checkov --download-external-modules True -d . --create-config "${CHECKOV_CONFIG}" &> /dev/null
-checkov --config-file "${CHECKOV_CONFIG}" > yaml_report_result.txt 2>&1
-CHRC=$?
-RC=$(bumprc $RC $CHRC)
-# remove the file before cfn_nag scanning so that it doesn't confuse the nag scanner
-rm "${CHECKOV_CONFIG}"
+rm /app/yaml_report_result.txt 2>/dev/null
+touch /app/yaml_report_result.txt
 
-cfn_nag_scan --rule-directory /cfnrules --input-path . >> yaml_report_result.txt 2>&1
-CRC=$?
-RC=$(bumprc $RC $CRC)
+echo "starting to investigate ..." >>/app/yaml_report_result.txt
+
+#
+# find only files that appear to contain CloudFormation templates
+#
+cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' . --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output} --exclude=ash) 2>/dev/null))
+
+#
+# For checkov scanning, add in files that are GitLab CI files or container build files
+#
+checkov_files=($(readlink -f $(find . -iname ".gitlab-ci.yml" -or -iname "*Dockerfile*" \
+                                       -not -path "./.git/*" -not -path "./.github/*" -not -path "./.venv/*") 2>/dev/null))
+checkov_files=( ${checkov_files[@]} ${cfn_files[@]} )
+
+if [ "${#checkov_files[@]}" -gt 0 ]; then
+  echo "found ${#checkov_files[@]} files to scan.  Starting checkov scans ..." >>/app/yaml_report_result.txt
+
+  for file in ${checkov_files[@]}; do
+    #echo $cfn_files
+    file1=`basename $file`
+    echo ">>>>>> begin checkov result for ${file1} >>>>>>" >> /app/yaml_report_result.txt
+    #
+    # Run the checkov scan on the file
+    #
+    checkov --download-external-modules True -f "${file}" >> /app/yaml_report_result.txt 2>&1
+    CHRC=$?
+    echo "<<<<<< end checkov result for ${file1} <<<<<<" >> /app/yaml_report_result.txt
+    RC=$(bumprc $RC $CHRC)
+  done
+else 
+  echo "found ${#checkov_files[@]} files to scan.  Skipping checkov scans." >>/app/yaml_report_result.txt
+fi
+
+if [ "${#cfn_files[@]}" -gt 0 ]; then
+  echo "found ${#cfn_files[@]} files to scan.  Starting cfn_nag scans ..." >>/app/yaml_report_result.txt
+
+  for file in ${cfn_files[@]}; do
+    file1=`basename $file`
+    echo ">>>>>> begin cfn_nag_scan result for ${file1} >>>>>>" >> /app/yaml_report_result.txt
+    #
+    # Run the cfn_nag scan on the file
+    #
+    cfn_nag_scan --output-format txt --print-suppression --rule-directory /cfnrules --input-path "${file}" >> /app/yaml_report_result.txt 2>&1
+    CNRC=$?
+    echo "<<<<<< end cfn_nag_scan result for ${file1} <<<<<<" >> /app/yaml_report_result.txt
+    RC=$(bumprc $RC $CNRC)
+  done
+else 
+  echo "found ${#cfn_files[@]} files to scan.  Skipping cfn_nag scans." >>/app/yaml_report_result.txt
+fi
 
 exit $RC
