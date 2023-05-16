@@ -41,7 +41,7 @@ echo -e "\n<<<<<< End Syft output <<<<<<\n" >>grype_report_result.txt
 
 echo -e "\n>>>>>> Begin Semgrep output >>>>>>\n" >>grype_report_result.txt
 
-semgrep --config=auto . >>grype_report_result.txt 2>&1
+semgrep --error --config=auto . >>grype_report_result.txt 2>&1
 CRC=$?
 RC=$(bumprc $RC $CRC)
 

@@ -2,7 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 set -e
-VERSION=("1.0.8-e-03May2023")
+VERSION=("1.0.9-e-16May2023")
 OCI_RUNNER="docker"
 
 
@@ -31,7 +31,7 @@ print_usage() {
 GIT_EXTENSIONS=("git")
 PY_EXTENSIONS=("py" "pyc" "ipynb")
 INFRA_EXTENSIONS=("yaml" "yml" "tf" "json" "dockerfile")
-CFN_EXTENSIONS=("yaml" "yml" "json")
+CFN_EXTENSIONS=("yaml" "yml" "json" "template")
 JS_EXTENSIONS=("js")
 GRYPE_EXTENSIONS=("js" "py" "java" "go" "cs" "sh")
 
@@ -232,6 +232,7 @@ run_security_check() {
   exit ${RETURN_CODE}
 }
 
+validate_input
 
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
 # Extract all zip files to temp dir before scanning
@@ -244,7 +245,6 @@ unset IFS
 
 all_files='' # Variable will be populated inside 'map_extensions_and_files' block
 
-validate_input
 map_extensions_and_files
 
 echo -e "ASH version $VERSION\n"
