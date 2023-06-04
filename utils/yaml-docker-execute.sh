@@ -35,8 +35,15 @@ cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' . --exclude-dir=
 #
 # For checkov scanning, add in files that are GitLab CI files or container build files
 #
-checkov_files=($(readlink -f $(find . -iname ".gitlab-ci.yml" -or -iname "*Dockerfile*" \
-                                       -not -path "./.git/*" -not -path "./.github/*" -not -path "./.venv/*") 2>/dev/null))
+checkov_files=($(readlink -f $(find . \( -iname ".gitlab-ci.yml" \
+                                         -or -iname "*Dockerfile*" \
+                                         -or -iname "*.tf" \
+                                         -or -iname "*.tf.json" \) \
+                                       -not -path "./.git/*" \
+                                       -not -path "./.github/*" \
+                                       -not -path "./.venv/*" \
+                                       -not -path "./.terraform/*" \
+                                       -not -path "./.external_modules/*") 2>/dev/null))
 checkov_files=( ${checkov_files[@]} ${cfn_files[@]} )
 
 if [ "${#checkov_files[@]}" -gt 0 ]; then
