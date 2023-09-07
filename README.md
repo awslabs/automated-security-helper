@@ -212,7 +212,6 @@ OPTIONS:
         --force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date.
         -q | --quiet             Don't print verbose text about the build process.
         -c | --no-color          Don't print colorized output.
-        -q | --quiet             Don't print verbose text about the build process.
         -f | --finch             Use finch instead of docker to run the containerized tools.
 ```
 
