@@ -2,7 +2,10 @@
 #FROM public.ecr.aws/bitnami/python:latest
 FROM --platform=linux/amd64 public.ecr.aws/bitnami/python:latest
 
-# Instal prerequisites
+# Allow for wider, more readable Semgrep output
+ENV COLUMNS 120
+
+# Install prerequisites
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin && \
     curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin && \
     python3 -m pip install semgrep
