@@ -1,0 +1,8 @@
+.pre-commit-*.yaml
+ash_output
+examples
+helper_dockerfiles
+img
+quickstart
+sample_report.txt
+utils/cfn-to-cdk/cdk.out

@@ -1,20 +1,21 @@
 # Get Ubuntu Image
-#FROM public.ecr.aws/ubuntu/ubuntu:latest
-#FROM public.ecr.aws/bitnami/python:latest
 FROM public.ecr.aws/docker/library/node:18.0.0
 ENV TZ=Europe/London
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Instal prerequisites
 RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y curl && \
-    apt-get install -y python3-venv && \
-    rm -rf /var/lib/apt/lists/*
-RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py
-RUN npm install -g cdk
-RUN pip install --no-cache-dir --upgrade pip
-RUN python3 -m pip install -U aws-cdk-lib cdk-nag jinja2 constructs jsii
-WORKDIR /app
+    apt-get upgrade -y
+
+#
+# Make sure the default dirs are initialized
+#
+RUN mkdir -p /src && \
+    mkdir -p /out && \
+    mkdir -p /run/scan/src \
+    mkdir -p /ash
+
+
+WORKDIR /src
 
 CMD bash -C /utils/cdk-docker-execute.sh
