@@ -1,6 +1,12 @@
 # 1.1.0-e-01Dec2023
 
-* Introduced single-container architecture
+* Introduced single-container architecture via single Dockerfile in the repo root
+    * Updated `utils/*.sh` and `ash` shell scripts to support running within a single container
+    * Added new `ash_helpers.{sh,ps1}` scripts to support building and running the new container image
+* Changed CDK Nag scanning to use TypeScript instead of Python in order to reduce the number of dependencies
+* Changed identification of files to scan from `find` to `git ls-files` for Git repositories in order to reduce the number of files scanned and to avoid scanning files that are not tracked by Git
+* Updated the multi-container Dockerfiles to be compatible with the script updates and retain backwards compatibility
+* Updated ASH documentation and README content to reflect the changes and improve the user experience
 
 # 1.0.9-e-16May2023
 ### Automated Security Helper
