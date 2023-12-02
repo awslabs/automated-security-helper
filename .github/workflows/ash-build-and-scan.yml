@@ -1,4 +1,4 @@
-name: Build ASH Image
+name: Build & run ASH against itself
 on:
   push:
     branches:
@@ -17,11 +17,11 @@ permissions:
   pull-requests: write
 jobs:
   build:
-    name: Build
+    name: ASH Build & Scan
     runs-on: ubuntu-latest
     env:
       IMG_NAME: ${{ github.repository }}
-      SUMMARY_FILE: 'SUMMARY_FILE.md'
+      SUMMARY_FILE: 'ASH Scan Result Summary.md'
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -109,7 +109,7 @@ jobs:
         if: always()
         with:
           name: Summary
-          path: ${{ env.SUMMARY_FILE }}
+          path: "${{ env.SUMMARY_FILE }}"
 
       - name: Collect aggregated_results.txt artifact
         uses: actions/upload-artifact@v2
