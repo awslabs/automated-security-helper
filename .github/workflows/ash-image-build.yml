@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMG_NAME: ${{ github.repository }}
+      SUMMARY_FILE: 'SUMMARY_FILE.md'
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -42,39 +43,77 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
 
       - name: Run ASH against itself
+        id: ash
         run: |-
           # Create the ash_output directory if it doesn't exist
           mkdir -p ash_output
 
-          # Enable errexit and print commands as they are run
-          set +e
           # Set the exit code to 0 by default
           EXIT_CODE=0
 
           # Run ASH against itself
+          docker run \
+            --platform linux/amd64 \
+            --mount type=bind,source="$(pwd)",destination=/src,readonly \
+            --mount type=bind,source="$(pwd)/ash_output",destination=/out \
+            --tmpfs /run/scan/src:rw,noexec,nosuid \
+            ${{ env.IMG_NAME }}  \
+            ash --source-dir /src --output-dir /out | \
+              tee ash_output/ash_stdout.txt
+
+          # Set the exit code to the highest return code from ASH
+          EXIT_CODE=$(cat ash_output/ash_stdout.txt | sed -rn 's/Highest return code is ([[:digit:]]+)/\1/p')
+
+          # cat the output contents to build the summary markdown
+          ASH_STDOUT=$(cat ash_output/ash_stdout.txt)
+          ASH_AGG_RESULTS=$(cat ash_output/aggregated_results.txt)
+
+          # Write the summary markdown to a file
+          cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
+          ## ASH Scan Output
+
+          \`\`\`bash
+          $ cat ash_output/ash_stdout.txt
+
+          ${ASH_STDOUT}
+          \`\`\`
+
+          <details>
+            <summary>Show aggregated_results.txt</summary>
+
+            \`\`\`bash
+            ${ASH_AGG_RESULTS}
+            \`\`\`
+          </details>
+          EOF
+
+          # Write the summary markdown to the GITHUB_OUTPUT
           {
-            docker run \
-              --platform linux/amd64 \
-              --mount type=bind,source="$(pwd)",destination=/src,readonly \
-              --mount type=bind,source="$(pwd)/ash_output",destination=/out \
-              --tmpfs /run/scan/src:rw,noexec,nosuid \
-              ${{ env.IMG_NAME }}  \
-              ash --source-dir /src --output-dir /out | tee ash_output/ash_stdout.txt
-          } || EXIT_CODE=1
+            echo 'ASH_OUTPUT<<EOF'
+            cat "${{ env.SUMMARY_FILE }}"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
 
-          if [[ "${EXIT_CODE}" != "0" ]]; then
-            cat ash_output/aggregated_results.txt
-          fi
-          echo "EXIT_CODE $EXIT_CODE"
+          # Exit with the highest return code from ASH
+          exit $EXIT_CODE
 
-      - name: Collect ash_stdout.txt
+      - name: Post ASH output as PR comment
+        uses: mshick/add-pr-comment@v2
+        if: always()
+        with:
+          message: |
+            ${{ steps.ash.outputs.ASH_OUTPUT }}
+
+      - name: Collect ash_stdout.txt artifact
         uses: actions/upload-artifact@v2
+        if: always()
         with:
           name: ash_stdout
           path: ash_output/ash_stdout.txt
 
-      - name: Collect aggregated_results.txt
+      - name: Collect aggregated_results.txt artifact
         uses: actions/upload-artifact@v2
+        if: always()
         with:
           name: aggregated_results
           path: ash_output/aggregated_results.txt
