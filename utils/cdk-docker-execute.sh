@@ -115,9 +115,9 @@ cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' ${_ASH_SOURCE_DI
 cp -R ${_ASH_UTILS_LOCATION}/cdk-nag-scan/* ${CDK_WORK_DIR}
 cd ${CDK_WORK_DIR}
 
-# Install the CDK application's required packages
+# # Install the CDK application's required packages
 
-npm install
+# npm install --quiet
 
 #
 # Now, for each file, run a cdk synth to subject the file to CDK-NAG scanning

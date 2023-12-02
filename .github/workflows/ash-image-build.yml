@@ -96,18 +96,12 @@ jobs:
           set -e
           cat ash_output/ash_stdout.txt | grep -q 'Highest return code is 0' || exit 1
 
-      - name: Remove ANSI color escape sequences
-        uses: marcransome/remove-ansi-colors@v1
-        id: remove-ansi-colors
-        with:
-          colored: ${{ steps.ash.outputs.ASH_OUTPUT }}
-
       - name: Post ASH output as PR comment
         uses: mshick/add-pr-comment@v2
         if: always()
         with:
           message: |
-            ${{ steps.remove-ansi-colors.outputs.uncolored }}
+            ${{ steps.ash.outputs.ASH_OUTPUT }}
 
       - name: Collect ash_stdout.txt artifact
         uses: actions/upload-artifact@v2

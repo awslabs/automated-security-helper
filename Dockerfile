@@ -92,17 +92,6 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh |
 
 RUN python3 -m pip install semgrep
 
-#
-# CDK
-#
-# RUN npm install -g aws-cdk # Install happens during the cdk script via npm install + npx cdk
-# RUN python3 -m pip install \
-#     aws-cdk-lib \
-#     cdk-nag \
-#     constructs \
-#     jsii \
-#     Jinja2
-
 # Setting PYTHONPATH so Jinja2 can resolve correctly
 # IMPORTANT: This is predicated on the Python version that is installed!
 #            Changing the BASE_IMAGE may result in this breaking.
@@ -127,6 +116,12 @@ RUN mkdir -p /src && \
 # COPY ASH source to /ash instead of / to isolate
 #
 COPY . /ash/
+
+#
+# Install CDK Nag stub dependencies
+#
+RUN cd /ash/utils/cdk-nag-scan && \
+    npm install
 
 #
 # Flag ASH as local execution mode since we are running in a container already
