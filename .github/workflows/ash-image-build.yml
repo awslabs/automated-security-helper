@@ -1,0 +1,35 @@
+name: Build ASH Image
+on:
+  push:
+    branches:
+      - '*'
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - '*'
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    env:
+      IMG_NAME: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set container metadata
+        id: metadata
+        uses: docker/metadata-action@v3
+        with:
+          images: ${{ env.IMG_NAME }}
+          tags: |
+            type=raw,value={{sha}},enable=${{ github.ref_type != 'tag' }}
+
+      - name: Build image
+        uses: docker/build-push-action@v2
+        with:
+          context: '.'
+          push: false
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
