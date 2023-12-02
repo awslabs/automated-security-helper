@@ -63,6 +63,7 @@ CDK_WORK_DIR=$(mktemp -d -t cdk-nag-scan.XXXXX)
 #
 # This is used to allow/accept files which have spaces in their names
 #
+# nosemgrep
 IFS=$'\n'
 
 #

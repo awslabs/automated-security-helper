@@ -56,6 +56,7 @@ touch ${REPORT_PATH}
 #
 # This is used to allow/accept files which have spaces in their names
 #
+# nosemgrep
 IFS=$'\n'
 
 #

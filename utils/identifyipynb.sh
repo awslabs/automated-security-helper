@@ -48,6 +48,7 @@ if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
   cd ${_ASH_RUN_DIR}
 fi;
 
+# nosemgrep
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
 # Find Jupyter files and convert them to python file for safety and bandit scans.
 echo "Looking for Jupyter notebook files"

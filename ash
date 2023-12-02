@@ -444,6 +444,7 @@ export _ASH_RUN_DIR="${_ASH_RUN_DIR:-/run/scan/src}"
 #
 echo -e "\n${LPURPLE}ASH version ${GREEN}$VERSION${NC}\n"
 
+# nosemgrep
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
 # Extract all zip files to temp dir *within $OUTPUT_DIR* before scanning
 for zipfile in $(find "${SOURCE_DIR}" -iname "*.zip");
