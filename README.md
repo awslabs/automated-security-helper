@@ -67,7 +67,7 @@ The security helper supports the following vectors:
   * Terraform; Cloudformation
     * **[checkov](https://github.com/bridgecrewio/checkov)**
     * **[cfn_nag](https://github.com/stelligent/cfn_nag)**
-    * **[cdk-nag](https://github.com/cdklabs/cdk-nag)** transforming Cloudformation to CDK, and run cdk-nag
+    * **[cdk-nag](https://github.com/cdklabs/cdk-nag)** (via import of rendered CloudFormation templates into a custom CDK project with the [AWS Solutions NagPack](https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#aws-solutions) enabled)
   * Dockerfile
     * **[checkov](https://github.com/bridgecrewio/checkov)**
 
