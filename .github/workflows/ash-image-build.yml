@@ -63,8 +63,9 @@ jobs:
               tee ash_output/ash_stdout.txt
 
           # cat the output contents to build the summary markdown
-          ASH_STDOUT=$(cat ash_output/ash_stdout.txt)
-          ASH_AGG_RESULTS=$(cat ash_output/aggregated_results.txt)
+          # strip out the color codes from the output
+          ASH_STDOUT=$(cat ash_output/ash_stdout.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+          ASH_AGG_RESULTS=$(cat ash_output/aggregated_results.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
 
           # Write the summary markdown to a file
           cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
@@ -103,12 +104,12 @@ jobs:
           message: |
             ${{ steps.ash.outputs.ASH_OUTPUT }}
 
-      - name: Collect ash_stdout.txt artifact
+      - name: Collect summary
         uses: actions/upload-artifact@v2
         if: always()
         with:
-          name: ash_stdout
-          path: ash_output/ash_stdout.txt
+          name: Summary
+          path: ${{ env.SUMMARY_FILE }}
 
       - name: Collect aggregated_results.txt artifact
         uses: actions/upload-artifact@v2
