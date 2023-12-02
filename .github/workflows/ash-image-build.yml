@@ -40,3 +40,20 @@ jobs:
           push: false
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+
+      - name: Run ASH against itself
+        run: |-
+          # Create the ash_output directory
+          mkdir -p ash_output
+
+          # Run ASH against the itself
+          set +e
+          EXIT_CODE=0
+
+          docker run \
+            --platform linux/amd64 \
+            --mount type=bind,source="$(pwd)",destination=/src,readonly \
+            --mount type=bind,source="$(pwd)/ash_output",destination=/out \
+            --tmpfs /run/scan/src:rw,noexec,nosuid \
+            ${{ env.IMG_NAME }} \
+            ash --source-dir /src --output-dir /out || EXIT_CODE=1
