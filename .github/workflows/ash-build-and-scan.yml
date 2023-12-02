@@ -28,7 +28,7 @@ jobs:
 
       - name: Set container metadata
         id: metadata
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMG_NAME }}
           tags: |
@@ -36,7 +36,7 @@ jobs:
             type=raw,value={{sha}},enable=${{ github.ref_type != 'tag' }}
 
       - name: Build image
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v5
         with:
           context: '.'
           push: false
@@ -112,7 +112,7 @@ jobs:
           path: "${{ env.SUMMARY_FILE }}"
 
       - name: Collect aggregated_results.txt artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         if: always()
         with:
           name: aggregated_results
