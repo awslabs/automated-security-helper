@@ -138,7 +138,6 @@ ENV _ASH_EXEC_MODE="local"
 #
 ENV PATH="$PATH:/ash"
 
-# nosemgrep
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD type ash || exit 1
 

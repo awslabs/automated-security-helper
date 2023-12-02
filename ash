@@ -613,7 +613,7 @@ fi
 END_TIME=$(date +%s)
 TOTAL_EXECUTION=$((END_TIME-START_TIME))
 
-echo -e "${GREEN}ASH execution completed in ${TOTAL_EXECUTION} seconds.${NC}"
+echo -e "${CYAN}ASH execution completed in ${TOTAL_EXECUTION} seconds.${NC}"
 
 RCCOLOR=${GREEN}
 if [[ $HIGHEST_RC -gt 0 ]]; then
