@@ -8,6 +8,13 @@ on:
   pull_request:
     branches:
       - '*'
+permissions:
+  actions: read
+  checks: write
+  contents: write
+  id-token: write
+  security-events: write
+  pull-requests: write
 jobs:
   build:
     name: Build
