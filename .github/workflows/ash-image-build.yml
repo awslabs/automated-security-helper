@@ -32,6 +32,7 @@ jobs:
         with:
           images: ${{ env.IMG_NAME }}
           tags: |
+            type=raw,value=latest
             type=raw,value={{sha}},enable=${{ github.ref_type != 'tag' }}
 
       - name: Build image
