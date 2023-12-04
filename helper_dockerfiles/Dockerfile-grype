@@ -1,13 +1,20 @@
 # Get Python Image
-#FROM public.ecr.aws/bitnami/python:latest
-FROM --platform=linux/amd64 public.ecr.aws/bitnami/python:latest
+FROM --platform=linux/amd64 public.ecr.aws/bitnami/python:3.11
 
 # Instal prerequisites
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin && \
     curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin && \
     python3 -m pip install semgrep
 
-WORKDIR /app
-VOLUME /app
+#
+# Make sure the default dirs are initialized
+#
+RUN mkdir -p /src && \
+    mkdir -p /out && \
+    mkdir -p /run/scan/src \
+    mkdir -p /ash
+
+WORKDIR /src
+VOLUME /src
 
 CMD bash -C /utils/grype-docker-execute.sh

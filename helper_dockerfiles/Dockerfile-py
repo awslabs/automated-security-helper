@@ -1,12 +1,19 @@
 # Get Python Image
-#FROM public.ecr.aws/bitnami/python:latest
-FROM --platform=linux/amd64 public.ecr.aws/bitnami/python:latest
+FROM --platform=linux/amd64 public.ecr.aws/bitnami/python:3.11
 
 # Instal prerequisites
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir bandit nbconvert jupyterlab
 
-WORKDIR /app
-VOLUME /app
+#
+# Make sure the default dirs are initialized
+#
+RUN mkdir -p /src && \
+    mkdir -p /out && \
+    mkdir -p /run/scan/src \
+    mkdir -p /ash
+
+WORKDIR /src
+VOLUME /src
 
 CMD bash -C /utils/py-docker-execute.sh
