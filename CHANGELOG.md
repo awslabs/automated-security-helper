@@ -1,5 +1,5 @@
 # 1.1.0-e-01Dec2023
-
+### Automated Security Helper
 * Introduced single-container architecture via single Dockerfile in the repo root
     * Updated `utils/*.sh` and `ash` shell scripts to support running within a single container
     * Added new `ash_helpers.{sh,ps1}` scripts to support building and running the new container image
