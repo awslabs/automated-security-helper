@@ -1,0 +1,120 @@
+name: Build & run ASH against itself
+on:
+  push:
+    branches:
+      - '*'
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - '*'
+permissions:
+  actions: read
+  checks: write
+  contents: write
+  id-token: write
+  security-events: write
+  pull-requests: write
+jobs:
+  build:
+    name: ASH Build & Scan
+    runs-on: ubuntu-latest
+    env:
+      IMG_NAME: ${{ github.repository }}
+      SUMMARY_FILE: 'ASH Scan Result Summary.md'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set container metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMG_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value={{sha}},enable=${{ github.ref_type != 'tag' }}
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: '.'
+          push: false
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+
+      - name: Run ASH against itself
+        id: ash
+        run: |-
+          # Create the ash_output directory if it doesn't exist
+          mkdir -p ash_output
+
+          # Disable exit on error
+          set +e
+
+          # Run ASH against itself
+          docker run \
+            --platform linux/amd64 \
+            --mount type=bind,source="$(pwd)",destination=/src,readonly \
+            --mount type=bind,source="$(pwd)/ash_output",destination=/out \
+            --tmpfs /run/scan/src:rw,noexec,nosuid \
+            ${{ env.IMG_NAME }}  \
+            ash --source-dir /src --output-dir /out | \
+              tee ash_output/ash_stdout.txt
+
+          # cat the output contents to build the summary markdown
+          # strip out the color codes from the output
+          ASH_STDOUT=$(cat ash_output/ash_stdout.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+          ASH_AGG_RESULTS=$(cat ash_output/aggregated_results.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+
+          # Write the summary markdown to a file
+          cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
+          ## ASH Scan Output
+
+          \`\`\`bash
+          $ cat ash_output/ash_stdout.txt
+
+          ${ASH_STDOUT}
+          \`\`\`
+
+          <details>
+            <summary>Show aggregated_results.txt</summary>
+
+            \`\`\`bash
+            ${ASH_AGG_RESULTS}
+            \`\`\`
+          </details>
+          EOF
+
+          # Write the summary markdown to the GITHUB_OUTPUT
+          {
+            echo 'ASH_OUTPUT<<EOF'
+            cat "${{ env.SUMMARY_FILE }}"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+          # Exit with the highest return code from ASH
+          set -e
+          cat ash_output/ash_stdout.txt | grep -q 'Highest return code is 0' || exit 1
+
+      - name: Post ASH output as PR comment
+        uses: mshick/add-pr-comment@v2
+        if: always()
+        with:
+          message: |
+            ${{ steps.ash.outputs.ASH_OUTPUT }}
+
+      - name: Collect summary
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: Summary
+          path: "${{ env.SUMMARY_FILE }}"
+
+      - name: Collect aggregated_results.txt artifact
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: aggregated_results
+          path: ash_output/aggregated_results.txt
+          if-no-files-found: error

@@ -1,4 +1,4 @@
-Description:  Quickstart template for spinning up a Cloud9 with the Automated Security Helper https://github.com/aws-samples/automated-security-helper (ash-c9-1u5fh360r)
+Description:  Quickstart template for spinning up a Cloud9 with the Automated Security Helper https://github.com/awslabs/automated-security-helper (ash-c9-1u5fh360r)
 
 Parameters:
   EnvironmentName:
@@ -36,15 +36,59 @@ Parameters:
     Type: String
     Default: t3.medium
     AllowedValues:
-      - t2.micro
-      - t3.micro
       - t3.small
       - t3.medium
+      - m5.large
     ConstraintDescription: Must be a valid Cloud9 instance type
+
   C9InstanceVolumeSize:
     Type: Number
     Description: The Size in GB of the Cloud9 Instance Volume.
     Default: 30
+
+  C9Image:
+    Type: String
+    Description: The Image to use for the Cloud9Instance
+    Default: ubuntu-22.04-x86_64
+
+  PatchC9Instance:
+    Description: Creates an Association to patch the Cloud9 Instance upon launch (single run).
+    Type: String
+    Default: False
+    AllowedValues:
+      - True
+      - False
+
+Conditions:
+  CreatePatchAssociation: !Equals
+    - !Ref PatchC9Instance
+    - True
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "General"
+        Parameters:
+          - EnvironmentName
+      -
+        Label:
+          default: "Network Configuration"
+        Parameters:
+          - VpcCIDR
+          - PublicSubnet1CIDR
+          - PublicSubnet2CIDR
+          - PrivateSubnet1CIDR
+          - PrivateSubnet2CIDR
+      -
+        Label:
+          default: "Cloud9 Configuration"
+        Parameters:
+          - C9InstanceType
+          - C9InstanceVolumeSize
+          - C9Image
+          - PatchC9Instance
 
 Resources:
   VPC:
@@ -236,7 +280,6 @@ Resources:
           CidrIp: 0.0.0.0/0
           Description: "HTTPS Outbound traffic"
 
-
 ################## PERMISSIONS AND ROLES #################
   C9Role:
     Type: AWS::IAM::Role
@@ -249,10 +292,8 @@ Resources:
             reason: "Needed in order to check the proper role is attached to the instance before running CDK"
           - id: W11
             reason: "Describe calls doesn't support resource filter. Volume tags are not propagated by Cloud9"
-
-
     Properties:
-      RoleName: ash-admin
+      RoleName: !Sub "${EnvironmentName}-admin"
       Tags:
         - Key: Environment
           Value: !Sub ${EnvironmentName}
@@ -321,6 +362,7 @@ Resources:
         rules_to_suppress:
           - id: W11
             reason: "Describe Action doesn't support any resource condition"
+
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -333,7 +375,9 @@ Resources:
           - sts:AssumeRole
       Path: "/"
       ManagedPolicyArns:
+#        - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
         - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+
       Policies:
       - PolicyName:
           Fn::Join:
@@ -399,15 +443,27 @@ Resources:
         - C9InstanceProfile
         - Arn
 
+  # LambdaSecurityGroup:
+  #   Type: AWS::EC2::SecurityGroup
+  #   Properties:
+  #     GroupDescription: "HTTPS Outbound Traffic"
+  #     VpcId: !Ref VPC
+  #     SecurityGroupEgress:
+  #       - IpProtocol: tcp
+  #         FromPort: 443
+  #         ToPort: 443
+  #         CidrIp: 0.0.0.0/0
+  #         Description: "HTTPS Outbound traffic"
+
   C9BootstrapInstanceLambdaFunction:
     Type: AWS::Lambda::Function
+    #checkov:skip=CKV_AWS_116:DLQ not needed for a single invocation Lambda
+    #checkov:skip=CKV_AWS_117:Lambda only talks with AWS endpoints, no need for a VPC
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "VPC support not needed for this helper lambda"
-          - id: W92
-            reason: "Reserved concurrency no needed for this helper lambda"
+            reason: "Lambda only talks with AWS endpoints, no need for a VPC"
     Properties:
       Tags:
         - Key: Environment
@@ -418,10 +474,17 @@ Resources:
         - C9LambdaExecutionRole
         - Arn
       Runtime: python3.9
+      # VpcConfig:
+      #   SecurityGroupIds:
+      #     - !Ref LambdaSecurityGroup
+      #   SubnetIds:
+      #     - !Ref PrivateSubnet1
+      #     - !Ref PrivateSubnet2
       MemorySize: 256
       Timeout: 600
+      ReservedConcurrentExecutions: 1
       Code:
-        ZipFile: |
+        ZipFile: !Sub |
           from __future__ import print_function
           import boto3
           import json
@@ -445,7 +508,7 @@ Resources:
                       ec2 = boto3.client('ec2')
 
                       # Get the InstanceId of the Cloud9 IDE
-                      instance = ec2.describe_instances(Filters=[{'Name': 'tag:Name','Values': ['aws-cloud9-ash'+'-'+event['ResourceProperties']['EnvironmentId']]}])['Reservations'][0]['Instances'][0]
+                      instance = ec2.describe_instances(Filters=[{'Name': 'tag:Name','Values': ['aws-cloud9-${EnvironmentName}'+'-'+event['ResourceProperties']['EnvironmentId']]}])['Reservations'][0]['Instances'][0]
                       logger.info('instance: {}'.format(instance))
 
                       # Create the IamInstanceProfile request object
@@ -480,16 +543,27 @@ Resources:
               else:
                 responseData = {'Success': 'Update or delete event'}
                 cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, 'CustomResourcePhysicalID')
-################## SSM BOOTSRAP HANDLER ###############
+################## SSM BOOTSTRAP HANDLER ###############
   C9OutputBucket:
-    Type: AWS::S3::Bucket
+    #checkov:skip=CKV_AWS_18:S3 Access Logs not needed for the Association result
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: W35
-            reason: "Access Logs aren't needed for this bucket"
+            reason: "Access Logs not needed for the Association result"
+    Type: AWS::S3::Bucket
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: Expire1Day
+            ExpirationInDays: 1
+            NoncurrentVersionExpirationInDays: 1
+            Status: Enabled
+
       AccessControl: Private
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -521,9 +595,38 @@ Resources:
             Principal:
               AWS:
                 Fn::GetAtt:
-                - C9LambdaExecutionRole
+                - C9Role
                 - Arn
 
+  BootstrapWaitHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+
+  BootstrapWaitCondition:
+    Type: AWS::CloudFormation::WaitCondition
+    Properties:
+      Handle: !Ref BootstrapWaitHandle
+      Timeout: "3600"
+
+
+  C9PatchDocument:
+    Condition: CreatePatchAssociation
+    Type: AWS::SSM::Document
+    Properties:
+      Tags:
+        - Key: Environment
+          Value: !Sub ${EnvironmentName}
+      DocumentType: Command
+      Content:
+        schemaVersion: '2.2'
+        description: Bootstrap Cloud9 Instance
+        mainSteps:
+        - action: aws:runDocument
+          name: PatchInstance
+          inputs:
+            documentPath: AWS-RunPatchBaseline
+            documentType: SSMDocument
+            documentParameters:
+              Operation: Install
 
   C9SSMDocument:
     Type: AWS::SSM::Document
@@ -537,22 +640,9 @@ Resources:
         description: Bootstrap Cloud9 Instance
         mainSteps:
         - action: aws:runShellScript
-          name: C9bootstrap
+          name: ResizeVolume
           inputs:
             runCommand:
-            - /bin/bash
-            - yum update -y
-            - yum -y install jq bash-completion python38 python38-pip
-            - echo '=== INSTALL and CONFIGURE default software components ==='
-            - sudo -H -u ec2-user bash -c "pip3 install --user -U boto boto3 awscli"
-            - alternatives --set python /usr/bin/python3.8
-            - python -m pip install --upgrade pip
-            - echo '=== INSTALL ASH ==='
-            - mkdir -p /usr/local/ash
-            - git clone https://github.com/aws-samples/automated-security-helper.git /usr/local/ash
-            - echo export PATH="/usr/local/ash/:$PATH" >> /home/ec2-user/.bashrc
-            - touch /home/ec2-user/environment/ASH-READY
-            - echo '=== Resizing the Instance volume'
             - !Sub SIZE=${C9InstanceVolumeSize}
             - !Sub REGION=${AWS::Region}
             - |
@@ -570,34 +660,71 @@ Resources:
                   --output text --region $REGION)" != "1" ]; do
               sleep 1
               done
-              if [ $(readlink -f /dev/xvda) = "/dev/xvda" ]
-              then
-                sudo growpart /dev/xvda 1
-                STR=$(cat /etc/os-release)
-                SUB="VERSION_ID=\"2\""
-                if [[ "$STR" == *"$SUB"* ]]
-                then
-                  sudo xfs_growfs -d /
-                else
-                  sudo resize2fs /dev/xvda1
-                fi
-              else
-                sudo growpart /dev/nvme0n1 1
-                STR=$(cat /etc/os-release)
-                SUB="VERSION_ID=\"2\""
-                if [[ "$STR" == *"$SUB"* ]]
-                then
-                  sudo xfs_growfs -d /
-                else
-                  sudo resize2fs /dev/nvme0n1p1
-                fi
-              fi
-            - echo "Bootstrap completed with return code $?"
+              sudo growpart /dev/nvme0n1 1
+              sudo resize2fs /dev/nvme0n1p1
+        - action: aws:runShellScript
+          name: CreateSwap
+          inputs:
+            runCommand:
+            - sudo dd if=/dev/zero of=/swapfile bs=128M count=32
+            - sudo chmod 600 /swapfile
+            - sudo mkswap /swapfile
+            - sudo swapon /swapfile
+            - sudo /bin/bash -c 'echo "/swapfile swap swap defaults 0 0" >> /etc/fstab'
+        - action: aws:runShellScript
+          name: DependencyInstall
+          inputs:
+            runCommand:
+            - apt update -y
+            - apt install -y jq bash-completion
+            - pip install --user --upgrade awscli
+            - sudo -i -u ubuntu bash -l -c "nvm install node --default"
+            - sudo -i -u ubuntu bash -l -c "nvm alias default node"
+            - sudo -i -u ubuntu bash -l -c "nvm exec node npm install -g aws-cdk --force"
+        - action: aws:runShellScript
+          name: InstallAsh
+          inputs:
+            runCommand:
+            - git clone https://github.com/awslabs/automated-security-helper.git /usr/local/ash
+            - echo export PATH="/usr/local/ash/:$PATH" >> /home/ubuntu/.bashrc
+        - action: aws:runShellScript
+          name: NotifyCloudformation
+          inputs:
+            finallyStep: true
+            runCommand:
+            - |
+              python --version &&
+              /usr/local/ash/ash -v &&
+              touch /home/ubuntu/environment/READY
+            - !Sub |
+              /usr/bin/python -c "
+              import json
+              import os
+              import urllib3
+              import uuid
+              signal_url='${BootstrapWaitHandle}'
+              result = 'FAILURE'
+              if os.path.exists('/home/ubuntu/environment/READY'):
+                result = 'SUCCESS'
+
+              encoded_body = json.dumps({
+                'Status': result,
+                'Reason': 'Association completed',
+                'UniqueId': str(uuid.uuid4()),
+                'Data': 'Association completed'
+              })
+
+              http = urllib3.PoolManager()
+              http.request('PUT', signal_url , body=encoded_body)
+              "
+            - |
+              [ -f /home/ubuntu/environment/READY ] && exit 0 || exit 2
 
   C9BootstrapAssociation:
     Type: AWS::SSM::Association
     Properties:
       Name: !Ref C9SSMDocument
+      AssociationName: !Sub Cloud9Bootstrap-${EnvironmentName}
       OutputLocation:
         S3Location:
           OutputS3BucketName: !Ref C9OutputBucket
@@ -605,9 +732,26 @@ Resources:
       Targets:
         - Key: tag:SSMBootstrap
           Values:
-          - Active
+          - !Ref EnvironmentName
 
-################## INSTANCE #####################
+  C9PatchAssociation:
+    Type: AWS::SSM::Association
+    Condition: CreatePatchAssociation
+    Properties:
+      Name: !Ref C9PatchDocument
+      AssociationName: !Sub Cloud9Patch-${EnvironmentName}
+      OutputLocation:
+        S3Location:
+          OutputS3BucketName: !Ref C9OutputBucket
+          OutputS3KeyPrefix: bootstrapoutput
+      Targets:
+        - Key: tag:SSMBootstrap
+          Values:
+          - !Ref EnvironmentName
+
+
+################## INSTANCE ####################
+
   C9InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -621,18 +765,19 @@ Resources:
     Properties:
       Description: !Sub  AWS Cloud9 instance for ${EnvironmentName}
       SubnetId: !Ref PublicSubnet1
-
       AutomaticStopTimeMinutes: 3600
+      ConnectionType: CONNECT_SSH
+      ImageId: !Ref C9Image
       InstanceType:
         Ref: C9InstanceType
-      Name: ash
+      Name: !Ref EnvironmentName
       Tags:
         -
           Key: SSMBootstrap
-          Value: Active
+          Value: !Ref EnvironmentName
         -
           Key: Environment
-          Value: !Sub ${EnvironmentName}
+          Value: !Ref EnvironmentName
 
 Outputs:
   VPC:

@@ -8,7 +8,6 @@ class CfnToCdkStack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-    
-        template0 = cfn_inc.CfnInclude(self, "/app/test.yaml",  
+
+        template0 = cfn_inc.CfnInclude(self, "/app/test.yaml",
                 template_file="/app/test.yaml")
-    
