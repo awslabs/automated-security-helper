@@ -36,40 +36,40 @@ We are currently working on a re-architecture of ASH targeting a single-containe
 
 The security helper supports the following vectors:
 
-- Code
-  - Git
-    - **[git-secrets](https://github.com/awslabs/git-secrets)** - Find api keys, passwords, AWS keys in the code
-  - Python
-    - **[bandit](https://github.com/PyCQA/bandit)** - finds common security issues in Python code.
-    - **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Python code.
-    - **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Python code.
-    - **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Python code.
-  - Jupyter Notebook
-    - **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts Jupyter Notebook (ipynb) files into Python executables. Code scan with Bandit.
-  - JavaScript; NodeJS
-    - **[npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit)** - checks for vulnerabilities in Javascript and NodeJS.
-    - **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in JavaScript code.
-    - **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Javascript and NodeJS.
-    - **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Javascript and NodeJS.
-  - Go
-    - **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Golang code.
-    - **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Golang.
-    - **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Golang.
-  - C#
-    - **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in C# code.
-  - Bash
-    - **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Bash code.
-  - Java
-    - **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Java code.
-    - **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Java.
-    - **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Java.
-- Infrastructure
-  - Terraform; Cloudformation
-    - **[checkov](https://github.com/bridgecrewio/checkov)**
-    - **[cfn_nag](https://github.com/stelligent/cfn_nag)**
-    - **[cdk-nag](https://github.com/cdklabs/cdk-nag)** (via import of rendered CloudFormation templates into a custom CDK project with the [AWS Solutions NagPack](https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#aws-solutions) enabled)
-  - Dockerfile
-    - **[checkov](https://github.com/bridgecrewio/checkov)**
+* Code
+  * Git
+    * **[git-secrets](https://github.com/awslabs/git-secrets)** - Find api keys, passwords, AWS keys in the code
+  * Python
+    * **[bandit](https://github.com/PyCQA/bandit)** - finds common security issues in Python code.
+    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Python code.
+    * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Python code.
+    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Python code.
+  * Jupyter Notebook
+    * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts Jupyter Notebook (ipynb) files into Python executables. Code scan with Bandit.
+  * JavaScript; NodeJS
+    * **[npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit)** - checks for vulnerabilities in Javascript and NodeJS.
+    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in JavaScript code.
+    * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Javascript and NodeJS.
+    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Javascript and NodeJS.
+  * Go
+    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Golang code.
+    * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Golang.
+    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Golang.
+  * C#
+    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in C# code.
+  * Bash
+    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Bash code.
+  * Java
+    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Java code.
+    * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Java.
+    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Java.
+* Infrastructure
+  * Terraform; Cloudformation
+    * **[checkov](https://github.com/bridgecrewio/checkov)**
+    * **[cfn_nag](https://github.com/stelligent/cfn_nag)**
+    * **[cdk-nag](https://github.com/cdklabs/cdk-nag)** (via import of rendered CloudFormation templates into a custom CDK project with the [AWS Solutions NagPack](https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#aws-solutions) enabled)
+  * Dockerfile
+    * **[checkov](https://github.com/bridgecrewio/checkov)**
 
 ## Prerequisites
 
