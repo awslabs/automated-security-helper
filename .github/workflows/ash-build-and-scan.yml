@@ -99,7 +99,10 @@ jobs:
 
       - name: Post ASH output as PR comment
         uses: mshick/add-pr-comment@v2
-        if: always()
+        # This does not work for fork runs without setting up a proxy
+        # Info: https://github.com/mshick/add-pr-comment#proxy-for-fork-based-prshttps://github.com/mshick/add-pr-comment#proxy-for-fork-based-prs
+        if: github.repository_owner == 'awslabs'
+        continue-on-error: true
         with:
           message: |
             ${{ steps.ash.outputs.ASH_OUTPUT }}
@@ -107,6 +110,7 @@ jobs:
       - name: Collect summary
         uses: actions/upload-artifact@v3
         if: always()
+        continue-on-error: true
         with:
           name: Summary
           path: "${{ env.SUMMARY_FILE }}"
@@ -114,6 +118,7 @@ jobs:
       - name: Collect aggregated_results.txt artifact
         uses: actions/upload-artifact@v3
         if: always()
+        continue-on-error: false
         with:
           name: aggregated_results
           path: ash_output/aggregated_results.txt
