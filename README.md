@@ -1,16 +1,21 @@
 # ASH
 
-* [Description](#description)
-* [Supported frameworks](#supported-frameworks)
-* [Prerequisites](#prerequisites)
-* [Getting started](#getting-started)
-  * [Linux or MacOS](#getting-started---linux-or-macos)
-  * [Windows](#getting-started---windows)
-  * [Cloud9 Quickstart](#cloud9-quickstart-guide)
-* [Using `ash` with `pre-commit`](#using-ash-with-pre-commit)
-* [Examples](#examples)
-* [Synopsis](#synopsis)
-* [FAQ](#faq)
+- [ASH; The *A*utomated *S*ecurity *H*elper](#ash-the-automated-security-helper)
+- [Description](#description)
+  - [ASH change advisory](#ash-change-advisory)
+- [Supported frameworks](#supported-frameworks)
+- [Prerequisites](#prerequisites)
+- [Getting Started](#getting-started)
+  - [Getting Started - Linux or MacOS](#getting-started---linux-or-macos)
+  - [Getting Started - Windows](#getting-started---windows)
+  - [Cloud9 Quickstart Guide](#cloud9-quickstart-guide)
+- [Using `ash` with `pre-commit`](#using-ash-with-pre-commit)
+- [Examples](#examples)
+- [Synopsis](#synopsis)
+- [FAQ](#faq)
+- [Feedback](#feedback)
+- [Security](#security)
+- [License](#license)
 
 ## ASH; The *A*utomated *S*ecurity *H*elper
 
@@ -19,9 +24,13 @@
 The security helper tool was created to help you reduce the probability of a security violation in a new code, infrastructure or IAM configuration
 by providing a fast and easy tool to conduct  preliminary security check as early as possible within your development process.
 
-* It is not a replacement of a human review nor standards enforced by your team/customer.
-* It uses light, open source tools to maintain its flexibility and ability to run from anywhere.
-* ASH is cloning and running different open-source tools, such as: git-secrets, bandit, Semgrep, Grype, Syft, nbconvert, npm-audit, checkov, cdk-nag and cfn-nag. Please review the tools LICENSE before usage.
+- It is not a replacement of a human review nor standards enforced by your team/customer.
+- It uses light, open source tools to maintain its flexibility and ability to run from anywhere.
+- ASH is cloning and running different open-source tools, such as: git-secrets, bandit, Semgrep, Grype, Syft, nbconvert, npm-audit, checkov, cdk-nag and cfn-nag. Please review the tools [LICENSE](license) before usage.
+
+### ASH change advisory
+
+We are currently working on a re-architecture of ASH targeting a single-container architecture as well as documentation to go along with it.
 
 ## Supported frameworks
 
@@ -34,18 +43,18 @@ The security helper supports the following vectors:
     * **[bandit](https://github.com/PyCQA/bandit)** - finds common security issues in Python code.
     * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Python code.
     * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Python code.
-    * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Python code.
+    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Python code.
   * Jupyter Notebook
     * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts Jupyter Notebook (ipynb) files into Python executables. Code scan with Bandit.
   * JavaScript; NodeJS
     * **[npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit)** - checks for vulnerabilities in Javascript and NodeJS.
     * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in JavaScript code.
     * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Javascript and NodeJS.
-    * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Javascript and NodeJS.
+    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Javascript and NodeJS.
   * Go
     * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Golang code.
     * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Golang.
-    * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Golang.
+    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Golang.
   * C#
     * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in C# code.
   * Bash
@@ -53,18 +62,22 @@ The security helper supports the following vectors:
   * Java
     * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Java code.
     * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Java.
-    * **[Syft](https://github.com/anchore/grype)** - generating a Software Bill of Materials (SBOM) for Java.
+    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Java.
 * Infrastructure
   * Terraform; Cloudformation
     * **[checkov](https://github.com/bridgecrewio/checkov)**
     * **[cfn_nag](https://github.com/stelligent/cfn_nag)**
-    * **[cdk-nag](https://github.com/cdklabs/cdk-nag)** transforming Cloudformation to CDK, and run cdk-nag
+    * **[cdk-nag](https://github.com/cdklabs/cdk-nag)** (via import of rendered CloudFormation templates into a custom CDK project with the [AWS Solutions NagPack](https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#aws-solutions) enabled)
+  * Dockerfile
+    * **[checkov](https://github.com/bridgecrewio/checkov)**
 
 ## Prerequisites
 
 To start using `ash` please make sure to install and configure the following:
 
-* Install Docker. You can refer to this [installation guide](https://docs.docker.com/get-docker/)
+- Tools installed to run Linux containers, such as [Finch](https://github.com/runfinch/finch), [Rancher Desktop](https://rancherdesktop.io/), [Podman Desktop](https://podman-desktop.io/), or [Docker Desktop](https://docs.docker.com/get-docker/).
+  - This can be any command-line interface (CLI) + container engine combination; there is nothing in ASH that requires a specific container runtime.
+  - If on Windows, you will also likely need Windows Subsystem for Linux (WSL) installed as a prerequisite for the listed container engine tools. Please see the specific instructions for the tool of choice regarding Windows-specific prerequisites.
 
 ## Getting Started
 
@@ -81,7 +94,7 @@ REPO_NAME=automated-security-helper
 mkdir -p ${REPO_DIR}
 
 # Clone the repository into the reference area
-git clone https://github.com/aws-samples/automated-security-helper "${REPO_DIR}/${REPO_NAME}"
+git clone https://github.com/awslabs/automated-security-helper "${REPO_DIR}/${REPO_NAME}"
 
 # Set the repo path in your shell for easier access
 #
@@ -101,29 +114,29 @@ ash --version
 **ASH** uses containers, `bash` shell scripts, and multiple background processes running in parallel to run the multiple
 source code security scanning tools that it uses.  Because of this, running `ash` from either a `PowerShell` or `cmd`
 shell on Windows is not possible.  Furthermore, due to reliance on running containers, usually with Docker Desktop
-when running on Windows, there is an implicit dependency on having installed, configured, and operational a WSL2
-(Windows System for Linux) environment on the Windows machine where `ash` will be run.
+when running on Windows, there is an implicit dependency on having installed, configured, and operational a
+Windows Subsystem for Linux (WSL) 2 environment on the Windows machine where `ash` will be run.
 
 To use `ash` on Windows:
 
-* Install, configure, and test the [WSL 2 environment on Windows](https://learn.microsoft.com/en-us/windows/wsl/install)
-* Install, configure, and test [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/), using the WSL 2 environment
-* Use the [Windows Terminal](https://learn.microsoft.com/en-us/windows/terminal/install) program and open a command-line window to interact with the WSL 2 environment
-* Install and/or update the `git` client in the WSL 2 environment.  This should be pre-installed, but you may need to update the version
+- Install, configure, and test the [WSL 2 environment on Windows](https://learn.microsoft.com/en-us/windows/wsl/install)
+- Install, configure, and test [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/), using the WSL 2 environment
+- Use the [Windows Terminal](https://learn.microsoft.com/en-us/windows/terminal/install) program and open a command-line window to interact with the WSL 2 environment
+- Install and/or update the `git` client in the WSL 2 environment.  This should be pre-installed, but you may need to update the version
   using the `apt-get update` command.
 
 Once the WSL2 command-line window is open, follow the steps above in [Getting Started - Linux or MacOS](#getting-started---linux-or-macos)
-to install and run `ash` in WSL2 on the Windows machine.
+to install and run `ash` in WSL 2 on the Windows machine.
 
 To run `ash`, open a Windows Terminal shell into the WSL 2 environment and use that command-line shell to run the `ash` command.
 
-**Note**: when working this way, be sure to `git clone` any git repositories to be scanned into the WSL2 filesystem.
+**Note**: when working this way, be sure to `git clone` any git repositories to be scanned into the WSL 2 filesystem.
 Results are un-predictable if repositories or file sub-trees in the Windows filesystem are scanned using `ash`
-that is running in the WSL2 environment.
+that is running in the WSL 2 environment.
 
 **Tip**: If you are using Microsoft VSCode for development, it is possible to configure a "remote" connection
 [using VSCode into the WSL2 environment](https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-vscode).
-By doing this, you can host your git repositories in WSL2 and still
+By doing this, you can host your git repositories in WSL 2 and still
 work with them as you have in the past when they were in the Windows filesystem of your Windows machine.
 
 ### Cloud9 Quickstart Guide
@@ -150,8 +163,8 @@ hook itself.
 To configure a git repository to use the `ash` hook, start with the following `pre-commit-config` configuration:
 
 ```yaml
-  - repo: git@github.com:aws-samples/automated-security-helper.git
-    rev: '1.0.8-e-03May2023' # update with the latest tagged version in the repository
+  - repo: git@github.com:awslabs/automated-security-helper.git
+    rev: '1.1.0-e-01Dec2023' # update with the latest tagged version in the repository
     hooks:
     - id: ash
       name: scan files using ash
@@ -212,34 +225,53 @@ OPTIONS:
         --force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date.
         -q | --quiet             Don't print verbose text about the build process.
         -c | --no-color          Don't print colorized output.
+        -o | --oci-runner        Use the specified OCI runner instead of docker to run the containerized tools.
         -f | --finch             Use finch instead of docker to run the containerized tools.
+                                 WARNING: The '--finch|-f' option is deprecated and will be removed in a future
+                                          release. Please switch to using '--oci-runner finch' in scripts instead.
 ```
 
 ## FAQ
 
-* Q: How to run `ash` on a Windows machine
+- Q: How to run `ash` on a Windows machine
 
   A: ASH on a windows machine
 
-  * Install a Windows Subsystem for Linux (WSL) with an [Ubuntu distribution](https://docs.microsoft.com/en-us/windows/wsl/install). Be sure to use the WSL 2.
-  * Install Docker Desktop for windows and activate the [integration the WSL](https://docs.docker.com/desktop/windows/wsl/)
-  * Clone this git repo from a windows terminal via VPN (while in vpn it'll not connect to the repo directly from Ubuntu WSL).
-  * Execute the helper tool from the folder downloaded in the previous step from the Ubuntu WSL.
+  - Install a Windows Subsystem for Linux (WSL) 2 environment with a [Ubuntu distribution](https://docs.microsoft.com/en-us/windows/wsl/install). Be sure to use the WSL 2.
+  - Install Docker Desktop for windows and activate the [integration the WSL 2](https://docs.docker.com/desktop/windows/wsl/)
+  - Clone this git repo from a windows terminal via VPN (while in vpn it'll not connect to the repo directly from Ubuntu WSL 2).
+  - Execute the helper tool from the folder downloaded in the previous step from the Ubuntu WSL.
 
-* Q: How to run `ash` in a CI/CD pipline?
+- Q: How to run `ash` in a Continuous Integration/Continuous Deployment (CI/CD) pipline?
 
   A: Check the [ASH Pipeline solution](https://github.com/aws-samples/automated-security-helper-pipeline)
 
-* Q: How to run `ash` with [finch](https://aws.amazon.com/blogs/opensource/introducing-finch-an-open-source-client-for-container-development/)
-  or another OCI compatible tool.
+- Q: How to run `ash` with [finch](https://aws.amazon.com/blogs/opensource/introducing-finch-an-open-source-client-for-container-development/)
+  or another Open Container Initiative (OCI) compatible tool.
 
   A: You can configure the OCI compatible tool to use with by using the environment variable `ASH_OCI_RUNNER`
 
+- Q: How to exclude files from scanning.
+
+  A: `ash` will scan all the files in the folder specified in `--source-dir`, or the current directory if invoked without parameters. If the folder is a git repository,
+  then `ash` will use the exclusions in your `.gitignore` configuration file. If you want to exclude any specific folder, it **must** be added to your git ignore list before invoking `ash`.
+
+- Q: `ash` reports there are not files to scan or you see a message stating `warning: You appear to have cloned an empty repository.`
+
+  A: Ensure you're running ASH inside the folder you intend to scan or using the `--source-dir` parameter. If the folder where the files reside is part of a git repository, ensure the files are added (committed) before running ASH.
+
 ## Feedback
-Create an issue [here](https://github.com/aws-samples/automated-security-helper/issues).
+
+Create an issue [here](https://github.com/awslabs/automated-security-helper/issues).
+
+## Contributing
+
+See [CONTRIBUTING](CONTRIBUTING.md#contributing-guidelines) for information on how to contribute to this project.
 
 ## Security
+
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
 
 ## License
+
 This library is licensed under the Apache 2.0 License. See the LICENSE file.

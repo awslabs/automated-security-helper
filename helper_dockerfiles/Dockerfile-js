@@ -1,7 +1,15 @@
 # Get NPM Image
 FROM public.ecr.aws/docker/library/node:18.0.0
 
-WORKDIR /app
-VOLUME /app
+#
+# Make sure the default dirs are initialized
+#
+RUN mkdir -p /src && \
+    mkdir -p /out && \
+    mkdir -p /run/scan/src \
+    mkdir -p /ash
+
+WORKDIR /src
+VOLUME /src
 
 CMD bash -C /utils/js-docker-execute.sh
