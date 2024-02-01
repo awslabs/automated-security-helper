@@ -117,7 +117,7 @@ cd ${CDK_WORK_DIR}
 
 # # Install the CDK application's required packages
 
-# npm install --quiet
+npm install --silent
 
 #
 # Now, for each file, run a cdk synth to subject the file to CDK-NAG scanning
