@@ -15,9 +15,6 @@ RUN mkdir -p /src && \
     mkdir -p /run/scan/src \
     mkdir -p /ash
 
-RUN cd /utils/cdk-nag-scan && \
-    npm install
-
 WORKDIR /src
 
 CMD bash -C /utils/cdk-docker-execute.sh
