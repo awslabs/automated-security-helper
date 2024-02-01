@@ -121,8 +121,8 @@ COPY . /ash/
 # Install CDK Nag stub dependencies
 #
 # Update NPM to latest
-RUN npm install -g npm
-RUN cd /ash/utils/cdk-nag-scan && \
+RUN npm install -g npm && \
+    cd /ash/utils/cdk-nag-scan && \
     npm install --quiet
 
 #
