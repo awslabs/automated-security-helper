@@ -54,7 +54,7 @@ print_usage() {
   echo -e "\t$(basename $0) [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir"
   echo "OPTIONS:"
   echo -e "\t-v | --version           Prints version number.\n"
-  echo -e "\t-p | --preserve-report   Add timestamp to the final report file to avoid overriding it after multiple executions."
+  echo -e "\t-p | --preserve-report   Add timestamp to the final report file to avoid overwriting it after multiple executions."
   echo -e "\t--source-dir             Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)"
   echo -e "\t--output-dir             Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
   echo -e "\t--ext | -extension       Force a file extension to scan. Defaults to identify files automatically."
