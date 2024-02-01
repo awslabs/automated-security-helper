@@ -120,8 +120,10 @@ COPY . /ash/
 #
 # Install CDK Nag stub dependencies
 #
-RUN cd /ash/utils/cdk-nag-scan && \
-    npm install
+# Update NPM to latest
+RUN npm install -g npm && \
+    cd /ash/utils/cdk-nag-scan && \
+    npm install --quiet
 
 #
 # Flag ASH as local execution mode since we are running in a container already
