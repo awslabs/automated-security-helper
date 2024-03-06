@@ -292,7 +292,7 @@ run_security_check() {
 
 set -e
 START_TIME=$(date +%s)
-VERSION=("1.1.0-e-01Dec2023")
+VERSION=("1.2.0-e-06Mar2024")
 OCI_RUNNER="docker"
 
 # Overrides default OCI Runner used by ASH
@@ -377,8 +377,8 @@ while (("$#")); do
     NC='' # No Color
     ;;
   --finch | -f)
-    OCI_RUNNER="finch"
-    echo -e "${YELLOW}WARNING: The '--finch|-f' option is deprecated and will be removed in a future release. Please switch to using '--oci-runner finch|-o finch' in scripts instead${NC}"
+    echo -e "${YELLOW}WARNING: The '--finch|-f' option is deprecated. Please switch to using '--oci-runner finch|-o finch' in scripts instead${NC}"
+    exit 1
     ;;
   --oci-runner | -o)
     shift
