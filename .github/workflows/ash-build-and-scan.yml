@@ -105,7 +105,7 @@ jobs:
 
           # Exit with the highest return code from ASH
           set -e
-          declare -i ASH_EXIT_CODE
+          typeset -i ASH_EXIT_CODE
           ASH_EXIT_CODE=$(sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt)
           if [ -z "$ASH_EXIT_CODE" ]; then
             echo "No return code found"
