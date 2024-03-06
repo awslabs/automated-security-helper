@@ -13,6 +13,7 @@ DOCKER_EXTRA_ARGS=""
 ASH_ARGS=""
 NO_BUILD="NO"
 NO_RUN="NO"
+DEBUG="NO"
 # Parse arguments
 while (("$#")); do
   case $1 in
@@ -40,6 +41,9 @@ while (("$#")); do
       ;;
     --no-run)
       NO_RUN="YES"
+      ;;
+    --debug)
+      DEBUG="YES"
       ;;
     --help | -h)
       source "${ASH_ROOT_DIR}/ash-multi" --help
@@ -80,7 +84,9 @@ if [[ "${RESOLVED_OCI_RUNNER}" == "" ]]; then
     exit 1
 # else, build and run the image
 else
-    set -x
+    if [ "${DEBUG}" = "YES" ]; then
+      set -x
+    fi
     echo "Resolved OCI_RUNNER to: ${RESOLVED_OCI_RUNNER}"
 
     # Build the image if the --no-build flag is not set
@@ -108,5 +114,7 @@ else
             --output-dir /out  \
             $ASH_ARGS
     fi
-    set +x
+    if [ "${DEBUG}" = "YES" ]; then
+      set +x
+    fi
 fi
