@@ -53,6 +53,11 @@ while (("$#")); do
       source "${ASH_ROOT_DIR}/ash-multi" --version
       exit 0
       ;;
+    --finch | -f)
+      # Show colored deprecation warning from entrypoint script and exit 1
+      source "${ASH_ROOT_DIR}/ash-multi" --finch
+      exit 1
+      ;;
     *)
       ASH_ARGS="${ASH_ARGS} $1"
   esac
