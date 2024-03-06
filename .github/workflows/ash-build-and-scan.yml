@@ -32,15 +32,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup docker (missing on MacOS)
+      - name: Setup docker
         if: runner.os == 'macos'
         run: |
           brew install docker
-          colima start
-
-          # For testcontainers to find the Colima socket
-          # https://github.com/abiosoft/colima/blob/main/docs/FAQ.md#cannot-connect-to-the-docker-daemon-at-unixvarrundockersock-is-the-docker-daemon-running
-          sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
+          docker info
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
