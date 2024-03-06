@@ -42,6 +42,9 @@ jobs:
             type=raw,value=${{ env.ARCH }}
             type=raw,value={{sha}},enable=${{ github.ref_type != 'tag' }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build image
         uses: docker/build-push-action@v5
         with:
