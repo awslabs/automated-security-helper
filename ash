@@ -100,17 +100,18 @@ else
 
     # Build the image if the --no-build flag is not set
     if [ "${NO_BUILD}" = "NO" ]; then
+      echo "Building image ${ASH_IMAGE_NAME} -- this may take a few minutes during the first build..."
       ${RESOLVED_OCI_RUNNER} build \
         --tag ${ASH_IMAGE_NAME} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
-      echo $build_cmd
       eval $build_cmd
     fi
 
     # Run the image if the --no-run flag is not set
     if [ "${NO_RUN}" = "NO" ]; then
+      echo "Running ASH scan using built image..."
       ${RESOLVED_OCI_RUNNER} run \
         --rm \
         -e ACTUAL_SOURCE_DIR=${SOURCE_DIR} \
