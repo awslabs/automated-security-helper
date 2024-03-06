@@ -20,7 +20,7 @@ jobs:
     strategy:
       matrix:
         runner:
-          - macos-14
+          # - macos-14 # Docker support on this runner is not working yet, still no options for ARM in hosted :-(
           - ubuntu-latest
     name: ASH Build & Scan - ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
