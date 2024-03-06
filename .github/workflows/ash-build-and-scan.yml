@@ -127,6 +127,15 @@ jobs:
           name: Summary
           path: "${{ env.SUMMARY_FILE }}"
 
+      - name: Collect ash_stdout
+        uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: ash_stdout
+          path: ash_stdout.txt
+          if-no-files-found: error
+
       - name: Collect aggregated_results.txt artifact
         uses: actions/upload-artifact@v4
         if: always()
