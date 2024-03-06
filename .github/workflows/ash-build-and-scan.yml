@@ -17,11 +17,17 @@ permissions:
   pull-requests: write
 jobs:
   build:
-    name: ASH Build & Scan
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runner:
+          - macos-14
+          - ubuntu-latest
+    name: ASH Build & Scan - ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
     env:
       IMG_NAME: ${{ github.repository }}
-      SUMMARY_FILE: 'ASH Scan Result Summary.md'
+      ARCH: ${{ matrix.runner == 'ubuntu-latest' && 'amd64' || 'arm64' }}
+      SUMMARY_FILE: 'ASH Scan Result Summary - ${{ matrix.runner }}.md'
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -33,6 +39,7 @@ jobs:
           images: ${{ env.IMG_NAME }}
           tags: |
             type=raw,value=latest
+            type=raw,value=${{ env.ARCH }}
             type=raw,value={{sha}},enable=${{ github.ref_type != 'tag' }}
 
       - name: Build image
@@ -54,7 +61,6 @@ jobs:
 
           # Run ASH against itself
           docker run \
-            --platform linux/amd64 \
             --mount type=bind,source="$(pwd)",destination=/src,readonly \
             --mount type=bind,source="$(pwd)/ash_output",destination=/out \
             --tmpfs /run/scan/src:rw,noexec,nosuid \
@@ -69,7 +75,7 @@ jobs:
 
           # Write the summary markdown to a file
           cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
-          ## ASH Scan Output
+          ## ASH Scan Output - ${{ env.ARCH }} - ${{ matrix.runner }}
 
           \`\`\`bash
           $ cat ash_output/ash_stdout.txt
