@@ -41,6 +41,10 @@ while (("$#")); do
     --no-run)
       NO_RUN="YES"
       ;;
+    --help | -h)
+      source "${ASH_ROOT_DIR}/ash-multi" --help
+      exit 0
+      ;;
     *)
       ASH_ARGS="${ASH_ARGS} $1"
   esac
