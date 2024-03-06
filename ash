@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Resolve the absolute path of the parent of the script directory (ASH repo root)
 export ASH_ROOT_DIR="$(cd "$(dirname "$0")"; pwd)"
