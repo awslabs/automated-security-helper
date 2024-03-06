@@ -124,7 +124,6 @@ function Invoke-ASH {
                 $buildCmd = @(
                     $RESOLVED_OCI_RUNNER
                     'build'
-                    '--platform linux/amd64'
                     '-t'
                     $AshImageName
                     "'$ashRoot'"
@@ -134,7 +133,6 @@ function Invoke-ASH {
                 $runCmd = @(
                     $RESOLVED_OCI_RUNNER
                     'run'
-                    '--platform linux/amd64'
                     '--rm'
                     '-it'
                     "--mount type=bind,source=$sourceDirFull,destination=/src,readonly"

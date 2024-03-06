@@ -3,13 +3,8 @@
 #
 # Enable BASE_IMAGE as an overrideable ARG for proxy cache + private registry support
 #
-ARG BASE_IMAGE=public.ecr.aws/bitnami/python:3.10
-#
-# Platform is set to `linux/amd64` as that is the only platform
-# the current BASE_IMAGE supports while we identify a solution
-# for supporting arm64 as well.
-#
-FROM --platform=linux/amd64 ${BASE_IMAGE}
+ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
+FROM ${BASE_IMAGE}
 
 #
 # Setting timezone in the container to UTC to ensure logged times are universal.
