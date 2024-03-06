@@ -117,17 +117,19 @@ RUN mkdir -p /src && \
     mkdir -p /ash
 
 #
-# COPY ASH source to /ash instead of / to isolate
-#
-COPY . /ash/
-
-#
 # Install CDK Nag stub dependencies
 #
 # Update NPM to latest
+COPY ./utils /ash/utils/
 RUN npm install -g npm && \
     cd /ash/utils/cdk-nag-scan && \
     npm install --quiet
+
+#
+# COPY ASH source to /ash instead of / to isolate
+#
+COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
+COPY ./ash-multi /ash/ash
 
 #
 # Flag ASH as local execution mode since we are running in a container already
