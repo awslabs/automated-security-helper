@@ -93,8 +93,7 @@ else
     if [ "${NO_RUN}" = "NO" ]; then
       ${RESOLVED_OCI_RUNNER} run \
         --rm \
-        --interactive \
-        --tty \
+        $([ "${CI}" != "" ] && echo "--interactive --tty" || echo "" ) \
         -e ACTUAL_SOURCE_DIR=${SOURCE_DIR} \
         -e ACTUAL_OUTPUT_DIR=${OUTPUT_DIR} \
         --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly \
