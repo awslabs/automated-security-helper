@@ -105,7 +105,8 @@ jobs:
 
           # Exit with the highest return code from ASH
           set -e
-          cat ash_stdout.txt | grep -q 'Highest return code is 0' || exit 1
+          ASH_EXIT_CODE=$(sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt)
+          exit $ASH_EXIT_CODE
 
       - name: Post ASH output as PR comment
         uses: mshick/add-pr-comment@v2
