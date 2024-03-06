@@ -76,6 +76,7 @@ if [[ "${RESOLVED_OCI_RUNNER}" == "" ]]; then
     exit 1
 # else, build and run the image
 else
+    set -x
     echo "Resolved OCI_RUNNER to: ${RESOLVED_OCI_RUNNER}"
 
     # Build the image if the --no-build flag is not set
@@ -93,7 +94,6 @@ else
     if [ "${NO_RUN}" = "NO" ]; then
       ${RESOLVED_OCI_RUNNER} run \
         --rm \
-        $([ "${CI}" != "" ] && echo "--interactive --tty" || echo "" ) \
         -e ACTUAL_SOURCE_DIR=${SOURCE_DIR} \
         -e ACTUAL_OUTPUT_DIR=${OUTPUT_DIR} \
         --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly \
@@ -104,4 +104,5 @@ else
             --output-dir /out  \
             $ASH_ARGS
     fi
+    set +x
 fi
