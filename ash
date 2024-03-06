@@ -49,6 +49,10 @@ while (("$#")); do
       source "${ASH_ROOT_DIR}/ash-multi" --help
       exit 0
       ;;
+    --version | -v)
+      source "${ASH_ROOT_DIR}/ash-multi" --version
+      exit 0
+      ;;
     *)
       ASH_ARGS="${ASH_ARGS} $1"
   esac
