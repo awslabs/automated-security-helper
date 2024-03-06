@@ -39,6 +39,7 @@ jobs:
           docker info
 
       - name: Set up Docker Buildx
+        if: runner.os == 'macos'
         uses: docker/setup-buildx-action@v3
         with:
           platforms: "linux/${{ env.ARCH }}"
