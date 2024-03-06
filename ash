@@ -80,7 +80,7 @@ SOURCE_DIR="$(cd "$SOURCE_DIR"; pwd)"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
 
 # Resolve the OCI_RUNNER
-RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v docker || command -v finch || command -v nerdctl || command -v podman)}
+RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
 
 # If we couldn't resolve an OCI_RUNNER, exit
 if [[ "${RESOLVED_OCI_RUNNER}" == "" ]]; then
