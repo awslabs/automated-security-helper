@@ -106,7 +106,7 @@ jobs:
           # Exit with the highest return code from ASH
           set -e
           typeset -i ASH_EXIT_CODE
-          ASH_EXIT_CODE=$(sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt)
+          ASH_EXIT_CODE=`sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt`
           echo "Highest return code found is '$ASH_EXIT_CODE'"
           if [ $ASH_EXIT_CODE -eq 0 ]; then
             echo "ASH scan succeeded"
