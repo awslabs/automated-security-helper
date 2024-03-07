@@ -90,14 +90,14 @@ invoke-ash() {
 
       # Build the image if the --no-build flag is not set
       if [ "${NO_BUILD}" = "NO" ]; then
-        build_cmd="${RESOLVED_OCI_RUNNER} build --platform linux/amd64 --tag ${ASH_IMAGE_NAME} --file \"${ASH_ROOT_DIR}/Dockerfile\"${DOCKER_EXTRA_ARGS} \"${ASH_ROOT_DIR}\""
+        build_cmd="${RESOLVED_OCI_RUNNER} build --tag ${ASH_IMAGE_NAME} --file \"${ASH_ROOT_DIR}/Dockerfile\"${DOCKER_EXTRA_ARGS} \"${ASH_ROOT_DIR}\""
         echo $build_cmd
         eval $build_cmd
       fi
 
       # Run the image if the --no-run flag is not set
       if [ "${NO_RUN}" = "NO" ]; then
-        run_cmd="${RESOLVED_OCI_RUNNER} run --platform linux/amd64 --rm --interactive --tty --mount type=bind,source=\"${SOURCE_DIR}\",destination=/src,readonly --mount type=bind,source=\"${OUTPUT_DIR}\",destination=/out --tmpfs /run/scan/src:rw,noexec,nosuid ${ASH_IMAGE_NAME} ash --source-dir /src --output-dir /out $ASH_ARGS"
+        run_cmd="${RESOLVED_OCI_RUNNER} run --rm --interactive --tty --mount type=bind,source=\"${SOURCE_DIR}\",destination=/src,readonly --mount type=bind,source=\"${OUTPUT_DIR}\",destination=/out --tmpfs /run/scan/src:rw,noexec,nosuid ${ASH_IMAGE_NAME} ash --source-dir /src --output-dir /out $ASH_ARGS"
         echo $run_cmd
         eval $run_cmd
       fi

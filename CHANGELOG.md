@@ -1,3 +1,13 @@
+# 1.2.0-e-06Mar2024
+### Automated Security Helper
+
+* Changes default base image in the root Dockerfile from `public.ecr.aws/bitnami/python:3.10` to `public.ecr.aws/docker/library/python:3.10-bullseye` to allow builds for linux/arm64 platforms to work
+* `ash` script has been renamed to `ash-multi` if multi-container architecture is needed from local. When running in the single-container, this is copied in as `ash` itself and becomes the entrypoint of the in-container run to prevent API changes for CI invocations.
+* New `ash` script for local invocation entrypoint is now defaulting to building the single-container image and running the scan within as normal
+* Printed output path of the `aggregated_results.txt` now shows the correct, local output path when using the single container instead of `/out/aggregated_results.txt`
+* Updated GitHub Actions workflow for the repo to invoke ASH using the `ash` script as well to validate the entire experience end-to-end
+* Deprecated `--finch|-f` option with warning indicating to use `--oci-runner finch|-o finch` if needing to use Finch explicitly
+
 # 1.1.0-e-01Dec2023
 ### Automated Security Helper
 * Introduced single-container architecture via single Dockerfile in the repo root
