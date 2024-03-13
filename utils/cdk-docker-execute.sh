@@ -161,7 +161,7 @@ unset IFS
 #
 # Clean up the CDK application temporary working folder
 #
-if [ -n "${CDK_WORK_DIR}" && -d "${CDK_WORK_DIR}" ]; then
+if [[ -n "${CDK_WORK_DIR}" && -d "${CDK_WORK_DIR}" ]]; then
   rm -rf "${CDK_WORK_DIR}"
 fi
 
