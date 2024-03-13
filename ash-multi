@@ -596,7 +596,9 @@ for pid in "${JOBS[@]}"; do
 done
 
 # Cleanup any previous file
-rm -f "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"
+if [[ -n "${AGGREGATED_RESULTS_REPORT_FILENAME}" && -n "${OUTPUT_DIR}" ]]
+  rm -f "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"
+fi
 
 # if an extension was not found, no report file will be in place, so skip the final report
 if [[ $(find "${OUTPUT_DIR}/work" -iname "*_report_result.txt" | wc -l | awk '{print $1}') -gt 0 ]];
@@ -614,7 +616,7 @@ then
   done
 
   # Cleanup work directory containing all temp files
-  if [ -d "${OUTPUT_DIR}/work" ]; then
+  if [[ -n "${OUTPUT_DIR}" && -d "${OUTPUT_DIR}/work" ]]; then
     rm -rf "${OUTPUT_DIR}/work"
   fi
 
