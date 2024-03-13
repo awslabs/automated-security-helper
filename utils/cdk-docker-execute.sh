@@ -161,7 +161,9 @@ unset IFS
 #
 # Clean up the CDK application temporary working folder
 #
-rm -rf ${CDK_WORK_DIR}
+if [ -d "${CDK_WORK_DIR}" ]; then
+  rm -rf "${CDK_WORK_DIR}"
+fi
 
 # cd back to the original folder in case path changed during scan
 cd ${_CURRENT_DIR}

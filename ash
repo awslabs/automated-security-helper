@@ -8,7 +8,6 @@ export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:local"}
 # Set local variables
 SOURCE_DIR=""
 OUTPUT_DIR=""
-OCI_RUNNER=""
 DOCKER_EXTRA_ARGS=""
 ASH_ARGS=""
 NO_BUILD="NO"

@@ -292,7 +292,7 @@ run_security_check() {
 
 set -e
 START_TIME=$(date +%s)
-VERSION=("1.2.0-e-06Mar2024")
+VERSION=("1.2.1-e-13Mar2024")
 OCI_RUNNER="docker"
 
 # Overrides default OCI Runner used by ASH
@@ -303,8 +303,8 @@ GIT_EXTENSIONS=("git")
 PY_EXTENSIONS=("py" "pyc" "ipynb")
 INFRA_EXTENSIONS=("yaml" "yml" "tf" "json" "dockerfile")
 CFN_EXTENSIONS=("yaml" "yml" "json" "template")
-JS_EXTENSIONS=("js")
-GRYPE_EXTENSIONS=("js" "py" "java" "go" "cs" "sh")
+JS_EXTENSIONS=("js" "jsx" "ts" "tsx")
+GRYPE_EXTENSIONS=("js" "jsx" "ts" "tsx" "py" "java" "go" "cs" "sh")
 
 DOCKERFILE_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"helper_dockerfiles"
 UTILS_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"utils"
@@ -446,11 +446,22 @@ echo -e "\n${LPURPLE}ASH version ${GREEN}$VERSION${NC}\n"
 
 # nosemgrep
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
+zip_files_to_extract=$(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" ${SOURCE_DIR} | grep '\.zip$')
 # Extract all zip files to temp dir *within $OUTPUT_DIR* before scanning
-for zipfile in $(find "${SOURCE_DIR}" -iname "*.zip");
-do
-  unzip ${QUIET_OUTPUT} -d "${OUTPUT_DIR}"/work/$(basename "${zipfile%.*}") $zipfile
+echo "Extracting zip files to temporary work dir before scanning..."
+echo "${zip_files_to_extract}"
+echo ""
+for zipfile in $zip_files_to_extract; do
+  [[ "${zipfile}" == "/"* ]] && zipfile="${zipfile:1}"
+  tgt_extract_dir="${OUTPUT_DIR}"/work/${zipfile%.*}
+  mkdir -p "${tgt_extract_dir}"
+  echo "Unzipping: '/${zipfile}' to '${tgt_extract_dir}'"
+  unzip ${QUIET_OUTPUT} -o -d "${tgt_extract_dir}" "/${zipfile%.*}"
 done
+# for zipfile in $(find "${SOURCE_DIR}" -iname "*.zip");
+# do
+#   unzip ${QUIET_OUTPUT} -d "${OUTPUT_DIR}"/work/$(basename "${zipfile%.*}") $zipfile
+# done
 
 unset IFS
 
@@ -603,7 +614,9 @@ then
   done
 
   # Cleanup work directory containing all temp files
-  rm -rf "${OUTPUT_DIR}"/work
+  if [ -d "${OUTPUT_DIR}/work" ]; then
+    rm -rf "${OUTPUT_DIR}/work"
+  fi
 
   RESOLVED_OUTPUT_DIR=${ACTUAL_OUTPUT_DIR:-${OUTPUT_DIR}}
   echo -e "${GREEN}\nYour final report can be found here:${NC} ${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}"
