@@ -8,6 +8,10 @@ from pathspec import PathSpec
 import argparse
 import os
 
+ASH_INCLUSIONS=[
+    "!**/*.template.json", # CDK output template default path pattern
+]
+
 def get_files_not_matching_gitignore(
     path,
     ignorefiles: List[str] = []
@@ -28,6 +32,7 @@ def get_files_not_matching_gitignore(
         with open(ignorefile) as f:
             lines.extend(f.readlines())
     lines = [ line.strip() for line in lines ]
+    lines.extend(ASH_INCLUSIONS)
     spec = PathSpec.from_lines('gitwildmatch', lines)
     for item in os.walk(path):
         for file in item[2]:
@@ -43,7 +48,7 @@ if __name__ == "__main__":
     # set up argparse
     parser = argparse.ArgumentParser(description="Get list of files not matching .gitignore underneath SourceDir arg path")
     parser.add_argument("path", help="path to scan", default=os.getcwd(), type=str, nargs='?')
-    parser.add_argument("--ignorefile", help="ignore file to use", default=[], type=str, nargs='*')
+    parser.add_argument("--ignorefile", help="ignore file to use in addition to the standard gitignore", default=[], type=str, nargs='*')
     args = parser.parse_args()
 
     files = get_files_not_matching_gitignore(args.path, args.ignorefile)

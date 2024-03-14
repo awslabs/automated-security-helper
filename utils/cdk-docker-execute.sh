@@ -79,8 +79,8 @@ cd ${_ASH_OUTPUT_DIR}
 #
 DIRECTORY="ash_cf2cdk_output"
 # Check if this directory already exist from previous ASH run
-if [ -d "${_ASH_OUTPUT_DIR}/$DIRECTORY" ]; then
-  # Delete this directory and its files and recreate it.
+if [[ -n "${_ASH_OUTPUT_DIR}" && -d "${_ASH_OUTPUT_DIR}/$DIRECTORY" ]]; then
+  echo "removing old directory ${_ASH_OUTPUT_DIR}/$DIRECTORY"
   rm -rf "${_ASH_OUTPUT_DIR}/$DIRECTORY"
 fi
 mkdir -p "${_ASH_OUTPUT_DIR}/$DIRECTORY" 2> /dev/null
