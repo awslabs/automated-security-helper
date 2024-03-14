@@ -29,8 +29,9 @@ def get_files_not_matching_gitignore(
     full = []
     included = []
     for ignorefile in all_ignores:
-        with open(ignorefile) as f:
-            lines.extend(f.readlines())
+        if os.path.isfile(ignorefile):
+            with open(ignorefile) as f:
+                lines.extend(f.readlines())
     lines = [ line.strip() for line in lines ]
     lines.extend(ASH_INCLUSIONS)
     spec = PathSpec.from_lines('gitwildmatch', lines)
