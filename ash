@@ -122,7 +122,7 @@ else
         -e http_proxy="${http_proxy}" \
         -e no_proxy="${no_proxy}" \
         --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly \
-        --mount type=bind,source="${OUTPUT_DIR}",destination=/out \
+        --mount type=bind,source="${OUTPUT_DIR}",destination=/out,bind-propagation=shared \
         --tmpfs /run/scan/src:rw,noexec,nosuid ${ASH_IMAGE_NAME} \
           ash \
             --source-dir /src  \

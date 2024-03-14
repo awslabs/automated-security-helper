@@ -446,23 +446,16 @@ echo -e "\n${LPURPLE}ASH version ${GREEN}$VERSION${NC}\n"
 
 # nosemgrep
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
-zip_files_to_extract=$(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" ${SOURCE_DIR} | grep '\.zip$')
-# Extract all zip files to temp dir *within $OUTPUT_DIR* before scanning
-echo "Extracting zip files to temporary work dir before scanning..."
-echo "${zip_files_to_extract}"
-echo ""
-for zipfile in $zip_files_to_extract; do
-  [[ "${zipfile}" == "/"* ]] && zipfile="${zipfile:1}"
-  tgt_extract_dir="${OUTPUT_DIR}"/work/${zipfile%.*}
-  mkdir -p "${tgt_extract_dir}"
-  echo "Unzipping: '/${zipfile}' to '${tgt_extract_dir}'"
-  unzip ${QUIET_OUTPUT} -o -d "${tgt_extract_dir}" "/${zipfile%.*}"
-done
+pushd . >/dev/null 2>&1
+cd "${SOURCE_DIR}"
 # for zipfile in $(find "${SOURCE_DIR}" -iname "*.zip");
-# do
-#   unzip ${QUIET_OUTPUT} -d "${OUTPUT_DIR}"/work/$(basename "${zipfile%.*}") $zipfile
-# done
-
+for zipfile in $(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" . | grep '\.zip$');
+do
+  tgt_dir=$(dirname "${OUTPUT_DIR}"/work/"${zipfile:2}")/"$(basename "${zipfile%.*}")"
+  mkdir -p "${tgt_dir}"
+  unzip ${QUIET_OUTPUT} -d "${tgt_dir}" $zipfile
+done
+popd >/dev/null 2>&1
 unset IFS
 
 declare -a all_files='' # Variable will be populated inside 'map_extensions_and_files' block
