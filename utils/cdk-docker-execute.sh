@@ -80,7 +80,6 @@ cd ${_ASH_OUTPUT_DIR}
 DIRECTORY="ash_cf2cdk_output"
 # Check if this directory already exist from previous ASH run
 if [[ -n "${_ASH_OUTPUT_DIR}" && -d "${_ASH_OUTPUT_DIR}/$DIRECTORY" ]]; then
-  echo "removing old directory ${_ASH_OUTPUT_DIR}/$DIRECTORY"
   rm -rf "${_ASH_OUTPUT_DIR}/$DIRECTORY"
 fi
 mkdir -p "${_ASH_OUTPUT_DIR}/$DIRECTORY" 2> /dev/null
@@ -161,7 +160,9 @@ unset IFS
 #
 # Clean up the CDK application temporary working folder
 #
-rm -rf ${CDK_WORK_DIR}
+if [[ -n "${CDK_WORK_DIR}" && -d "${CDK_WORK_DIR}" ]]; then
+  rm -rf ${CDK_WORK_DIR}
+fi
 
 # cd back to the original folder in case path changed during scan
 cd ${_CURRENT_DIR}

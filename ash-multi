@@ -590,7 +590,6 @@ done
 
 # Cleanup any previous file
 if [[ -n "${AGGREGATED_RESULTS_REPORT_FILENAME}" && -n "${OUTPUT_DIR}" && -f "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}" ]]; then
-  echo -e "${CYAN}Removing ${AGGREGATED_RESULTS_REPORT_FILENAME}${NC}"
   rm -f "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"
 fi
 
@@ -611,7 +610,6 @@ then
 
   # Cleanup work directory containing all temp files
   if [[ -n "${OUTPUT_DIR}" && -d "${OUTPUT_DIR}"/work ]]; then
-    echo -e "${CYAN}Removing ${OUTPUT_DIR}/work${NC}"
     rm -rf "${OUTPUT_DIR}"/work
   fi
 
