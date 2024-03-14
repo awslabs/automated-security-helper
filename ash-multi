@@ -292,7 +292,7 @@ run_security_check() {
 
 set -e
 START_TIME=$(date +%s)
-VERSION=("1.2.1-e-13Mar2024")
+VERSION=("1.2.2-e-14Mar2024")
 OCI_RUNNER="docker"
 
 # Overrides default OCI Runner used by ASH
