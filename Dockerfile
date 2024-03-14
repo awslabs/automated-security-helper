@@ -6,14 +6,6 @@
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
 FROM ${BASE_IMAGE}
 
-ARG https_proxy=""
-ARG http_proxy=""
-ARG no_proxy=""
-
-ENV https_proxy=${https_proxy} \
-    http_proxy=${http_proxy} \
-    no_proxy=${no_proxy}
-
 #
 # Setting timezone in the container to UTC to ensure logged times are universal.
 #

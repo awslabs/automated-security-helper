@@ -104,9 +104,6 @@ else
         --tag ${ASH_IMAGE_NAME} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         ${DOCKER_EXTRA_ARGS} \
-        --build-arg https_proxy="${https_proxy}" \
-        --build-arg http_proxy="${http_proxy}" \
-        --build-arg no_proxy="${no_proxy}" \
         "${ASH_ROOT_DIR}"
       eval $build_cmd
     fi
@@ -118,10 +115,7 @@ else
         --rm \
         -e ACTUAL_SOURCE_DIR=${SOURCE_DIR} \
         -e ACTUAL_OUTPUT_DIR=${OUTPUT_DIR} \
-        -e https_proxy="${https_proxy}" \
-        -e http_proxy="${http_proxy}" \
-        -e no_proxy="${no_proxy}" \
-        --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly \
+        --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly,bind-propagation=shared \
         --mount type=bind,source="${OUTPUT_DIR}",destination=/out,bind-propagation=shared \
         --tmpfs /run/scan/src:rw,noexec,nosuid ${ASH_IMAGE_NAME} \
           ash \
