@@ -616,9 +616,7 @@ then
   done
 
   # Cleanup work directory containing all temp files
-  if [[ -n "${OUTPUT_DIR}" && -d "${OUTPUT_DIR}/work" ]]; then
-    rm -rf "${OUTPUT_DIR}/work"
-  fi
+  rm -rf "${OUTPUT_DIR}"/work
 
   RESOLVED_OUTPUT_DIR=${ACTUAL_OUTPUT_DIR:-${OUTPUT_DIR}}
   echo -e "${GREEN}\nYour final report can be found here:${NC} ${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}"
