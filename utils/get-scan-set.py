@@ -7,6 +7,7 @@ from typing import List
 from pathspec import PathSpec
 import argparse
 import os
+from glob import glob
 
 ASH_INCLUSIONS=[
     "!**/*.template.json", # CDK output template default path pattern
@@ -18,8 +19,13 @@ def get_files_not_matching_gitignore(
 ):
     # collect all lines from f"{path}/.gitignore" and any extra ignorefiles passed in
     # function call
+    sub_gitignores = [
+        item
+        for item in glob(f"{path}/**/.gitignore")
+    ]
     all_ignores = list(set([
         f"{path}/.gitignore",
+        *sub_gitignores,
         *[
             f"{path}/{file}"
             for file in ignorefiles
