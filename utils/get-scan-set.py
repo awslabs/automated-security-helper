@@ -19,6 +19,13 @@ def get_files_not_matching_gitignore(
 ):
     # collect all lines from f"{path}/.gitignore" and any extra ignorefiles passed in
     # function call
+    ashignores = [
+        f"{path}/**/.ashignore",
+        *[
+            item
+            for item in glob(f"{path}/**/.ashignore")
+        ]
+    ]
     sub_gitignores = [
         item
         for item in glob(f"{path}/**/.gitignore")
@@ -26,6 +33,7 @@ def get_files_not_matching_gitignore(
     all_ignores = list(set([
         f"{path}/.gitignore",
         *sub_gitignores,
+        *ashignores,
         *[
             f"{path}/{file}"
             for file in ignorefiles
@@ -36,6 +44,7 @@ def get_files_not_matching_gitignore(
     included = []
     for ignorefile in all_ignores:
         if os.path.isfile(ignorefile):
+            # print(f"Reading: {ignorefile}", file=sys.stderr)
             with open(ignorefile) as f:
                 lines.extend(f.readlines())
     lines = [ line.strip() for line in lines ]
