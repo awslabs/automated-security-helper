@@ -17,22 +17,22 @@ def get_files_not_matching_gitignore(
     path,
     ignorefiles: List[str] = []
 ):
-    # collect all lines from f"{path}/.gitignore" and any extra ignorefiles passed in
-    # function call
     ashignores = [
-        f"{path}/**/.ashignore",
+        f"{path}/.ashignore",
         *[
             item
             for item in glob(f"{path}/**/.ashignore")
         ]
     ]
-    sub_gitignores = [
-        item
-        for item in glob(f"{path}/**/.gitignore")
+    gitignores = [
+        f"{path}/.gitignore",
+        *[
+            item
+            for item in glob(f"{path}/**/.gitignore")
+        ]
     ]
     all_ignores = list(set([
-        f"{path}/.gitignore",
-        *sub_gitignores,
+        *gitignores,
         *ashignores,
         *[
             f"{path}/{file}"

@@ -31,6 +31,9 @@ _ASH_UTILS_LOCATION=${_ASH_UTILS_LOCATION:-/utils}
 _ASH_CFNRULES_LOCATION=${_ASH_CFNRULES_LOCATION:-/cfnrules}
 _ASH_RUN_DIR=${_ASH_RUN_DIR:-/run/scan/src}
 _ASH_IS_GIT_REPOSITORY=0
+
+source ${_ASH_UTILS_LOCATION}/common.sh
+
 #
 # Allow the container to run Git commands against a repo in ${_ASH_SOURCE_DIR}
 #
@@ -44,6 +47,7 @@ cd ${_ASH_SOURCE_DIR}
 if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
   _ASH_IS_GIT_REPOSITORY=1
   if [[ "$_ASH_EXEC_MODE" != "local" ]]; then
+    debug_echo "Normal cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned but retain commit history for Git secrets inspection"
     git clone ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
   fi
   _ASH_SOURCE_DIR=${_ASH_RUN_DIR}

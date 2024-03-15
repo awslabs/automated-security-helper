@@ -1,4 +1,5 @@
 #!/bin/bash
+
 abs() { # compute the absolute value of the input parameter
   input=$1
   if [[ $input -lt 0 ]]; then
@@ -30,6 +31,8 @@ _ASH_UTILS_LOCATION=${_ASH_UTILS_LOCATION:-/utils}
 _ASH_CFNRULES_LOCATION=${_ASH_CFNRULES_LOCATION:-/cfnrules}
 _ASH_RUN_DIR=${_ASH_RUN_DIR:-/run/scan/src}
 
+source ${_ASH_UTILS_LOCATION}/common.sh
+
 #
 # Allow the container to run Git commands against a repo in ${_ASH_SOURCE_DIR}
 #
@@ -41,7 +44,8 @@ cd ${_ASH_SOURCE_DIR}
 # Check if the source directory is a git repository and clone it to the run directory
 if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
   if [[ "$_ASH_EXEC_MODE" != "local" ]]; then
-    git clone ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
+    debug_echo "Shallow cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned"
+    git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
   fi
   _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
   cd ${_ASH_RUN_DIR}
@@ -102,6 +106,7 @@ RC=0
 # cdk --version >> ${REPORT_PATH}
 # echo "----------------------" >> ${REPORT_PATH}
 
+debug_echo "Starting all scanners within the CDK scanner tool set"
 echo -e "\nstarting to investigate ..." >> ${REPORT_PATH}
 
 cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' ${_ASH_SOURCE_DIR} --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output} --exclude=ash) 2>/dev/null))
@@ -122,6 +127,7 @@ npm install --silent
 # Now, for each file, run a cdk synth to subject the file to CDK-NAG scanning
 #
 if [ "${#cfn_files[@]}" -gt 0 ]; then
+  debug_echo "Found CloudFormation files to scan, starting scan"
   echo "found ${#cfn_files[@]} files to scan.  Starting scans ..." >> ${REPORT_PATH}
 
   for file in "${cfn_files[@]}"; do
@@ -136,7 +142,8 @@ if [ "${#cfn_files[@]}" -gt 0 ]; then
     # Use CDK to synthesize the CDK application,
     # running CDK-NAG on the inserted CloudFormation template
     #
-    npx cdk synth --context fileName="${file}" --quiet 2>> ${REPORT_PATH}
+    debug_echo "Importing CloudFormation template file ${file} to apply CDK Nag rules against it"
+    npx cdk synth --context fileName="${cfn_filename}" --quiet 2>> ${REPORT_PATH}
     CRC=$?
     echo "<<<<<< end cdk-nag result for ${cfn_filename} <<<<<<" >> ${REPORT_PATH}
     mkdir -p ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results
@@ -167,4 +174,5 @@ fi
 # cd back to the original folder in case path changed during scan
 cd ${_CURRENT_DIR}
 
+debug_echo "Finished all scanners within the CDK scanner tool set"
 exit $RC

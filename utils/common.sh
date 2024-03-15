@@ -1,0 +1,11 @@
+# LPURPLE='\033[1;35m'
+# LGRAY='\033[0;37m'
+# GREEN='\033[0;32m'
+# RED='\033[0;31m'
+# YELLOW='\033[0;33m'
+# CYAN='\033[0;36m'
+# NC='\033[0m' # No Color
+
+debug_echo() {
+  [[ "${ASH_DEBUG:-"NO"}" != "NO" ]] && echo -e "\033[0;33m[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG:\033[0m ${1}"
+}
