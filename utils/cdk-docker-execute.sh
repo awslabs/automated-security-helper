@@ -143,7 +143,7 @@ if [ "${#cfn_files[@]}" -gt 0 ]; then
     # running CDK-NAG on the inserted CloudFormation template
     #
     debug_echo "Importing CloudFormation template file ${file} to apply CDK Nag rules against it"
-    npx cdk synth --context fileName="${cfn_filename}" --quiet 2>> ${REPORT_PATH}
+    npx cdk synth --context fileName="${file}" --quiet 2>> ${REPORT_PATH}
     CRC=$?
     echo "<<<<<< end cdk-nag result for ${cfn_filename} <<<<<<" >> ${REPORT_PATH}
     mkdir -p ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results
