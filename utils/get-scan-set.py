@@ -88,10 +88,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     lines = get_ash_ignorespec_lines(args.path, args.ignorefile)
-    semgrepignore_path = os.path.join(args.path, ".semgrepignore")
-    if not os.path.exists(semgrepignore_path):
-        with open(semgrepignore_path, "w") as f:
-            f.writelines(lines)
+    # semgrepignore_path = os.path.join(args.path, ".semgrepignore")
+    # if not os.path.exists(semgrepignore_path):
+    #     with open(semgrepignore_path, "w") as f:
+    #         f.write("\n".join(lines))
 
     spec = get_ash_ignorespec(lines)
 
