@@ -1,3 +1,6 @@
+export ASH_ROOT_DIR="$(cd $(dirname "$(dirname "$0")"); pwd)"
+export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
+
 # LPURPLE='\033[1;35m'
 # LGRAY='\033[0;37m'
 # GREEN='\033[0;32m'

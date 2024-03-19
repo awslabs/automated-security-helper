@@ -62,10 +62,7 @@ print_usage() {
   echo -e "\t-q | --quiet             Don't print verbose text about the build process."
   echo -e "\t-c | --no-color          Don't print colorized output."
   echo -e "\t-s | --single-process    Run ash scanners serially rather than as separate, parallel sub-processes."
-  echo -e "\t-o | --oci-runner        Use the specified OCI runner instead of docker to run the containerized tools."
-  echo -e "\t-f | --finch             Use finch instead of docker to run the containerized tools."
-  echo -e "\t                         WARNING: The '--finch|-f' option is deprecated and will be removed in a future"
-  echo -e "\t                                  release. Please switch to using '--oci-runner finch' in scripts instead.\n"
+  echo -e "\t-o | --oci-runner        Use the specified OCI runner instead of docker to run the containerized tools.\n"
   echo -e "For more information please visit https://github.com/awslabs/automated-security-helper"
 }
 
@@ -78,18 +75,19 @@ get_all_files() {
   pushd . >/dev/null 2>&1
   # cd to the source directory as a starting point
   cd ${_ASH_SOURCE_DIR}
-  # Check if the source directory is a git repository and clone it to the run directory
-  if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-    echo "Source is a git repository. Using git ls-files to exclude files from scanning."
-    src_files=$(git ls-files)
-  else
-    echo "Source is not a git repository. Using find to list all files instead."
-    src_files=$(find "${_ASH_SOURCE_DIR}" \( -path '*/node_modules*' -prune -o -path '*/cdk.out*' -prune -o -path '*/.venv*' -prune -o -path '*/venv*' -prune \) -o -type f -name '*')
-  fi;
+  src_files=$(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" $(pwd))
+  # # Check if the source directory is a git repository and clone it to the run directory
+  # if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+  #   echo "Source is a git repository. Using git ls-files to exclude files from scanning."
+  #   src_files=$($(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" ${_ASH_SOURCE_DIR})
+  #   # src_files=$(git ls-files)
+  # else
+  #   echo "Source is not a git repository. Using find to list all files instead."
+  #   src_files=$(find "${_ASH_SOURCE_DIR}" \( -path '*/node_modules*' -prune -o -path '*/cdk.out*' -prune -o -path '*/.venv*' -prune -o -path '*/venv*' -prune \) -o -type f -name '*')
+  # fi;
   popd >/dev/null 2>&1
 
   all_files+=( "$src_files" )
-
 }
 
 # shellcheck disable=SC2120
@@ -166,19 +164,12 @@ validate_input() {
   if [[ -z ${SOURCE_DIR} ]]; then SOURCE_DIR="$(pwd)"; else SOURCE_DIR=$(cd "${SOURCE_DIR}"; pwd); fi # Transform any relative path to absolute
   if [[ -z ${OUTPUT_DIR} ]]; then
     OUTPUT_DIR="$(pwd)"
-    # Create the OUTPUT_DIR/work recursively if it doesn't already exist.
-    # -p flag is included will create missing parent dirs and skip if
-    # the dir already exists.
-    mkdir -p "${OUTPUT_DIR}/work"
-  else
-    # Create the OUTPUT_DIR/work recursively if it doesn't already exist.
-    # -p flag is included will create missing parent dirs and skip if
-    # the dir already exists.
-    mkdir -p "${OUTPUT_DIR}/work"
-    # The mkdir call needs to be done before absolute path resolution in case
-    # OUTPUT_DIR itself doesn't exist yet.
-    OUTPUT_DIR=$(cd "${OUTPUT_DIR}"; pwd) # Transform any relative path to absolute
   fi
+  if [ -d "${OUTPUT_DIR}/work" ]; then
+    rm -rf "${OUTPUT_DIR}/work"
+  fi
+  mkdir -p "${OUTPUT_DIR}/work"
+  OUTPUT_DIR=$(cd "${OUTPUT_DIR}"; pwd) # Transform any relative path to absolute
   CFNRULES_LOCATION=$(cd "${CFNRULES_LOCATION}"; pwd) # Transform any relative path to absolute
   UTILS_LOCATION=$(cd "${UTILS_LOCATION}"; pwd) # Transform any relative path to absolute
 }
