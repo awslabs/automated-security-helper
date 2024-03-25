@@ -8,7 +8,6 @@ export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:local"}
 # Set local variables
 SOURCE_DIR=""
 OUTPUT_DIR=""
-OCI_RUNNER=""
 DOCKER_EXTRA_ARGS=""
 ASH_ARGS=""
 NO_BUILD="NO"
@@ -93,7 +92,7 @@ if [[ "${RESOLVED_OCI_RUNNER}" == "" ]]; then
     exit 1
 # else, build and run the image
 else
-    if [ "${DEBUG}" = "YES" ]; then
+    if [[ "${DEBUG}" = "YES" ]]; then
       set -x
     fi
     echo "Resolved OCI_RUNNER to: ${RESOLVED_OCI_RUNNER}"
@@ -116,15 +115,16 @@ else
         --rm \
         -e ACTUAL_SOURCE_DIR=${SOURCE_DIR} \
         -e ACTUAL_OUTPUT_DIR=${OUTPUT_DIR} \
-        --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly \
-        --mount type=bind,source="${OUTPUT_DIR}",destination=/out \
+        -e ASH_DEBUG=${DEBUG} \
+        --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly,bind-propagation=shared \
+        --mount type=bind,source="${OUTPUT_DIR}",destination=/out,bind-propagation=shared \
         --tmpfs /run/scan/src:rw,noexec,nosuid ${ASH_IMAGE_NAME} \
           ash \
             --source-dir /src  \
             --output-dir /out  \
             $ASH_ARGS
     fi
-    if [ "${DEBUG}" = "YES" ]; then
+    if [[ "${DEBUG}" = "YES" ]]; then
       set +x
     fi
 fi

@@ -31,6 +31,8 @@ _ASH_UTILS_LOCATION=${_ASH_UTILS_LOCATION:-/utils}
 _ASH_CFNRULES_LOCATION=${_ASH_CFNRULES_LOCATION:-/cfnrules}
 _ASH_RUN_DIR=${_ASH_RUN_DIR:-/run/scan/src}
 
+source ${_ASH_UTILS_LOCATION}/common.sh
+
 #
 # Allow the container to run Git commands against a repo in ${_ASH_SOURCE_DIR}
 #
@@ -42,7 +44,8 @@ cd ${_ASH_SOURCE_DIR}
 # Check if the source directory is a git repository and clone it to the run directory
 if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
   if [[ "$_ASH_EXEC_MODE" != "local" ]]; then
-    git clone ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
+    debug_echo "Shallow cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned"
+    git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
   fi
   _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
   cd ${_ASH_RUN_DIR}
@@ -58,10 +61,12 @@ scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
 #
 # Run Grype
 #
+debug_echo "Starting all scanners within the Grype scanner tool set"
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
+  debug_echo "Starting Grype scan of ${scan_path}"
   echo -e "\n>>>>>> Begin Grype output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   grype -f medium dir:${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
@@ -69,6 +74,7 @@ do
   RC=$(bumprc $RC $SRC)
 
   echo -e "\n<<<<<< End Grype output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
+  debug_echo "Finished Grype scan of ${scan_path}"
 done
 
 #
@@ -78,6 +84,7 @@ for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
+  debug_echo "Starting Syft scan of ${scan_path}"
   echo -e "\n>>>>>> Begin Syft output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   syft ${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
@@ -85,6 +92,7 @@ do
   RC=$(bumprc $RC $SRC)
 
   echo -e "\n<<<<<< End Syft output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
+  debug_echo "Finished Syft scan of ${scan_path}"
 done
 
 #
@@ -94,6 +102,7 @@ for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
+  debug_echo "Starting Semgrep scan of ${scan_path}"
   echo -e "\n>>>>>> Begin Semgrep output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   semgrep --legacy --error --config=auto $scan_path --exclude="*-converted.py,*_report_result.txt" >> ${REPORT_PATH} 2>&1
@@ -101,9 +110,11 @@ do
   RC=$(bumprc $RC $SRC)
 
   echo -e "\n<<<<<< End Semgrep output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
+  debug_echo "Finished Semgrep scan of ${scan_path}"
 done
 
 # cd back to the original SOURCE_DIR in case path changed during scan
 cd ${_ASH_SOURCE_DIR}
 
+debug_echo "Finished all scanners within the Grype scanner tool set"
 exit $RC

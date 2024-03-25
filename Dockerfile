@@ -78,7 +78,7 @@ RUN python3 -m pip install --no-cache-dir \
 # YAML (Checkov, cfn-nag)
 #
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    python3 -m pip install checkov && \
+    python3 -m pip install checkov pathspec && \
     gem install cfn-nag
 
 #
@@ -120,7 +120,8 @@ RUN mkdir -p /src && \
 # Install CDK Nag stub dependencies
 #
 # Update NPM to latest
-COPY ./utils /ash/utils/
+RUN mkdir -p /ash/utils
+COPY ./utils/cdk-nag-scan /ash/utils/cdk-nag-scan/
 RUN npm install -g npm && \
     cd /ash/utils/cdk-nag-scan && \
     npm install --quiet
@@ -128,6 +129,8 @@ RUN npm install -g npm && \
 #
 # COPY ASH source to /ash instead of / to isolate
 #
+COPY ./utils/cfn-to-cdk /ash/utils/cfn-to-cdk/
+COPY ./utils/*.* /ash/utils/
 COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
 
