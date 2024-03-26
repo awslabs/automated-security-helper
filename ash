@@ -116,8 +116,8 @@ else
         -e ACTUAL_SOURCE_DIR=${SOURCE_DIR} \
         -e ACTUAL_OUTPUT_DIR=${OUTPUT_DIR} \
         -e ASH_DEBUG=${DEBUG} \
-        --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly,bind-propagation=shared \
-        --mount type=bind,source="${OUTPUT_DIR}",destination=/out,bind-propagation=shared \
+        --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly \
+        --mount type=bind,source="${OUTPUT_DIR}",destination=/out \
         --tmpfs /run/scan/src:rw,noexec,nosuid ${ASH_IMAGE_NAME} \
           ash \
             --source-dir /src  \
