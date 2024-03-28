@@ -109,6 +109,7 @@ else
     fi
 
     # Run the image if the --no-run flag is not set
+    RC=0
     if [ "${NO_RUN}" = "NO" ]; then
       echo "Running ASH scan using built image..."
       ${RESOLVED_OCI_RUNNER} run \
@@ -123,8 +124,10 @@ else
             --source-dir /src  \
             --output-dir /out  \
             $ASH_ARGS
+      RC=$?
     fi
     if [[ "${DEBUG}" = "YES" ]]; then
       set +x
     fi
+    exit ${RC}
 fi
