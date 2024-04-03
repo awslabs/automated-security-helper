@@ -43,12 +43,12 @@ git config --global --add safe.directory ${_ASH_RUN_DIR} >/dev/null 2>&1
 cd ${_ASH_SOURCE_DIR}
 # Check if the source directory is a git repository and clone it to the run directory
 if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-  if [[ "$_ASH_EXEC_MODE" != "local" ]]; then
-    debug_echo "Shallow cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned"
-    git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
-  fi
+  debug_echo "Shallow cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned"
+  git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
   _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
   cd ${_ASH_RUN_DIR}
+else
+  debug_echo "Not a Git repository! Skipping shallow clone to ASH_RUN_DIR"
 fi;
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
@@ -109,7 +109,9 @@ RC=0
 debug_echo "Starting all scanners within the CDK scanner tool set"
 echo -e "\nstarting to investigate ..." >> ${REPORT_PATH}
 
-cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' ${_ASH_SOURCE_DIR} --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output} --exclude=ash) 2>/dev/null))
+# cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' ${_ASH_SOURCE_DIR} --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output} --exclude=ash) 2>/dev/null))
+cfn_files=($(rg AWSTemplateFormatVersion --files-with-matches --type yaml --type json ${_ASH_SOURCE_DIR} 2>/dev/null))
+debug_echo "Found ${#cfn_files[@]} CloudFormation files to scan: ${cfn_files}"
 
 #
 # Copy the CDK application to the work area and change
@@ -151,8 +153,8 @@ if [ "${#cfn_files[@]}" -gt 0 ]; then
     #
     # Copy and then remove these files to avoid permission setting errors when running in a single container
     #
-    cp ${CDK_WORK_DIR}/cdk.out/CdkNagScanStack.template.json ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
-    rm ${CDK_WORK_DIR}/cdk.out/CdkNagScanStack.template.json
+    cp ${CDK_WORK_DIR}/cdk.out/*.template.json ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
+    rm ${CDK_WORK_DIR}/cdk.out/*.template.json
     cp ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
     rm ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv
 

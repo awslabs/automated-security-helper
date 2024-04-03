@@ -43,10 +43,8 @@ git config --global --add safe.directory ${_ASH_RUN_DIR} >/dev/null 2>&1
 cd ${_ASH_SOURCE_DIR}
 # Check if the source directory is a git repository and clone it to the run directory
 if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-  if [[ "$_ASH_EXEC_MODE" != "local" ]]; then
-    debug_echo "Shallow cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned"
-    git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
-  fi
+  debug_echo "Shallow cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned"
+  git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
   _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
   cd ${_ASH_RUN_DIR}
 fi;

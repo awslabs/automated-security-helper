@@ -35,6 +35,7 @@ RUN apt-get update && \
       curl \
       python3-venv \
       git \
+      ripgrep \
       ruby-dev \
       tree && \
     rm -rf /var/lib/apt/lists/*

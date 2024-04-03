@@ -59,6 +59,7 @@ print_usage() {
   echo -e "\t--output-dir             Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
   echo -e "\t--ext | -extension       Force a file extension to scan. Defaults to identify files automatically."
   echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
+  echo -e "\t--no-cleanup             Don't cleanup the work directory where temp reports are stored during scans."
   echo -e "\t-q | --quiet             Don't print verbose text about the build process."
   echo -e "\t-c | --no-color          Don't print colorized output."
   echo -e "\t-s | --single-process    Run ash scanners serially rather than as separate, parallel sub-processes."
@@ -283,7 +284,7 @@ run_security_check() {
 
 set -e
 START_TIME=$(date +%s)
-VERSION=("1.2.4-e-26Mar2024")
+VERSION=("1.2.5-e-02Apr2024")
 OCI_RUNNER="docker"
 
 # Overrides default OCI Runner used by ASH
@@ -353,6 +354,9 @@ while (("$#")); do
     ;;
   --preserve-report | -p)
     PRESERVE_FILE="true"
+    ;;
+  --no-cleanup)
+    NO_CLEANUP_WORK_DIR="true"
     ;;
   --no-color | -c)
     COLOR_OUTPUT="false"
@@ -444,7 +448,7 @@ for zipfile in $(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" . | grep '\.zip
 do
   tgt_dir=$(dirname "${OUTPUT_DIR}"/work/"${zipfile:2}")/"$(basename "${zipfile%.*}")"
   mkdir -p "${tgt_dir}"
-  unzip ${QUIET_OUTPUT} -d "${tgt_dir}" $zipfile
+  unzip ${QUIET_OUTPUT} -d "${tgt_dir}" -o $zipfile
 done
 popd >/dev/null 2>&1
 unset IFS
@@ -600,7 +604,7 @@ then
   done
 
   # Cleanup work directory containing all temp files
-  if [[ -n "${OUTPUT_DIR}" && -d "${OUTPUT_DIR}"/work ]]; then
+  if [[ -z "${NO_CLEANUP_WORK_DIR}" && -n "${OUTPUT_DIR}" && -d "${OUTPUT_DIR}"/work ]]; then
     rm -rf "${OUTPUT_DIR}"/work
   fi
 
