@@ -25,13 +25,13 @@ def get_ash_ignorespec_lines(
             for item in glob(f"{path}/**/.ashignore")
         ]
     ]
-    semgrepignores = [
-        f"{path}/.semgrepignore",
-        *[
-            item
-            for item in glob(f"{path}/**/.semgrepignore")
-        ]
-    ]
+    # semgrepignores = [
+    #     f"{path}/.semgrepignore",
+    #     *[
+    #         item
+    #         for item in glob(f"{path}/**/.semgrepignore")
+    #     ]
+    # ]
     gitignores = [
         f"{path}/.gitignore",
         *[
@@ -41,7 +41,7 @@ def get_ash_ignorespec_lines(
     ]
     all_ignores = list(set([
         *gitignores,
-        *semgrepignores,
+        # *semgrepignores,
         *ashignores,
         *[
             f"{path}/{file}"
@@ -51,7 +51,7 @@ def get_ash_ignorespec_lines(
     lines = ['.git']
     for ignorefile in all_ignores:
         if os.path.isfile(ignorefile):
-            # print(f"Reading: {ignorefile}", file=sys.stderr)
+            print(f"Reading: {ignorefile}", file=sys.stderr)
             with open(ignorefile) as f:
                 lines.extend(f.readlines())
     lines = [ line.strip() for line in lines ]
@@ -75,8 +75,9 @@ def get_files_not_matching_spec(
             full.append(os.path.join(item[0], file))
             if not spec.match_file(os.path.join(item[0], file)):
                 inc_full = os.path.join(item[0], file)
-                # print(f"Including: {inc_full}", file=sys.stderr)
-                included.append(inc_full)
+                if '/node_modules/aws-cdk' not in inc_full:
+                    # print(f"Including: {inc_full}", file=sys.stderr)
+                    included.append(inc_full)
     included = sorted(set(included))
     return included
 
