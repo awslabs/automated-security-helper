@@ -295,7 +295,7 @@ PY_EXTENSIONS=("py" "pyc" "ipynb")
 INFRA_EXTENSIONS=("yaml" "yml" "tf" "json" "dockerfile")
 CFN_EXTENSIONS=("yaml" "yml" "json" "template")
 JS_EXTENSIONS=("js" "jsx" "ts" "tsx")
-GRYPE_EXTENSIONS=("js" "jsx" "ts" "tsx" "py" "java" "go" "cs" "sh")
+GRYPE_EXTENSIONS=("js" "jsx" "ts" "tsx" "py" "java" "go" "cs" "sh" "war" "jar")
 
 DOCKERFILE_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"helper_dockerfiles"
 UTILS_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"utils"
