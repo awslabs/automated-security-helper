@@ -60,6 +60,7 @@ print_usage() {
   echo -e "\t--ext | -extension       Force a file extension to scan. Defaults to identify files automatically."
   echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
   echo -e "\t--no-cleanup             Don't cleanup the work directory where temp reports are stored during scans."
+  echo -e "\t--debug                  Print ASH debug log information where applicable."
   echo -e "\t-q | --quiet             Don't print verbose text about the build process."
   echo -e "\t-c | --no-color          Don't print colorized output."
   echo -e "\t-s | --single-process    Run ash scanners serially rather than as separate, parallel sub-processes."
@@ -75,17 +76,8 @@ get_all_files() {
   src_files=()
   pushd . >/dev/null 2>&1
   # cd to the source directory as a starting point
-  cd ${_ASH_SOURCE_DIR}
-  src_files=$(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" $(pwd))
-  # # Check if the source directory is a git repository and clone it to the run directory
-  # if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-  #   echo "Source is a git repository. Using git ls-files to exclude files from scanning."
-  #   src_files=$($(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" ${_ASH_SOURCE_DIR})
-  #   # src_files=$(git ls-files)
-  # else
-  #   echo "Source is not a git repository. Using find to list all files instead."
-  #   src_files=$(find "${_ASH_SOURCE_DIR}" \( -path '*/node_modules*' -prune -o -path '*/cdk.out*' -prune -o -path '*/.venv*' -prune -o -path '*/venv*' -prune \) -o -type f -name '*')
-  # fi;
+  cd "${_ASH_SOURCE_DIR}"
+  src_files=$(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" --source $(pwd) --output "${_ASH_OUTPUT_DIR}" ${ASH_SCANSET_ARGS})
   popd >/dev/null 2>&1
 
   all_files+=( "$src_files" )
@@ -99,15 +91,15 @@ map_extensions_and_files() {
   # Check the source folder and create a clone of the repository if ASH is running on single container mode
   if [[ "$_ASH_EXEC_MODE" = "local" ]]; then
     pushd . >/dev/null 2>&1
-    cd ${_ASH_SOURCE_DIR}
+    cd "${_ASH_SOURCE_DIR}"
 
     # On local mode, this configuration will only affect the current container
-    git config --global --add safe.directory ${_ASH_SOURCE_DIR} >/dev/null 2>&1
-    git config --global --add safe.directory ${_ASH_RUN_DIR} >/dev/null 2>&1
+    git config --global --add safe.directory "${_ASH_SOURCE_DIR}" >/dev/null 2>&1
+    git config --global --add safe.directory "${_ASH_RUN_DIR}" >/dev/null 2>&1
     if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-      git clone ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR}
+      git clone "${_ASH_SOURCE_DIR}" "${_ASH_RUN_DIR}"
       echo "Repository cloned successfully."
-      _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
+      _ASH_SOURCE_DIR="${_ASH_RUN_DIR}"
     else
       echo "No git repository found in source folder."
     fi;
@@ -313,6 +305,8 @@ HIGHEST_RC=0
 COLOR_OUTPUT="true"
 FORCED_EXT="false"
 SINGLE_PROCESS="false"
+ASH_DEBUG_ENABLED="false"
+ASH_SCANSET_ARGS=""
 
 #
 # Initialize color escape codes
@@ -357,6 +351,10 @@ while (("$#")); do
     ;;
   --no-cleanup)
     NO_CLEANUP_WORK_DIR="true"
+    ;;
+  --debug)
+    ASH_DEBUG_ENABLED="true"
+    ASH_SCANSET_ARGS="${ASH_SCANSET_ARGS} --debug"
     ;;
   --no-color | -c)
     COLOR_OUTPUT="false"
@@ -443,8 +441,8 @@ echo -e "\n${LPURPLE}ASH version ${GREEN}$VERSION${NC}\n"
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
 pushd . >/dev/null 2>&1
 cd "${SOURCE_DIR}"
-# for zipfile in $(find "${SOURCE_DIR}" -iname "*.zip");
-for zipfile in $(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" . | grep '\.zip$');
+# We do not include --output here explicitly to only yield the relative path
+for zipfile in $(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" --source . ${ASH_SCANSET_ARGS} | grep '\.zip$');
 do
   tgt_dir=$(dirname "${OUTPUT_DIR}"/work/"${zipfile:2}")/"$(basename "${zipfile%.*}")"
   mkdir -p "${tgt_dir}"

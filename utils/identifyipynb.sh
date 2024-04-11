@@ -31,6 +31,8 @@ _ASH_UTILS_LOCATION=${_ASH_UTILS_LOCATION:-/utils}
 _ASH_CFNRULES_LOCATION=${_ASH_CFNRULES_LOCATION:-/cfnrules}
 _ASH_RUN_DIR=${_ASH_RUN_DIR:-/run/scan/src}
 
+source ${_ASH_UTILS_LOCATION}/common.sh
+
 #
 # Allow the container to run Git commands against a repo in ${_ASH_SOURCE_DIR}
 #

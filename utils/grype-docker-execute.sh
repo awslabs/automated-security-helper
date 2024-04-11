@@ -66,7 +66,7 @@ do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
   debug_echo "Starting Grype scan of ${scan_path}"
-  debug_show_tree ${scan_path} ${REPORT_PATH}
+  # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Grype output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   grype -f medium dir:${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
@@ -85,7 +85,7 @@ do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
   debug_echo "Starting Syft scan of ${scan_path}"
-  debug_show_tree ${scan_path} ${REPORT_PATH}
+  # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Syft output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   debug_echo "syft ${scan_path}"
@@ -105,7 +105,7 @@ do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
   debug_echo "Starting Semgrep scan of ${scan_path}"
-  debug_show_tree ${scan_path} ${REPORT_PATH}
+  # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Semgrep output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   semgrep --legacy --error --config=auto $scan_path --exclude="*-converted.py,*_report_result.txt" >> ${REPORT_PATH} 2>&1
