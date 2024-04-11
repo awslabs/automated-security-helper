@@ -45,7 +45,7 @@ def black(msg) -> str:
 
 def debug_echo(*msg, debug: bool = False) -> str:
     if debug or os.environ.get("ASH_DEBUG","NO") != "NO":
-        print(yellow(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [get-scan-set.py] DEBUG: {' '.join(msg)}"), file=sys.stderr)
+        print(yellow(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [get-scan-set.py] DEBUG:"), *msg, file=sys.stderr)
 
 def get_ash_ignorespec_lines(
     path,
@@ -148,10 +148,12 @@ if __name__ == "__main__":
             with open(ashignore_path) as f:
                 ashignore_content = f.readlines()
             ashignore_imported = True
+            print(cyan(f"Imported ash-ignore-report.txt from {args.output}"), file=sys.stderr)
         if ashscanset_path.exists():
             with open(ashscanset_path) as f:
                 ashscanset_list = f.readlines()
             ashscanset_imported = True
+            print(cyan(f"Imported ash-scan-set-files-list.txt from {args.output}"), file=sys.stderr)
 
     if not ashignore_content:
         ashignore_content = get_ash_ignorespec_lines(args.source, args.ignorefile, debug=args.debug)
