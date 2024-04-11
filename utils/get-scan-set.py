@@ -2,6 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import re
 import sys
 from datetime import datetime
 from typing import List
@@ -84,7 +85,7 @@ def get_ash_ignorespec_lines(
     lines = []
     for ignorefile in all_ignores:
         if os.path.isfile(ignorefile):
-            clean = ignorefile.replace(path, '${SOURCE_DIR}')
+            clean = re.sub(rf"^{re.escape(path)}", '${SOURCE_DIR}', ignorefile)
             debug_echo(f"Found .ignore file: {clean}", debug=debug)
             lines.append(f"######### START CONTENTS: {clean} #########")
             with open(ignorefile) as f:
@@ -116,7 +117,7 @@ def get_files_not_matching_spec(
         for file in item[2]:
             full.append(os.path.join(item[0], file))
             inc_full = os.path.join(item[0], file)
-            clean = inc_full.replace(path, '${SOURCE_DIR}')
+            clean = re.sub(rf"^{re.escape(path)}", '${SOURCE_DIR}', inc_full)
             if not spec.match_file(inc_full):
                 if '/node_modules/aws-cdk' not in inc_full:
                     debug_echo(f"Matched file for scan set: {clean}", debug=debug)
