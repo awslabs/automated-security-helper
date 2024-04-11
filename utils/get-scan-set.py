@@ -59,13 +59,13 @@ def get_ash_ignorespec_lines(
             for item in glob(f"{path}/**/.ignore")
         ]
     ]
-    ashignores = [
-        f"{path}/.ashignore",
-        *[
-            item
-            for item in glob(f"{path}/**/.ashignore")
-        ]
-    ]
+    # ashignores = [
+    #     f"{path}/.ashignore",
+    #     *[
+    #         item
+    #         for item in glob(f"{path}/**/.ashignore")
+    #     ]
+    # ]
     gitignores = [
         f"{path}/.gitignore",
         *[
@@ -76,7 +76,7 @@ def get_ash_ignorespec_lines(
     all_ignores = list(set([
         *dotignores,
         *gitignores,
-        *ashignores,
+        # *ashignores,
         *[
             f"{path}/{file}"
             for file in ignorefiles
