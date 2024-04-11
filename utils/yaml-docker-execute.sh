@@ -20,6 +20,8 @@ bumprc() { # return the higher absolute value of the inputs
   echo $output
 }
 
+source ${_ASH_UTILS_LOCATION}/common.sh
+
 RC=0
 
 #
@@ -39,12 +41,13 @@ git config --global --add safe.directory ${_ASH_RUN_DIR} >/dev/null 2>&1
 
 # cd to the source directory as a starting point
 cd ${_ASH_SOURCE_DIR}
-# Check if the source directory is a git repository and clone it to the run directory
-if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-  git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
-  _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
-  cd ${_ASH_RUN_DIR}
-fi;
+debug_echo "[yaml] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: ${_ASH_SOURCE_DIR} :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
+# # Check if the source directory is a git repository and clone it to the run directory
+# if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+#   git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
+#   _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
+#   cd ${_ASH_RUN_DIR}
+# fi;
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
 REPORT_PATH="${_ASH_OUTPUT_DIR}/work/yaml_report_result.txt"

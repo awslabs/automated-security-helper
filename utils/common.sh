@@ -12,3 +12,8 @@ export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 debug_echo() {
   [[ "${ASH_DEBUG:-"NO"}" != "NO" ]] && echo -e "\033[0;33m[$(date '+%Y-%m-%d %H:%M:%S')] DEBUG:\033[0m ${1}"
 }
+
+debug_show_tree() {
+  _TREE_FLAGS="-x -h -a --du -I .git"
+  [[ "${ASH_DEBUG:-"NO"}" != "NO" ]] && tree ${_TREE_FLAGS} ${1:-$(pwd)}
+}

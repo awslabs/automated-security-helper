@@ -39,14 +39,15 @@ git config --global --add safe.directory ${_ASH_RUN_DIR} >/dev/null 2>&1
 
 # cd to the source directory as a starting point
 cd ${_ASH_SOURCE_DIR}
+debug_echo "[ipynb] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: ${_ASH_SOURCE_DIR} :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
 # Check if the source directory is a git repository and clone it to the run directory
-if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-  if [[ "$_ASH_EXEC_MODE" != "local" ]]; then
-    git clone ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
-  fi
-  _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
-  cd ${_ASH_RUN_DIR}
-fi;
+# if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+#   if [[ "$_ASH_EXEC_MODE" != "local" ]]; then
+#     git clone ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
+#   fi
+#   _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
+#   cd ${_ASH_RUN_DIR}
+# fi;
 
 # nosemgrep
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space

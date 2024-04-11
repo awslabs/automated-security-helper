@@ -41,13 +41,14 @@ git config --global --add safe.directory ${_ASH_RUN_DIR} >/dev/null 2>&1
 
 # cd to the source directory as a starting point
 cd ${_ASH_SOURCE_DIR}
-# Check if the source directory is a git repository and clone it to the run directory
-if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-  debug_echo "Shallow cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned"
-  git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
-  _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
-  cd ${_ASH_RUN_DIR}
-fi;
+debug_echo "[grype] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: ${_ASH_SOURCE_DIR} :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
+# # Check if the source directory is a git repository and clone it to the run directory
+# if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+#   debug_echo "Shallow cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned"
+#   git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
+#   _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
+#   cd ${_ASH_RUN_DIR}
+# fi;
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
 REPORT_PATH="${_ASH_OUTPUT_DIR}/work/grype_report_result.txt"
@@ -65,6 +66,7 @@ do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
   debug_echo "Starting Grype scan of ${scan_path}"
+  debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Grype output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   grype -f medium dir:${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
@@ -83,9 +85,11 @@ do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
   debug_echo "Starting Syft scan of ${scan_path}"
+  debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Syft output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-  syft ${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
+  debug_echo "syft ${scan_path}"
+  syft ${scan_path} >> ${REPORT_PATH} 2>&1
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
@@ -101,6 +105,7 @@ do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
   debug_echo "Starting Semgrep scan of ${scan_path}"
+  debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Semgrep output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   semgrep --legacy --error --config=auto $scan_path --exclude="*-converted.py,*_report_result.txt" >> ${REPORT_PATH} 2>&1
