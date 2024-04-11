@@ -442,7 +442,7 @@ IFS=$'\n' # Support directories with spaces, make the loop iterate over newline 
 pushd . >/dev/null 2>&1
 cd "${SOURCE_DIR}"
 # We do not include --output here explicitly to only yield the relative path
-for zipfile in $(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" --source . ${ASH_SCANSET_ARGS} | grep '\.zip$');
+for zipfile in $(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" --source . | grep '\.zip$');
 do
   tgt_dir=$(dirname "${OUTPUT_DIR}"/work/"${zipfile:2}")/"$(basename "${zipfile%.*}")"
   mkdir -p "${tgt_dir}"

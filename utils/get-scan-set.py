@@ -44,7 +44,7 @@ def black(msg) -> str:
     return "\033[98m{}\033[00m".format(msg)
 
 def debug_echo(*msg, debug: bool = False) -> str:
-    if debug or os.environ.get("ASH_DEBUG","NO") != "NO":
+    if debug:
         print(yellow(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [get-scan-set.py] DEBUG:"), *msg, file=sys.stderr)
 
 def get_ash_ignorespec_lines(
