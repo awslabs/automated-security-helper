@@ -131,7 +131,7 @@ if __name__ == "__main__":
     # set up argparse
     parser = argparse.ArgumentParser(description="Get list of files not matching .gitignore underneath SourceDir arg path")
     parser.add_argument("--source", help="path to scan", default=os.getcwd(), type=str)
-    parser.add_argument("--output", help="output path to save the .ashignore and .ashscanset files to", default=None, type=str)
+    parser.add_argument("--output", help="output path to save the ash-ignore.txt and ash-scan-set.txt files to", default=None, type=str)
     parser.add_argument("--ignorefile", help="ignore file to use in addition to the standard gitignore", default=[], type=str, nargs='*')
     parser.add_argument("--debug", help="Enables debug logging", action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
@@ -142,8 +142,8 @@ if __name__ == "__main__":
     ashscanset_imported = False
 
     if args.output:
-        ashignore_path = Path(args.output).joinpath('.ashignore')
-        ashscanset_path = Path(args.output).joinpath('.ashscanset')
+        ashignore_path = Path(args.output).joinpath('ash-ignore.txt')
+        ashscanset_path = Path(args.output).joinpath('ash-scan-set.txt')
         if ashignore_path.exists():
             with open(ashignore_path) as f:
                 ashignore_content = f.readlines()
@@ -165,14 +165,14 @@ if __name__ == "__main__":
 
     if args.output:
         if ashignore_imported == False:
-            debug_echo(f"Writing .ashignore to {args.output}", debug=args.debug)
+            debug_echo(f"Writing ash-ignore.txt to {args.output}", debug=args.debug)
             if not ashignore_path.parent.exists():
                 ashignore_path.parent.mkdir(parents=True)
             with open(ashignore_path, "w") as f:
                 f.write("\n".join(ashignore_content))
 
         if ashscanset_imported == False:
-            debug_echo(f"Writing .ashscanset to {args.output}", debug=args.debug)
+            debug_echo(f"Writing ash-scan-set.txt to {args.output}", debug=args.debug)
             if not ashscanset_path.parent.exists():
                 ashscanset_path.parent.mkdir(parents=True)
             with open(ashscanset_path, "w") as f:
