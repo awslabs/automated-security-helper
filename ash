@@ -114,8 +114,8 @@ else
       echo "Running ASH scan using built image..."
       ${RESOLVED_OCI_RUNNER} run \
         --rm \
-        -e ACTUAL_SOURCE_DIR=${SOURCE_DIR} \
-        -e ACTUAL_OUTPUT_DIR=${OUTPUT_DIR} \
+        -e ACTUAL_SOURCE_DIR="${SOURCE_DIR}" \
+        -e ACTUAL_OUTPUT_DIR="${OUTPUT_DIR}" \
         -e ASH_DEBUG=${DEBUG} \
         --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly \
         --mount type=bind,source="${OUTPUT_DIR}",destination=/out \
