@@ -64,12 +64,16 @@ do
   scan_path=${scan_paths[$i]}
   echo -e "\n>>>>>> Begin npm audit output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
   cd ${scan_path}
-  for file in $(find . -iname "package-lock.json");
+  for file in $(find . -iname "package-lock.json" -o -iname "pnpm-lock.yaml");
   do
       path="$(dirname -- $file)"
       cd $path
 
-      npm audit >> ${REPORT_PATH} 2>&1
+      if [ $file == "package-lock.json" ]; then
+        npm audit >> ${REPORT_PATH} 2>&1
+      elif [ $file == "pnpm-lock.yaml" ]; then
+        pnpm audit >> ${REPORT_PATH} 2>&1
+      fi
       NRC=$?
       RC=$(bumprc $RC $NRC)
 
