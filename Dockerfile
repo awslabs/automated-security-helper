@@ -122,7 +122,7 @@ RUN mkdir -p /src && \
 # Update NPM to latest
 RUN mkdir -p /ash/utils
 COPY ./utils/cdk-nag-scan /ash/utils/cdk-nag-scan/
-RUN npm install -g npm && \
+RUN npm install -g npm pnpm && \
     cd /ash/utils/cdk-nag-scan && \
     npm install --quiet
 
