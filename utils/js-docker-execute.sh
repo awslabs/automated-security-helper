@@ -69,9 +69,9 @@ do
       path="$(dirname -- $file)"
       cd $path
 
-      if [ $file == "package-lock.json" ]; then
+      if [ $file == "./package-lock.json" ]; then
         npm audit >> ${REPORT_PATH} 2>&1
-      elif [ $file == "pnpm-lock.yaml" ]; then
+      elif [ $file == "./pnpm-lock.yaml" ]; then
         pnpm audit >> ${REPORT_PATH} 2>&1
       fi
       NRC=$?
