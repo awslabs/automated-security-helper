@@ -15,6 +15,8 @@
 
 ### Features
 
+* New version scheme introduced, moving ASH to SemVer alignment for versioning releases
+* Moved version number to standalone `__version__` file for easier version maintainability
 * Added [ripgrep](https://github.com/BurntSushi/ripgrep) to replace `grep` on the `cdk-docker-execute.sh` script for speed as well as to respect `.gitignore`/`.ignore` file specifications automatically. Implemented `ripgrep` for the intended purposes.
 * Updated `cdk-docker-execute.sh` script to create a unique internal stack name per imported-and-scanned CloudFormation template.
 
@@ -24,8 +26,6 @@
 
 ### Maintenance / Internal
 
-* New version scheme introduced, moving ASH to SemVer alignment for versioning releases
-* Moved version number to standalone `__version__` file for easier version maintainability
 * Added better support for debug logging via `--debug` flag.
 * Added new `debug_show_tree` function to `utils/common.sh` for easy debugging insertion of a tree call at any point in the scan to see repository contents
 * Improved functionality of `utils/get-scan-set.py` script to generate the ignore spec and initial scan set to file in the output directory
