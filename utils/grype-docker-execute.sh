@@ -88,8 +88,8 @@ do
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Syft output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-  debug_echo "syft ${scan_path}"
-  syft ${scan_path} >> ${REPORT_PATH} 2>&1
+  debug_echo "syft ${scan_path} --exclude=\"**/*-converted.py\" --exclude=\"**/*_report_result.txt\""
+  syft ${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
   SRC=$?
   RC=$(bumprc $RC $SRC)
 

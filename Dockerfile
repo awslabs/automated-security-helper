@@ -134,6 +134,7 @@ COPY ./utils/cfn-to-cdk /ash/utils/cfn-to-cdk/
 COPY ./utils/*.* /ash/utils/
 COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
+COPY ./__version__ /ash/__version__
 
 #
 # Flag ASH as local execution mode since we are running in a container already
