@@ -40,11 +40,11 @@ source ${_ASH_UTILS_LOCATION}/common.sh
 #
 # Allow the container to run Git commands against a repo in ${_ASH_SOURCE_DIR}
 #
-git config --global --add safe.directory ${_ASH_SOURCE_DIR} >/dev/null 2>&1
-git config --global --add safe.directory ${_ASH_RUN_DIR} >/dev/null 2>&1
+git config --global --add safe.directory "${_ASH_SOURCE_DIR}" >/dev/null 2>&1
+git config --global --add safe.directory "${_ASH_RUN_DIR}" >/dev/null 2>&1
 
 # cd to the source directory as a starting point
-cd ${_ASH_SOURCE_DIR}
+cd "${_ASH_SOURCE_DIR}"
 debug_echo "[js] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: ${_ASH_SOURCE_DIR} :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
 # # Check if the source directory is a git repository and clone it to the run directory
 # if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
