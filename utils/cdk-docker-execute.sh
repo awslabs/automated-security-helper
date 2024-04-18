@@ -154,13 +154,13 @@ if [ "${#cfn_files[@]}" -gt 0 ]; then
     #
     # Copy and then remove these files to avoid permission setting errors when running in a single container
     #
-    cp ${CDK_WORK_DIR}/cdk.out/*.template.json ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
-    rm ${CDK_WORK_DIR}/cdk.out/*.template.json
-    cp ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
-    rm ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv
 
     RC=$(bumprc $RC $CRC)
   done
+  cp ${CDK_WORK_DIR}/cdk.out/*.template.json ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
+  rm ${CDK_WORK_DIR}/cdk.out/*.template.json
+  cp ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
+  rm ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv
 else
   echo "found ${#cfn_files[@]} files to scan.  Skipping scans." >> ${REPORT_PATH}
 fi
