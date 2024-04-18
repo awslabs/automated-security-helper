@@ -57,29 +57,45 @@ REPORT_PATH="${_ASH_OUTPUT_DIR}/work/js_report_result.txt"
 rm ${REPORT_PATH} 2> /dev/null
 touch ${REPORT_PATH}
 
-# Run NPM audit
+# Run NPM, PNPM, or Yarn audit
 scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
-  echo -e "\n>>>>>> Begin npm audit output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
   cd ${scan_path}
-  for file in $(find . -iname "package-lock.json" -o -iname "pnpm-lock.yaml");
+  for file in $(find . \
+    -iname "package-lock.json" -o \
+    -iname "pnpm-lock.yaml" -o \
+    -iname "yarn.lock");
   do
       path="$(dirname -- $file)"
       cd $path
 
-      if [ $file == "./package-lock.json" ]; then
-        npm audit >> ${REPORT_PATH} 2>&1
-      elif [ $file == "./pnpm-lock.yaml" ]; then
-        pnpm audit >> ${REPORT_PATH} 2>&1
-      fi
+      audit_command="npm"
+
+      case $file in
+        "./package-lock.json")
+          audit_command="npm"
+          ;;
+        "./pnpm-lock.yaml")
+          audit_command="pnpm"
+          ;;
+        "./yarn.lock")
+          audit_command="yarn"
+          ;;
+      esac
+
+      echo -e "\n>>>>>> Begin ${audit_command} audit output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
+
+      eval "${audit_command} audit >> ${REPORT_PATH} 2>&1"
+
       NRC=$?
       RC=$(bumprc $RC $NRC)
 
       cd ${scan_path}
+
+      echo -e "\n<<<<<< End ${audit_command} audit output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
   done
-  echo -e "\n<<<<<< End npm audit output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
 done
 
 # cd back to the original SOURCE_DIR in case path changed during scan
