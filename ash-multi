@@ -72,7 +72,7 @@ print_usage() {
 get_all_files() {
 
   # This should be
-  # git config --global --add safe.directory ${_ASH_SOURCE_DIR} >/dev/null 2>&1
+  # git config --global --add safe.directory "${_ASH_SOURCE_DIR}" >/dev/null 2>&1
   src_files=()
   pushd . >/dev/null 2>&1
   # cd to the source directory as a starting point
