@@ -6,13 +6,6 @@ export class CdkNagScanStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // The code that defines your stack goes here
-
-    // example resource
-    // const queue = new sqs.Queue(this, 'CdkNagScanQueue', {
-    //   visibilityTimeout: cdk.Duration.seconds(300)
-    // });
-
     const templateFileName = this.node.tryGetContext('fileName');
 
     if ( templateFileName != undefined ) {
@@ -27,9 +20,9 @@ export class CdkNagScanStack extends cdk.Stack {
         } else {
           message = 'unknown caught type'
         }
-        console.log(`Error calling CfnInclude, Error: ${message}`)
+        console.log(`Error calling CfnInclude -- File: '${templateFileName}', Error: ${message}`)
       }
-  
+
     } else {
       console.log(`Context parameter "fileName" must be set!`)
     }

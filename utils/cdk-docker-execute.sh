@@ -36,20 +36,12 @@ source ${_ASH_UTILS_LOCATION}/common.sh
 #
 # Allow the container to run Git commands against a repo in ${_ASH_SOURCE_DIR}
 #
-git config --global --add safe.directory ${_ASH_SOURCE_DIR} >/dev/null 2>&1
-git config --global --add safe.directory ${_ASH_RUN_DIR} >/dev/null 2>&1
+git config --global --add safe.directory "${_ASH_SOURCE_DIR}" >/dev/null 2>&1
+git config --global --add safe.directory "${_ASH_RUN_DIR}" >/dev/null 2>&1
 
 # cd to the source directory as a starting point
 cd ${_ASH_SOURCE_DIR}
-# Check if the source directory is a git repository and clone it to the run directory
-if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-  if [[ "$_ASH_EXEC_MODE" != "local" ]]; then
-    debug_echo "Shallow cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned"
-    git clone --depth=1 --single-branch ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
-  fi
-  _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
-  cd ${_ASH_RUN_DIR}
-fi;
+debug_echo "[cdk] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: "${_ASH_SOURCE_DIR}" :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
 REPORT_PATH="${_ASH_OUTPUT_DIR}/work/cdk_report_result.txt"
@@ -109,7 +101,9 @@ RC=0
 debug_echo "Starting all scanners within the CDK scanner tool set"
 echo -e "\nstarting to investigate ..." >> ${REPORT_PATH}
 
-cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' ${_ASH_SOURCE_DIR} --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output} --exclude=ash) 2>/dev/null))
+# cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' "${_ASH_SOURCE_DIR}" --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output} --exclude=ash) 2>/dev/null))
+cfn_files=($(rg AWSTemplateFormatVersion --files-with-matches --type yaml --type json "${_ASH_SOURCE_DIR}" 2>/dev/null))
+debug_echo "Found ${#cfn_files[@]} CloudFormation files to scan: ${cfn_files}"
 
 #
 # Copy the CDK application to the work area and change
@@ -151,13 +145,13 @@ if [ "${#cfn_files[@]}" -gt 0 ]; then
     #
     # Copy and then remove these files to avoid permission setting errors when running in a single container
     #
-    cp ${CDK_WORK_DIR}/cdk.out/CdkNagScanStack.template.json ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
-    rm ${CDK_WORK_DIR}/cdk.out/CdkNagScanStack.template.json
-    cp ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
-    rm ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv
 
     RC=$(bumprc $RC $CRC)
   done
+  cp ${CDK_WORK_DIR}/cdk.out/*.template.json ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
+  rm ${CDK_WORK_DIR}/cdk.out/*.template.json
+  cp ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/
+  rm ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv
 else
   echo "found ${#cfn_files[@]} files to scan.  Skipping scans." >> ${REPORT_PATH}
 fi

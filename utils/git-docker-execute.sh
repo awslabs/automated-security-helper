@@ -37,22 +37,16 @@ source ${_ASH_UTILS_LOCATION}/common.sh
 #
 # Allow the container to run Git commands against a repo in ${_ASH_SOURCE_DIR}
 #
-git config --global --add safe.directory ${_ASH_SOURCE_DIR} >/dev/null 2>&1
-git config --global --add safe.directory ${_ASH_RUN_DIR} >/dev/null 2>&1
+git config --global --add safe.directory "${_ASH_SOURCE_DIR}" >/dev/null 2>&1
+git config --global --add safe.directory "${_ASH_RUN_DIR}" >/dev/null 2>&1
 
 
 # cd to the source directory as a starting point
-cd ${_ASH_SOURCE_DIR}
-# Check if the source directory is a git repository and clone it to the run directory
+cd "${_ASH_SOURCE_DIR}"
+debug_echo "[git] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: ${_ASH_SOURCE_DIR} :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
 if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
   _ASH_IS_GIT_REPOSITORY=1
-  if [[ "$_ASH_EXEC_MODE" != "local" ]]; then
-    debug_echo "Normal cloning git repo to ${_ASH_RUN_DIR} to remove ignored files from being scanned but retain commit history for Git secrets inspection"
-    git clone ${_ASH_SOURCE_DIR} ${_ASH_RUN_DIR} >/dev/null 2>&1
-  fi
-  _ASH_SOURCE_DIR=${_ASH_RUN_DIR}
-  cd ${_ASH_RUN_DIR}
-fi;
+fi
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
 REPORT_PATH="${_ASH_OUTPUT_DIR}/work/git_report_result.txt"
@@ -66,7 +60,7 @@ echo ">>>>>> begin tree result >>>>>>" >> "${REPORT_PATH}"
 if [ "$_ASH_IS_GIT_REPOSITORY" -eq 1 ]; then
 echo "Git repository detected. Ensure your .gitignore configuration excludes all the files that you intend to ignore." >> "${REPORT_PATH}"
 fi;
-tree ${_TREE_FLAGS} ${_ASH_SOURCE_DIR} >> "${REPORT_PATH}" 2>&1
+tree ${_TREE_FLAGS} "${_ASH_SOURCE_DIR}" >> "${REPORT_PATH}" 2>&1
 echo "<<<<<< end tree ${_TREE_FLAGS} result <<<<<<" >> "${REPORT_PATH}"
 
 #
