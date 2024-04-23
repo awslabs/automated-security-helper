@@ -461,6 +461,8 @@ map_extensions_and_files
 
 TOTAL_FILES=$(echo "$all_files" | wc -l)
 
+trap "echo Stopping; exit 0" SIGTERM SIGINT
+
 echo -e "ASH found ${TOTAL_FILES} file(s) in the source directory..."
 if [ $TOTAL_FILES -gt 1000 ]; then
   echo -e "${RED}Depending on your machine this might take a while...${NC}"
