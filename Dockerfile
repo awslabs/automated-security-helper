@@ -114,14 +114,12 @@ WORKDIR /src
 #
 RUN mkdir -p /src && \
     mkdir -p /out && \
-    mkdir -p /run/scan/src \
-    mkdir -p /ash
+    mkdir -p /ash/utils
 
 #
 # Install CDK Nag stub dependencies
 #
 # Update NPM to latest
-RUN mkdir -p /ash/utils
 COPY ./utils/cdk-nag-scan /ash/utils/cdk-nag-scan/
 RUN npm install -g npm pnpm yarn && \
     cd /ash/utils/cdk-nag-scan && \

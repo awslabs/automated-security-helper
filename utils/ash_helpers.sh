@@ -97,7 +97,7 @@ invoke-ash() {
 
       # Run the image if the --no-run flag is not set
       if [ "${NO_RUN}" = "NO" ]; then
-        run_cmd="${RESOLVED_OCI_RUNNER} run --rm --interactive --tty --mount type=bind,source=\"${SOURCE_DIR}\",destination=/src,readonly --mount type=bind,source=\"${OUTPUT_DIR}\",destination=/out --tmpfs /run/scan/src:rw,noexec,nosuid ${ASH_IMAGE_NAME} ash --source-dir /src --output-dir /out $ASH_ARGS"
+        run_cmd="${RESOLVED_OCI_RUNNER} run --rm --interactive --tty --mount type=bind,source=\"${SOURCE_DIR}\",destination=/src,readonly --mount type=bind,source=\"${OUTPUT_DIR}\",destination=/out ${ASH_IMAGE_NAME} ash --source-dir /src --output-dir /out $ASH_ARGS"
         echo $run_cmd
         eval $run_cmd
       fi
