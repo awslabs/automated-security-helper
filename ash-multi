@@ -210,7 +210,7 @@ run_security_check() {
       echo -e "${LPURPLE}Found one or more of: [ ${RED}""${ITEMS_TO_SCAN[*]}""${LPURPLE} ] items in source dir,${NC} ${GREEN}running ${DOCKERFILE_TO_EXECUTE} ...${NC}"
       ${OCI_RUNNER} build -t "${RUNTIME_CONTAINER_NAME}" -f "${DOCKERFILE_LOCATION}"/"${DOCKERFILE_TO_EXECUTE}" ${DOCKER_EXTRA_ARGS} "${SOURCE_DIR}" > /dev/null
       set +e # the scan will fail the command if it finds any finding. we don't want it to stop our script execution
-      ${OCI_RUNNER} run --name "${RUNTIME_CONTAINER_NAME}" -v "${CFNRULES_LOCATION}":/cfnrules:ro -v "${UTILS_LOCATION}":/utils:ro -v "${SOURCE_DIR}":/src:ro -v "${OUTPUT_DIR}":/out:rw --tmpfs /run/ash/src:rw,noexec,nosuid "${RUNTIME_CONTAINER_NAME}"
+      ${OCI_RUNNER} run --name "${RUNTIME_CONTAINER_NAME}" -v "${CFNRULES_LOCATION}":/cfnrules:ro -v "${UTILS_LOCATION}":/utils:ro -v "${SOURCE_DIR}":/src:ro -v "${OUTPUT_DIR}":/out:rw "${RUNTIME_CONTAINER_NAME}"
     fi
     #
     # capture the return code of the command invoked through docker
@@ -430,7 +430,7 @@ export _ASH_OUTPUT_DIR="${_ASH_OUTPUT_DIR:-${OUTPUT_DIR}}"
 export _ASH_ROOT_DIR="${_ASH_ROOT_DIR:-${ASH_ROOT_DIR}}"
 export _ASH_UTILS_LOCATION="${_ASH_UTILS_LOCATION:-${UTILS_LOCATION}}"
 export _ASH_CFNRULES_LOCATION="${_ASH_CFNRULES_LOCATION:-${CFNRULES_LOCATION}}"
-export _ASH_RUN_DIR="${_ASH_RUN_DIR:-/run/scan/src}"
+export _ASH_RUN_DIR="${_ASH_RUN_DIR:-$(mktemp -d -p /tmp ash-run-scan.XXXX)}"
 
 #
 # Print out the current ASH version to start execution output

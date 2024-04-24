@@ -137,7 +137,6 @@ function Invoke-ASH {
                     '-it'
                     "--mount type=bind,source=$sourceDirFull,destination=/src,readonly"
                     "--mount type=bind,source=$outputDirFull,destination=/out"
-                    "--tmpfs /run/scan/src:rw,noexec,nosuid"
                     $AshImageName
                     'ash'
                     '--source-dir /src'
