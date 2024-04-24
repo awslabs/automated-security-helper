@@ -430,7 +430,7 @@ export _ASH_OUTPUT_DIR="${_ASH_OUTPUT_DIR:-${OUTPUT_DIR}}"
 export _ASH_ROOT_DIR="${_ASH_ROOT_DIR:-${ASH_ROOT_DIR}}"
 export _ASH_UTILS_LOCATION="${_ASH_UTILS_LOCATION:-${UTILS_LOCATION}}"
 export _ASH_CFNRULES_LOCATION="${_ASH_CFNRULES_LOCATION:-${CFNRULES_LOCATION}}"
-export _ASH_RUN_DIR="${_ASH_RUN_DIR:-/run/scan/src}"
+export _ASH_RUN_DIR="${_ASH_RUN_DIR:-$(mktemp -d -p /tmp ash-run-scan.XXXX)}"
 
 #
 # Print out the current ASH version to start execution output
