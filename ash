@@ -73,6 +73,7 @@ fi
 # Resolve the absolute paths
 SOURCE_DIR="$(cd "$SOURCE_DIR"; pwd)"
 if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]]; then
+  mkdir -p "${OUTPUT_DIR}"
   OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
 fi
 
