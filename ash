@@ -8,6 +8,7 @@ export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:local"}
 # Set local variables
 SOURCE_DIR=""
 OUTPUT_DIR=""
+OUTPUT_DIR_SPECIFIED="NO"
 DOCKER_EXTRA_ARGS=""
 ASH_ARGS=""
 NO_BUILD="NO"
@@ -23,6 +24,7 @@ while (("$#")); do
     --output-dir)
       shift
       OUTPUT_DIR="$1"
+      OUTPUT_DIR_SPECIFIED="YES"
       ;;
     --force)
       DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} --no-cache"
@@ -68,20 +70,12 @@ if [ "${SOURCE_DIR}" = "" ]; then
   SOURCE_DIR="$(pwd)"
 fi
 
-# Default to the pwd/ash_output
-if [ "${OUTPUT_DIR}" = "" ]; then
-  OUTPUT_DIR="${SOURCE_DIR}/ash_output"
-fi
-
-# Create the output directory if it doesn't exist, otherwise the bind mount of the
-# OUTPUT_DIR will fail.
-if [ ! -d "${OUTPUT_DIR}" ]; then
-  mkdir -p "${OUTPUT_DIR}"
-fi
-
 # Resolve the absolute paths
 SOURCE_DIR="$(cd "$SOURCE_DIR"; pwd)"
-OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
+if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]]; then
+  mkdir -p "${OUTPUT_DIR}"
+  OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
+fi
 
 # Resolve the OCI_RUNNER
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
@@ -111,18 +105,25 @@ else
     # Run the image if the --no-run flag is not set
     RC=0
     if [ "${NO_RUN}" = "NO" ]; then
+      MOUNT_SOURCE_DIR="--mount type=bind,source=${SOURCE_DIR},destination=/src"
+      MOUNT_OUTPUT_DIR=""
+      OUTPUT_DIR_OPTION=""
+      if [[ ${OUTPUT_DIR_SPECIFIED} = "YES" ]]; then
+        MOUNT_SOURCE_DIR="${MOUNT_SOURCE_DIR},readonly" # add readonly source mount when --output-dir is specified
+        MOUNT_OUTPUT_DIR="--mount type=bind,source=${OUTPUT_DIR},destination=/out"
+        OUTPUT_DIR_OPTION="--output-dir /out"
+      fi
       echo "Running ASH scan using built image..."
       ${RESOLVED_OCI_RUNNER} run \
         --rm \
         -e ACTUAL_SOURCE_DIR="${SOURCE_DIR}" \
-        -e ACTUAL_OUTPUT_DIR="${OUTPUT_DIR}" \
         -e ASH_DEBUG=${DEBUG} \
-        --mount type=bind,source="${SOURCE_DIR}",destination=/src,readonly \
-        --mount type=bind,source="${OUTPUT_DIR}",destination=/out \
+        ${MOUNT_SOURCE_DIR} \
+        ${MOUNT_OUTPUT_DIR} \
         ${ASH_IMAGE_NAME} \
           ash \
             --source-dir /src  \
-            --output-dir /out  \
+            ${OUTPUT_DIR_OPTION}  \
             $ASH_ARGS
       RC=$?
     fi
