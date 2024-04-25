@@ -156,7 +156,8 @@ validate_input() {
   if [[ -z ${FORCE_REBUILD} ]]; then FORCE_REBUILD="false"; fi
   if [[ -z ${SOURCE_DIR} ]]; then SOURCE_DIR="$(pwd)"; else SOURCE_DIR=$(cd "${SOURCE_DIR}"; pwd); fi # Transform any relative path to absolute
   if [[ -z ${OUTPUT_DIR} ]]; then
-    OUTPUT_DIR="$(pwd)"
+    OUTPUT_DIR="${SOURCE_DIR}/ash_output"
+    mkdir -p ${OUTPUT_DIR}
   fi
   if [ -d "${OUTPUT_DIR}/work" ]; then
     rm -rf "${OUTPUT_DIR}/work"
