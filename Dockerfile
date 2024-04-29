@@ -1,5 +1,4 @@
 #checkov:skip=CKV_DOCKER_7: Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
-#checkov:skip=CKV_DOCKER_3: ASH is focused on mounting source code into the container and scanning it, not running services. Setting USER breaks the ability for certain scanners to work correctly.
 #
 # Enable BASE_IMAGE as an overrideable ARG for proxy cache + private registry support
 #
