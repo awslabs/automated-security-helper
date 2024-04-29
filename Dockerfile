@@ -153,9 +153,10 @@ RUN chmod +x /ash/ash
 # confirmation requests unexpectedly
 #
 ARG ASHUSER_HOME=/home/ash-user
-RUN adduser --disabled-password --disabled-login \
-    --uid ${UID} --gid ${GID} \
-    ash-user && \
+RUN addgroup --gid ${GID} ash-group || \
+    adduser --disabled-password --disabled-login \
+        --uid ${UID} --gid ${GID} \
+        ash-user && \
     mkdir -p ${ASHUSER_HOME}/.ssh && \
     echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
     echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
