@@ -94,18 +94,8 @@ map_extensions_and_files() {
     cd "${_ASH_SOURCE_DIR}"
 
     # On local mode, this configuration will only affect the current container
-    # git config --global --add safe.directory "${_ASH_SOURCE_DIR}" >/dev/null 2>&1
-    # git config --global --add safe.directory "${_ASH_RUN_DIR}" >/dev/null 2>&1
-    echo "PATH is ${PATH}, git is $(type git)"
-    echo ">>> info on ${_ASH_SOURCE_DIR}"
-    ls -aln "${_ASH_SOURCE_DIR}"
-    echo "<<< info on ${_ASH_SOURCE_DIR}"
-    echo ">>> info on ${_ASH_RUN_DIR}"
-    ls -aln "${_ASH_RUN_DIR}"
-    echo "<<< info on ${_ASH_RUN_DIR}"
-    git --version
-    git config --global --add safe.directory "${_ASH_SOURCE_DIR}" || echo "return code $? from git config"
-    git config --global --add safe.directory "${_ASH_RUN_DIR}" || echo "return code $? from git config"
+    git config --global --add safe.directory "${_ASH_SOURCE_DIR}" >/dev/null 2>&1
+    git config --global --add safe.directory "${_ASH_RUN_DIR}" >/dev/null 2>&1
     if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
       git clone "${_ASH_SOURCE_DIR}" "${_ASH_RUN_DIR}"
       echo "Repository cloned successfully."
@@ -172,18 +162,7 @@ validate_input() {
   if [ -d "${OUTPUT_DIR}/work" ]; then
     rm -rf "${OUTPUT_DIR}/work"
   fi
-  echo ">>> ID is"
-  id
-  echo "<<< ID"
-  echo ">>> permissions on ${OUTPUT_DIR} are"
-  ls -aln "${OUTPUT_DIR}"
-  echo "<<< permissions"
-  echo ">>> before mkdir"
   mkdir -p "${OUTPUT_DIR}/work"
-  echo "<<< after mkdir"
-  echo ">>> permissions on ${OUTPUT_DIR} are"
-  ls -aln "${OUTPUT_DIR}"
-  echo "<<< permissions"
   OUTPUT_DIR=$(cd "${OUTPUT_DIR}"; pwd) # Transform any relative path to absolute
   CFNRULES_LOCATION=$(cd "${CFNRULES_LOCATION}"; pwd) # Transform any relative path to absolute
   UTILS_LOCATION=$(cd "${UTILS_LOCATION}"; pwd) # Transform any relative path to absolute
@@ -458,9 +437,6 @@ export _ASH_RUN_DIR="${_ASH_RUN_DIR:-$(mktemp -d -p /tmp ash-run-scan.XXXX)}"
 # Print out the current ASH version to start execution output
 #
 echo -e "\n${LPURPLE}ASH version ${GREEN}$VERSION${NC}\n"
-
-echo ">>> setting debug on"
-set -x
 
 # nosemgrep
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space

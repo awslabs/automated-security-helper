@@ -166,10 +166,14 @@ RUN addgroup --gid ${GID} ash-group || \
 USER ${UID}
 
 #
+# Set the HOME environment variable to be the HOME folder for the non-root user
+#
+ENV HOME=${ASHUSER_HOME}
+
+#
 # Flag ASH as local execution mode since we are running in a container already
 #
 ENV _ASH_EXEC_MODE="local"
-ENV HOME=${ASHUSER_HOME}
 
 #
 # Append /ash to PATH to allow calling `ash` directly
