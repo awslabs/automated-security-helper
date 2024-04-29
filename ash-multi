@@ -449,6 +449,9 @@ export _ASH_RUN_DIR="${_ASH_RUN_DIR:-$(mktemp -d -p /tmp ash-run-scan.XXXX)}"
 #
 echo -e "\n${LPURPLE}ASH version ${GREEN}$VERSION${NC}\n"
 
+echo ">>> setting debug on"
+set -x
+
 # nosemgrep
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
 pushd . >/dev/null 2>&1

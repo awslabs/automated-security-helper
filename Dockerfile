@@ -144,7 +144,7 @@ COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
 COPY ./__version__ /ash/__version__
 
-RUN chmod +x /ash/ash
+RUN chmod -R +r /ash && chmod +x /ash/ash
 
 #
 # Create a non-root user in the container and run as this user
