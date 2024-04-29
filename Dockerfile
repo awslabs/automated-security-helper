@@ -168,6 +168,7 @@ USER ${UID}
 # Flag ASH as local execution mode since we are running in a container already
 #
 ENV _ASH_EXEC_MODE="local"
+ENV HOME=${ASHUSER_HOME}
 
 #
 # Append /ash to PATH to allow calling `ash` directly
