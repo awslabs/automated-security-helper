@@ -7,6 +7,16 @@ ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
 FROM ${BASE_IMAGE}
 
 #
+# Collect the host UID/GID which built the image in order to set the UID/GID of the non-root user
+# to match the UID/GID of the builder of the container.
+#
+# Set the default values to non-zero to avoid someone inadvertantly creating a container that runs as root
+# if/when they did not specify these as --build-arg arguments on the ${OCI_RUNNER} build command.
+#
+ARG UID=500
+ARG GID=100
+
+#
 # Setting timezone in the container to UTC to ensure logged times are universal.
 #
 ENV TZ=UTC
@@ -144,14 +154,14 @@ RUN chmod +x /ash/ash
 #
 ARG ASHUSER_HOME=/home/ash-user
 RUN adduser --disabled-password --disabled-login \
-    --uid 500 --gid 100 \
+    --uid ${UID} --gid ${GID} \
     ash-user && \
     mkdir -p ${ASHUSER_HOME}/.ssh && \
     echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
     echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
     echo "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=" >> ${ASHUSER_HOME}/.ssh/known_hosts
 
-USER 500
+USER ${UID}
 
 #
 # Flag ASH as local execution mode since we are running in a container already

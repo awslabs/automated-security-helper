@@ -162,7 +162,18 @@ validate_input() {
   if [ -d "${OUTPUT_DIR}/work" ]; then
     rm -rf "${OUTPUT_DIR}/work"
   fi
+  echo ">>> ID is"
+  id
+  echo "<<< ID"
+  echo ">>> permissions on ${OUTPUT_DIR} are"
+  ls -aln "${OUTPUT_DIR}"
+  echo "<<< permissions"
+  echo ">>> before mkdir"
   mkdir -p "${OUTPUT_DIR}/work"
+  echo "<<< after mkdir"
+  echo ">>> permissions on ${OUTPUT_DIR} are"
+  ls -aln "${OUTPUT_DIR}"
+  echo "<<< permissions"
   OUTPUT_DIR=$(cd "${OUTPUT_DIR}"; pwd) # Transform any relative path to absolute
   CFNRULES_LOCATION=$(cd "${CFNRULES_LOCATION}"; pwd) # Transform any relative path to absolute
   UTILS_LOCATION=$(cd "${UTILS_LOCATION}"; pwd) # Transform any relative path to absolute

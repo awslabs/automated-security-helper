@@ -77,6 +77,12 @@ if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]]; then
   OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
 fi
 
+#
+# Gather the UID and GID of the caller
+#
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
+
 # Resolve the OCI_RUNNER
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
 
@@ -95,6 +101,8 @@ else
     if [ "${NO_BUILD}" = "NO" ]; then
       echo "Building image ${ASH_IMAGE_NAME} -- this may take a few minutes during the first build..."
       ${RESOLVED_OCI_RUNNER} build \
+        --build-arg UID="${HOST_UID}" \
+        --build-arg GID="${HOST_GID}" \
         --tag ${ASH_IMAGE_NAME} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         ${DOCKER_EXTRA_ARGS} \
