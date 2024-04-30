@@ -101,13 +101,13 @@ else
     if [ "${NO_BUILD}" = "NO" ]; then
       echo "Building image ${ASH_IMAGE_NAME} -- this may take a few minutes during the first build..."
       ${RESOLVED_OCI_RUNNER} build \
-        # --build-arg UID="${HOST_UID}" \
-        # --build-arg GID="${HOST_GID}" \
         --tag ${ASH_IMAGE_NAME} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
-      eval $build_cmd
+        # --build-arg UID="${HOST_UID}" \
+        # --build-arg GID="${HOST_GID}" \
+      # eval $build_cmd
     fi
 
     # Run the image if the --no-run flag is not set
