@@ -9,6 +9,8 @@ export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:local"}
 SOURCE_DIR=""
 OUTPUT_DIR=""
 OUTPUT_DIR_SPECIFIED="NO"
+CONTAINER_UID_SPECIFIED="NO"
+CONTAINER_GID_SPEICIFED="NO"
 DOCKER_EXTRA_ARGS=""
 ASH_ARGS=""
 NO_BUILD="NO"
@@ -36,6 +38,16 @@ while (("$#")); do
     --oci-runner | -o)
       shift
       OCI_RUNNER="$1"
+      ;;
+    --container-uid | -u)
+      shift
+      CONTAINER_UID_SPECIFIED="YES"
+      CONTAINER_UID="$1"
+      ;;
+    --container-gid | -u)
+      shift
+      CONTAINER_GID_SPECIFIED="YES"
+      CONTAINER_GID="$1"
       ;;
     --no-build)
       NO_BUILD="YES"
@@ -99,10 +111,16 @@ else
 
     # Build the image if the --no-build flag is not set
     if [ "${NO_BUILD}" = "NO" ]; then
+      if [[ ${CONTAINER_UID_SPECIFIED} = "YES" ]]; then
+        CONTAINER_UID_OPTION="--build-arg UID=${CONTAINER_UID}" # add readonly source mount when --output-dir is specified
+      fi
+      if [[ ${CONTAINER_GID_SPECIFIED} = "YES" ]]; then
+        CONTAINER_GID_OPTION="--build-arg GID=${CONTAINER_GID}" # add readonly source mount when --output-dir is specified
+      fi
       echo "Building image ${ASH_IMAGE_NAME} -- this may take a few minutes during the first build..."
       ${RESOLVED_OCI_RUNNER} build \
-        --build-arg UID="${HOST_UID}" \
-        --build-arg GID="${HOST_GID}" \
+        ${CONTAINER_UID_OPTION} \
+        ${CONTAINER_GID_OPTION} \
         --tag ${ASH_IMAGE_NAME} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         ${DOCKER_EXTRA_ARGS} \

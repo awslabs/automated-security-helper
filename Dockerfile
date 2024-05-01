@@ -153,7 +153,7 @@ RUN chmod -R +r /ash && chmod +x /ash/ash
 #
 ARG ASHUSER_HOME=/home/ash-user
 RUN addgroup --gid ${GID} ash-group || \
-    adduser --disabled-password --disabled-login \
+    adduser --disabled-password --disabled-login --gecos "" \
         --uid ${UID} --gid ${GID} \
         ash-user && \
     mkdir -p ${ASHUSER_HOME}/.ssh && \
@@ -164,7 +164,7 @@ RUN addgroup --gid ${GID} ash-group || \
 # Setting default WORKDIR to ${ASHUSER_HOME}
 WORKDIR ${ASHUSER_HOME}
 
-USER ${UID}
+USER ${UID}:${GID}
 
 #
 # Set the HOME environment variable to be the HOME folder for the non-root user
