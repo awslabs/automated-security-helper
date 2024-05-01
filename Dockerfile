@@ -6,11 +6,18 @@ ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
 FROM ${BASE_IMAGE}
 
 #
-# Collect the host UID/GID which built the image in order to set the UID/GID of the non-root user
-# to match the UID/GID of the builder of the container.
+# Allow for UID and GID to be set as build arguments to this Dockerfile.
 #
-# Set the default values to non-zero to avoid someone inadvertantly creating a container that runs as root
-# if/when they did not specify these as --build-arg arguments on the ${OCI_RUNNER} build command.
+# Set the default values of UID/GID to non-zero (and above typical low-number UID/GID values which
+# are defined by default).  500 and 100 are not special values or depended upon.
+# Their selection as default values is only to set the default for this container to be non-zero.
+#
+# The actions performed in this image (CMD command) do not require root privileges.
+# Thus, UID/GID are set non-zero to avoid someone inadvertantly running this image in a container
+# that runs privileged and as as root(UID 0).
+#
+# If the environment in which the container will run requires a specific UID/GID, then --build-arg
+# arguments on the ${OCI_RUNNER} build command can be used to over-ride these values.
 #
 ARG UID=500
 ARG GID=100
