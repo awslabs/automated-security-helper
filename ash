@@ -125,7 +125,6 @@ else
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
-      eval $build_cmd
     fi
 
     # Run the image if the --no-run flag is not set

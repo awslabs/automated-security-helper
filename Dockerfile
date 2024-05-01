@@ -159,8 +159,9 @@ RUN chmod -R +r /ash && chmod +x /ash/ash
 # confirmation requests unexpectedly
 #
 ARG ASHUSER_HOME=/home/ash-user
-RUN addgroup --gid ${GID} ash-group || \
-    adduser --disabled-password --disabled-login --gecos "" \
+# ignore a failure to add the group
+RUN addgroup --gid ${GID} ash-group || :
+RUN adduser --disabled-password --disabled-login \
         --uid ${UID} --gid ${GID} \
         ash-user && \
     mkdir -p ${ASHUSER_HOME}/.ssh && \
