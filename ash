@@ -111,6 +111,8 @@ else
 
     # Build the image if the --no-build flag is not set
     if [ "${NO_BUILD}" = "NO" ]; then
+      CONTAINER_UID_OPTION=""
+      CONTAINER_GID_OPTION=""
       if [[ ${CONTAINER_UID_SPECIFIED} = "YES" ]]; then
         CONTAINER_UID_OPTION="--build-arg UID=${CONTAINER_UID}" # add readonly source mount when --output-dir is specified
       fi
