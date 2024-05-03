@@ -135,6 +135,11 @@ COPY ./ash-multi /ash/ash
 COPY ./__version__ /ash/__version__
 
 #
+# Make sure the ash script is executable
+#
+RUN chmod +x /ash/ash
+
+#
 # Flag ASH as local execution mode since we are running in a container already
 #
 ENV _ASH_EXEC_MODE="local"
