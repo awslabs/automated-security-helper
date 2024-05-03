@@ -150,6 +150,9 @@ COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
 COPY ./__version__ /ash/__version__
 
+#
+# Make sure the ash script is executable
+#
 RUN chmod -R +r /ash && chmod +x /ash/ash
 
 #
@@ -178,11 +181,6 @@ USER ${UID}:${GID}
 # Set the HOME environment variable to be the HOME folder for the non-root user
 #
 ENV HOME=${ASHUSER_HOME}
-
-#
-# Make sure the ash script is executable
-#
-RUN chmod +x /ash/ash
 
 #
 # Flag ASH as local execution mode since we are running in a container already
