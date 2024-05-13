@@ -47,7 +47,7 @@ while (("$#")); do
     --debug)
       DEBUG="YES"
       ;;
-    --format|-f)
+    --format)
       shift
       OUTPUT_FORMAT="$1"
       ;;
@@ -59,7 +59,7 @@ while (("$#")); do
       source "${ASH_ROOT_DIR}/ash-multi" --version
       exit 0
       ;;
-    --finch)
+    --finch|-f)
       # Show colored deprecation warning from entrypoint script and exit 1
       source "${ASH_ROOT_DIR}/ash-multi" --finch
       exit 1
@@ -123,6 +123,7 @@ else
         --rm \
         -e ACTUAL_SOURCE_DIR="${SOURCE_DIR}" \
         -e ASH_DEBUG=${DEBUG} \
+        -e ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT} \
         ${MOUNT_SOURCE_DIR} \
         ${MOUNT_OUTPUT_DIR} \
         ${ASH_IMAGE_NAME} \

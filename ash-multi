@@ -308,6 +308,7 @@ FORCED_EXT="false"
 SINGLE_PROCESS="false"
 ASH_DEBUG_ENABLED="false"
 ASH_SCANSET_ARGS=""
+ASH_OUTPUT_FORMAT="text"
 
 #
 # Initialize color escape codes
@@ -356,6 +357,10 @@ while (("$#")); do
   --debug)
     ASH_DEBUG_ENABLED="true"
     ASH_SCANSET_ARGS="${ASH_SCANSET_ARGS} --debug"
+    ;;
+  --format)
+    shift
+    ASH_OUTPUT_FORMAT="$1"
     ;;
   --no-color | -c)
     COLOR_OUTPUT="false"
