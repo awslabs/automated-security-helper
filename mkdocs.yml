@@ -1,0 +1,73 @@
+site_name: ASH - Automated Security Helper
+site_description: 'Your one-stop shop for code security scanning'
+site_url: !ENV DOC_SITE_URL
+repo_name: 'awslabs/automated-security-helper'
+repo_url: 'https://github.com/awslabs/automated-security-helper'
+edit_uri: 'edit/main/site/content'
+copyright: '&copy; 2024, Amazon Web Services, Inc. or its affiliates. All rights reserved.'
+docs_dir: 'docs/content'
+site_dir: 'public'
+use_directory_urls: false # Needed for review app in GitLab to work
+
+nav:
+  - Overview: index.md
+  - Documentation:
+    - Getting started:
+      - Prerequisites: docs/prerequisites.md
+    - Support Matrix: docs/support.md
+  - Tutorials:
+    - Running ASH locally: tutorials/running-ash-locally.md
+    - Running ASH in a CI environment: tutorials/running-ash-in-ci.md
+    - Cloud9 Quick Start: tutorials/cloud9-quickstart.md
+  - Troubleshooting:
+    - Finch Issues: troubleshooting/finch.md
+  - Contributing to ASH: contributing.md
+  - FAQs: faq.md
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  palette:
+    # Palette toggle for light mode
+    - scheme: dracula
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font: false
+  language: en
+  features:
+    - navigation.instant
+    - navigation.indexes
+    - toc.follow
+    - content.tabs.link
+    - search.share
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.code.select
+  icon:
+    logo: aws-logo-light
+    repo: fontawesome/brands/gitlab
+  favicon: assets/images/aws-logo-light.svg
+
+markdown_extensions:
+  - admonition
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+plugins:
+    - search
+    - awesome-pages
