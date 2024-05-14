@@ -20,7 +20,7 @@
 version_check() {
   _ASHTYPE="${VERSION%-*}" # remove the date portion
   _ASHTYPE="${_ASHTYPE#*-}" # remove the version number portion
-  _GITREPO="git@github.com:awslabs/automated-security-helper.git"
+  _GITREPO="https://github.com/awslabs/automated-security-helper.git"
 
   #
   # list the tag values and sort based on "version sort"
