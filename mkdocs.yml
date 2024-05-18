@@ -1,6 +1,6 @@
 site_name: ASH - Automated Security Helper
 site_description: 'Your one-stop shop for code security scanning'
-site_url: !ENV DOC_SITE_URL
+site_url: 'https://awslabs.github.io/automated-security-helper'
 repo_name: 'awslabs/automated-security-helper'
 repo_url: 'https://github.com/awslabs/automated-security-helper'
 edit_uri: 'edit/main/site/content'
