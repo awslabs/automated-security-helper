@@ -1,18 +1,55 @@
-name: Build documentation for Github pages
+name: Build and Deploy Documentation
+
 on:
+  pull_request:
+    paths:
+      - 'docs/content/**'
   push:
     branches:
-      - main
+      - '*'
     paths:
-      - 'docs/content/*'
+      - 'docs/content/**'
+
+env:
+  PYTHON_VERSION: '3.12'
+
 jobs:
-  deploy:
+
+  build:
+    name: Build documentation
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install mkdocs
-      - run: mkdocs gh-deploy --clean
-        
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Build documentation
+      run: mkdocs build --clean
+
+  deploy:
+    name: Deploy documentation
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Deploy documentation
+      run: mkdocs gh-deploy --clean
