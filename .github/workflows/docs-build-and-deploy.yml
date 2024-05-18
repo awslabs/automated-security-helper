@@ -3,12 +3,12 @@ name: Build and Deploy Documentation
 on:
   pull_request:
     paths:
-      - 'docs/content/**'
+      - 'docs/**'
   push:
     branches:
       - '*'
     paths:
-      - 'docs/content/**'
+      - 'docs/**'
 
 env:
   PYTHON_VERSION: '3.12'
