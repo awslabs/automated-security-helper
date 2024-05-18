@@ -30,6 +30,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip' # caching pip dependencies
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -50,6 +51,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip' # caching pip dependencies
 
       - name: Install dependencies
         run: pip install -r requirements.txt
