@@ -1,0 +1,40 @@
+#!/usr/bin/env groovy
+/*
+  This example uses the generic `docker run` mechanism to run the ASH container as
+  an executable. This only depends on an OCI image runner being installed on the Jenkins
+  worker node.
+
+  Due to the bind mounts required to mount the `source-dir` and `output-dir`, both
+  directories need to exist prior to the bind mount being created, which is why the
+  inital `mkdir -p "$(pwd)/${{ env.ASH_OUTPUT_PATH }}"` call is made before `docker run`.
+
+  This example, like the others included in this repository, uses an example image
+  tag for the ASH container. This is intended to be replaced with a valid repository and
+  image tag for the ASH container, whether publicly available or one from a private
+  registry hosted within your internal environment.
+*/
+node {
+  def ASH_IMAGE_REPO = 'myregistry.example.com/automated-security-helper'
+  def ASH_IMAGE_TAG = 'latest'
+  def ASH_OUTPUT_PATH = 'ash_output'
+
+  sh(
+    script: """
+      # Create the output folder
+      mkdir -p "$(pwd)/${ASH_OUTPUT_PATH}"
+
+      # Run the ASH container image
+      docker run \
+        -v="$(pwd):/src" \
+        -v="$(pwd)/${ASH_OUTPUT_PATH}:/out" \
+        ${ASH_IMAGE_REPO}:${ASH_IMAGE_TAG} \
+        ash \
+        --source-dir /src \
+        --output-dir /out
+    """
+  )
+
+  archiveArtifacts(
+    artifacts: "${ASH_OUTPUT_PATH}/**"
+  )
+}
