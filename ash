@@ -114,10 +114,14 @@ else
       CONTAINER_UID_OPTION=""
       CONTAINER_GID_OPTION=""
       if [[ ${CONTAINER_UID_SPECIFIED} = "YES" ]]; then
-        CONTAINER_UID_OPTION="--build-arg UID=${CONTAINER_UID}" # add readonly source mount when --output-dir is specified
+        CONTAINER_UID_OPTION="--build-arg UID=${CONTAINER_UID}" # set the UID build-arg if --container-uid is specified
+      else
+        CONTAINER_UID_OPTION="--build-arg UID=${HOST_UID}" # set the UID build-arg to the caller's UID if --container-uid is not specified
       fi
       if [[ ${CONTAINER_GID_SPECIFIED} = "YES" ]]; then
-        CONTAINER_GID_OPTION="--build-arg GID=${CONTAINER_GID}" # add readonly source mount when --output-dir is specified
+        CONTAINER_GID_OPTION="--build-arg GID=${CONTAINER_GID}" # set the GID build-arg if --container-gid is specified
+      else
+        CONTAINER_GID_OPTION="--build-arg GID=${HOST_GID}" # set the GID build-arg to the caller's GID if --container-uid is not specified
       fi
       echo "Building image ${ASH_IMAGE_NAME} -- this may take a few minutes during the first build..."
       ${RESOLVED_OCI_RUNNER} build \
