@@ -1,0 +1,8 @@
+# Documentation static site generator & deployment tool
+mkdocs>=1.1.2
+# Material theme for mkdocs
+mkdocs-material>=5.4.0
+# awesome-pages plugin for mkdocs
+mkdocs-awesome-pages-plugin==2.8.0
+# Additional mkdocs extensions for prettifying the output
+pymdown-extensions
