@@ -4,6 +4,7 @@ utils/cfn-to-cdk/cdk.out/
 /**/__pycache__
 utils/cfn-to-cdk/cfn_to_cdk/cfn_to_cdk_stack.py
 ash_output
+*.bak
 
 ### macOS ###
 # General
