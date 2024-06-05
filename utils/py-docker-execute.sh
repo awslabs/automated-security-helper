@@ -51,19 +51,29 @@ touch ${REPORT_PATH}
 # Convert any Jupyter notebook files to python
 echo ">>>>>> begin identifyipynb output for Jupyter notebook conversion >>>>>>" >> ${REPORT_PATH}
 bash -C ${_ASH_UTILS_LOCATION}/identifyipynb.sh >>${REPORT_PATH} 2>&1
+echo >> ${REPORT_PATH}	# ensure that we have a newline separating end-of-section
 echo "<<<<<< end identifyipynb output for Jupyter notebook conversion <<<<<<" >> ${REPORT_PATH}
 
 # Run bandit on both the source and output directories
 scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
+
+BANDIT_ARGS="--exclude=\"*venv/*\" --severity-level=all"
+debug_echo "[py] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT}'"
+if [[ "${ASH_OUTPUT_FORMAT}" != "text" ]]; then
+  debug_echo "[py] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
+  BANDIT_ARGS="-f json ${BANDIT_ARGS}"
+fi
+
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
 
   echo ">>>>>> begin bandit result for ${scan_path} >>>>>>" >> ${REPORT_PATH}
-  python3 -m bandit --exclude='*venv/*' --severity-level='all' -r $(pwd) >> ${REPORT_PATH} 2>&1
+  python3 -m bandit ${BANDIT_ARGS} -r $(pwd) >> ${REPORT_PATH} 2>&1
   BRC=$?
   RC=$(bumprc $RC $BRC)
+  echo >> ${REPORT_PATH}	# ensure that we have a newline separating end-of-section
   echo "<<<<<< end bandit result for ${scan_path} <<<<<<" >> ${REPORT_PATH}
 done
 

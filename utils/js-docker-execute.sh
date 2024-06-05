@@ -1,9 +1,5 @@
 #!/bin/bash
 
-debug_echo() {
-  [[ "${ASH_DEBUG:-"NO"}" != "NO" ]] && echo "DEBUG: ${1}"
-}
-
 abs() { # compute the absolute value of the input parameter
   input=$1
   if [[ $input -lt 0 ]]; then
@@ -54,6 +50,14 @@ touch ${REPORT_PATH}
 
 # Run NPM, PNPM, or Yarn audit
 scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
+
+AUDIT_ARGS=""
+debug_echo "[js] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT}'"
+if [[ "${ASH_OUTPUT_FORMAT}" != "text" ]]; then
+  debug_echo "[js] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
+  AUDIT_ARGS="--json ${AUDIT_ARGS}"
+fi
+
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
@@ -82,7 +86,7 @@ do
 
       echo -e "\n>>>>>> Begin ${audit_command} audit output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-      eval "${audit_command} audit >> ${REPORT_PATH} 2>&1"
+      eval "${audit_command} audit ${AUDIT_ARGS} >> ${REPORT_PATH} 2>&1"
 
       NRC=$?
       RC=$(bumprc $RC $NRC)

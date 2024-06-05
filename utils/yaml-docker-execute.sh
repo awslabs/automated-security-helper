@@ -63,6 +63,18 @@ _CURRENT_DIR=${PWD}
 cd ${_ASH_OUTPUT_DIR}
 
 scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
+
+CHECKOV_ARGS=""
+CFNNAG_ARGS="--print-suppression --rule-directory ${_ASH_CFNRULES_LOCATION}"
+debug_echo "[yaml] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT}'"
+if [[ "${ASH_OUTPUT_FORMAT}" != "text" ]]; then
+  debug_echo "[yaml] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
+  CHECKOV_ARGS="--output=json"
+  CFNNAG_ARGS="--output-format json ${CFNNAG_ARGS}"
+else
+  CFNNAG_ARGS="--output-format text ${CFNNAG_ARGS}"
+fi
+
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
@@ -102,7 +114,7 @@ do
       #
       # Run the checkov scan on the file
       #
-      checkov --download-external-modules True -f "${file}" >> ${REPORT_PATH} 2>&1
+      checkov ${CHECKOV_ARGS} --download-external-modules True -f "${file}" >> ${REPORT_PATH} 2>&1
       CHRC=$?
       echo "<<<<<< end checkov result for ${file1} <<<<<<" >> ${REPORT_PATH}
       RC=$(bumprc $RC $CHRC)
@@ -120,7 +132,7 @@ do
       #
       # Run the cfn_nag scan on the file
       #
-      cfn_nag_scan --output-format txt --print-suppression --rule-directory ${_ASH_CFNRULES_LOCATION} --input-path "${file}" >> ${REPORT_PATH} 2>&1
+      cfn_nag_scan ${CFNNAG_ARGS} --input-path "${file}" >> ${REPORT_PATH} 2>&1
       CNRC=$?
       echo "<<<<<< end cfn_nag_scan result for ${file1} <<<<<<" >> ${REPORT_PATH}
       RC=$(bumprc $RC $CNRC)

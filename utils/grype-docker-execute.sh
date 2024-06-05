@@ -50,19 +50,31 @@ touch ${REPORT_PATH}
 
 scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
 
+GRYPE_ARGS="-f medium --exclude=**/*-converted.py --exclude=**/*_report_result.txt"
+SYFT_ARGS="--exclude=**/*-converted.py --exclude=**/*_report_result.txt"
+SEMGREP_ARGS="--legacy --error --config=auto --exclude=\"*-converted.py,*_report_result.txt\""
+debug_echo "[grype] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT}'"
+if [[ "${ASH_OUTPUT_FORMAT}" != "text" ]]; then
+  debug_echo "[grype] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
+  GRYPE_ARGS="-o json ${GRYPE_ARGS}"
+  SYFT_ARGS="-o json ${SYFT_ARGS}"
+  SEMGREP_ARGS="--json ${SEMGREP_ARGS}"
+fi
+
 #
 # Run Grype
 #
-debug_echo "Starting all scanners within the Grype scanner tool set"
+debug_echo "[grype] Starting all scanners within the Grype scanner tool set"
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
-  debug_echo "Starting Grype scan of ${scan_path}"
+  debug_echo "[grype] Starting Grype scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Grype output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-  grype -f medium dir:${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
+  debug_echo "[grype] grype ${GRYPE_ARGS} dir:${scan_path}"
+  grype ${GRYPE_ARGS} dir:${scan_path} >> ${REPORT_PATH} 2>&1
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
@@ -77,17 +89,17 @@ for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
-  debug_echo "Starting Syft scan of ${scan_path}"
+  debug_echo "[grype] Starting Syft scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Syft output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-  debug_echo "syft ${scan_path} --exclude=\"**/*-converted.py\" --exclude=\"**/*_report_result.txt\""
-  syft ${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
+  debug_echo "[grype] syft ${SYFT_ARGS} ${scan_path}"
+  syft ${SYFT_ARGS} ${scan_path} >> ${REPORT_PATH} 2>&1
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
   echo -e "\n<<<<<< End Syft output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
-  debug_echo "Finished Syft scan of ${scan_path}"
+  debug_echo "[grype] Finished Syft scan of ${scan_path}"
 done
 
 #
@@ -97,20 +109,21 @@ for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
-  debug_echo "Starting Semgrep scan of ${scan_path}"
+  debug_echo "[grype] Starting Semgrep scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Semgrep output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-  semgrep --legacy --error --config=auto $scan_path --exclude="*-converted.py,*_report_result.txt" >> ${REPORT_PATH} 2>&1
+  debug_echo "[grype] semgrep ${SEMGREP_ARGS} $scan_path"
+  semgrep ${SEMGREP_ARGS} $scan_path >> ${REPORT_PATH} 2>&1
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
   echo -e "\n<<<<<< End Semgrep output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
-  debug_echo "Finished Semgrep scan of ${scan_path}"
+  debug_echo "[grype] Finished Semgrep scan of ${scan_path}"
 done
 
 # cd back to the original SOURCE_DIR in case path changed during scan
 cd ${_ASH_SOURCE_DIR}
 
-debug_echo "Finished all scanners within the Grype scanner tool set"
+debug_echo "[grype] Finished all scanners within the Grype scanner tool set"
 exit $RC
