@@ -1,0 +1,45 @@
+#
+# This example uses the Container Jobs mechanism in Azure Pipelines to specify a
+# container image to run the steps of the job within, compared to needing to explicitly
+# run the container image and mount the source and output directories.
+#
+# This method allows your script step to call `ash` directly, as it is provided in the
+# PATH of the ASH container image. `ash` will also handle creating the output-dir for
+# you to make things easy, but you can always explicitly call `mkdir -p ash_output`
+# from the script before calling `ash` as well, if preferred.
+#
+# This example, like the others included in this repository, uses an example image
+# tag for the ASH container. This is intended to be replaced with a valid repository and
+# image tag for the ASH container, whether publicly available or one from a private
+# registry hosted within your internal environment.
+#
+# More info on Container Jobs in Azure Pipelines:
+#      https://learn.microsoft.com/en-us/azure/devops/pipelines/process/container-phases
+#
+trigger:
+  branches:
+    include: [ '*' ]
+
+variables:
+  ASH_IMAGE_REPO: myregistry.example.com/automated-security-helper
+  ASH_IMAGE_TAG: latest
+  ASH_OUTPUT_PATH: ash_output
+
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+  - job: scanInContainerJob
+    container: ${{ variables.ASH_IMAGE_REPO }}:${{ variables.ASH_IMAGE_TAG }}
+    displayName: Run ASH in Container Job
+    steps:
+      - checkout: self
+      - script: |
+          ash \
+            --source-dir "$(pwd)" \
+            --output-dir "${{ variables.ASH_OUTPUT_PATH }}"
+        name: runash
+        displayName: Run ASH scan
+      - publish: ${{ variables.ASH_OUTPUT_PATH }}
+        artifact: ${{ variables.ASH_OUTPUT_PATH }}
+        condition: succeededOrFailed()

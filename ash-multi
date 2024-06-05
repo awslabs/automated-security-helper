@@ -202,13 +202,13 @@ run_security_check() {
         SCANNER_SCRIPT="cdk-docker-execute.sh"
       fi
       FULL_SCANNER_SCRIPT_PATH="${UTILS_LOCATION}/${SCANNER_SCRIPT}"
-      echo -e "${LPURPLE}Running ${SCANNER_SCRIPT} ...${NC}"
+      echo -e "${LPURPLE}Found ${CYAN}one or more${LPURPLE} of: [ ${RED}""${ITEMS_TO_SCAN[*]}""${LPURPLE} ] items in source dir,${NC} ${CYAN}running${GREEN} ${SCANNER_SCRIPT} ...${NC}"
 
       cd ${SOURCE_DIR}
       # Invoke the resolved scanner script
       bash -C ${FULL_SCANNER_SCRIPT_PATH}
     else
-      echo -e "${LPURPLE}Found one or more of: [ ${RED}""${ITEMS_TO_SCAN[*]}""${LPURPLE} ] items in source dir,${NC} ${GREEN}running ${DOCKERFILE_TO_EXECUTE} ...${NC}"
+      echo -e "${LPURPLE}Found ${CYAN}one or more${LPURPLE} of: [ ${RED}""${ITEMS_TO_SCAN[*]}""${LPURPLE} ] items in source dir,${NC} ${CYAN}running${GREEN} ${DOCKERFILE_TO_EXECUTE} ...${NC}"
       ${OCI_RUNNER} build -t "${RUNTIME_CONTAINER_NAME}" -f "${DOCKERFILE_LOCATION}"/"${DOCKERFILE_TO_EXECUTE}" ${DOCKER_EXTRA_ARGS} "${SOURCE_DIR}" > /dev/null
       set +e # the scan will fail the command if it finds any finding. we don't want it to stop our script execution
       ${OCI_RUNNER} run --name "${RUNTIME_CONTAINER_NAME}" -v "${CFNRULES_LOCATION}":/cfnrules:ro -v "${UTILS_LOCATION}":/utils:ro -v "${SOURCE_DIR}":/src:ro -v "${OUTPUT_DIR}":/out:rw "${RUNTIME_CONTAINER_NAME}"
