@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "asharp"
+version = "0.1.0"
+description = ""
+authors = ["Nate Ferrell <nateferl@amazon.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+
+[tool.poetry.scripts]
+asharp = 'asharp.asharp:main'
+
+[tool.poetry.dependencies]
+python = "^3.10"
+regex = "^2024.5.15"
+pydantic = "^2.7.3"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

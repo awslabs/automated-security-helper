@@ -616,6 +616,11 @@ then
 
   RESOLVED_OUTPUT_DIR=${ACTUAL_OUTPUT_DIR:-${OUTPUT_DIR}}
   echo -e "${GREEN}\nYour final report can be found here:${NC} ${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}"
+
+  if [[ "${ASH_OUTPUT_FORMAT}" != "text" ]]; then
+    echo -e "${GREEN}Converting${NC} ${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}${GREEN} to ASHARP JSON model${NC}"
+    # Add ASHARP call
+  fi
 else
   echo -e "${GREEN}No extensions were found, nothing to scan at the moment.${NC}"
 fi
