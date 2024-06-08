@@ -4,7 +4,29 @@
 # Enable BASE_IMAGE as an overrideable ARG for proxy cache + private registry support
 #
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} as poetry-reqs
+
+ENV PYTHONDONTWRITEBYTECODE 1
+
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y \
+        python3-venv && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install -U pip poetry
+
+WORKDIR /src
+
+COPY pyproject.toml pyproject.toml
+COPY poetry.lock poetry.lock
+COPY README.md README.md
+COPY asharp/ asharp/
+
+RUN poetry build
+
+
+FROM ${BASE_IMAGE} as ash
 
 #
 # Setting timezone in the container to UTC to ensure logged times are universal.
@@ -133,6 +155,9 @@ COPY ./utils/*.* /ash/utils/
 COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
 COPY ./__version__ /ash/__version__
+
+COPY --from=poetry-reqs /src/dist/*.whl .
+RUN python3 -m pip install *.whl && rm *.whl
 
 #
 # Make sure the ash script is executable

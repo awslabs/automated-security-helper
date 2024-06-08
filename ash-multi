@@ -619,7 +619,7 @@ then
 
   if [[ "${ASH_OUTPUT_FORMAT}" != "text" ]]; then
     echo -e "${GREEN}Converting${NC} ${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}${GREEN} to ASHARP JSON model${NC}"
-    # Add ASHARP call
+    asharp --input "${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}" --output "${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}.json"
   fi
 else
   echo -e "${GREEN}No extensions were found, nothing to scan at the moment.${NC}"
