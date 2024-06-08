@@ -3,7 +3,7 @@
 # asharp.py / Automated Security Helper - Aggregated Report Parser
 # A tool to parse, ingest, and output ASH aggregated reports.
 
-version = 'asharp.py/0.123'
+version = 'asharp.py/0.1.0'
 
 import datetime
 import regex as re
