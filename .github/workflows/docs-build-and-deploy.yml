@@ -2,17 +2,11 @@ name: Build and Deploy Documentation
 
 on:
   pull_request:
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "requirements.txt"
+    branches:
+      - main
   push:
     branches:
-      - "*"
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "requirements.txt"
+      - main
 
 env:
   PYTHON_VERSION: "3.12"
