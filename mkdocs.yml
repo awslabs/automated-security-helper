@@ -7,7 +7,7 @@ edit_uri: 'edit/main/site/content'
 copyright: '&copy; 2024, Amazon Web Services, Inc. or its affiliates. All rights reserved.'
 docs_dir: 'docs/content'
 site_dir: 'public'
-use_directory_urls: true
+# use_directory_urls: true
 
 nav:
   - Overview: index.md
