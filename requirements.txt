@@ -6,4 +6,3 @@ mkdocs-material>=5.4.0
 mkdocs-awesome-pages-plugin==2.8.0
 # Additional mkdocs extensions for prettifying the output
 pymdown-extensions
-# Fixing line endings
