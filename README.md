@@ -2,7 +2,6 @@
 
 - [ASH; The *A*utomated *S*ecurity *H*elper](#ash-the-automated-security-helper)
 - [Description](#description)
-  - [ASH change advisory](#ash-change-advisory)
 - [Supported frameworks](#supported-frameworks)
 - [Prerequisites](#prerequisites)
 - [Getting Started](#getting-started)
@@ -14,6 +13,7 @@
 - [Synopsis](#synopsis)
 - [FAQ](#faq)
 - [Feedback](#feedback)
+- [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
 
@@ -27,10 +27,6 @@ by providing a fast and easy tool to conduct  preliminary security check as earl
 - It is not a replacement of a human review nor standards enforced by your team/customer.
 - It uses light, open source tools to maintain its flexibility and ability to run from anywhere.
 - ASH is cloning and running different open-source tools, such as: git-secrets, bandit, Semgrep, Grype, Syft, nbconvert, npm-audit, checkov, cdk-nag and cfn-nag. Please review the tools [LICENSE](license) before usage.
-
-### ASH change advisory
-
-We are currently working on a re-architecture of ASH targeting a single-container architecture as well as documentation to go along with it.
 
 ## Supported frameworks
 
