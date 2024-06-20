@@ -1,5 +1,7 @@
 #!/usr/bin/python3
-#
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # asharp.py / Automated Security Helper - Aggregated Report Parser
 # A tool to parse, ingest, and output ASH aggregated reports.
 
