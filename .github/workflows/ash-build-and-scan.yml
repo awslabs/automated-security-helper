@@ -69,7 +69,7 @@ jobs:
           set +e
 
           # Run ASH against itself
-          ./ash --source-dir $(pwd) --output-dir ash_output --debug | \
+          ./ash --source-dir $(pwd) --output-dir ash_output --container-uid 1001 --container-gid 123 --debug | \
               tee ash_stdout.txt
 
           # cat the output contents to build the summary markdown

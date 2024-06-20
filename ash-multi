@@ -97,7 +97,7 @@ map_extensions_and_files() {
     git config --global --add safe.directory "${_ASH_SOURCE_DIR}" >/dev/null 2>&1
     git config --global --add safe.directory "${_ASH_RUN_DIR}" >/dev/null 2>&1
     if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-      git clone "${_ASH_SOURCE_DIR}" "${_ASH_RUN_DIR}"
+      git clone "${_ASH_SOURCE_DIR}" "${_ASH_RUN_DIR}" >/dev/null 2>&1
       echo "Repository cloned successfully."
       _ASH_SOURCE_DIR="${_ASH_RUN_DIR}"
     else
@@ -437,6 +437,11 @@ export _ASH_RUN_DIR="${_ASH_RUN_DIR:-$(mktemp -d -p /tmp ash-run-scan.XXXX)}"
 # Print out the current ASH version to start execution output
 #
 echo -e "\n${LPURPLE}ASH version ${GREEN}$VERSION${NC}\n"
+
+#
+# Print out the uid/gid values in effect
+#
+echo -e "\n${LPURPLE}ASH running with UID/GID: ${CYAN}$(id -u):$(id -g)${NC}\n"
 
 # nosemgrep
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space

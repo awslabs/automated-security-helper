@@ -9,6 +9,8 @@ export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:local"}
 SOURCE_DIR=""
 OUTPUT_DIR=""
 OUTPUT_DIR_SPECIFIED="NO"
+CONTAINER_UID_SPECIFIED="NO"
+CONTAINER_GID_SPEICIFED="NO"
 DOCKER_EXTRA_ARGS=""
 ASH_ARGS=""
 NO_BUILD="NO"
@@ -36,6 +38,16 @@ while (("$#")); do
     --oci-runner | -o)
       shift
       OCI_RUNNER="$1"
+      ;;
+    --container-uid | -u)
+      shift
+      CONTAINER_UID_SPECIFIED="YES"
+      CONTAINER_UID="$1"
+      ;;
+    --container-gid | -u)
+      shift
+      CONTAINER_GID_SPECIFIED="YES"
+      CONTAINER_GID="$1"
       ;;
     --no-build)
       NO_BUILD="YES"
@@ -77,6 +89,12 @@ if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]]; then
   OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
 fi
 
+#
+# Gather the UID and GID of the caller
+#
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
+
 # Resolve the OCI_RUNNER
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
 
@@ -93,13 +111,26 @@ else
 
     # Build the image if the --no-build flag is not set
     if [ "${NO_BUILD}" = "NO" ]; then
+      CONTAINER_UID_OPTION=""
+      CONTAINER_GID_OPTION=""
+      if [[ ${CONTAINER_UID_SPECIFIED} = "YES" ]]; then
+        CONTAINER_UID_OPTION="--build-arg UID=${CONTAINER_UID}" # set the UID build-arg if --container-uid is specified
+      else
+        CONTAINER_UID_OPTION="--build-arg UID=${HOST_UID}" # set the UID build-arg to the caller's UID if --container-uid is not specified
+      fi
+      if [[ ${CONTAINER_GID_SPECIFIED} = "YES" ]]; then
+        CONTAINER_GID_OPTION="--build-arg GID=${CONTAINER_GID}" # set the GID build-arg if --container-gid is specified
+      else
+        CONTAINER_GID_OPTION="--build-arg GID=${HOST_GID}" # set the GID build-arg to the caller's GID if --container-uid is not specified
+      fi
       echo "Building image ${ASH_IMAGE_NAME} -- this may take a few minutes during the first build..."
       ${RESOLVED_OCI_RUNNER} build \
+        ${CONTAINER_UID_OPTION} \
+        ${CONTAINER_GID_OPTION} \
         --tag ${ASH_IMAGE_NAME} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
-      eval $build_cmd
     fi
 
     # Run the image if the --no-run flag is not set
