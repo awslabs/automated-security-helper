@@ -214,17 +214,17 @@ SYNOPSIS:
 OPTIONS:
         -v | --version           Prints version number.
 
-        -p | --preserve-report   Add timestamp to the final report file to avoid overriding it after multiple executions.
+        -p | --preserve-report   Add timestamp to the final report file to avoid overwriting it after multiple executions.
         --source-dir             Path to the directory containing the code/files you wish to scan. Defaults to $(pwd)
         --output-dir             Path to the directory that will contain the report of the scans. Defaults to $(pwd)
         --ext | -extension       Force a file extension to scan. Defaults to identify files automatically.
         --force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date.
+        --no-cleanup             Don't cleanup the work directory where temp reports are stored during scans.
+        --debug                  Print ASH debug log information where applicable.
         -q | --quiet             Don't print verbose text about the build process.
         -c | --no-color          Don't print colorized output.
+        -s | --single-process    Run ash scanners serially rather than as separate, parallel sub-processes.
         -o | --oci-runner        Use the specified OCI runner instead of docker to run the containerized tools.
-        -f | --finch             Use finch instead of docker to run the containerized tools.
-                                 WARNING: The '--finch|-f' option is deprecated and will be removed in a future
-                                          release. Please switch to using '--oci-runner finch' in scripts instead.
 ```
 
 ## FAQ

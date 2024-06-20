@@ -24,6 +24,9 @@ node {
 
       # Run the ASH container image
       export PATH="$(pwd)/../automated-security-helper:$PATH"
+      ash \
+        --source-dir $(pwd) \
+        --output-dir $(pwd)/${ASH_OUTPUT_PATH}
     """
   )
 
