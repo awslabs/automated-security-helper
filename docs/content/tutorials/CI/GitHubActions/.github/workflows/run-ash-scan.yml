@@ -1,0 +1,45 @@
+#
+# This example clones the ASH repo and the repo to be scanned, then runs `ash`
+# against the repo.
+#
+# This will build the ASH container image, run the scan using the built image,
+# and publish the scan results as a build artifact.
+#
+name: ASH SAST Scan
+
+on:
+  push:
+    branches: [ '**' ]
+
+env:
+  ASH_OUTPUT_PATH: ash_output
+
+jobs:
+  containerjob:
+    name: Run ASH Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ASH
+        uses: actions/checkout@v4
+        with:
+          path: ./automated-security-helper
+          repository: awslabs/automated-security-helper
+          ref: v1.3.3
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+        with:
+          path: ./repo
+      - name: Run ASH scan against repo
+        run: |
+          export PATH="$(pwd)/automated-security-helper:$PATH"
+
+          ash \
+            --source-dir "$(pwd)/repo" \
+            --output-dir "${{ env.ASH_OUTPUT_PATH }}"
+
+      - name: Publish ${{ env.ASH_OUTPUT_PATH }}
+        uses: actions/upload-artifact@v3
+        if: success() || failure()
+        with:
+          name: ${{ env.ASH_OUTPUT_PATH }}
+          path: ${{ env.ASH_OUTPUT_PATH }}

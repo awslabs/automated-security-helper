@@ -1,36 +1,32 @@
-#!/usr/bin/env groovy
 /*
-  This example uses the generic `docker run` mechanism to run the ASH container as
-  an executable. This only depends on an OCI image runner being installed on the Jenkins
-  worker node.
-
-  Due to the bind mounts required to mount the `source-dir` and `output-dir`, both
-  directories need to exist prior to the bind mount being created, which is why the
-  inital `mkdir -p "$(pwd)/${{ env.ASH_OUTPUT_PATH }}"` call is made before `docker run`.
-
-  This example, like the others included in this repository, uses an example image
-  tag for the ASH container. This is intended to be replaced with a valid repository and
-  image tag for the ASH container, whether publicly available or one from a private
-  registry hosted within your internal environment.
+#
+# This example clones the ASH repo and the repo to be scanned, then runs `ash`
+# against the repo.
+#
+# This will build the ASH container image, run the scan using the built image,
+# and publish the scan results as a build artifact.
+#
 */
 node {
-  def ASH_IMAGE_REPO = 'myregistry.example.com/automated-security-helper'
-  def ASH_IMAGE_TAG = 'latest'
-  def ASH_OUTPUT_PATH = 'ash_output'
+  def ASH_VERSION = 'v1.3.3'
+
+  git(
+    branch: ASH_VERSION,
+    url: 'https://github.com/awslabs/automated-security-helper.git',
+  )
 
   sh(
     script: """
-      # Create the output folder
-      mkdir -p "$(pwd)/${ASH_OUTPUT_PATH}"
+      # Clone the ASH repository from GitHub at the desired version
+      git clone https://github.com/awslabs/automated-security-helper.git \
+        ../automated-security-helper \
+        --branch "${ASH_VERSION}"
 
       # Run the ASH container image
-      docker run \
-        -v="$(pwd):/src" \
-        -v="$(pwd)/${ASH_OUTPUT_PATH}:/out" \
-        ${ASH_IMAGE_REPO}:${ASH_IMAGE_TAG} \
-        ash \
-        --source-dir /src \
-        --output-dir /out
+      export PATH="$(pwd)/../automated-security-helper:$PATH"
+      ash \
+        --source-dir $(pwd) \
+        --output-dir $(pwd)/${ASH_OUTPUT_PATH}
     """
   )
 

@@ -1,0 +1,33 @@
+#
+# This example clones the ASH repo and the repo to be scanned, then runs `ash`
+# against the repo.
+#
+# This will build the ASH container image, run the scan using the built image,
+# and publish the scan results as a build artifact.
+#
+variables:
+  ASH_VERSION:
+    description: The version tag of the awslabs/automated-security-helper repo to clone
+    value: v1.3.3
+
+Run ASH Scan:
+  stage: .pre
+  when: always
+  script:
+    # Clone the ASH repository from GitHub at the desired version
+    - |-
+      git clone https://github.com/awslabs/automated-security-helper.git \
+        ../automated-security-helper \
+        --branch "$ASH_VERSION"
+    # Add the ASH repo path to $PATH so `ash` is available in PATH
+    - export PATH="$(pwd)/../automated-security-helper:$PATH"
+    # Run `ash`.
+    # This will build the ASH container first, then run the scan once built.
+    - |-
+      ash \
+        --source-dir "$(pwd)" \
+        --output-dir "$(pwd)/ash_output"
+  artifacts:
+    paths:
+      - ash_output
+    when: always
