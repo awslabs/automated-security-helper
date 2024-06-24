@@ -21,7 +21,7 @@ WORKDIR /src
 COPY pyproject.toml pyproject.toml
 COPY poetry.lock poetry.lock
 COPY README.md README.md
-COPY asharp/ asharp/
+COPY src/ src/
 
 RUN poetry build
 
