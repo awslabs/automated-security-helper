@@ -23,9 +23,10 @@
 ### What's Changed
 
 - Adds `--format` parameter to `ash`/`ash-multi` scripts to enable additional output integrations, beginning with ASHARP (Automated Security Helper Aggregated Report Parser) as the intermediary data model to enable subsequent conversion from there.
-- Adds `asharp` Python code as a module of the same name, including poetry.lock and pyproject.toml files to support.
-- Adds pre-stage build of `asharp` module to Dockerfile
+- Adds `automated_security_helper` Python code as a module of the same name from within new `src` directory, including poetry.lock and pyproject.toml files to support. This module includes the `asharp` script (CLI tool) that enabled programmatic parsing of the aggregated_results content in conjunction with the JSON output changes.
+- Adds pre-stage build of `automated_security_helper` module to Dockerfile
 - Adds support to handle when `--format` is a value other than the current default of `text` so scanners switch output to programmatically parseable output formats and `asharp` is called to parse the `aggregated_results.txt` file into `aggregated_results.txt.json`.
+- Moved source of version string truth into `pyproject.toml` for all projects, removed `__version__` file to coincide with this.
 
 **Full Changelog**: https://github.com/awslabs/automated-security-helper/compare/v1.3.3...v1.4.0
 
