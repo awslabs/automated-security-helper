@@ -154,7 +154,7 @@ COPY ./utils/cfn-to-cdk /ash/utils/cfn-to-cdk/
 COPY ./utils/*.* /ash/utils/
 COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
-COPY ./__version__ /ash/__version__
+COPY ./pyproject.toml /ash/pyproject.toml
 
 COPY --from=poetry-reqs /src/dist/*.whl .
 RUN python3 -m pip install *.whl && rm *.whl
