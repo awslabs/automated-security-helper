@@ -4,7 +4,7 @@
 name = "automated-security-helper"
 version = "1.4.0"
 description = ""
-authors = ["Nate Ferrell <nateferl@amazon.com>"]
+authors = ["Nate Ferrell <nateferl@amazon.com>", "Nathan Bates <nbb@amazon.com>"]
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/awslabs/automated-security-helper"
