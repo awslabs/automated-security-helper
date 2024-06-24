@@ -53,8 +53,8 @@ scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
 GRYPE_ARGS="-f medium --exclude=**/*-converted.py --exclude=**/*_report_result.txt"
 SYFT_ARGS="--exclude=**/*-converted.py --exclude=**/*_report_result.txt"
 SEMGREP_ARGS="--legacy --error --config=auto --exclude=\"*-converted.py,*_report_result.txt\""
-debug_echo "[grype] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT}'"
-if [[ "${ASH_OUTPUT_FORMAT}" != "text" ]]; then
+debug_echo "[grype] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT:-text}'"
+if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   debug_echo "[grype] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
   GRYPE_ARGS="-o json ${GRYPE_ARGS}"
   SYFT_ARGS="-o json ${SYFT_ARGS}"

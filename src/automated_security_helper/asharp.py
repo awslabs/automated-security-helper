@@ -5,14 +5,12 @@
 # asharp.py / Automated Security Helper - Aggregated Report Parser
 # A tool to parse, ingest, and output ASH aggregated reports.
 
-version = 'asharp.py/0.1.0'
-
 import datetime
 import regex as re
 import argparse
 import json
 from json import JSONEncoder
-#import jq
+from automated_security_helper import __version__
 
 # default filenames for input and output
 DEF_INFILE='aggregated_results.txt'
@@ -31,7 +29,7 @@ args = cliparser.parse_args()
 
 # simply output version and exit
 if args.version:
-    print(version)
+    print(__version__)
     exit(0)
 
 # data parsing/collection from ASH aggregated report

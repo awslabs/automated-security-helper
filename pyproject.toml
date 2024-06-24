@@ -1,15 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 [tool.poetry]
-name = "asharp"
-version = "0.1.0"
+name = "automated-security-helper"
+version = "1.4.0"
 description = ""
 authors = ["Nate Ferrell <nateferl@amazon.com>"]
 license = "Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/awslabs/automated-security-helper"
 
 [tool.poetry.scripts]
-asharp = 'asharp.asharp:main'
+asharp = 'automated_security_helper.asharp:main'
 
 [tool.poetry.dependencies]
 python = "^3.10"

@@ -58,8 +58,8 @@ echo "<<<<<< end identifyipynb output for Jupyter notebook conversion <<<<<<" >>
 scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
 
 BANDIT_ARGS="--exclude=\"*venv/*\" --severity-level=all"
-debug_echo "[py] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT}'"
-if [[ "${ASH_OUTPUT_FORMAT}" != "text" ]]; then
+debug_echo "[py] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT:-text}'"
+if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   debug_echo "[py] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
   BANDIT_ARGS="-f json ${BANDIT_ARGS}"
 fi

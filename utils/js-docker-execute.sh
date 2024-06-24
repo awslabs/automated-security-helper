@@ -52,8 +52,8 @@ touch ${REPORT_PATH}
 scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
 
 AUDIT_ARGS=""
-debug_echo "[js] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT}'"
-if [[ "${ASH_OUTPUT_FORMAT}" != "text" ]]; then
+debug_echo "[js] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT:-text}'"
+if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   debug_echo "[js] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
   AUDIT_ARGS="--json ${AUDIT_ARGS}"
 fi
