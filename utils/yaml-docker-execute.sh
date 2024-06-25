@@ -72,7 +72,7 @@ if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   CHECKOV_ARGS="--output=json"
   CFNNAG_ARGS="--output-format json ${CFNNAG_ARGS}"
 else
-  CFNNAG_ARGS="--output-format text ${CFNNAG_ARGS}"
+  CFNNAG_ARGS="--output-format txt ${CFNNAG_ARGS}"
 fi
 
 for i in "${!scan_paths[@]}";

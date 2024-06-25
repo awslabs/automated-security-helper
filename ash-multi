@@ -281,6 +281,7 @@ set -e
 START_TIME=$(date +%s)
 VERSION=v$(cat "$(dirname "${BASH_SOURCE[0]}")"/"pyproject.toml" | sed -n 's/^version = "\(.*\)"$/\1/p' | head -n 1)
 OCI_RUNNER="docker"
+ASH_OUTPUT_FORMAT=${ASH_OUTPUT_FORMAT:-text}
 
 # Overrides default OCI Runner used by ASH
 [ ! -z "$ASH_OCI_RUNNER" ] && OCI_RUNNER="$ASH_OCI_RUNNER"
