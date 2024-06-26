@@ -39,7 +39,8 @@ version_check() {
 
   if [ -n "${_REPO_VERSION}" ]; then # found a version
     if [ "${_REPO_VERSION}" != "${_SCRIPT_VERSION}" ]; then
-      echo -e "${YELLOW}ASH version ${_SCRIPT_VERSION} is different from repository version ${_REPO_VERSION} ... consider upgrading${NC}"
+      echo -e "${YELLOW}ASH version ${_SCRIPT_VERSION} is different from the latest tagged version in the repository: ${_REPO_VERSION} -- consider upgrading!${NC}"
+      echo -e "${YELLOW}View changes: https://github.com/awslabs/automated-security-helper/compare/${_REPO_VERSION}...${_SCRIPT_VERSION}${NC}"
     else
       # the ":" below allows the else/fi clause to remain, even if there is no operation listed
       : #   echo "repo version is ${_REPO_VERSION}, current version is ${_SCRIPT_VERSION}"
@@ -57,6 +58,7 @@ print_usage() {
   echo -e "\t-p | --preserve-report   Add timestamp to the final report file to avoid overwriting it after multiple executions."
   echo -e "\t--source-dir             Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)"
   echo -e "\t--output-dir             Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
+  echo -e "\t--format                 Output format of the aggregated_results file segments. Defaults to text. Use json instead to enable parseable output."
   echo -e "\t--ext | -extension       Force a file extension to scan. Defaults to identify files automatically."
   echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
   echo -e "\t--no-cleanup             Don't cleanup the work directory where temp reports are stored during scans."
@@ -277,8 +279,9 @@ run_security_check() {
 
 set -e
 START_TIME=$(date +%s)
-VERSION=$(cat "$(dirname "${BASH_SOURCE[0]}")"/"__version__")
+VERSION=v$(cat "$(dirname "${BASH_SOURCE[0]}")"/"pyproject.toml" | sed -n 's/^version = "\(.*\)"$/\1/p' | head -n 1)
 OCI_RUNNER="docker"
+ASH_OUTPUT_FORMAT=${ASH_OUTPUT_FORMAT:-text}
 
 # Overrides default OCI Runner used by ASH
 [ ! -z "$ASH_OCI_RUNNER" ] && OCI_RUNNER="$ASH_OCI_RUNNER"
@@ -356,6 +359,10 @@ while (("$#")); do
   --debug)
     ASH_DEBUG_ENABLED="true"
     ASH_SCANSET_ARGS="${ASH_SCANSET_ARGS} --debug"
+    ;;
+  --format)
+    shift
+    ASH_OUTPUT_FORMAT="$1"
     ;;
   --no-color | -c)
     COLOR_OUTPUT="false"
@@ -611,6 +618,11 @@ then
 
   RESOLVED_OUTPUT_DIR=${ACTUAL_OUTPUT_DIR:-${OUTPUT_DIR}}
   echo -e "${GREEN}\nYour final report can be found here:${NC} ${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}"
+
+  if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
+    echo -e "${GREEN}Converting${NC} ${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}${GREEN} to ASHARP JSON model${NC}"
+    asharp --input "${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}" --output "${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}.json"
+  fi
 else
   echo -e "${GREEN}No extensions were found, nothing to scan at the moment.${NC}"
 fi
