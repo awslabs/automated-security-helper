@@ -84,6 +84,12 @@ if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]]; then
   OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
 fi
 
+#
+# Gather the UID and GID of the caller
+#
+# HOST_UID=$(id -u)
+# HOST_GID=$(id -g)
+
 # Resolve the OCI_RUNNER
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
 
@@ -106,7 +112,9 @@ else
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
-      eval $build_cmd
+        # --build-arg UID="${HOST_UID}" \
+        # --build-arg GID="${HOST_GID}" \
+      # eval $build_cmd
     fi
 
     # Run the image if the --no-run flag is not set
