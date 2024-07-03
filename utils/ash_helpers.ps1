@@ -127,8 +127,7 @@ function Invoke-ASH {
                     '-t'
                     $AshImageName
                     "'$ashRoot'"
-                    $($buildArgs -join ' '
-                    '-q')
+                    $($buildArgs -join ' ')
                 ) -join ' '
                 $runCmd = @(
                     $RESOLVED_OCI_RUNNER
