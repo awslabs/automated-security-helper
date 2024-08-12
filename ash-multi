@@ -54,19 +54,21 @@ print_usage() {
   echo "SYNOPSIS:"
   echo -e "\t$(basename $0) [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir"
   echo "OPTIONS:"
-  echo -e "\t-v | --version           Prints version number.\n"
-  echo -e "\t-p | --preserve-report   Add timestamp to the final report file to avoid overwriting it after multiple executions."
-  echo -e "\t--source-dir             Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)"
-  echo -e "\t--output-dir             Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
-  echo -e "\t--format                 Output format of the aggregated_results file segments. Defaults to text. Use json instead to enable parseable output."
-  echo -e "\t--ext | -extension       Force a file extension to scan. Defaults to identify files automatically."
-  echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
-  echo -e "\t--no-cleanup             Don't cleanup the work directory where temp reports are stored during scans."
-  echo -e "\t--debug                  Print ASH debug log information where applicable."
-  echo -e "\t-q | --quiet             Don't print verbose text about the build process."
-  echo -e "\t-c | --no-color          Don't print colorized output."
-  echo -e "\t-s | --single-process    Run ash scanners serially rather than as separate, parallel sub-processes."
-  echo -e "\t-o | --oci-runner        Use the specified OCI runner instead of docker to run the containerized tools.\n"
+  echo -e "\t-v | --version                 Prints version number.\n"
+  echo -e "\t-p | --preserve-report         Add timestamp to the final report file to avoid overwriting it after multiple executions."
+  echo -e "\t--source-dir                   Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)"
+  echo -e "\t--output-dir                   Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
+  echo -e "\t--format                       Output format of the aggregated_results file segments. Defaults to text. Use json instead to enable parseable output."
+  echo -e "\t--ext | -extension             Force a file extension to scan. Defaults to identify files automatically."
+  echo -e "\t--offline                      Build ASH for offline execution. Defaults to false."
+  echo -e "\t--offline-semgrep-rulesets     Specify Semgrep rulesets for use in ASH offline mode. Defaults to 'p/ci'."
+  echo -e "\t--force                        Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
+  echo -e "\t--no-cleanup                   Don't cleanup the work directory where temp reports are stored during scans."
+  echo -e "\t--debug                        Print ASH debug log information where applicable."
+  echo -e "\t-q | --quiet                   Don't print verbose text about the build process."
+  echo -e "\t-c | --no-color                Don't print colorized output."
+  echo -e "\t-s | --single-process          Run ash scanners serially rather than as separate, parallel sub-processes."
+  echo -e "\t-o | --oci-runner              Use the specified OCI runner instead of docker to run the containerized tools.\n"
   echo -e "For more information please visit https://github.com/awslabs/automated-security-helper"
 }
 
@@ -340,6 +342,13 @@ while (("$#")); do
     shift
     FORCED_EXT="$1"
     ;;
+  --offline)
+    OFFLINE="YES"
+    ;;
+  --offline-semgrep-rulesets)
+    shift
+    OFFLINE_SEMGREP_RULESETS="$1"
+  ;;
   --force)
     DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} --no-cache"
     ;;
@@ -439,6 +448,8 @@ export _ASH_ROOT_DIR="${_ASH_ROOT_DIR:-${ASH_ROOT_DIR}}"
 export _ASH_UTILS_LOCATION="${_ASH_UTILS_LOCATION:-${UTILS_LOCATION}}"
 export _ASH_CFNRULES_LOCATION="${_ASH_CFNRULES_LOCATION:-${CFNRULES_LOCATION}}"
 export _ASH_RUN_DIR="${_ASH_RUN_DIR:-$(mktemp -d -p /tmp ash-run-scan.XXXX)}"
+export _ASH_OFFLINE=${_ASH_OFFLINE:-${OFFLINE}}
+export _ASH_OFFLINE_SEMGREP_RULESETS=${_ASH_OFFLINE_SEMGREP_RULESETS:-${OFFLINE_SEMGREP_RULESETS}}
 
 #
 # Print out the current ASH version to start execution output

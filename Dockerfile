@@ -4,6 +4,8 @@
 # Enable BASE_IMAGE as an overrideable ARG for proxy cache + private registry support
 #
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
+ARG OFFLINE="NO"
+ARG OFFLINE_SEMGREP_RULESETS=""
 FROM ${BASE_IMAGE} as poetry-reqs
 
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -28,6 +30,8 @@ RUN poetry build
 
 FROM ${BASE_IMAGE} as ash
 
+ENV OFFLINE="${OFFLINE}"
+ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
 #
 # Setting timezone in the container to UTC to ensure logged times are universal.
 #
@@ -111,6 +115,9 @@ RUN echo "gem: --no-document" >> /etc/gemrc && \
 #
 # Grype/Syft/Semgrep
 #
+ENV GRYPE_DB_CACHE_DIR="${HOME}/.grype"
+ENV SEMGREP_RULES_CACHE_DIR="${HOME}/.semgrep"
+
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | \
     sh -s -- -b /usr/local/bin
 
@@ -118,6 +125,13 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh |
     sh -s -- -b /usr/local/bin
 
 RUN python3 -m pip install semgrep
+
+RUN if [[ "$OFFLINE" == "YES" ]]; then \
+        grype db update && \
+        mkdir -p ${HOME}/.semgrep && \
+        for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
+    fi
+
 
 # Setting PYTHONPATH so Jinja2 can resolve correctly
 # IMPORTANT: This is predicated on the Python version that is installed!

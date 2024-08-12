@@ -30,6 +30,31 @@ _ASH_OUTPUT_DIR=${_ASH_OUTPUT_DIR:-/out}
 _ASH_UTILS_LOCATION=${_ASH_UTILS_LOCATION:-/utils}
 _ASH_CFNRULES_LOCATION=${_ASH_CFNRULES_LOCATION:-/cfnrules}
 _ASH_RUN_DIR=${_ASH_RUN_DIR:-/run/scan/src}
+_ASH_OFFLINE=${_ASH_OFFLINE:-NO}
+_ASH_OFFLINE_DATA_SEMGREP_LOCATION=${_ASH_OFFLINE_DATA_SEMGREP_LOCATION:-${HOME}/.semgrep}
+_ASH_OFFLINE_DATA_GRYPE_LOCATION=${_ASH_OFFLINE_DATA_GRYPE_LOCATION:-${HOME}/.grype}
+
+# Empty Semgrep data dir case
+if [[ $_ASH_OFFLINE == "YES" && -z "$(ls -A "$_ASH_OFFLINE_DATA_SEMGREP_LOCATION")" ]]; then
+  debug_echo "[offline] Semgrep rulesets not found but offline mode enabled, erroring"
+  exit 1
+# Empty Grype data dir case
+elif [[ $_ASH_OFFLINE == "YES" && -z "$(ls -A "$_ASH_OFFLINE_DATA_GRYPE_LOCATION")" ]]; then
+  debug_echo "[offline] Grype rulesets not found but offline mode enabled, erroring"
+  exit 1
+# Valid offline config case
+elif [[ $_ASH_OFFLINE == "YES" ]]; then
+  SEMGREP_RULES="$(echo "$_ASH_OFFLINE_DATA_SEMGREP_LOCATION"/*)"
+  SEMGREP_METRICS="off"
+  debug_echo "[offline] Semgrep rulesets are ${SEMGREP_RULES} with metrics off"
+
+  GRYPE_DB_CACHE_DIR="${_ASH_OFFLINE_DATA_GRYPE_LOCATION}"
+  GRYPE_DB_VALIDATE_AGE=false
+  GRYPE_DB_AUTO_UPDATE=false
+  GRYPE_CHECK_FOR_APP_UPDATE=false
+  debug_echo "[offline] Grype DB cache dir is ${GRYPE_DB_CACHE_DIR} and validation/auto update is off"
+fi
+
 
 source ${_ASH_UTILS_LOCATION}/common.sh
 

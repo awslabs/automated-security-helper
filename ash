@@ -17,6 +17,8 @@ ASH_ARGS=""
 NO_BUILD="NO"
 NO_RUN="NO"
 DEBUG="NO"
+OFFLINE="NO"
+OFFLINE_SEMGREP_RULESETS="p/ci"
 # Parse arguments
 while (("$#")); do
   case $1 in
@@ -28,6 +30,13 @@ while (("$#")); do
       shift
       OUTPUT_DIR="$1"
       OUTPUT_DIR_SPECIFIED="YES"
+      ;;
+    --offline)
+      OFFLINE="YES"
+      ;;
+    --offline-semgrep-rulesets)
+      shift
+      OFFLINE_SEMGREP_RULESETS="$1"
       ;;
     --force)
       DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} --no-cache"
@@ -104,6 +113,8 @@ else
       ${RESOLVED_OCI_RUNNER} build \
         --tag ${ASH_IMAGE_NAME} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
+        --build-arg OFFLINE="${OFFLINE}" \
+        --build-arg OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}" \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
       eval $build_cmd
