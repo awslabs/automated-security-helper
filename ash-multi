@@ -156,6 +156,10 @@ search_extension() {
 # Validate the input and set default values
 # shellcheck disable=SC2120
 validate_input() {
+  if [[ ${OFFLINE} != "${OFFLINE_AT_BUILD_TIME}" ]]; then
+    echo -e "${RED}Please ensure --offline is specified at build time to be able to run in offline mode.${NC}"
+    exit 1
+  fi
   if [[ -z ${PRESERVE_FILE} ]]; then AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results.txt"; else AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results-$(date +%s).txt"; fi
   if [[ -z ${FORCE_REBUILD} ]]; then FORCE_REBUILD="false"; fi
   if [[ -z ${SOURCE_DIR} ]]; then SOURCE_DIR="$(pwd)"; else SOURCE_DIR=$(cd "${SOURCE_DIR}"; pwd); fi # Transform any relative path to absolute

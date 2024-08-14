@@ -12,7 +12,8 @@ SOURCE_DIR=""
 OUTPUT_DIR=""
 OUTPUT_DIR_SPECIFIED="NO"
 OUTPUT_FORMAT="text"
-DOCKER_EXTRA_ARGS=""
+DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS:-}"
+DOCKER_RUN_EXTRA_ARGS=""
 ASH_ARGS=""
 NO_BUILD="NO"
 NO_RUN="NO"
@@ -37,6 +38,7 @@ while (("$#")); do
     --offline-semgrep-rulesets)
       shift
       OFFLINE_SEMGREP_RULESETS="$1"
+      OFFLINE="YES"
       ;;
     --force)
       DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} --no-cache"
@@ -93,6 +95,11 @@ if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]]; then
   OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
 fi
 
+# Resolve any offline mode flags
+if [[ "${OFFLINE}" == "YES" ]]; then
+  DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} --network=none"
+fi
+
 # Resolve the OCI_RUNNER
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
 
@@ -132,18 +139,19 @@ else
         OUTPUT_DIR_OPTION="--output-dir /out"
       fi
       echo "Running ASH scan using built image..."
-      ${RESOLVED_OCI_RUNNER} run \
-        --rm \
-        -e ACTUAL_SOURCE_DIR="${SOURCE_DIR}" \
-        -e ASH_DEBUG=${DEBUG} \
-        -e ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT} \
-        ${MOUNT_SOURCE_DIR} \
-        ${MOUNT_OUTPUT_DIR} \
-        ${ASH_IMAGE_NAME} \
-          ash \
-            --source-dir /src  \
-            ${OUTPUT_DIR_OPTION}  \
-            $ASH_ARGS
+      eval ${RESOLVED_OCI_RUNNER} run \
+          --rm \
+          -e ACTUAL_SOURCE_DIR="${SOURCE_DIR}" \
+          -e ASH_DEBUG=${DEBUG} \
+          -e ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT} \
+          ${MOUNT_SOURCE_DIR} \
+          ${MOUNT_OUTPUT_DIR} \
+          ${DOCKER_RUN_EXTRA_ARGS} \
+          ${ASH_IMAGE_NAME} \
+            ash \
+              --source-dir /src  \
+              ${OUTPUT_DIR_OPTION}  \
+              $ASH_ARGS
       RC=$?
     fi
     if [[ "${DEBUG}" = "YES" ]]; then
