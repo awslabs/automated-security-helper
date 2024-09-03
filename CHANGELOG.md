@@ -1,14 +1,17 @@
 # Automated Security Helper - CHANGELOG
 
-- [v1.4.1](#v141)
+- [v1.5.0](#v150)
     - [What's Changed](#whats-changed)
-- [v1.4.0](#v140)
+    - [New Contributors](#new-contributors)
+- [v1.4.1](#v141)
     - [What's Changed](#whats-changed-1)
-- [v1.3.3](#v133)
+- [v1.4.0](#v140)
     - [What's Changed](#whats-changed-2)
-- [v1.3.2](#v132)
+- [v1.3.3](#v133)
     - [What's Changed](#whats-changed-3)
-- [New Contributors](#new-contributors)
+- [v1.3.2](#v132)
+    - [What's Changed](#whats-changed-4)
+    - [New Contributors](#new-contributors-1)
 - [1.3.0 - 2024-04-17](#130---2024-04-17)
     - [Features](#features)
     - [Fixes](#fixes)
@@ -19,6 +22,18 @@
 - [1.0.8-e-03May2023](#108-e-03may2023)
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
+
+
+## v1.5.0
+
+### What's Changed
+
+- Introduced support for offline execution via `--offline`
+
+### New Contributors
+* @awsmadi made their first contribution in https://github.com/awslabs/automated-security-helper/pull/104
+
+**Full Changelog**: https://github.com/awslabs/automated-security-helper/compare/v1.4.1...v1.5.0
 
 ## v1.4.1
 
@@ -61,7 +76,7 @@
 * fix(ash): use /tmp rather than tmpfs for scratch area by @climbertjh2 in https://github.com/awslabs/automated-security-helper/pull/73
 * Fix CTRL-C cancelling by @awsntheule in https://github.com/awslabs/automated-security-helper/pull/71
 
-## New Contributors
+### New Contributors
 * @awsntheule made their first contribution in https://github.com/awslabs/automated-security-helper/pull/64
 
 **Full Changelog**: https://github.com/awslabs/automated-security-helper/compare/1.2.0-e-06Mar2024...v1.3.2
