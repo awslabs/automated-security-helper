@@ -31,7 +31,37 @@ _ASH_UTILS_LOCATION=${_ASH_UTILS_LOCATION:-/utils}
 _ASH_CFNRULES_LOCATION=${_ASH_CFNRULES_LOCATION:-/cfnrules}
 _ASH_RUN_DIR=${_ASH_RUN_DIR:-/run/scan/src}
 
+if [[ "${OFFLINE}" == "YES" && ( -z "${SEMGREP_RULES_CACHE_DIR}" || -z "${GRYPE_DB_CACHE_DIR}" ) ]]; then
+  echo "Invalid cache state for Semgrep or Grype, please rebuild with --offline."
+  exit 100
+fi
+
 source ${_ASH_UTILS_LOCATION}/common.sh
+
+
+# Empty Semgrep data dir case
+if [[ $OFFLINE == "YES" && -z "$(ls -A "$SEMGREP_RULES_CACHE_DIR")" ]]; then
+  debug_echo "[offline] Semgrep rulesets not found but offline mode enabled, erroring"
+  exit 1
+# Empty Grype data dir case
+elif [[ $OFFLINE == "YES" && -z "$(ls -A "$GRYPE_DB_CACHE_DIR")" ]]; then
+  debug_echo "[offline] Grype rulesets not found but offline mode enabled, erroring"
+  exit 1
+# Valid offline config case
+elif [[ $OFFLINE == "YES" ]]; then
+  export SEMGREP_RULES="$(echo "$SEMGREP_RULES_CACHE_DIR"/*)"
+  SEMGREP_ARGS="--metrics=off"
+  debug_echo "[offline] Semgrep rulesets are ${SEMGREP_RULES} with metrics off"
+
+  export GRYPE_DB_VALIDATE_AGE=false
+  export GRYPE_DB_AUTO_UPDATE=false
+  export GRYPE_CHECK_FOR_APP_UPDATE=false
+  debug_echo "[offline] Grype DB cache dir is ${GRYPE_DB_CACHE_DIR} and validation/auto update is off"
+# Online (default) mode
+else
+  SEMGREP_ARGS="--config=auto"
+fi
+
 
 #
 # Allow the container to run Git commands against a repo in ${_ASH_SOURCE_DIR}
@@ -52,7 +82,7 @@ scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
 
 GRYPE_ARGS="-f medium --exclude=**/*-converted.py --exclude=**/*_report_result.txt"
 SYFT_ARGS="--exclude=**/*-converted.py --exclude=**/*_report_result.txt"
-SEMGREP_ARGS="--legacy --error --config=auto --exclude=\"*-converted.py,*_report_result.txt\""
+SEMGREP_ARGS="${SEMGREP_ARGS} --legacy --error --exclude=\"*-converted.py,*_report_result.txt\""
 debug_echo "[grype] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT:-text}'"
 if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   debug_echo "[grype] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"

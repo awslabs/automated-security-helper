@@ -218,6 +218,8 @@ OPTIONS:
         --source-dir             Path to the directory containing the code/files you wish to scan. Defaults to $(pwd)
         --output-dir             Path to the directory that will contain the report of the scans. Defaults to $(pwd)
         --ext | -extension       Force a file extension to scan. Defaults to identify files automatically.
+        --offline                      Build ASH for offline execution. Defaults to false.
+        --offline-semgrep-rulesets     Specify Semgrep rulesets for use in ASH offline mode. Defaults to 'p/ci'.
         --force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date.
         --no-cleanup             Don't cleanup the work directory where temp reports are stored during scans.
         --debug                  Print ASH debug log information where applicable.
@@ -255,6 +257,10 @@ OPTIONS:
 - Q: `ash` reports there are not files to scan or you see a message stating `warning: You appear to have cloned an empty repository.`
 
   A: Ensure you're running ASH inside the folder you intend to scan or using the `--source-dir` parameter. If the folder where the files reside is part of a git repository, ensure the files are added (committed) before running ASH.
+
+- Q: How to run `ash` in an environment without internet connectivity/with an airgap?
+
+  A: From your environment which does have internet connectivity, build the ASH image using `--offline` and `--offline-semgrep-rulesets` to specify what resources to package into the image.  Environment variable `$ASH_IMAGE_NAME` controls the name of the image.  After building, push to your container repository of choice which will be available within the airgapped environment.  When you go to execute ASH in your offline environment, passing `--no-build` to `ash` alongside `--offline` and `--offline-semgrep-rulesets` will use your offline image and skip the build.  Specify `$ASH_IMAGE_NAME` to override ASH's container image to the previously-built image available within your airgapped environment. 
 
 ## Feedback
 
