@@ -53,7 +53,7 @@ theme:
     - content.code.select
   icon:
     logo: aws-logo-light
-    repo: fontawesome/brands/gitlab
+    repo: fontawesome/brands/github
   favicon: assets/images/aws-logo-light.svg
 
 markdown_extensions:
