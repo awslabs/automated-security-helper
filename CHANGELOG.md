@@ -32,7 +32,6 @@
 
 - Fix SHELL directive in Dockerfile
 - Fix small items in Mkdocs config
-- Add initial ASHARP test data JSON
 
 **Full Changelog**: https://github.com/awslabs/automated-security-helper/compare/v1.5.0...v1.5.1
 
