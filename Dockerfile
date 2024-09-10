@@ -29,7 +29,7 @@ RUN poetry build
 
 
 FROM ${BASE_IMAGE} as ash
-SHELL ["bash", "-c"]
+SHELL ["/bin/bash", "-c"]
 ARG OFFLINE="NO"
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
 

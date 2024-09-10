@@ -1,16 +1,18 @@
 # Automated Security Helper - CHANGELOG
 
-- [v1.5.0](#v150)
+- [v1.5.1](#v151)
     - [What's Changed](#whats-changed)
+- [v1.5.0](#v150)
+    - [What's Changed](#whats-changed-1)
     - [New Contributors](#new-contributors)
 - [v1.4.1](#v141)
-    - [What's Changed](#whats-changed-1)
-- [v1.4.0](#v140)
     - [What's Changed](#whats-changed-2)
-- [v1.3.3](#v133)
+- [v1.4.0](#v140)
     - [What's Changed](#whats-changed-3)
-- [v1.3.2](#v132)
+- [v1.3.3](#v133)
     - [What's Changed](#whats-changed-4)
+- [v1.3.2](#v132)
+    - [What's Changed](#whats-changed-5)
     - [New Contributors](#new-contributors-1)
 - [1.3.0 - 2024-04-17](#130---2024-04-17)
     - [Features](#features)
@@ -23,6 +25,15 @@
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
+
+## v1.5.1
+
+### What's Changed
+
+- Fix SHELL directive in Dockerfile
+- Fix small items in Mkdocs config
+
+**Full Changelog**: https://github.com/awslabs/automated-security-helper/compare/v1.5.0...v1.5.1
 
 ## v1.5.0
 
