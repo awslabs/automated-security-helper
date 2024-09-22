@@ -165,6 +165,7 @@ validate_input() {
       echo -e "${RED}Please ensure you have pulled in the latest ASH changes and rebuilt your container since v1.5.2."
     elif [[ "$(($(date +%s)-"${BUILD_DATE_EPOCH}"))" -gt "604800" ]]; then # Greater than 7 days
       echo -e "${RED}Your build is over 7 days old.  Please rebuild your ASH offline container."
+      exit 1
     fi
   fi
   if [[ -z ${PRESERVE_FILE} ]]; then AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results.txt"; else AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results-$(date +%s).txt"; fi
