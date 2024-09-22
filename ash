@@ -122,6 +122,7 @@ else
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         --build-arg OFFLINE="${OFFLINE}" \
         --build-arg OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}" \
+        --build-arg BUILD_DATE="$(date +%s)" \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
       eval $build_cmd
