@@ -125,54 +125,55 @@ if [ "${#cfn_files[@]}" -gt 0 ]; then
   echo "found ${#cfn_files[@]} files to scan.  Starting scans ..." >> ${REPORT_PATH}
 
   for file in "${cfn_files[@]}"; do
-
     cfn_filename=`basename $file`
-    echo ">>>>>> begin cdk-nag result for ${cfn_filename} >>>>>>" >> ${REPORT_PATH}
-    #
-    # Generate the CDK application inserting the CloudFormation template
-    #
-    # /usr/bin/python3 cfn_to_cdk/template_generator.py $file
-    #
-    # Use CDK to synthesize the CDK application,
-    # running CDK-NAG on the inserted CloudFormation template
-    #
-    debug_echo "Importing CloudFormation template file ${file} to apply CDK Nag rules against it"
-    npx cdk synth --context fileName="${file}" --quiet 2>> ${REPORT_PATH}
-    CRC=$?
-
-    RC=$(bumprc $RC $CRC)
-
-    #
-    # Check to see if there is output to copy, if so, create a folder and copy the files
-    #
-    fileName="*.template.json"
-    # echo "checking for ${fileName}" >> ${REPORT_PATH}
-    # find -type f -name ${fileName} >> ${REPORT_PATH} 2>&1
-    # ls ${fileName} >> ${REPORT_PATH} 2>&1
-    fileExists=$(find ${CDK_WORK_DIR}/cdk.out -type f -name ${fileName} | wc -l)
-    # echo "fileExists = ${fileExists}" >> ${REPORT_PATH}
-    reportsName="AwsSolutions-*-NagReport.csv"
-    # echo "checking for ${reportsName}" >> ${REPORT_PATH}
-    # find -type f -name ${reportsName} >> ${REPORT_PATH} 2>&1
-    # ls ${reportsName} >> ${REPORT_PATH} 2>&1
-    reportsExist=$(find ${CDK_WORK_DIR}/cdk.out -type f -name ${reportsName} | wc -l)
-    # echo "reportsExist = ${reportsExist}" >> ${REPORT_PATH}
-    if [ "${fileExists}" -gt 0 -o "${reportsExist}" -gt 0 ]; then
-      mkdir -p ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results
-
-      echo "Writing CDK-NAG reports for ${cfn_filename}" >> ${REPORT_PATH}
+    if [[ "${file1}" != "aggregated_results.txt.json" ]]; then
+      echo ">>>>>> begin cdk-nag result for ${cfn_filename} >>>>>>" >> ${REPORT_PATH}
       #
-      # Copy and then remove these files to avoid permission setting errors when running in a single container
+      # Generate the CDK application inserting the CloudFormation template
       #
-      cp ${CDK_WORK_DIR}/cdk.out/*.template.json ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/ >/dev/null 2>&1
-      rm ${CDK_WORK_DIR}/cdk.out/*.template.json >/dev/null 2>&1
-      cp ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/ >/dev/null 2>&1
-      rm ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv >/dev/null 2>&1
-    else
-      echo "No CDK-NAG reports generated for ${cfn_filename}" >> ${REPORT_PATH}
+      # /usr/bin/python3 cfn_to_cdk/template_generator.py $file
+      #
+      # Use CDK to synthesize the CDK application,
+      # running CDK-NAG on the inserted CloudFormation template
+      #
+      debug_echo "Importing CloudFormation template file ${file} to apply CDK Nag rules against it"
+      npx cdk synth --context fileName="${file}" --quiet 2>> ${REPORT_PATH}
+      CRC=$?
+
+      RC=$(bumprc $RC $CRC)
+
+      #
+      # Check to see if there is output to copy, if so, create a folder and copy the files
+      #
+      fileName="*.template.json"
+      # echo "checking for ${fileName}" >> ${REPORT_PATH}
+      # find -type f -name ${fileName} >> ${REPORT_PATH} 2>&1
+      # ls ${fileName} >> ${REPORT_PATH} 2>&1
+      fileExists=$(find ${CDK_WORK_DIR}/cdk.out -type f -name ${fileName} | wc -l)
+      # echo "fileExists = ${fileExists}" >> ${REPORT_PATH}
+      reportsName="AwsSolutions-*-NagReport.csv"
+      # echo "checking for ${reportsName}" >> ${REPORT_PATH}
+      # find -type f -name ${reportsName} >> ${REPORT_PATH} 2>&1
+      # ls ${reportsName} >> ${REPORT_PATH} 2>&1
+      reportsExist=$(find ${CDK_WORK_DIR}/cdk.out -type f -name ${reportsName} | wc -l)
+      # echo "reportsExist = ${reportsExist}" >> ${REPORT_PATH}
+      if [ "${fileExists}" -gt 0 -o "${reportsExist}" -gt 0 ]; then
+        mkdir -p ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results
+
+        echo "Writing CDK-NAG reports for ${cfn_filename}" >> ${REPORT_PATH}
+        #
+        # Copy and then remove these files to avoid permission setting errors when running in a single container
+        #
+        cp ${CDK_WORK_DIR}/cdk.out/*.template.json ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/ >/dev/null 2>&1
+        rm ${CDK_WORK_DIR}/cdk.out/*.template.json >/dev/null 2>&1
+        cp ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/ >/dev/null 2>&1
+        rm ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv >/dev/null 2>&1
+      else
+        echo "No CDK-NAG reports generated for ${cfn_filename}" >> ${REPORT_PATH}
+      fi
+
+      echo "<<<<<< end cdk-nag result for ${cfn_filename} <<<<<<" >> ${REPORT_PATH}
     fi
-
-    echo "<<<<<< end cdk-nag result for ${cfn_filename} <<<<<<" >> ${REPORT_PATH}
   done
 else
   echo "found ${#cfn_files[@]} files to scan.  Skipping scans." >> ${REPORT_PATH}

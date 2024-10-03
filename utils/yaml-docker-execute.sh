@@ -85,7 +85,7 @@ do
   #
   # find only files that appear to contain CloudFormation templates
   #
-  cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' . --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output} --exclude=ash) 2>/dev/null))
+  cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' . --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output,ash_output} --exclude=ash) 2>/dev/null))
 
   #
   # For checkov scanning, add in files that are GitLab CI files or container build files
@@ -93,6 +93,7 @@ do
   checkov_files=($(readlink -f $(find . \( -iname ".gitlab-ci.yml" \
                                           -or -iname "*Dockerfile*" \
                                           -or -iname "*.tf" \
+                                          -or -iname "aggregated_results.txt.json" \
                                           -or -iname "*.tf.json" \) \
                                         -not -path "./.git/*" \
                                         -not -path "./.github/*" \
@@ -128,14 +129,16 @@ do
 
     for file in "${cfn_files[@]}"; do
       file1=`basename $file`
-      echo ">>>>>> begin cfn_nag_scan result for ${file1} >>>>>>" >> ${REPORT_PATH}
-      #
-      # Run the cfn_nag scan on the file
-      #
-      cfn_nag_scan ${CFNNAG_ARGS} --input-path "${file}" >> ${REPORT_PATH} 2>&1
-      CNRC=$?
-      echo "<<<<<< end cfn_nag_scan result for ${file1} <<<<<<" >> ${REPORT_PATH}
-      RC=$(bumprc $RC $CNRC)
+      if [[ "${file1}" != "aggregated_results.txt.json" ]]; then
+        echo ">>>>>> begin cfn_nag_scan result for ${file1} >>>>>>" >> ${REPORT_PATH}
+        #
+        # Run the cfn_nag scan on the file
+        #
+        cfn_nag_scan ${CFNNAG_ARGS} --input-path "${file}" >> ${REPORT_PATH} 2>&1
+        CNRC=$?
+        echo "<<<<<< end cfn_nag_scan result for ${file1} <<<<<<" >> ${REPORT_PATH}
+        RC=$(bumprc $RC $CNRC)
+      fi
     done
   else
     echo "found ${#cfn_files[@]} files to scan.  Skipping cfn_nag scans." >> ${REPORT_PATH}

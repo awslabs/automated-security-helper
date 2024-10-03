@@ -5,7 +5,10 @@
 # asharp.py / Automated Security Helper - Aggregated Report Parser
 # A tool to parse, ingest, and output ASH aggregated reports.
 
+import csv
 import datetime
+from glob import glob
+from pathlib import Path
 import regex as re
 import argparse
 import json
@@ -123,46 +126,55 @@ def ExtractSecondarySections(data):
     return result
 
 # need to parse cdk provider here and addModel accordingly
-def parseCdkProvider(data):
+def parseCdkProvider(data, aggfile):
 
-    # rx for Warnings and Errors
-    results = re.findall(r'''(?xmsi)
+    # # rx for Warnings and Errors
+    # results = re.findall(r'''(?xmsi)
 
-        # total pita - this will not extract the 2nd pattern, even if swapped
-        # works well enough for now.  will revisit later.
+    #     # total pita - this will not extract the 2nd pattern, even if swapped
+    #     # works well enough for now.  will revisit later.
 
-        ^[\n]*   # just in case..
-        (
-        \[(Warning|Error)\s+at\s+([^\]]+)\]\s+
-            (
-                ([^:]+):\s+.+?                  # error refernce id
-                |
-                [^:]+:\s+'(Aws.+?)'\s+.+?       # warning reference id
-            )
-        [\n]+
-        )
-    ''', data)
+    #     ^[\n]*   # just in case..
+    #     (
+    #     \[(Warning|Error)\s+at\s+([^\]]+)\]\s+
+    #         (
+    #             ([^:]+):\s+.+?                  # error refernce id
+    #             |
+    #             [^:]+:\s+'(Aws.+?)'\s+.+?       # warning reference id
+    #         )
+    #     [\n]+
+    #     )
+    # ''', data)
 
-    cdks = []
-    for result in results:
-        o = {
-                'raw': result[0],
-                'severity': result[1],
-                'ref': result[2],
-                'id': result[4],
-                'result': result[3]
-        }
+    cdk_nag_output_dir = Path(aggfile).parent.joinpath('ash_cf2cdk_output')
+    results = []
+    debug(f'cdk_nag_output_dir = {cdk_nag_output_dir}')
+    for cdk_csv in glob(f"{cdk_nag_output_dir.as_posix()}/**/*NagReport.csv"):
+        debug(f'cdk_csv = {cdk_csv}')
+        cdk_csv = Path(cdk_csv)
+        with open(cdk_csv, 'r') as f:
+            findings = csv.DictReader(f, skipinitialspace=True)
+            for finding in findings:
+                fmtd = {
+                    "raw": finding,
+                    "file": cdk_csv.name,
+                    "rule_id": finding["Rule ID"],
+                    "resource_id": finding["Resource ID"],
+                    "compliance": finding["Compliance"],
+                    "exception_reason": finding["Exception Reason"],
+                    "rule_level": finding["Rule Level"],
+                    "rule_info": finding["Rule Info"],
+                }
+                results.append(json.dumps(fmtd, cls=DateTimeEncoder, indent=0))
 
-        #debug(json.dumps(o, cls=DateTimeEncoder, indent=4))
-        cdks.append(json.dumps(o, cls=DateTimeEncoder, indent=0))
-
-    if not len(cdks):
+    if not len(results):
         return
 
-    return cdks
+    return results
+
 
 # parse out ASH report sections
-def ParseAshSections(aggfile):
+def ParseAshSections(aggfile, aggregate_file_path):
 
     # find, separate, and extract each providers output section
     sections = ExtractSectionsFromData(aggfile)
@@ -217,7 +229,7 @@ def ParseAshSections(aggfile):
 
             # if this is cdk provider, then we need to manually extract & generate json
             if provider in ['cdk']:
-                gmodel = parseCdkProvider(subsection[2])
+                gmodel = parseCdkProvider(subsection[2], aggregate_file_path)
             else:
                 gmodel = ExtractJsonFromData(subsection[2])
 
@@ -273,11 +285,12 @@ def main():
     # read the ASH aggregated report as text blob
     if not args.input:
         debug("!! provide the path to the ASH aggregate report", 255)
-    with open(args.input, 'r') as file:
+    aggregate_file_path = args.input
+    with open(aggregate_file_path, 'r') as file:
         aggfile = file.read()
 
     # parse ASH report sections
-    ParseAshSections(aggfile)
+    ParseAshSections(aggfile, aggregate_file_path)
 
     # if output file specified then write to file
     if args.output:

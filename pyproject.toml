@@ -15,7 +15,7 @@ asharp = 'automated_security_helper.asharp:main'
 [tool.poetry.dependencies]
 python = "^3.10"
 regex = "^2024.5.15"
-pydantic = "^2.7.3"
+pydantic = "^2.9.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.4.2"
