@@ -3,10 +3,22 @@
 #
 # Enable BASE_IMAGE as an overrideable ARG for proxy cache + private registry support
 #
-ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
+ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12.0-bullseye
+
+ARG CERT_FILE
+
+FROM ${BASE_IMAGE} as cert-patched
+
+COPY ${CERT_FILE} /usr/local/share/ca-certificates
+RUN update-ca-certificates
+
+#RUN apt-get update && \
+#    apt-get upgrade -y && \
+#    apt-get install -y ruby-dev && \
+#    echo "Rubygems location: $(gem which rubygems)"
 
 
-FROM ${BASE_IMAGE} as poetry-reqs
+FROM cert-patched as poetry-reqs
 
 ENV PYTHONDONTWRITEBYTECODE 1
 
@@ -28,8 +40,9 @@ COPY src/ src/
 RUN poetry build
 
 
-FROM ${BASE_IMAGE} as ash
+FROM cert-patched as ash
 SHELL ["/bin/bash", "-c"]
+ARG CERT_FILE
 ARG OFFLINE="NO"
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
 
@@ -69,6 +82,9 @@ RUN apt-get update && \
       ruby-dev \
       tree && \
     rm -rf /var/lib/apt/lists/*
+
+COPY ${CERT_FILE} /usr/lib/ruby/vendor_ruby/rubygems/ssl_certs/rubygems.org/self_signed_cert.pem
+
 
 #
 # Install nodejs@18 using latest recommended method
@@ -161,7 +177,9 @@ RUN mkdir -p /src && \
 #
 # Update NPM to latest
 COPY ./utils/cdk-nag-scan /ash/utils/cdk-nag-scan/
-RUN npm install -g npm pnpm yarn && \
+RUN npm config set strict-ssl false && \
+    npm config set cafile /usr/local/share/ca-certificates/${CERT_FILE} && \
+    npm install -g npm pnpm yarn && \
     cd /ash/utils/cdk-nag-scan && \
     npm install --quiet
 

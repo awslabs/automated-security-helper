@@ -20,12 +20,26 @@ NO_RUN="NO"
 DEBUG="NO"
 OFFLINE="NO"
 OFFLINE_SEMGREP_RULESETS="p/ci"
+
+# self signed certificate variable
+CERT_FILE=""
+
 # Parse arguments
 while (("$#")); do
   case $1 in
     --source-dir)
       shift
       SOURCE_DIR="$1"
+      ;;
+    --cert-file)
+      shift
+      mkdir -p $ASH_ROOT_DIR/certs
+      inp_cert_file="$1"
+      inp_cert_file_ext=${inp_cert_file##*.}
+      inp_cert_file_basename=$(basename $inp_cert_file $inp_cert_file_ext)
+      cert_file_new_name="${inp_cert_file_basename}crt"
+      cp $1 $ASH_ROOT_DIR/certs/$cert_file_new_name
+      CERT_FILE="certs/$cert_file_new_name"
       ;;
     --output-dir)
       shift
@@ -122,6 +136,8 @@ else
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         --build-arg OFFLINE="${OFFLINE}" \
         --build-arg OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}" \
+        --build-arg CERT_FILE="${CERT_FILE}" \
+        --progress=plain --no-cache \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
       eval $build_cmd

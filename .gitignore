@@ -258,3 +258,6 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# Temp certificate directory
+certs
