@@ -101,7 +101,9 @@ do
                                         -not -path "./.external_modules/*") 2>/dev/null))
   checkov_files=( ${checkov_files[@]} ${cfn_files[@]} )
 
-  if [ "${#checkov_files[@]}" -gt 0 ]; then
+  if [[ $OFFLINE == "YES" ]]; then
+    debug_echo "[yaml] Checkov scans are not available in offline mode"
+  elif [ "${#checkov_files[@]}" -gt 0 ]; then
     echo "found ${#checkov_files[@]} files to scan.  Starting checkov scans ..." >> ${REPORT_PATH}
     ##HACK Overcomes the String length limitation default of 10000 characters so false negatives cannot occur from large resource policies.
     ##Vendor Issue: https://github.com/bridgecrewio/checkov/issues/5627
