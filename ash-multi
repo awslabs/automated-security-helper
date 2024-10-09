@@ -163,7 +163,7 @@ validate_input() {
   if [[ ${OFFLINE} == "YES" ]]; then
     if [[ ${BUILD_DATE_EPOCH} == -1 ]]; then
       echo -e "${RED}Please ensure you have pulled in the latest ASH changes and rebuilt your container since v1.5.2."
-    elif [[ "$(($(date +%s)-"${BUILD_DATE_EPOCH}"))" -gt "604800" ]]; then # Greater than 7 days
+    elif [[ "$(($(date +%s)-"${BUILD_DATE_EPOCH}"))" -gt "${BUILD_EXPIRATION_SECONDS:-604800}" ]]; then # Greater than 7 days or specified as BUILD_EXPIRATION_SECONDS env var
       echo -e "${RED}Your build is over 7 days old.  Please rebuild your ASH offline container."
       exit 1
     fi
