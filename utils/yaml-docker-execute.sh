@@ -69,10 +69,17 @@ CFNNAG_ARGS="--print-suppression --rule-directory ${_ASH_CFNRULES_LOCATION}"
 debug_echo "[yaml] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT:-text}'"
 if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   debug_echo "[yaml] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
-  CHECKOV_ARGS="--output=json"
+  CHECKOV_ARGS="${CHECKOV_ARGS} --output=json"
   CFNNAG_ARGS="--output-format json ${CFNNAG_ARGS}"
 else
   CFNNAG_ARGS="--output-format txt ${CFNNAG_ARGS}"
+fi
+
+if [[ $OFFLINE == "YES" ]]; then
+  debug_echo "[yaml] Adding --skip-download to prevent connection to Prisma Cloud during offline mode for Checkov scans"
+  CHECKOV_ARGS="${CHECKOV_ARGS} --skip-download"
+else
+  CHECKOV_ARGS="${CHECKOV_ARGS} --download-external-modules True"
 fi
 
 for i in "${!scan_paths[@]}";
@@ -114,7 +121,9 @@ do
       #
       # Run the checkov scan on the file
       #
-      checkov ${CHECKOV_ARGS} --download-external-modules True -f "${file}" >> ${REPORT_PATH} 2>&1
+      checkov_call="checkov ${CHECKOV_ARGS} -f '${file}'"
+      debug_echo "[yaml] Running checkov ${checkov_call}"
+      eval $checkov_call >> ${REPORT_PATH} 2>&1
       CHRC=$?
       echo "<<<<<< end checkov result for ${file1} <<<<<<" >> ${REPORT_PATH}
       RC=$(bumprc $RC $CHRC)
