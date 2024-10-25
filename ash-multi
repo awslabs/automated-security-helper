@@ -39,7 +39,8 @@ version_check() {
 
   if [ -n "${_REPO_VERSION}" ]; then # found a version
     if [ "${_REPO_VERSION}" != "${_SCRIPT_VERSION}" ]; then
-      echo -e "${YELLOW}ASH version ${_SCRIPT_VERSION} is different from repository version ${_REPO_VERSION} ... consider upgrading${NC}"
+      echo -e "${YELLOW}ASH version ${_SCRIPT_VERSION} is different from the latest tagged version in the repository: ${_REPO_VERSION} -- consider upgrading!${NC}"
+      echo -e "${YELLOW}View changes: https://github.com/awslabs/automated-security-helper/compare/${_REPO_VERSION}...${_SCRIPT_VERSION}${NC}"
     else
       # the ":" below allows the else/fi clause to remain, even if there is no operation listed
       : #   echo "repo version is ${_REPO_VERSION}, current version is ${_SCRIPT_VERSION}"
@@ -53,18 +54,21 @@ print_usage() {
   echo "SYNOPSIS:"
   echo -e "\t$(basename $0) [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir"
   echo "OPTIONS:"
-  echo -e "\t-v | --version           Prints version number.\n"
-  echo -e "\t-p | --preserve-report   Add timestamp to the final report file to avoid overwriting it after multiple executions."
-  echo -e "\t--source-dir             Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)"
-  echo -e "\t--output-dir             Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
-  echo -e "\t--ext | -extension       Force a file extension to scan. Defaults to identify files automatically."
-  echo -e "\t--force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
-  echo -e "\t--no-cleanup             Don't cleanup the work directory where temp reports are stored during scans."
-  echo -e "\t--debug                  Print ASH debug log information where applicable."
-  echo -e "\t-q | --quiet             Don't print verbose text about the build process."
-  echo -e "\t-c | --no-color          Don't print colorized output."
-  echo -e "\t-s | --single-process    Run ash scanners serially rather than as separate, parallel sub-processes."
-  echo -e "\t-o | --oci-runner        Use the specified OCI runner instead of docker to run the containerized tools.\n"
+  echo -e "\t-v | --version                 Prints version number.\n"
+  echo -e "\t-p | --preserve-report         Add timestamp to the final report file to avoid overwriting it after multiple executions."
+  echo -e "\t--source-dir                   Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)"
+  echo -e "\t--output-dir                   Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
+  echo -e "\t--format                       Output format of the aggregated_results file segments. Defaults to text. Use json instead to enable parseable output."
+  echo -e "\t--ext | -extension             Force a file extension to scan. Defaults to identify files automatically."
+  echo -e "\t--offline                      Build ASH for offline execution. Defaults to false."
+  echo -e "\t--offline-semgrep-rulesets     Specify Semgrep rulesets for use in ASH offline mode. Defaults to 'p/ci'."
+  echo -e "\t--force                        Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
+  echo -e "\t--no-cleanup                   Don't cleanup the work directory where temp reports are stored during scans."
+  echo -e "\t--debug                        Print ASH debug log information where applicable."
+  echo -e "\t-q | --quiet                   Don't print verbose text about the build process."
+  echo -e "\t-c | --no-color                Don't print colorized output."
+  echo -e "\t-s | --single-process          Run ash scanners serially rather than as separate, parallel sub-processes."
+  echo -e "\t-o | --oci-runner              Use the specified OCI runner instead of docker to run the containerized tools.\n"
   echo -e "For more information please visit https://github.com/awslabs/automated-security-helper"
 }
 
@@ -152,6 +156,10 @@ search_extension() {
 # Validate the input and set default values
 # shellcheck disable=SC2120
 validate_input() {
+  if [[ ${OFFLINE} != "${OFFLINE_AT_BUILD_TIME}" ]]; then
+    echo -e "${RED}Please ensure --offline is specified at build time to be able to run in offline mode.${NC}"
+    exit 1
+  fi
   if [[ -z ${PRESERVE_FILE} ]]; then AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results.txt"; else AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results-$(date +%s).txt"; fi
   if [[ -z ${FORCE_REBUILD} ]]; then FORCE_REBUILD="false"; fi
   if [[ -z ${SOURCE_DIR} ]]; then SOURCE_DIR="$(pwd)"; else SOURCE_DIR=$(cd "${SOURCE_DIR}"; pwd); fi # Transform any relative path to absolute
@@ -277,8 +285,9 @@ run_security_check() {
 
 set -e
 START_TIME=$(date +%s)
-VERSION=$(cat "$(dirname "${BASH_SOURCE[0]}")"/"__version__")
+VERSION=v$(cat "$(dirname "${BASH_SOURCE[0]}")"/"pyproject.toml" | sed -n 's/^version = "\(.*\)"$/\1/p' | head -n 1)
 OCI_RUNNER="docker"
+ASH_OUTPUT_FORMAT=${ASH_OUTPUT_FORMAT:-text}
 
 # Overrides default OCI Runner used by ASH
 [ ! -z "$ASH_OCI_RUNNER" ] && OCI_RUNNER="$ASH_OCI_RUNNER"
@@ -337,6 +346,13 @@ while (("$#")); do
     shift
     FORCED_EXT="$1"
     ;;
+  --offline)
+    OFFLINE="YES"
+    ;;
+  --offline-semgrep-rulesets)
+    shift
+    OFFLINE_SEMGREP_RULESETS="$1"
+  ;;
   --force)
     DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} --no-cache"
     ;;
@@ -356,6 +372,10 @@ while (("$#")); do
   --debug)
     ASH_DEBUG_ENABLED="true"
     ASH_SCANSET_ARGS="${ASH_SCANSET_ARGS} --debug"
+    ;;
+  --format)
+    shift
+    ASH_OUTPUT_FORMAT="$1"
     ;;
   --no-color | -c)
     COLOR_OUTPUT="false"
@@ -432,6 +452,8 @@ export _ASH_ROOT_DIR="${_ASH_ROOT_DIR:-${ASH_ROOT_DIR}}"
 export _ASH_UTILS_LOCATION="${_ASH_UTILS_LOCATION:-${UTILS_LOCATION}}"
 export _ASH_CFNRULES_LOCATION="${_ASH_CFNRULES_LOCATION:-${CFNRULES_LOCATION}}"
 export _ASH_RUN_DIR="${_ASH_RUN_DIR:-$(mktemp -d -p /tmp ash-run-scan.XXXX)}"
+export _ASH_OFFLINE=${_ASH_OFFLINE:-${OFFLINE}}
+export _ASH_OFFLINE_SEMGREP_RULESETS=${_ASH_OFFLINE_SEMGREP_RULESETS:-${OFFLINE_SEMGREP_RULESETS}}
 
 #
 # Print out the current ASH version to start execution output
@@ -616,6 +638,11 @@ then
 
   RESOLVED_OUTPUT_DIR=${ACTUAL_OUTPUT_DIR:-${OUTPUT_DIR}}
   echo -e "${GREEN}\nYour final report can be found here:${NC} ${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}"
+
+  if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
+    echo -e "${GREEN}Converting${NC} ${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}${GREEN} to ASHARP JSON model${NC}"
+    asharp --input "${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}" --output "${RESOLVED_OUTPUT_DIR}/${AGGREGATED_RESULTS_REPORT_FILENAME}.json"
+  fi
 else
   echo -e "${GREEN}No extensions were found, nothing to scan at the moment.${NC}"
 fi

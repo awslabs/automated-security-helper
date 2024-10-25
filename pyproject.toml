@@ -1,0 +1,25 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+[tool.poetry]
+name = "automated-security-helper"
+version = "1.5.1"
+description = ""
+authors = ["Nate Ferrell <nateferl@amazon.com>", "Nathan Bates <nbb@amazon.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/awslabs/automated-security-helper"
+
+[tool.poetry.scripts]
+asharp = 'automated_security_helper.asharp:main'
+
+[tool.poetry.dependencies]
+python = "^3.10"
+regex = "^2024.5.15"
+pydantic = "^2.7.3"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

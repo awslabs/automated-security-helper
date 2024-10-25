@@ -31,7 +31,37 @@ _ASH_UTILS_LOCATION=${_ASH_UTILS_LOCATION:-/utils}
 _ASH_CFNRULES_LOCATION=${_ASH_CFNRULES_LOCATION:-/cfnrules}
 _ASH_RUN_DIR=${_ASH_RUN_DIR:-/run/scan/src}
 
+if [[ "${OFFLINE}" == "YES" && ( -z "${SEMGREP_RULES_CACHE_DIR}" || -z "${GRYPE_DB_CACHE_DIR}" ) ]]; then
+  echo "Invalid cache state for Semgrep or Grype, please rebuild with --offline."
+  exit 100
+fi
+
 source ${_ASH_UTILS_LOCATION}/common.sh
+
+
+# Empty Semgrep data dir case
+if [[ $OFFLINE == "YES" && -z "$(ls -A "$SEMGREP_RULES_CACHE_DIR")" ]]; then
+  debug_echo "[offline] Semgrep rulesets not found but offline mode enabled, erroring"
+  exit 1
+# Empty Grype data dir case
+elif [[ $OFFLINE == "YES" && -z "$(ls -A "$GRYPE_DB_CACHE_DIR")" ]]; then
+  debug_echo "[offline] Grype rulesets not found but offline mode enabled, erroring"
+  exit 1
+# Valid offline config case
+elif [[ $OFFLINE == "YES" ]]; then
+  export SEMGREP_RULES="$(echo "$SEMGREP_RULES_CACHE_DIR"/*)"
+  SEMGREP_ARGS="--metrics=off"
+  debug_echo "[offline] Semgrep rulesets are ${SEMGREP_RULES} with metrics off"
+
+  export GRYPE_DB_VALIDATE_AGE=false
+  export GRYPE_DB_AUTO_UPDATE=false
+  export GRYPE_CHECK_FOR_APP_UPDATE=false
+  debug_echo "[offline] Grype DB cache dir is ${GRYPE_DB_CACHE_DIR} and validation/auto update is off"
+# Online (default) mode
+else
+  SEMGREP_ARGS="--config=auto"
+fi
+
 
 #
 # Allow the container to run Git commands against a repo in ${_ASH_SOURCE_DIR}
@@ -50,19 +80,31 @@ touch ${REPORT_PATH}
 
 scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
 
+GRYPE_ARGS="-f medium --exclude=**/*-converted.py --exclude=**/*_report_result.txt"
+SYFT_ARGS="--exclude=**/*-converted.py --exclude=**/*_report_result.txt"
+SEMGREP_ARGS="${SEMGREP_ARGS} --legacy --error --exclude=\"*-converted.py,*_report_result.txt\""
+debug_echo "[grype] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT:-text}'"
+if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
+  debug_echo "[grype] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
+  GRYPE_ARGS="-o json ${GRYPE_ARGS}"
+  SYFT_ARGS="-o json ${SYFT_ARGS}"
+  SEMGREP_ARGS="--json ${SEMGREP_ARGS}"
+fi
+
 #
 # Run Grype
 #
-debug_echo "Starting all scanners within the Grype scanner tool set"
+debug_echo "[grype] Starting all scanners within the Grype scanner tool set"
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
-  debug_echo "Starting Grype scan of ${scan_path}"
+  debug_echo "[grype] Starting Grype scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Grype output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-  grype -f medium dir:${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
+  debug_echo "[grype] grype ${GRYPE_ARGS} dir:${scan_path}"
+  grype ${GRYPE_ARGS} dir:${scan_path} >> ${REPORT_PATH} 2>&1
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
@@ -77,17 +119,17 @@ for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
-  debug_echo "Starting Syft scan of ${scan_path}"
+  debug_echo "[grype] Starting Syft scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Syft output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-  debug_echo "syft ${scan_path} --exclude=\"**/*-converted.py\" --exclude=\"**/*_report_result.txt\""
-  syft ${scan_path} --exclude="**/*-converted.py" --exclude="**/*_report_result.txt" >> ${REPORT_PATH} 2>&1
+  debug_echo "[grype] syft ${SYFT_ARGS} ${scan_path}"
+  syft ${SYFT_ARGS} ${scan_path} >> ${REPORT_PATH} 2>&1
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
   echo -e "\n<<<<<< End Syft output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
-  debug_echo "Finished Syft scan of ${scan_path}"
+  debug_echo "[grype] Finished Syft scan of ${scan_path}"
 done
 
 #
@@ -97,20 +139,21 @@ for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
-  debug_echo "Starting Semgrep scan of ${scan_path}"
+  debug_echo "[grype] Starting Semgrep scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Semgrep output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-  semgrep --legacy --error --config=auto $scan_path --exclude="*-converted.py,*_report_result.txt" >> ${REPORT_PATH} 2>&1
+  debug_echo "[grype] semgrep ${SEMGREP_ARGS} $scan_path"
+  semgrep ${SEMGREP_ARGS} $scan_path >> ${REPORT_PATH} 2>&1
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
   echo -e "\n<<<<<< End Semgrep output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
-  debug_echo "Finished Semgrep scan of ${scan_path}"
+  debug_echo "[grype] Finished Semgrep scan of ${scan_path}"
 done
 
 # cd back to the original SOURCE_DIR in case path changed during scan
 cd ${_ASH_SOURCE_DIR}
 
-debug_echo "Finished all scanners within the Grype scanner tool set"
+debug_echo "[grype] Finished all scanners within the Grype scanner tool set"
 exit $RC

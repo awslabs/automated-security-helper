@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 
 # Resolve the absolute path of the parent of the script directory (ASH repo root)
 export ASH_ROOT_DIR="$(cd "$(dirname "$0")"; pwd)"
@@ -11,11 +13,15 @@ OUTPUT_DIR=""
 OUTPUT_DIR_SPECIFIED="NO"
 CONTAINER_UID_SPECIFIED="NO"
 CONTAINER_GID_SPEICIFED="NO"
-DOCKER_EXTRA_ARGS=""
+OUTPUT_FORMAT="text"
+DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS:-}"
+DOCKER_RUN_EXTRA_ARGS=""
 ASH_ARGS=""
 NO_BUILD="NO"
 NO_RUN="NO"
 DEBUG="NO"
+OFFLINE="NO"
+OFFLINE_SEMGREP_RULESETS="p/ci"
 # Parse arguments
 while (("$#")); do
   case $1 in
@@ -27,6 +33,14 @@ while (("$#")); do
       shift
       OUTPUT_DIR="$1"
       OUTPUT_DIR_SPECIFIED="YES"
+      ;;
+    --offline)
+      OFFLINE="YES"
+      ;;
+    --offline-semgrep-rulesets)
+      shift
+      OFFLINE_SEMGREP_RULESETS="$1"
+      OFFLINE="YES"
       ;;
     --force)
       DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS} --no-cache"
@@ -58,6 +72,10 @@ while (("$#")); do
     --debug)
       DEBUG="YES"
       ;;
+    --format)
+      shift
+      OUTPUT_FORMAT="$1"
+      ;;
     --help | -h)
       source "${ASH_ROOT_DIR}/ash-multi" --help
       exit 0
@@ -66,7 +84,7 @@ while (("$#")); do
       source "${ASH_ROOT_DIR}/ash-multi" --version
       exit 0
       ;;
-    --finch | -f)
+    --finch|-f)
       # Show colored deprecation warning from entrypoint script and exit 1
       source "${ASH_ROOT_DIR}/ash-multi" --finch
       exit 1
@@ -94,6 +112,11 @@ fi
 #
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
+
+# Resolve any offline mode flags
+if [[ "${OFFLINE}" == "YES" ]]; then
+  DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} --network=none"
+fi
 
 # Resolve the OCI_RUNNER
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
@@ -129,6 +152,8 @@ else
         ${CONTAINER_GID_OPTION} \
         --tag ${ASH_IMAGE_NAME} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
+        --build-arg OFFLINE="${OFFLINE}" \
+        --build-arg OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}" \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
     fi
@@ -145,17 +170,19 @@ else
         OUTPUT_DIR_OPTION="--output-dir /out"
       fi
       echo "Running ASH scan using built image..."
-      ${RESOLVED_OCI_RUNNER} run \
-        --rm \
-        -e ACTUAL_SOURCE_DIR="${SOURCE_DIR}" \
-        -e ASH_DEBUG=${DEBUG} \
-        ${MOUNT_SOURCE_DIR} \
-        ${MOUNT_OUTPUT_DIR} \
-        ${ASH_IMAGE_NAME} \
-          ash \
-            --source-dir /src  \
-            ${OUTPUT_DIR_OPTION}  \
-            $ASH_ARGS
+      eval ${RESOLVED_OCI_RUNNER} run \
+          --rm \
+          -e ACTUAL_SOURCE_DIR="${SOURCE_DIR}" \
+          -e ASH_DEBUG=${DEBUG} \
+          -e ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT} \
+          ${MOUNT_SOURCE_DIR} \
+          ${MOUNT_OUTPUT_DIR} \
+          ${DOCKER_RUN_EXTRA_ARGS} \
+          ${ASH_IMAGE_NAME} \
+            ash \
+              --source-dir /src  \
+              ${OUTPUT_DIR_OPTION}  \
+              $ASH_ARGS
       RC=$?
     fi
     if [[ "${DEBUG}" = "YES" ]]; then

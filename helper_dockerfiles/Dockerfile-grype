@@ -1,10 +1,25 @@
 # Get Python Image
 FROM --platform=linux/amd64 public.ecr.aws/bitnami/python:3.11
+SHELL ["bash", "-c"]
+ARG OFFLINE="NO"
+ARG OFFLINE_SEMGREP_RULESETS="p/ci"
+
+ENV HOME="/root"
+ENV OFFLINE="${OFFLINE}"
+ENV GRYPE_DB_CACHE_DIR="${HOME}/.grype"
+ENV SEMGREP_RULES_CACHE_DIR="${HOME}/.semgrep"
 
 # Instal prerequisites
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin && \
     curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin && \
     python3 -m pip install semgrep
+
+RUN if [[ "$OFFLINE" == "YES" ]]; then \
+        grype db update && \
+        mkdir -p ${SEMGREP_RULES_CACHE_DIR} && \
+        for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
+    fi
+
 
 #
 # Make sure the default dirs are initialized

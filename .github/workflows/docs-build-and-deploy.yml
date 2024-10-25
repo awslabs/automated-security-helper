@@ -2,17 +2,11 @@ name: Build and Deploy Documentation
 
 on:
   pull_request:
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "requirements.txt"
+    branches:
+      - main
   push:
     branches:
-      - "*"
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "requirements.txt"
+      - main
 
 env:
   PYTHON_VERSION: "3.12"
@@ -20,6 +14,7 @@ env:
 jobs:
   build:
     name: Build documentation
+    needs: []
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
 
@@ -40,7 +35,7 @@ jobs:
 
   deploy:
     name: Deploy documentation
-    needs: build
+    needs: []
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
@@ -57,4 +52,4 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Deploy documentation
-        run: mkdocs gh-deploy --clean
+        run: mkdocs gh-deploy --clean --force

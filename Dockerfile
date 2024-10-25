@@ -3,8 +3,38 @@
 # Enable BASE_IMAGE as an overrideable ARG for proxy cache + private registry support
 #
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
-FROM ${BASE_IMAGE}
 
+
+FROM ${BASE_IMAGE} as poetry-reqs
+
+ENV PYTHONDONTWRITEBYTECODE 1
+
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y \
+        python3-venv && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install -U pip poetry
+
+WORKDIR /src
+
+COPY pyproject.toml pyproject.toml
+COPY poetry.lock poetry.lock
+COPY README.md README.md
+COPY src/ src/
+
+RUN poetry build
+
+
+FROM ${BASE_IMAGE} as ash
+SHELL ["/bin/bash", "-c"]
+ARG OFFLINE="NO"
+ARG OFFLINE_SEMGREP_RULESETS="p/ci"
+
+ENV OFFLINE="${OFFLINE}"
+ENV OFFLINE_AT_BUILD_TIME="${OFFLINE}"
+ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
 #
 # Allow for UID and GID to be set as build arguments to this Dockerfile.
 #
@@ -105,6 +135,10 @@ RUN echo "gem: --no-document" >> /etc/gemrc && \
 #
 # Grype/Syft/Semgrep
 #
+ENV HOME="/root"
+ENV GRYPE_DB_CACHE_DIR="${HOME}/.grype"
+ENV SEMGREP_RULES_CACHE_DIR="${HOME}/.semgrep"
+
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | \
     sh -s -- -b /usr/local/bin
 
@@ -112,6 +146,12 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh |
     sh -s -- -b /usr/local/bin
 
 RUN python3 -m pip install semgrep
+
+RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
+        grype db update && \
+        mkdir -p ${SEMGREP_RULES_CACHE_DIR} && \
+        for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
+    fi
 
 # Setting PYTHONPATH so Jinja2 can resolve correctly
 # IMPORTANT: This is predicated on the Python version that is installed!
@@ -148,7 +188,10 @@ COPY ./utils/cfn-to-cdk /ash/utils/cfn-to-cdk/
 COPY ./utils/*.* /ash/utils/
 COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
-COPY ./__version__ /ash/__version__
+COPY ./pyproject.toml /ash/pyproject.toml
+
+COPY --from=poetry-reqs /src/dist/*.whl .
+RUN python3 -m pip install *.whl && rm *.whl
 
 #
 # Make sure the ash script is executable

@@ -2,7 +2,6 @@
 
 - [ASH; The *A*utomated *S*ecurity *H*elper](#ash-the-automated-security-helper)
 - [Description](#description)
-  - [ASH change advisory](#ash-change-advisory)
 - [Supported frameworks](#supported-frameworks)
 - [Prerequisites](#prerequisites)
 - [Getting Started](#getting-started)
@@ -14,6 +13,7 @@
 - [Synopsis](#synopsis)
 - [FAQ](#faq)
 - [Feedback](#feedback)
+- [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
 
@@ -27,10 +27,6 @@ by providing a fast and easy tool to conduct  preliminary security check as earl
 - It is not a replacement of a human review nor standards enforced by your team/customer.
 - It uses light, open source tools to maintain its flexibility and ability to run from anywhere.
 - ASH is cloning and running different open-source tools, such as: git-secrets, bandit, Semgrep, Grype, Syft, nbconvert, npm-audit, checkov, cdk-nag and cfn-nag. Please review the tools [LICENSE](license) before usage.
-
-### ASH change advisory
-
-We are currently working on a re-architecture of ASH targeting a single-container architecture as well as documentation to go along with it.
 
 ## Supported frameworks
 
@@ -218,17 +214,19 @@ SYNOPSIS:
 OPTIONS:
         -v | --version           Prints version number.
 
-        -p | --preserve-report   Add timestamp to the final report file to avoid overriding it after multiple executions.
+        -p | --preserve-report   Add timestamp to the final report file to avoid overwriting it after multiple executions.
         --source-dir             Path to the directory containing the code/files you wish to scan. Defaults to $(pwd)
         --output-dir             Path to the directory that will contain the report of the scans. Defaults to $(pwd)
         --ext | -extension       Force a file extension to scan. Defaults to identify files automatically.
+        --offline                      Build ASH for offline execution. Defaults to false.
+        --offline-semgrep-rulesets     Specify Semgrep rulesets for use in ASH offline mode. Defaults to 'p/ci'.
         --force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date.
+        --no-cleanup             Don't cleanup the work directory where temp reports are stored during scans.
+        --debug                  Print ASH debug log information where applicable.
         -q | --quiet             Don't print verbose text about the build process.
         -c | --no-color          Don't print colorized output.
+        -s | --single-process    Run ash scanners serially rather than as separate, parallel sub-processes.
         -o | --oci-runner        Use the specified OCI runner instead of docker to run the containerized tools.
-        -f | --finch             Use finch instead of docker to run the containerized tools.
-                                 WARNING: The '--finch|-f' option is deprecated and will be removed in a future
-                                          release. Please switch to using '--oci-runner finch' in scripts instead.
 ```
 
 ## FAQ
@@ -259,6 +257,10 @@ OPTIONS:
 - Q: `ash` reports there are not files to scan or you see a message stating `warning: You appear to have cloned an empty repository.`
 
   A: Ensure you're running ASH inside the folder you intend to scan or using the `--source-dir` parameter. If the folder where the files reside is part of a git repository, ensure the files are added (committed) before running ASH.
+
+- Q: How to run `ash` in an environment without internet connectivity/with an airgap?
+
+  A: From your environment which does have internet connectivity, build the ASH image using `--offline` and `--offline-semgrep-rulesets` to specify what resources to package into the image.  Environment variable `$ASH_IMAGE_NAME` controls the name of the image.  After building, push to your container repository of choice which will be available within the airgapped environment.  When you go to execute ASH in your offline environment, passing `--no-build` to `ash` alongside `--offline` and `--offline-semgrep-rulesets` will use your offline image and skip the build.  Specify `$ASH_IMAGE_NAME` to override ASH's container image to the previously-built image available within your airgapped environment. 
 
 ## Feedback
 
