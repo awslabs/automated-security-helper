@@ -51,6 +51,7 @@ ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
 #
 ARG UID=500
 ARG GID=100
+ARG ASHUSER_HOME=/home/ash-user
 
 #
 # Setting timezone in the container to UTC to ensure logged times are universal.
@@ -135,7 +136,6 @@ RUN echo "gem: --no-document" >> /etc/gemrc && \
 #
 # Grype/Syft/Semgrep
 #
-ENV HOME="/root"
 ENV GRYPE_DB_CACHE_DIR="${HOME}/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="${HOME}/.semgrep"
 
@@ -204,7 +204,6 @@ RUN chmod -R +r /ash && chmod +x /ash/ash
 # And add GitHub's public fingerprints to known_hosts inside the image to prevent fingerprint
 # confirmation requests unexpectedly
 #
-ARG ASHUSER_HOME=/home/ash-user
 # ignore a failure to add the group
 RUN addgroup --gid ${GID} ash-group || :
 RUN adduser --disabled-password --disabled-login \
@@ -224,6 +223,12 @@ USER ${UID}:${GID}
 # Set the HOME environment variable to be the HOME folder for the non-root user
 #
 ENV HOME=${ASHUSER_HOME}
+
+#
+# Set the location for Grype DB inside ASH_USER folder
+#
+ENV GRYPE_DB_CACHE_DIR=${HOME}/.grypedb
+RUN mkdir -p ${GRYPE_DB_CACHE_DIR}
 
 #
 # Flag ASH as local execution mode since we are running in a container already
