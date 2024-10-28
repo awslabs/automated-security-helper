@@ -51,7 +51,9 @@ ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
 #
 ARG UID=500
 ARG GID=100
-ARG ASHUSER_HOME=/home/ash-user
+ARG ASH_USER=ash-user
+ARG ASH_GROUP=ash-group
+ARG ASHUSER_HOME=/home/${ASH_USER}
 
 #
 # Setting timezone in the container to UTC to ensure logged times are universal.
@@ -205,10 +207,10 @@ RUN chmod -R +r /ash && chmod +x /ash/ash
 # confirmation requests unexpectedly
 #
 # ignore a failure to add the group
-RUN addgroup --gid ${GID} ash-group || :
+RUN addgroup --gid ${GID} ${ASH_GROUP} || :
 RUN adduser --disabled-password --disabled-login \
         --uid ${UID} --gid ${GID} \
-        ash-user && \
+        ${ASH_USER} && \
     mkdir -p ${ASHUSER_HOME}/.ssh && \
     echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
     echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
@@ -223,7 +225,8 @@ USER ${UID}:${GID}
 # Set the HOME environment variable to be the HOME folder for the non-root user
 #
 ENV HOME=${ASHUSER_HOME}
-
+ENV ASH_USER=${ASH_USER}
+ENV ASH_GROUP=${ASH_GROUP}
 #
 # Set the location for Grype DB inside ASH_USER folder
 #
