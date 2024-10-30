@@ -1,4 +1,4 @@
-name: Build & run ASH against itself
+name: ASH - Core Pipeline
 on:
   push:
     branches:
