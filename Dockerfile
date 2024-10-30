@@ -183,8 +183,8 @@ FROM core as ci
 ENV ASH_TARGET=ci
 
 
-# Final stage: Local development final version. This image contains all dependencies
-# for ASH, but ensures it is launched as a non-root user for local runs.
+# Final stage: Non-root user final version. This image contains all dependencies
+# for ASH from the `core` stage, but ensures it is launched as a non-root user.
 # Running as a non-root user impacts the ability to run ASH reliably across CI
 # platforms and other orchestrators where the initialization and launch of the image
 # is not configurable for customizing the running UID/GID.

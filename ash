@@ -5,7 +5,6 @@
 # Resolve the absolute path of the parent of the script directory (ASH repo root)
 export ASH_ROOT_DIR="$(cd "$(dirname "$0")"; pwd)"
 export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
-export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:local"}
 
 # Set local variables
 SOURCE_DIR=""
@@ -22,6 +21,7 @@ NO_RUN="NO"
 DEBUG="NO"
 OFFLINE="NO"
 OFFLINE_SEMGREP_RULESETS="p/ci"
+TARGET_STAGE="non-root"
 # Parse arguments
 while (("$#")); do
   case $1 in
@@ -69,12 +69,16 @@ while (("$#")); do
     --no-run)
       NO_RUN="YES"
       ;;
-    --debug)
+    --debug|-d)
       DEBUG="YES"
       ;;
     --format)
       shift
       OUTPUT_FORMAT="$1"
+      ;;
+    --target)
+      shift
+      TARGET_STAGE="$1"
       ;;
     --help | -h)
       source "${ASH_ROOT_DIR}/ash-multi" --help
@@ -94,6 +98,8 @@ while (("$#")); do
   esac
   shift
 done
+
+export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:${TARGET_STAGE}"}
 
 # Default to the pwd
 if [ "${SOURCE_DIR}" = "" ]; then
@@ -138,12 +144,12 @@ else
       CONTAINER_GID_OPTION=""
       if [[ ${CONTAINER_UID_SPECIFIED} = "YES" ]]; then
         CONTAINER_UID_OPTION="--build-arg UID=${CONTAINER_UID}" # set the UID build-arg if --container-uid is specified
-      else
+      elif [[ "${HOST_UID}" != "" ]]; then
         CONTAINER_UID_OPTION="--build-arg UID=${HOST_UID}" # set the UID build-arg to the caller's UID if --container-uid is not specified
       fi
       if [[ ${CONTAINER_GID_SPECIFIED} = "YES" ]]; then
         CONTAINER_GID_OPTION="--build-arg GID=${CONTAINER_GID}" # set the GID build-arg if --container-gid is specified
-      else
+      elif [[ "${HOST_GID}" != "" ]]; then
         CONTAINER_GID_OPTION="--build-arg GID=${HOST_GID}" # set the GID build-arg to the caller's GID if --container-uid is not specified
       fi
       echo "Building image ${ASH_IMAGE_NAME} -- this may take a few minutes during the first build..."
@@ -151,6 +157,7 @@ else
         ${CONTAINER_UID_OPTION} \
         ${CONTAINER_GID_OPTION} \
         --tag ${ASH_IMAGE_NAME} \
+        --target ${TARGET_STAGE} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         --build-arg OFFLINE="${OFFLINE}" \
         --build-arg OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}" \

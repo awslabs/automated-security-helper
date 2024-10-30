@@ -49,27 +49,43 @@ version_check() {
 }
 
 print_usage() {
-  echo "NAME:"
-  echo -e "\t$(basename $0)"
-  echo "SYNOPSIS:"
-  echo -e "\t$(basename $0) [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir"
-  echo "OPTIONS:"
-  echo -e "\t-v | --version                 Prints version number.\n"
-  echo -e "\t-p | --preserve-report         Add timestamp to the final report file to avoid overwriting it after multiple executions."
-  echo -e "\t--source-dir                   Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)"
-  echo -e "\t--output-dir                   Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
-  echo -e "\t--format                       Output format of the aggregated_results file segments. Defaults to text. Use json instead to enable parseable output."
-  echo -e "\t--ext | -extension             Force a file extension to scan. Defaults to identify files automatically."
-  echo -e "\t--offline                      Build ASH for offline execution. Defaults to false."
-  echo -e "\t--offline-semgrep-rulesets     Specify Semgrep rulesets for use in ASH offline mode. Defaults to 'p/ci'."
-  echo -e "\t--force                        Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
-  echo -e "\t--no-cleanup                   Don't cleanup the work directory where temp reports are stored during scans."
-  echo -e "\t--debug                        Print ASH debug log information where applicable."
-  echo -e "\t-q | --quiet                   Don't print verbose text about the build process."
-  echo -e "\t-c | --no-color                Don't print colorized output."
-  echo -e "\t-s | --single-process          Run ash scanners serially rather than as separate, parallel sub-processes."
-  echo -e "\t-o | --oci-runner              Use the specified OCI runner instead of docker to run the containerized tools.\n"
-  echo -e "For more information please visit https://github.com/awslabs/automated-security-helper"
+    local cmd=$(basename "$0")
+    cat <<-EOF
+NAME:
+    ${cmd}
+SYNOPSIS:
+    ${cmd} [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir
+OPTIONS:
+    --source-dir                    Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)
+    --output-dir                    Path to the directory that will contain the report of the scans. Defaults to \$(pwd)
+
+    --format                        Output format of the aggregated_results file segments.
+                                    Options: text, json
+                                    Default: text
+
+    --target                        Specify the target stage of the ASH image to build.
+                                    Options: non-root, ci
+                                    Default: non-root
+
+    --offline                       Build ASH for offline execution. Defaults to false.
+    --offline-semgrep-rulesets      Specify Semgrep rulesets for use in ASH offline mode.
+                                    Default: p/ci
+
+    --no-cleanup                    Don't cleanup the work directory where temp reports are stored during scans.
+    --ext | -extension              Force a file extension to scan. Defaults to identify files automatically.
+
+    -d    | --debug                 Print ASH debug log information where applicable.
+    -q    | --quiet                 Don't print verbose text about the build process.
+    -v    | --version               Prints version number.
+
+    -c    | --no-color              Don't print colorized output.
+    -s    | --single-process        Run ash scanners serially rather than as separate, parallel sub-processes.
+    -o    | --oci-runner            Use the specified OCI runner instead of docker to run the containerized tools.
+    -p    | --preserve-report       Add timestamp to the final report file to avoid overwriting it after multiple executions.
+
+INFO:
+    For more information, please visit https://github.com/awslabs/automated-security-helper
+EOF
 }
 
 # Find all files in the source directory. Method to list the files will be different if the source is a git repository or not
