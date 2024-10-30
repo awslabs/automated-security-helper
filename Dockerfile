@@ -1,63 +1,27 @@
 #checkov:skip=CKV_DOCKER_7: Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
-#
-# Enable BASE_IMAGE as an overrideable ARG for proxy cache + private registry support
-#
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
 
-
+# First stage: Build poetry requirements
 FROM ${BASE_IMAGE} as poetry-reqs
-
 ENV PYTHONDONTWRITEBYTECODE 1
-
 RUN apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y \
-        python3-venv && \
+    apt-get install -y python3-venv && \
     rm -rf /var/lib/apt/lists/*
-
 RUN python3 -m pip install -U pip poetry
-
 WORKDIR /src
-
-COPY pyproject.toml pyproject.toml
-COPY poetry.lock poetry.lock
-COPY README.md README.md
+COPY pyproject.toml poetry.lock README.md ./
 COPY src/ src/
-
 RUN poetry build
 
-
-FROM ${BASE_IMAGE} as ash
+# Second stage: Core ASH image
+FROM ${BASE_IMAGE} as core
 SHELL ["/bin/bash", "-c"]
 ARG OFFLINE="NO"
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
-
 ENV OFFLINE="${OFFLINE}"
 ENV OFFLINE_AT_BUILD_TIME="${OFFLINE}"
 ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
-#
-# Allow for UID and GID to be set as build arguments to this Dockerfile.
-#
-# Set the default values of UID/GID to non-zero (and above typical low-number UID/GID values which
-# are defined by default).  500 and 100 are not special values or depended upon.
-# Their selection as default values is only to set the default for this container to be non-zero.
-#
-# The actions performed in this image (CMD command) do not require root privileges.
-# Thus, UID/GID are set non-zero to avoid someone inadvertantly running this image in a container
-# that runs privileged and as as root(UID 0).
-#
-# If the environment in which the container will run requires a specific UID/GID, then --build-arg
-# arguments on the ${OCI_RUNNER} build command can be used to over-ride these values.
-#
-ARG UID=500
-ARG GID=100
-ARG ASH_USER=ash-user
-ARG ASH_GROUP=ash-group
-ARG ASHUSER_HOME=/home/${ASH_USER}
-
-#
-# Setting timezone in the container to UTC to ensure logged times are universal.
-#
 ENV TZ=UTC
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
@@ -136,10 +100,11 @@ RUN echo "gem: --no-document" >> /etc/gemrc && \
 #
 
 #
-# Grype/Syft/Semgrep
+# Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
 #
-ENV GRYPE_DB_CACHE_DIR="${HOME}/.grype"
-ENV SEMGREP_RULES_CACHE_DIR="${HOME}/.semgrep"
+ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
+ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
+RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR}
 
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | \
     sh -s -- -b /usr/local/bin
@@ -198,7 +163,40 @@ RUN python3 -m pip install *.whl && rm *.whl
 #
 # Make sure the ash script is executable
 #
-RUN chmod -R +r /ash && chmod +x /ash/ash
+RUN chmod -R 777 /ash /src /out /deps && chmod +x /ash/ash
+
+#
+# Flag ASH as local execution mode since we are running in a container already
+#
+ENV _ASH_EXEC_MODE="local"
+
+#
+# Append /ash to PATH to allow calling `ash` directly
+#
+ENV PATH="$PATH:/ash"
+
+
+# CI stage -- any customizations specific to CI platform compatibility should be added
+# in this stage if it is not applicable to ASH outside of CI usage
+FROM core as ci
+
+ENV ASH_TARGET=ci
+
+
+# Final stage: Local development final version. This image contains all dependencies
+# for ASH, but ensures it is launched as a non-root user for local runs.
+# Running as a non-root user impacts the ability to run ASH reliably across CI
+# platforms and other orchestrators where the initialization and launch of the image
+# is not configurable for customizing the running UID/GID.
+FROM core as non-root
+
+ENV ASH_TARGET=non-root
+
+ARG UID=500
+ARG GID=100
+ARG ASH_USER=ash-user
+ARG ASH_GROUP=ash-group
+ARG ASHUSER_HOME=/home/${ASH_USER}
 
 #
 # Create a non-root user in the container and run as this user
@@ -222,41 +220,15 @@ WORKDIR ${ASHUSER_HOME}
 USER ${UID}:${GID}
 
 #
-# Set the HOME environment variable to be the HOME folder for the non-root user
+# Set the HOME environment variable to be the HOME folder for the non-root user,
+# along with any additional details that were set to root user values by default
 #
 ENV HOME=${ASHUSER_HOME}
 ENV ASH_USER=${ASH_USER}
 ENV ASH_GROUP=${ASH_GROUP}
-#
-# Set the location for Grype DB inside ASH_USER folder
-#
-ENV GRYPE_DB_CACHE_DIR=${HOME}/.grypedb
-RUN mkdir -p ${GRYPE_DB_CACHE_DIR}
 
-#
-# Flag ASH as local execution mode since we are running in a container already
-#
-ENV _ASH_EXEC_MODE="local"
-
-#
-# Append /ash to PATH to allow calling `ash` directly
-#
-ENV PATH="$PATH:/ash"
-
-# nosemgrep
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD type ash || exit 1
 
-#
-# The ENTRYPOINT needs to be NULL for CI platform support
-# This needs to be an empty array ([ ]), as nerdctl-based runners will attempt to
-# resolve an empty string in PATH, unlike Docker which treats an empty string the
-# same as a literal NULL
-#
 ENTRYPOINT [ ]
-
-#
-# CMD will be run when invoking it via `$OCI_RUNNER run ...`, but will
-# be overridden during CI execution when used as the job image directly.
-#
 CMD [ "ash" ]
