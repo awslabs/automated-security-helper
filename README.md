@@ -207,6 +207,7 @@ ash --source-dir . --ext py
 ## Synopsis
 
 ```text
+$ ash --help
 NAME:
     ash
 SYNOPSIS:
@@ -223,7 +224,9 @@ OPTIONS:
                                     Options: non-root, ci
                                     Default: non-root
 
-    --offline                       Build ASH for offline execution. Defaults to false.
+    --offline                       Build ASH for offline execution.
+                                    Default: false
+
     --offline-semgrep-rulesets      Specify Semgrep rulesets for use in ASH offline mode.
                                     Default: p/ci
 
