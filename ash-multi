@@ -76,14 +76,14 @@ OPTIONS:
     --no-cleanup                    Don't cleanup the work directory where temp reports are stored during scans.
     --ext | -extension              Force a file extension to scan. Defaults to identify files automatically.
 
-    -d    | --debug                 Print ASH debug log information where applicable.
-    -q    | --quiet                 Don't print verbose text about the build process.
-    -v    | --version               Prints version number.
-
     -c    | --no-color              Don't print colorized output.
     -s    | --single-process        Run ash scanners serially rather than as separate, parallel sub-processes.
     -o    | --oci-runner            Use the specified OCI runner instead of docker to run the containerized tools.
     -p    | --preserve-report       Add timestamp to the final report file to avoid overwriting it after multiple executions.
+
+    -d    | --debug                 Print ASH debug log information where applicable.
+    -q    | --quiet                 Don't print verbose text about the build process.
+    -v    | --version               Prints version number.
 
 INFO:
     For more information, please visit https://github.com/awslabs/automated-security-helper
