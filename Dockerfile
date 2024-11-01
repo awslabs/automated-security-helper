@@ -217,7 +217,6 @@ RUN adduser --disabled-password --disabled-login \
 # Change ownership and permissions now that we are running with a non-root
 # user by default.
 RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out /deps && \
-    chgrp -R ${GID} ${ASHUSER_HOME} /src /out /deps && \
     chmod 750 -R ${ASHUSER_HOME} /src /out /deps
 
 # Setting default WORKDIR to ${ASHUSER_HOME}
