@@ -88,6 +88,39 @@ def ExtractJsonFromData(data):
     #debug(json.dumps(result, cls=DateTimeEncoder, indent=4))
     return result
 
+# normalize json based on each tool format
+def NormalizeJson(tool, file, data):
+    # normalize npm audit
+    if tool == "npm":
+        # extract vulnerabilities
+        vulns_raw = data["vulnerabilities"]
+        # loop on each vulnerability, and add to an array
+        vulns = []
+        for vuln in vulns_raw:
+            item = vulns_raw[vuln]
+            if type(item["fixAvailable"]) is not bool:
+                item["fixDetails"] = item["fixAvailable"]
+                item["fixAvailable"] = True
+                 
+            vulns.append(item)
+        
+        data["vulnerabilities"] = vulns
+
+    # normalize bandit results
+    elif tool == "bandit":
+        # extract metrics
+        metrics_raw = data["metrics"]
+        # loop on each metric, and add to an array
+        metrics = []
+        for metric in metrics_raw:
+            metrics.append({
+                "file": metric.replace(file,""),
+                "metrics": metrics_raw[metric]
+            })
+        data["metrics"] = metrics
+
+    return data
+
 # extract ASH invoked provider sections
 def ExtractSectionsFromData(data):
 
@@ -251,6 +284,7 @@ def ParseAshSections(aggfile, aggregate_file_path):
             # attempt to validate the extraction
             try:
                 o = json.loads(data)
+                o = NormalizeJson(tool, file, o)
                 arr.append({'tool': tool, 'file': file, 'data': o})
 
                 # COMMENT THE FOLLOWING OUT TO RETAIN UNALTERED RAW OUTPUT
@@ -295,7 +329,7 @@ def main():
     # if output file specified then write to file
     if args.output:
         with open(args.output, 'w') as file:
-            file.write(json.dumps(aggregated, cls=DateTimeEncoder, indent=4))
+            file.write(json.dumps(aggregated, cls=DateTimeEncoder))
 
     # output it to screen
     if not args.output or args.stdout:
