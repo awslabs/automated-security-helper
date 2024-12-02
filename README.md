@@ -220,7 +220,7 @@ OPTIONS:
                                     Options: text, json
                                     Default: text
 
-    --target                        Specify the target stage of the ASH image to build.
+    --build-target                  Specify the target stage of the ASH image to build.
                                     Options: non-root, ci
                                     Default: non-root
 
@@ -229,6 +229,11 @@ OPTIONS:
 
     --offline-semgrep-rulesets      Specify Semgrep rulesets for use in ASH offline mode.
                                     Default: p/ci
+
+    --no-build                      Skip rebuild of the ASH container image, run a scan only.
+                                    Requires an existing ASH image to be present in the image cache.
+    --no-run                        Skip running a scan with ASH, build a new ASH container image only.
+                                    Useful when needing to build an ASH image for publishing to a private image registry.
 
     --no-cleanup                    Don't cleanup the work directory where temp reports are stored during scans.
     --ext | -extension              Force a file extension to scan. Defaults to identify files automatically.

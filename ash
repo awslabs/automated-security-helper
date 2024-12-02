@@ -76,7 +76,7 @@ while (("$#")); do
       shift
       OUTPUT_FORMAT="$1"
       ;;
-    --target)
+    --build-target)
       shift
       TARGET_STAGE="$1"
       ;;
