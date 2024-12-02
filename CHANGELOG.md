@@ -1,18 +1,19 @@
 # Automated Security Helper - CHANGELOG
-
-- [v1.5.1](#v151)
+- [v1.6.0](#v160)
     - [What's Changed](#whats-changed)
-- [v1.5.0](#v150)
+- [v1.5.1](#v151)
     - [What's Changed](#whats-changed-1)
+- [v1.5.0](#v150)
+    - [What's Changed](#whats-changed-2)
     - [New Contributors](#new-contributors)
 - [v1.4.1](#v141)
-    - [What's Changed](#whats-changed-2)
-- [v1.4.0](#v140)
     - [What's Changed](#whats-changed-3)
-- [v1.3.3](#v133)
+- [v1.4.0](#v140)
     - [What's Changed](#whats-changed-4)
-- [v1.3.2](#v132)
+- [v1.3.3](#v133)
     - [What's Changed](#whats-changed-5)
+- [v1.3.2](#v132)
+    - [What's Changed](#whats-changed-6)
     - [New Contributors](#new-contributors-1)
 - [1.3.0 - 2024-04-17](#130---2024-04-17)
     - [Features](#features)
@@ -25,6 +26,14 @@
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
+## v1.6.0
+
+### What's Changed
+
+- Run ash as non-root user to comply with the security scans (ASH on ASH) and best practices.
+- Create a CI version of the docker file that still runs as root to comply with the different requirements from building platforms where UID/GID cannot be modified and there are additional agents installed at runtime that requires elevated privileges.
+
+**Full Changelog**: https://github.com/awslabs/automated-security-helper/compare/v1.5.1...v1.6.0
 
 ## v1.5.1
 
