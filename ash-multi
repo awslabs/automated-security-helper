@@ -183,6 +183,14 @@ validate_input() {
     echo -e "${RED}Please ensure --offline is specified at build time to be able to run in offline mode.${NC}"
     exit 1
   fi
+  if [[ ${OFFLINE} == "YES" ]]; then
+    if [[ ${BUILD_DATE_EPOCH} == -1 ]]; then
+      echo -e "${RED}Please ensure you have pulled in the latest ASH changes and rebuilt your container since v1.5.2."
+    elif [[ "$(($(date +%s)-"${BUILD_DATE_EPOCH}"))" -gt "${BUILD_EXPIRATION_SECONDS:-604800}" ]]; then # Greater than 7 days or specified as BUILD_EXPIRATION_SECONDS env var
+      echo -e "${RED}Your build is over 7 days old.  Please rebuild your ASH offline container."
+      exit 1
+    fi
+  fi
   if [[ -z ${PRESERVE_FILE} ]]; then AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results.txt"; else AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results-$(date +%s).txt"; fi
   if [[ -z ${FORCE_REBUILD} ]]; then FORCE_REBUILD="false"; fi
   if [[ -z ${SOURCE_DIR} ]]; then SOURCE_DIR="$(pwd)"; else SOURCE_DIR=$(cd "${SOURCE_DIR}"; pwd); fi # Transform any relative path to absolute
