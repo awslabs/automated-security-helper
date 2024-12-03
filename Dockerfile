@@ -2,7 +2,7 @@
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
 
 # First stage: Build poetry requirements
-FROM ${BASE_IMAGE} as poetry-reqs
+FROM ${BASE_IMAGE} AS poetry-reqs
 ENV PYTHONDONTWRITEBYTECODE 1
 RUN apt-get update && \
     apt-get upgrade -y && \
@@ -15,7 +15,7 @@ COPY src/ src/
 RUN poetry build
 
 # Second stage: Core ASH image
-FROM ${BASE_IMAGE} as core
+FROM ${BASE_IMAGE} AS core
 SHELL ["/bin/bash", "-c"]
 ARG BUILD_DATE_EPOCH="-1"
 ARG OFFLINE="NO"
@@ -183,7 +183,7 @@ ENV PATH="$PATH:/ash"
 
 # CI stage -- any customizations specific to CI platform compatibility should be added
 # in this stage if it is not applicable to ASH outside of CI usage
-FROM core as ci
+FROM core AS ci
 
 ENV ASH_TARGET=ci
 
@@ -193,7 +193,7 @@ ENV ASH_TARGET=ci
 # Running as a non-root user impacts the ability to run ASH reliably across CI
 # platforms and other orchestrators where the initialization and launch of the image
 # is not configurable for customizing the running UID/GID.
-FROM core as non-root
+FROM core AS non-root
 
 ENV ASH_TARGET=non-root
 
