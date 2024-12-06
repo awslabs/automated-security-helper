@@ -1,5 +1,8 @@
 # Automated Security Helper - CHANGELOG
-
+- [v2.0.0](#v200)
+    - [Breaking Changes](#breaking-changes)
+    - [Features](#features)
+    - [Fixes](#fixes)
 - [v1.5.1](#v151)
     - [What's Changed](#whats-changed)
 - [v1.5.0](#v150)
@@ -15,8 +18,8 @@
     - [What's Changed](#whats-changed-5)
     - [New Contributors](#new-contributors-1)
 - [1.3.0 - 2024-04-17](#130---2024-04-17)
-    - [Features](#features)
-    - [Fixes](#fixes)
+    - [Features](#features-1)
+    - [Fixes](#fixes-1)
     - [Maintenance / Internal](#maintenance--internal)
 - [1.2.0-e-06Mar2024](#120-e-06mar2024)
 - [1.1.0-e-01Dec2023](#110-e-01dec2023)
@@ -25,6 +28,35 @@
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
+## v2.0.0
+
+### Breaking Changes
+
+- Building ASH images for use in CI platforms (or other orchestration platforms that may require elevated access within the container) now requires targeting the `ci` stage of the `Dockerfile`:
+
+_via `ash` CLI_
+
+```sh
+ash --no-run --build-target ci
+```
+
+_via `docker` or other OCI CLI_
+
+```sh
+docker build --tag automated-security-helper:ci --target ci .
+```
+
+### Features
+
+- Run ASH as non-root user to align with security best practices.
+- Create a CI version of the docker file that still runs as root to comply with the different requirements from building platforms where UID/GID cannot be modified and there are additional agents installed at runtime that requires elevated privileges.
+
+### Fixes
+
+- Offline mode now skips NPM/PNPM/Yarn Audit checks (requires connection to registry to pull package information)
+- NPM install during image build now restricts available memory to prevent segmentation fault
+
+**Full Changelog**: https://github.com/awslabs/automated-security-helper/compare/v1.5.1...v2.0.0
 
 ## v1.5.1
 

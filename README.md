@@ -207,26 +207,48 @@ ash --source-dir . --ext py
 ## Synopsis
 
 ```text
+$ ash --help
 NAME:
-        ash
+    ash
 SYNOPSIS:
-        ash [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir
+    ash [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir
 OPTIONS:
-        -v | --version           Prints version number.
+    --source-dir                    Path to the directory containing the code/files you wish to scan. Defaults to $(pwd)
+    --output-dir                    Path to the directory that will contain the report of the scans. Defaults to $(pwd)
 
-        -p | --preserve-report   Add timestamp to the final report file to avoid overwriting it after multiple executions.
-        --source-dir             Path to the directory containing the code/files you wish to scan. Defaults to $(pwd)
-        --output-dir             Path to the directory that will contain the report of the scans. Defaults to $(pwd)
-        --ext | -extension       Force a file extension to scan. Defaults to identify files automatically.
-        --offline                      Build ASH for offline execution. Defaults to false.
-        --offline-semgrep-rulesets     Specify Semgrep rulesets for use in ASH offline mode. Defaults to 'p/ci'.
-        --force                  Rebuild the Docker images of the scanning tools, to make sure software is up-to-date.
-        --no-cleanup             Don't cleanup the work directory where temp reports are stored during scans.
-        --debug                  Print ASH debug log information where applicable.
-        -q | --quiet             Don't print verbose text about the build process.
-        -c | --no-color          Don't print colorized output.
-        -s | --single-process    Run ash scanners serially rather than as separate, parallel sub-processes.
-        -o | --oci-runner        Use the specified OCI runner instead of docker to run the containerized tools.
+    --format                        Output format of the aggregated_results file segments.
+                                    Options: text, json
+                                    Default: text
+
+    --build-target                  Specify the target stage of the ASH image to build.
+                                    Options: non-root, ci
+                                    Default: non-root
+
+    --offline                       Build ASH for offline execution.
+                                    Default: false
+
+    --offline-semgrep-rulesets      Specify Semgrep rulesets for use in ASH offline mode.
+                                    Default: p/ci
+
+    --no-build                      Skip rebuild of the ASH container image, run a scan only.
+                                    Requires an existing ASH image to be present in the image cache.
+    --no-run                        Skip running a scan with ASH, build a new ASH container image only.
+                                    Useful when needing to build an ASH image for publishing to a private image registry.
+
+    --no-cleanup                    Don't cleanup the work directory where temp reports are stored during scans.
+    --ext | -extension              Force a file extension to scan. Defaults to identify files automatically.
+
+    -c    | --no-color              Don't print colorized output.
+    -s    | --single-process        Run ash scanners serially rather than as separate, parallel sub-processes.
+    -o    | --oci-runner            Use the specified OCI runner instead of docker to run the containerized tools.
+    -p    | --preserve-report       Add timestamp to the final report file to avoid overwriting it after multiple executions.
+
+    -d    | --debug                 Print ASH debug log information where applicable.
+    -q    | --quiet                 Don't print verbose text about the build process.
+    -v    | --version               Prints version number.
+
+INFO:
+    For more information, please visit https://github.com/awslabs/automated-security-helper
 ```
 
 ## FAQ
@@ -260,7 +282,7 @@ OPTIONS:
 
 - Q: How to run `ash` in an environment without internet connectivity/with an airgap?
 
-  A: From your environment which does have internet connectivity, build the ASH image using `--offline` and `--offline-semgrep-rulesets` to specify what resources to package into the image.  Environment variable `$ASH_IMAGE_NAME` controls the name of the image.  After building, push to your container repository of choice which will be available within the airgapped environment.  When you go to execute ASH in your offline environment, passing `--no-build` to `ash` alongside `--offline` and `--offline-semgrep-rulesets` will use your offline image and skip the build.  Specify `$ASH_IMAGE_NAME` to override ASH's container image to the previously-built image available within your airgapped environment. 
+  A: From your environment which does have internet connectivity, build the ASH image using `--offline` and `--offline-semgrep-rulesets` to specify what resources to package into the image.  Environment variable `$ASH_IMAGE_NAME` controls the name of the image.  After building, push to your container repository of choice which will be available within the airgapped environment.  When you go to execute ASH in your offline environment, passing `--no-build` to `ash` alongside `--offline` and `--offline-semgrep-rulesets` will use your offline image and skip the build.  Specify `$ASH_IMAGE_NAME` to override ASH's container image to the previously-built image available within your airgapped environment.
 
 ## Feedback
 

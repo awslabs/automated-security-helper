@@ -58,45 +58,48 @@ if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   AUDIT_ARGS="--json ${AUDIT_ARGS}"
 fi
 
-for i in "${!scan_paths[@]}";
-do
-  scan_path=${scan_paths[$i]}
-  cd ${scan_path}
-  for file in $(find . \
-    -iname "package-lock.json" -o \
-    -iname "pnpm-lock.yaml" -o \
-    -iname "yarn.lock");
+if [[ $OFFLINE == "YES" ]]; then
+  debug_echo "[js] JavaScript package auditing is not available in offline mode"
+else
+  for i in "${!scan_paths[@]}";
   do
-      path="$(dirname -- $file)"
-      cd $path
+    scan_path=${scan_paths[$i]}
+    cd ${scan_path}
+    for file in $(find . \
+      -iname "package-lock.json" -o \
+      -iname "pnpm-lock.yaml" -o \
+      -iname "yarn.lock");
+    do
+        path="$(dirname -- $file)"
+        cd $path
 
-      audit_command="npm"
+        audit_command="npm"
 
-      case $file in
-        "./package-lock.json")
-          audit_command="npm"
-          ;;
-        "./pnpm-lock.yaml")
-          audit_command="pnpm"
-          ;;
-        "./yarn.lock")
-          audit_command="yarn"
-          ;;
-      esac
+        case $file in
+          "./package-lock.json")
+            audit_command="npm"
+            ;;
+          "./pnpm-lock.yaml")
+            audit_command="pnpm"
+            ;;
+          "./yarn.lock")
+            audit_command="yarn"
+            ;;
+        esac
 
-      echo -e "\n>>>>>> Begin ${audit_command} audit output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
+        echo -e "\n>>>>>> Begin ${audit_command} audit output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-      eval "${audit_command} audit ${AUDIT_ARGS} >> ${REPORT_PATH} 2>&1"
+        eval "${audit_command} audit ${AUDIT_ARGS} >> ${REPORT_PATH} 2>&1"
 
-      NRC=$?
-      RC=$(bumprc $RC $NRC)
+        NRC=$?
+        RC=$(bumprc $RC $NRC)
 
-      cd ${scan_path}
+        cd ${scan_path}
 
-      echo -e "\n<<<<<< End ${audit_command} audit output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
+        echo -e "\n<<<<<< End ${audit_command} audit output for ${scan_path} <<<<<<\n" >> ${REPORT_PATH}
+    done
   done
-done
-
+fi
 # cd back to the original SOURCE_DIR in case path changed during scan
 cd ${_ASH_SOURCE_DIR}
 

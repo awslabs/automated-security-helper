@@ -2,6 +2,24 @@
 
 ASH supports running in CI environments as an executable container (e.g. via `docker run`) as well as via Container Job mechanisms, depending on CI platform support.
 
+### Building ASH Container Images for CI Usage
+
+Building ASH images for use in CI platforms (or other orchestration platforms that may require elevated access within the container) requires targeting the `ci` stage of the `Dockerfile`. This can be done via one of the following methods from the root of the ASH repository:
+
+_via `ash` CLI_
+
+```sh
+ash --no-run --build-target ci
+```
+
+_via `docker` or other OCI CLI_
+
+```sh
+docker build --tag automated-security-helper:ci --target ci .
+```
+
+### Examples
+
 Within the CI folder, there are multiple examples of running ASH scans in various CI platforms. All examples include the following:
 
 * ASH repository is cloned from GitHub alongside the repository to be scanned.

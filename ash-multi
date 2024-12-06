@@ -49,27 +49,50 @@ version_check() {
 }
 
 print_usage() {
-  echo "NAME:"
-  echo -e "\t$(basename $0)"
-  echo "SYNOPSIS:"
-  echo -e "\t$(basename $0) [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir"
-  echo "OPTIONS:"
-  echo -e "\t-v | --version                 Prints version number.\n"
-  echo -e "\t-p | --preserve-report         Add timestamp to the final report file to avoid overwriting it after multiple executions."
-  echo -e "\t--source-dir                   Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)"
-  echo -e "\t--output-dir                   Path to the directory that will contain the report of the scans. Defaults to \$(pwd)"
-  echo -e "\t--format                       Output format of the aggregated_results file segments. Defaults to text. Use json instead to enable parseable output."
-  echo -e "\t--ext | -extension             Force a file extension to scan. Defaults to identify files automatically."
-  echo -e "\t--offline                      Build ASH for offline execution. Defaults to false."
-  echo -e "\t--offline-semgrep-rulesets     Specify Semgrep rulesets for use in ASH offline mode. Defaults to 'p/ci'."
-  echo -e "\t--force                        Rebuild the Docker images of the scanning tools, to make sure software is up-to-date."
-  echo -e "\t--no-cleanup                   Don't cleanup the work directory where temp reports are stored during scans."
-  echo -e "\t--debug                        Print ASH debug log information where applicable."
-  echo -e "\t-q | --quiet                   Don't print verbose text about the build process."
-  echo -e "\t-c | --no-color                Don't print colorized output."
-  echo -e "\t-s | --single-process          Run ash scanners serially rather than as separate, parallel sub-processes."
-  echo -e "\t-o | --oci-runner              Use the specified OCI runner instead of docker to run the containerized tools.\n"
-  echo -e "For more information please visit https://github.com/awslabs/automated-security-helper"
+    local cmd=$(basename "$0")
+    cat <<-EOF
+NAME:
+    ${cmd}
+SYNOPSIS:
+    ${cmd} [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir
+OPTIONS:
+    --source-dir                    Path to the directory containing the code/files you wish to scan. Defaults to \$(pwd)
+    --output-dir                    Path to the directory that will contain the report of the scans. Defaults to \$(pwd)
+
+    --format                        Output format of the aggregated_results file segments.
+                                    Options: text, json
+                                    Default: text
+
+    --build-target                  Specify the target stage of the ASH image to build.
+                                    Options: non-root, ci
+                                    Default: non-root
+
+    --offline                       Build ASH for offline execution.
+                                    Default: false
+
+    --offline-semgrep-rulesets      Specify Semgrep rulesets for use in ASH offline mode.
+                                    Default: p/ci
+
+    --no-build                      Skip rebuild of the ASH container image, run a scan only.
+                                    Requires an existing ASH image to be present in the image cache.
+    --no-run                        Skip running a scan with ASH, build a new ASH container image only.
+                                    Useful when needing to build an ASH image for publishing to a private image registry.
+
+    --no-cleanup                    Don't cleanup the work directory where temp reports are stored during scans.
+    --ext | -extension              Force a file extension to scan. Defaults to identify files automatically.
+
+    -c    | --no-color              Don't print colorized output.
+    -s    | --single-process        Run ash scanners serially rather than as separate, parallel sub-processes.
+    -o    | --oci-runner            Use the specified OCI runner instead of docker to run the containerized tools.
+    -p    | --preserve-report       Add timestamp to the final report file to avoid overwriting it after multiple executions.
+
+    -d    | --debug                 Print ASH debug log information where applicable.
+    -q    | --quiet                 Don't print verbose text about the build process.
+    -v    | --version               Prints version number.
+
+INFO:
+    For more information, please visit https://github.com/awslabs/automated-security-helper
+EOF
 }
 
 # Find all files in the source directory. Method to list the files will be different if the source is a git repository or not
@@ -101,7 +124,7 @@ map_extensions_and_files() {
     git config --global --add safe.directory "${_ASH_SOURCE_DIR}" >/dev/null 2>&1
     git config --global --add safe.directory "${_ASH_RUN_DIR}" >/dev/null 2>&1
     if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
-      git clone "${_ASH_SOURCE_DIR}" "${_ASH_RUN_DIR}"
+      git clone "${_ASH_SOURCE_DIR}" "${_ASH_RUN_DIR}" >/dev/null 2>&1
       echo "Repository cloned successfully."
       _ASH_SOURCE_DIR="${_ASH_RUN_DIR}"
     else
@@ -159,6 +182,14 @@ validate_input() {
   if [[ ${OFFLINE} != "${OFFLINE_AT_BUILD_TIME}" ]]; then
     echo -e "${RED}Please ensure --offline is specified at build time to be able to run in offline mode.${NC}"
     exit 1
+  fi
+  if [[ ${OFFLINE} == "YES" ]]; then
+    if [[ ${BUILD_DATE_EPOCH} == -1 ]]; then
+      echo -e "${RED}Please ensure you have pulled in the latest ASH changes and rebuilt your container since v1.5.2."
+    elif [[ "$(($(date +%s)-"${BUILD_DATE_EPOCH}"))" -gt "${BUILD_EXPIRATION_SECONDS:-604800}" ]]; then # Greater than 7 days or specified as BUILD_EXPIRATION_SECONDS env var
+      echo -e "${RED}Your build is over 7 days old.  Please rebuild your ASH offline container."
+      exit 1
+    fi
   fi
   if [[ -z ${PRESERVE_FILE} ]]; then AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results.txt"; else AGGREGATED_RESULTS_REPORT_FILENAME="aggregated_results-$(date +%s).txt"; fi
   if [[ -z ${FORCE_REBUILD} ]]; then FORCE_REBUILD="false"; fi
@@ -459,6 +490,11 @@ export _ASH_OFFLINE_SEMGREP_RULESETS=${_ASH_OFFLINE_SEMGREP_RULESETS:-${OFFLINE_
 # Print out the current ASH version to start execution output
 #
 echo -e "\n${LPURPLE}ASH version ${GREEN}$VERSION${NC}\n"
+
+#
+# Print out the uid/gid values in effect
+#
+echo -e "\n${LPURPLE}ASH running with UID/GID: ${CYAN}$(id -u):$(id -g)${NC}\n"
 
 # nosemgrep
 IFS=$'\n' # Support directories with spaces, make the loop iterate over newline instead of space
