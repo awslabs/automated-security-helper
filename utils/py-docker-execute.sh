@@ -61,6 +61,8 @@ if [ -f "${_ASH_SOURCE_DIR}/.bandit" ]; then
   BANDIT_ARGS="--ini ${_ASH_SOURCE_DIR}/.bandit"
 elif [ -f "${_ASH_SOURCE_DIR}/bandit.yaml" ]; then
   BANDIT_ARGS="-c ${_ASH_SOURCE_DIR}/bandit.yaml"
+elif [ -f "${_ASH_SOURCE_DIR}/bandit.toml" ]; then
+  BANDIT_ARGS="-c ${_ASH_SOURCE_DIR}/bandit.toml"
 else
   BANDIT_ARGS="--exclude=\"*venv/*\" --severity-level=all"
 fi
