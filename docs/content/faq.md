@@ -22,3 +22,9 @@ For additional CI pipeline support, please refer to the [Running ASH in CI](./tu
 ## How can I run `ash` with [finch](https://aws.amazon.com/blogs/opensource/introducing-finch-an-open-source-client-for-container-development/) or another OCI compatible tool?
 
 You can configure the OCI compatible tool to use with by using the environment variable `OCI_RUNNER`
+
+## Can I use a Bandit configuration file when `ash` runs?
+
+Yes, `ash` will use a bandit configuration file if it is placed at the root of your project directory. It must be named `.bandit`, `bandit.yaml`, or `bandit.toml`. Configuration files must be formatted properly according to the [Bandit documentation](https://bandit.readthedocs.io/en/latest/config.html).
+
+> Note: paths excluded in a Bandit configuration file must begin with a `/` because `ash` uses an absolute path when calling `bandit`.
