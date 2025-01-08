@@ -57,7 +57,15 @@ echo "<<<<<< end identifyipynb output for Jupyter notebook conversion <<<<<<" >>
 # Run bandit on both the source and output directories
 scan_paths=("${_ASH_SOURCE_DIR}" "${_ASH_OUTPUT_DIR}/work")
 
-BANDIT_ARGS="--exclude=\"*venv/*\" --severity-level=all"
+if [ -f "${_ASH_SOURCE_DIR}/.bandit" ]; then
+  BANDIT_ARGS="--ini ${_ASH_SOURCE_DIR}/.bandit"
+elif [ -f "${_ASH_SOURCE_DIR}/bandit.yaml" ]; then
+  BANDIT_ARGS="-c ${_ASH_SOURCE_DIR}/bandit.yaml"
+else
+  BANDIT_ARGS="--exclude=\"*venv/*\" --severity-level=all"
+fi
+
+debug_echo "[py] BANDIT_ARGS: '${BANDIT_ARGS}'"
 debug_echo "[py] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT:-text}'"
 if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   debug_echo "[py] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
