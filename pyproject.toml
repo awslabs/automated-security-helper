@@ -22,6 +22,7 @@ nbconvert = "^7.16.6"
 jupyterlab = "^4.3.6"
 checkov = "^3.2.395"
 pathspec = "^0.12.1"
+semgrep = "^1.116.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.2"

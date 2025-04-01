@@ -1,0 +1,4 @@
+# Do not check for assert_used in test files;
+# they use `assert` intentionally, leading to B101 false positives.
+assert_used:
+  skips: ["*/test_*.py", "**/test_*.py"]

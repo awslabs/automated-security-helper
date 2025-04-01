@@ -111,13 +111,14 @@ debug_echo "[grype] Starting all scanners within the Grype scanner tool set"
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
+  cleanfile=$(echo $scan_path | sed 's/\//./g;s/^\.//g')
   cd ${scan_path}
   debug_echo "[grype] Starting Grype scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Grype output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   debug_echo "[grype] grype ${GRYPE_ARGS} dir:${scan_path}"
-  grype ${GRYPE_ARGS} dir:${scan_path} >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/grype/grype.${TEEFILEEXT}"
+  grype ${GRYPE_ARGS} dir:${scan_path} >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/grype/grype.${cleanfile}.${TEEFILEEXT}"
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
@@ -131,13 +132,14 @@ done
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
+  cleanfile=$(echo $scan_path | sed 's/\//./g;s/^\.//g')
   cd ${scan_path}
   debug_echo "[grype] Starting Syft scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Syft output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   debug_echo "[grype] syft ${SYFT_ARGS} ${scan_path}"
-  syft ${SYFT_ARGS} ${scan_path} >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/grype/syft.${TEEFILEEXT}"
+  syft ${SYFT_ARGS} ${scan_path} >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/grype/syft.${cleanfile}.${TEEFILEEXT}"
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
@@ -151,13 +153,14 @@ done
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
+  cleanfile=$(echo $scan_path | sed 's/\//./g;s/^\.//g')
   cd ${scan_path}
   debug_echo "[grype] Starting Semgrep scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Semgrep output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   debug_echo "[grype] semgrep ${SEMGREP_ARGS} $scan_path"
-  semgrep ${SEMGREP_ARGS} $scan_path >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/grype/semgrep.${TEEFILEEXT}"
+  semgrep ${SEMGREP_ARGS} $scan_path >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/grype/semgrep.${cleanfile}.${TEEFILEEXT}"
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
