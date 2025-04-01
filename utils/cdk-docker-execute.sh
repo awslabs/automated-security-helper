@@ -44,7 +44,12 @@ cd ${_ASH_SOURCE_DIR}
 debug_echo "[cdk] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: "${_ASH_SOURCE_DIR}" :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
-REPORT_PATH="${_ASH_OUTPUT_DIR}/work/cdk_report_result.txt"
+SCANNER_DIR="${_ASH_OUTPUT_DIR}/scanners"
+RESULTS_DIR="${SCANNER_DIR}/results"
+
+mkdir -p "${RESULTS_DIR}"
+
+REPORT_PATH="${RESULTS_DIR}/cdk_report_result.txt"
 rm ${REPORT_PATH} 2> /dev/null
 touch ${REPORT_PATH}
 
@@ -73,14 +78,19 @@ cd ${_ASH_OUTPUT_DIR}
 #
 # Create a directory to hold all the cdk_nag results from ASH
 #
-DIRECTORY="ash_cf2cdk_output"
+DIRECTORY="cdk"
 # Check if this directory already exist from previous ASH run
-if [[ -n "${_ASH_OUTPUT_DIR}" && -d "${_ASH_OUTPUT_DIR}/$DIRECTORY" ]]; then
-  rm -rf "${_ASH_OUTPUT_DIR}/$DIRECTORY"
+if [[ -n "${SCANNER_DIR}" && -d "${SCANNER_DIR}/$DIRECTORY" ]]; then
+  rm -rf "${SCANNER_DIR}/$DIRECTORY"
 fi
-mkdir -p "${_ASH_OUTPUT_DIR}/$DIRECTORY" 2> /dev/null
+mkdir -p "${SCANNER_DIR}/$DIRECTORY" 2> /dev/null
 
 RC=0
+
+if [ -d "${SCANNER_DIR}/cdk" ]; then
+  rm -rf "${SCANNER_DIR}/cdk"
+fi
+mkdir -p "${SCANNER_DIR}/cdk"
 
 #
 # Uncomment the diagnostic output below to get details about
@@ -126,6 +136,7 @@ if [ "${#cfn_files[@]}" -gt 0 ]; then
 
   for file in "${cfn_files[@]}"; do
     cfn_filename=`basename $file`
+    cleanfile=$(echo $file | sed 's/\//./g;s/^\.//g')
     if [[ "${file1}" != "aggregated_results.txt.json" ]]; then
       echo ">>>>>> begin cdk-nag result for ${cfn_filename} >>>>>>" >> ${REPORT_PATH}
       #
@@ -137,7 +148,7 @@ if [ "${#cfn_files[@]}" -gt 0 ]; then
       # running CDK-NAG on the inserted CloudFormation template
       #
       debug_echo "Importing CloudFormation template file ${file} to apply CDK Nag rules against it"
-      npx cdk synth --context fileName="${file}" --quiet 2>> ${REPORT_PATH}
+      eval "npx cdk synth --context fileName=\"${file}\" --quiet" >> "${REPORT_PATH}" 2>&1 > "${SCANNER_DIR}/cdk/${cleanfile}.txt"
       CRC=$?
 
       RC=$(bumprc $RC $CRC)
@@ -158,15 +169,15 @@ if [ "${#cfn_files[@]}" -gt 0 ]; then
       reportsExist=$(find ${CDK_WORK_DIR}/cdk.out -type f -name ${reportsName} | wc -l)
       # echo "reportsExist = ${reportsExist}" >> ${REPORT_PATH}
       if [ "${fileExists}" -gt 0 -o "${reportsExist}" -gt 0 ]; then
-        mkdir -p ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results
+        mkdir -p ${SCANNER_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results
 
         echo "Writing CDK-NAG reports for ${cfn_filename}" >> ${REPORT_PATH}
         #
         # Copy and then remove these files to avoid permission setting errors when running in a single container
         #
-        cp ${CDK_WORK_DIR}/cdk.out/*.template.json ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/ >/dev/null 2>&1
+        cp ${CDK_WORK_DIR}/cdk.out/*.template.json ${SCANNER_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/ >/dev/null 2>&1
         rm ${CDK_WORK_DIR}/cdk.out/*.template.json >/dev/null 2>&1
-        cp ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv ${_ASH_OUTPUT_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/ >/dev/null 2>&1
+        cp ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv ${SCANNER_DIR}/${DIRECTORY}/${cfn_filename}_cdk_nag_results/ >/dev/null 2>&1
         rm ${CDK_WORK_DIR}/cdk.out/AwsSolutions-*-NagReport.csv >/dev/null 2>&1
       else
         echo "No CDK-NAG reports generated for ${cfn_filename}" >> ${REPORT_PATH}

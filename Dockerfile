@@ -57,7 +57,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 #
-# Install nodejs@18 using latest recommended method
+# Install nodejs@20 using latest recommended method
 #
 RUN set -uex; \
     apt-get update; \
@@ -65,13 +65,14 @@ RUN set -uex; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
      | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
-    NODE_MAJOR=18; \
+    NODE_MAJOR=20; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
      > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
     apt-get -qy install nodejs;
+
 #
-# Install and upgrade pip
+# Python (no-op other than updating pip --- Python deps managed via Poetry @ pyproject.toml)
 #
 RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py
 RUN python3 -m pip install --no-cache-dir --upgrade pip
@@ -83,24 +84,17 @@ RUN git clone https://github.com/awslabs/git-secrets.git && \
     cd git-secrets && \
     make install
 
-#
-# Python
-#
-RUN python3 -m pip install --no-cache-dir \
-    bandit \
-    nbconvert \
-    jupyterlab
 
 #
 # YAML (Checkov, cfn-nag)
 #
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    python3 -m pip install checkov pathspec && \
     gem install cfn-nag
 
 #
-# JavaScript: (no-op --- node is already installed in the image, nothing else needed)
+# JavaScript:
 #
+RUN npm install -g npm pnpm yarn
 
 #
 # Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
@@ -114,8 +108,6 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | 
 
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | \
     sh -s -- -b /usr/local/bin
-
-RUN python3 -m pip install semgrep
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         grype db update && \
@@ -149,21 +141,21 @@ RUN mkdir -p /src && \
 COPY ./utils/cdk-nag-scan /ash/utils/cdk-nag-scan/
 # Limit memory size available for Node to prevent segmentation faults during npm install
 ENV NODE_OPTIONS=--max_old_space_size=512
-RUN npm install -g npm pnpm yarn && \
-    cd /ash/utils/cdk-nag-scan && \
+RUN cd /ash/utils/cdk-nag-scan && \
     npm install --quiet
 
 #
 # COPY ASH source to /ash instead of / to isolate
 #
+COPY --from=poetry-reqs /src/dist/*.whl .
+COPY ./pyproject.toml /ash/pyproject.toml
+RUN python3 -m pip install *.whl && rm *.whl
+
 COPY ./utils/cfn-to-cdk /ash/utils/cfn-to-cdk/
 COPY ./utils/*.* /ash/utils/
 COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
-COPY ./pyproject.toml /ash/pyproject.toml
 
-COPY --from=poetry-reqs /src/dist/*.whl .
-RUN python3 -m pip install *.whl && rm *.whl
 
 #
 # Make sure the ash script is executable

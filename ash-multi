@@ -202,6 +202,12 @@ validate_input() {
     rm -rf "${OUTPUT_DIR}/work"
   fi
   mkdir -p "${OUTPUT_DIR}/work"
+
+  if [ -d "${OUTPUT_DIR}/scanners" ]; then
+    rm -rf "${OUTPUT_DIR}/scanners"
+  fi
+  mkdir -p "${OUTPUT_DIR}/scanners"
+
   OUTPUT_DIR=$(cd "${OUTPUT_DIR}"; pwd) # Transform any relative path to absolute
   CFNRULES_LOCATION=$(cd "${CFNRULES_LOCATION}"; pwd) # Transform any relative path to absolute
   UTILS_LOCATION=$(cd "${UTILS_LOCATION}"; pwd) # Transform any relative path to absolute
@@ -648,10 +654,10 @@ if [[ -n "${AGGREGATED_RESULTS_REPORT_FILENAME}" && -n "${OUTPUT_DIR}" && -f "${
 fi
 
 # if an extension was not found, no report file will be in place, so skip the final report
-if [[ $(find "${OUTPUT_DIR}/work" -iname "*_report_result.txt" | wc -l | awk '{print $1}') -gt 0 ]];
+if [[ $(find "${OUTPUT_DIR}/scanners/results" -iname "*_report_result.txt" | wc -l | awk '{print $1}') -gt 0 ]];
 then
   # Aggregate the results output files
-  for result in "${OUTPUT_DIR}"/work/*_report_result.txt;
+  for result in "${OUTPUT_DIR}"/scanners/results/*_report_result.txt;
   do
     echo "#############################################" >> "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"
     echo "Start of  ${result}" >> "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"

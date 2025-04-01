@@ -7,6 +7,7 @@ ash_output
 *.bak
 src/automated_security_helper/models/*generated*
 !tests/test_data/aggregated_results.txt
+devfile.yaml
 
 ### macOS ###
 # General
@@ -94,6 +95,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+test-results/
 
 # Translations
 *.mo

@@ -44,7 +44,12 @@ cd "${_ASH_SOURCE_DIR}"
 debug_echo "[py] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: ${_ASH_SOURCE_DIR} :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
-REPORT_PATH="${_ASH_OUTPUT_DIR}/work/py_report_result.txt"
+SCANNER_DIR="${_ASH_OUTPUT_DIR}/scanners"
+RESULTS_DIR="${SCANNER_DIR}/results"
+
+mkdir -p "${RESULTS_DIR}"
+
+REPORT_PATH="${RESULTS_DIR}/py_report_result.txt"
 rm ${REPORT_PATH} 2> /dev/null
 touch ${REPORT_PATH}
 
@@ -62,15 +67,25 @@ debug_echo "[py] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT:-text}'"
 if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   debug_echo "[py] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
   BANDIT_ARGS="-f json ${BANDIT_ARGS}"
+  TEEFILEEXT="json"
+else
+  TEEFILEEXT="txt"
 fi
+
+if [ -d "${SCANNER_DIR}/bandit" ]; then
+  rm -rf "${SCANNER_DIR}/bandit"
+fi
+mkdir -p "${SCANNER_DIR}/bandit"
 
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
   cd ${scan_path}
 
+
+  cleanfile=$(echo $scan_path | sed 's/\//./g;s/^\.//g')
   echo ">>>>>> begin bandit result for ${scan_path} >>>>>>" >> ${REPORT_PATH}
-  python3 -m bandit ${BANDIT_ARGS} -r $(pwd) >> ${REPORT_PATH} 2>&1
+  python3 -m bandit ${BANDIT_ARGS} -r $(pwd) >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/bandit/${cleanfile}.${TEEFILEEXT}"
   BRC=$?
   RC=$(bumprc $RC $BRC)
   echo >> ${REPORT_PATH}	# ensure that we have a newline separating end-of-section

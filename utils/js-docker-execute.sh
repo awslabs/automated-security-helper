@@ -44,7 +44,12 @@ cd "${_ASH_SOURCE_DIR}"
 debug_echo "[js] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: ${_ASH_SOURCE_DIR} :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
-REPORT_PATH="${_ASH_OUTPUT_DIR}/work/js_report_result.txt"
+SCANNER_DIR="${_ASH_OUTPUT_DIR}/scanners"
+RESULTS_DIR="${SCANNER_DIR}/results"
+
+mkdir -p "${RESULTS_DIR}"
+
+REPORT_PATH="${RESULTS_DIR}/js_report_result.txt"
 rm ${REPORT_PATH} 2> /dev/null
 touch ${REPORT_PATH}
 
@@ -56,11 +61,19 @@ debug_echo "[js] ASH_OUTPUT_FORMAT: '${ASH_OUTPUT_FORMAT:-text}'"
 if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   debug_echo "[js] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
   AUDIT_ARGS="--json ${AUDIT_ARGS}"
+  TEEFILEEXT="json"
+else
+  TEEFILEEXT="txt"
 fi
 
 if [[ $OFFLINE == "YES" ]]; then
   debug_echo "[js] JavaScript package auditing is not available in offline mode"
 else
+  if [ -d "${SCANNER_DIR}/npmaudit" ]; then
+    rm -rf "${SCANNER_DIR}/npmaudit"
+  fi
+  mkdir -p "${SCANNER_DIR}/npmaudit"
+
   for i in "${!scan_paths[@]}";
   do
     scan_path=${scan_paths[$i]}
@@ -89,7 +102,7 @@ else
 
         echo -e "\n>>>>>> Begin ${audit_command} audit output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
-        eval "${audit_command} audit ${AUDIT_ARGS} >> ${REPORT_PATH} 2>&1"
+        eval "${audit_command} audit ${AUDIT_ARGS}" >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/npmaudit/${audit_command}.${TEEFILEEXT}"
 
         NRC=$?
         RC=$(bumprc $RC $NRC)

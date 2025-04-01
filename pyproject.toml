@@ -15,10 +15,21 @@ asharp = 'automated_security_helper.asharp:main'
 [tool.poetry.dependencies]
 python = "^3.10"
 regex = "^2024.5.15"
-pydantic = "^2.9.1"
+pydantic = "^2.11.1"
+pytest = "^8.3.5"
+bandit = "^1.8.3"
+nbconvert = "^7.16.6"
+jupyterlab = "^4.3.6"
+checkov = "^3.2.395"
+pathspec = "^0.12.1"
 
 [tool.poetry.group.dev.dependencies]
-black = "^24.4.2"
+ruff = "^0.11.2"
+pytest-cov = "^6.1.0"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
 
 [build-system]
 requires = ["poetry-core"]

@@ -101,9 +101,9 @@ def NormalizeJson(tool, file, data):
             if type(item["fixAvailable"]) is not bool:
                 item["fixDetails"] = item["fixAvailable"]
                 item["fixAvailable"] = True
-                 
+
             vulns.append(item)
-        
+
         data["vulnerabilities"] = vulns
 
     # normalize bandit results
@@ -179,7 +179,7 @@ def parseCdkProvider(data, aggfile):
     #     )
     # ''', data)
 
-    cdk_nag_output_dir = Path(aggfile).parent.joinpath('ash_cf2cdk_output')
+    cdk_nag_output_dir = Path(aggfile).parent.joinpath('scanners').joinpath('cdk')
     results = []
     debug(f'cdk_nag_output_dir = {cdk_nag_output_dir}')
     for cdk_csv in glob(f"{cdk_nag_output_dir.as_posix()}/**/*NagReport.csv"):
