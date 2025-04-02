@@ -129,8 +129,8 @@ def test_scanner_scan_error(mocker):
     )
     mocker.patch(
         "automated_security_helper.scanners.cdk_nag_scanner.subprocess.run",
-        side_effect=Exception("Target file /test/path does not exist"),
+        side_effect=Exception("Target /test/path does not exist"),
     )
 
-    with pytest.raises(ScannerError, match="Target file /test/path does not exist"):
+    with pytest.raises(ScannerError, match="Target /test/path does not exist"):
         scanner.scan("/test/path")

@@ -1,13 +1,13 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
-  - repo: local
-    hooks:
-      - id: generate-schemas
-        name: Generate ASH JSON schemas
-        entry: poetry run generate_ash_schemas
-        language: system
-        pass_filenames: false
+  # - repo: local
+  #   hooks:
+  #     - id: generate-schemas
+  #       name: Generate ASH JSON schemas
+  #       entry: poetry run generate_ash_schemas
+  #       language: system
+  #       pass_filenames: false
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
     rev: v0.11.2
