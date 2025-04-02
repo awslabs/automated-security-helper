@@ -190,10 +190,13 @@ def test_iac_vulnerability_with_policy_violation(base_scanner, base_location):
             "resource_id": "policy-12345",
             "impact": "Overly permissive IAM policy",
             "remediation": "Limit IAM permissions to required actions only",
-            "policy_violation": "Actions include wildcard permissions"
+            "policy_violation": "Actions include wildcard permissions",
         },
     )
     assert vuln.title == "Non-Compliant IAM Policy"
     assert vuln.resource_type == "AWS::IAM::Policy"
     assert "policy_violation" in vuln.violation_details
-    assert "Actions include wildcard permissions" in vuln.violation_details["policy_violation"]
+    assert (
+        "Actions include wildcard permissions"
+        in vuln.violation_details["policy_violation"]
+    )

@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Models for Static Analysis findings."""
+
 from datetime import datetime, timezone
-from typing import Annotated, List, Optional
+from typing import Annotated, List
 from pydantic import BaseModel, Field
 
 # Import base classes using relative imports
-from automated_security_helper.models.config import ASHConfig
+from automated_security_helper.models.config import BaseConfig
 from automated_security_helper.models.core import BaseFinding
 
 
@@ -59,9 +60,9 @@ class StaticAnalysisReport(BaseModel):
         str, Field(description="Timestamp when scan was performed")
     ] = datetime.now(timezone.utc).strftime("%Y-%M-%d")
     scan_config: Annotated[
-        ASHConfig,
+        BaseConfig,
         Field(description="Configuration used for the scan"),
-    ] = ASHConfig()
+    ] = None
 
     def group_findings_by_file(self):
         """Group findings by source file."""

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Models for Dependency Scanning findings."""
+
 from typing import Annotated, List, Optional, Dict
 from pydantic import BaseModel, Field
 from automated_security_helper.models.core import BaseFinding

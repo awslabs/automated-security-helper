@@ -5,7 +5,6 @@
 
 from datetime import datetime, timezone
 from typing import Optional, Dict, Literal, Annotated
-from typing_extensions import Annotated
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 # Define valid severity levels at module level for use across all finding types
@@ -35,23 +34,24 @@ class Scanner(BaseModel):
 
     name: Annotated[
         str,
-        Field(
-            min_length=1, pattern=r"^[\w-]+$", description="Name of the scanner"
-        ),
+        Field(min_length=1, pattern=r"^[\w-]+$", description="Name of the scanner"),
     ]
     version: Annotated[str, Field(description="Version of the scanner")] = "1.0.0"
     type: Annotated[
         Literal[
-        "SAST", "DAST", "SBOM",
-        "CONTAINER",
-        "IAC",
-        "DEPENDENCY",
-        "VULNERABILITY",
-        "SECURITY",
-        "STATIC",
-        "DYNAMIC",
-        "SECRET",
-    ], Field(description="Type of scanner (e.g., SAST, DAST, SBOM)")
+            "SAST",
+            "DAST",
+            "SBOM",
+            "CONTAINER",
+            "IAC",
+            "DEPENDENCY",
+            "VULNERABILITY",
+            "SECURITY",
+            "STATIC",
+            "DYNAMIC",
+            "SECRET",
+        ],
+        Field(description="Type of scanner (e.g., SAST, DAST, SBOM)"),
     ] = "SAST"
     rule_id: Annotated[
         str,
@@ -61,9 +61,7 @@ class Scanner(BaseModel):
             description="Unique identifier for the scanner rule",
         ),
     ] = None
-    description: Annotated[
-        str, Field(description="Description of the scanner")
-    ] = None
+    description: Annotated[str, Field(description="Description of the scanner")] = None
 
     model_config = ConfigDict(
         str_strip_whitespace=True,

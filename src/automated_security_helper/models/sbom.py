@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, List, Optional, Dict, Union, Set
+from typing import Any, List, Optional, Dict, Union
 from typing_extensions import Annotated
 from .data_interchange import DataInterchange, ExportFormat
 
@@ -101,22 +101,26 @@ class SBOMReport(DataInterchange):
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
-        extra='allow',
-        ser_json_timedelta='iso8601',
-        revalidate_instances='always',
-        allow_methods=True
+        extra="allow",
+        ser_json_timedelta="iso8601",
+        revalidate_instances="always",
+        allow_methods=True,
     )
 
-    def export(self, format: ExportFormat = ExportFormat.JSON) -> Union[str, Dict[str, Any]]:
+    def export(
+        self, format: ExportFormat = ExportFormat.JSON
+    ) -> Union[str, Dict[str, Any]]:
         """Export the SBOM report in the specified format."""
         if format == ExportFormat.JSON:
             return self.model_dump_json(indent=2)
         elif format == ExportFormat.YAML:
             import yaml
+
             return yaml.dump(self.model_dump())
         elif format == ExportFormat.CSV:
             import csv
             import io
+
             output = io.StringIO()
             if self.components:
                 component_dicts = [comp.model_dump() for comp in self.components]
@@ -151,11 +155,12 @@ class SBOMReport(DataInterchange):
 
     def get_dependency_tree(self) -> Dict[str, Any]:
         """Generate a tree structure of package dependencies."""
+
         def build_tree(component: SBOMComponent) -> Dict[str, Any]:
             tree = {
                 "name": component.name,
                 "version": component.version,
-                "dependencies": {}
+                "dependencies": {},
             }
             for dep in component.dependencies:
                 tree["dependencies"][dep.name] = build_tree(dep)
@@ -166,8 +171,6 @@ class SBOMReport(DataInterchange):
         for package in packages:
             result[package.name] = build_tree(package)
         return result
-
-
 
 
 # Initialize types at module level

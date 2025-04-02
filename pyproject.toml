@@ -1,16 +1,34 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
 [tool.poetry]
-name = "automated-security-helper"
-version = "2.0.1"
-description = ""
-authors = ["Nate Ferrell <nateferl@amazon.com>", "Nathan Bates <nbb@amazon.com>"]
-license = "Apache-2.0"
+name = "ash-github"
+version = "0.1.0"
+description = "Automated Security Helper for GitHub Actions"
 readme = "README.md"
+license = "Apache-2.0"
 repository = "https://github.com/awslabs/automated-security-helper"
+authors = [
+  "Daniel Begimher <dbbegimh@amazon.com>",
+  "Madison Steiner <awsmadi@amazon.com>",
+  "Nate Ferrell <nateferl@amazon.com>",
+  "Nathan Bates <nbb@amazon.com>",
+  "Rafael Pereyra <rapg@amazon.com>",
+  "Tim Hahn <timhahn@amazon.com>",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+packages = [{include = "automated_security_helper", from = "src"}]
 
 [tool.poetry.scripts]
 asharp = 'automated_security_helper.asharp:main'
+generate_ash_schemas = 'automated_security_helper.models.generate_schemas:generate_schemas'
+ash-multi = "automated_security_helper.ash_multi:main"
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -27,6 +45,7 @@ semgrep = "^1.116.0"
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.2"
 pytest-cov = "^6.1.0"
+pytest-mock = "^3.14.0"
 
 [tool.pytest.ini_options]
 minversion = "6.0"

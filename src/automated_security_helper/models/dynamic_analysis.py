@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Models for Dynamic Analysis findings."""
+
 from typing import Annotated, Any, List, Optional, Dict
 from pydantic import BaseModel, Field
 from automated_security_helper.models.core import BaseFinding
@@ -21,10 +22,12 @@ class DynamicAnalysisFinding(BaseFinding):
         None, description="Steps to reproduce the issue"
     )
 
+
 class DynamicAnalysisScanCoverage(BaseModel):
     endpoints_tested: int = 0
     auth_tested: bool = False
     input_vectors_tested: List[Any] = []
+
 
 class DynamicAnalysisReport(BaseModel):
     """Container for dynamic analysis findings."""

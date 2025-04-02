@@ -18,8 +18,8 @@ class PasswordAsCFnParameterRule < BaseRule
   def audit_impl(cfn_model)
 
     parameters = cfn_model.parameters.select do |name, properties|
-      
-      # TODO: find way to preserve the line number from properties.type["line"] 
+
+      # TODO: find way to preserve the line number from properties.type["line"]
       name.downcase.include?("password") and
       properties.type["value"] == "String" and
       properties.allowedValues != [true, false] and

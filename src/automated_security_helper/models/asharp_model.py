@@ -1,19 +1,18 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from datetime import datetime, timezone
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from datetime import datetime
+from pydantic import ConfigDict, Field, model_validator
 from automated_security_helper.models.data_interchange import (
     SecurityReport,
     ReportMetadata,
 )
-from typing import Annotated, Literal, List, Dict, Any, Union, Optional
+from typing import Annotated, List, Dict, Any, Union, Optional
 from automated_security_helper.models.core import BaseFinding, Scanner
 
 __all__ = ["ASHARPModel"]
 
 
-from datetime import datetime
 from automated_security_helper.models.aggregation import (
     FindingAggregator,
     TrendAnalyzer,
@@ -134,11 +133,7 @@ class ASHARPModel(SecurityReport):
                 Returns empty list if no scanners are defined.
         """
         if not hasattr(self, "_scanners"):
-            self._scanners = (
-                self.scanners_used
-                if self.scanners_used
-                else []
-            )
+            self._scanners = self.scanners_used if self.scanners_used else []
         return self._scanners.copy()  # Return copy to prevent modification
 
     @model_validator(mode="after")
@@ -173,23 +168,3 @@ class ASHARPModel(SecurityReport):
         if isinstance(json_data, str):
             return cls.model_validate_json(json_data)
         return cls.model_validate(json_data)
-
-    def to_json_schema(
-        self,
-        format: Literal["dict", "str"] = "dict",
-        *args,
-        **kwargs,
-    ) -> Union[Dict[str, Any], str]:
-        """Generate JSON schema for the model.
-
-        Args:
-            format: Output format, either "dict" for dictionary or "str" for JSON string
-            *args: Additional positional arguments passed to model_dump/model_dump_json
-            **kwargs: Additional keyword arguments passed to model_dump/model_dump_json
-
-        Returns:
-            JSON schema as either a dictionary or string based on format parameter
-        """
-        if format == "dict":
-            return self.model_dump(*args, **kwargs)
-        return self.model_dump_json(*args, **kwargs)

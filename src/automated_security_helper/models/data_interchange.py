@@ -4,8 +4,7 @@
 """Models and interfaces for data interchange and report generation."""
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Union, Annotated
-from typing_extensions import Annotated
+from typing import Dict, List, Any, Union, Annotated
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 

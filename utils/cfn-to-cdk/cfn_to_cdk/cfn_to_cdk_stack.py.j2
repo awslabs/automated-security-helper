@@ -9,6 +9,6 @@ class CfnToCdkStack(cdk.Stack):
         super().__init__(scope, construct_id, **kwargs)
 
     {% for id, file in enumerate(files)  %}
-        template{{ id }} = cfn_inc.CfnInclude(self, "{{ file }}",  
+        template{{ id }} = cfn_inc.CfnInclude(self, "{{ file }}",
                 template_file="{{ file }}")
     {% endfor -%}

@@ -2,7 +2,6 @@
 
 import pytest
 from datetime import datetime, timezone
-from automated_security_helper.models.core import Location, Scanner
 from automated_security_helper.models.sbom import (
     SBOMComponent,
     SBOMMetadata,
@@ -74,15 +73,17 @@ def test_sbom_report_creation(sample_package):
         version=datetime.now(timezone.utc).strftime("%Y.%m.%d"),
         generated_at=datetime.now(),
         packages=[sample_package],
-        metadata=[SBOMMetadata(
-            component=SBOMComponent(
-                name="requests",
-                version="2.26.0",
-                license="Apache-2.0",
-                type="pypi",
-                publisher="Kenneth Reitz",
+        metadata=[
+            SBOMMetadata(
+                component=SBOMComponent(
+                    name="requests",
+                    version="2.26.0",
+                    license="Apache-2.0",
+                    type="pypi",
+                    publisher="Kenneth Reitz",
+                )
             )
-        )]
+        ],
     )
     assert report.project_name == "test-project"
     assert len(report.packages) == 1

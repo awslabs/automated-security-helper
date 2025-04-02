@@ -1,4 +1,5 @@
 """Unit tests for data interchange functionality."""
+
 import pytest
 import json
 from datetime import datetime
@@ -7,8 +8,9 @@ from automated_security_helper.models.data_interchange import (
     ExportFormat,
     DataInterchange,
     ReportMetadata,
-    SecurityReport
+    SecurityReport,
 )
+
 
 @pytest.fixture
 def sample_metadata():
@@ -18,8 +20,9 @@ def sample_metadata():
         tool_name="ash",
         source="test-source",
         scan_type="security",
-        timestamp=datetime.now()
+        timestamp=datetime.now(),
     )
+
 
 @pytest.fixture
 def sample_finding():
@@ -33,8 +36,9 @@ def sample_finding():
         severity="HIGH",
         scanner=scanner,
         location=location,
-        timestamp=datetime.now()
+        timestamp=datetime.now(),
     )
+
 
 def test_export_format_values():
     """Test ExportFormat enum values."""
@@ -42,22 +46,23 @@ def test_export_format_values():
     assert ExportFormat.DICT == "dict"
     assert ExportFormat.SARIF == "sarif"
 
+
 def test_data_interchange_creation():
     """Test creation of DataInterchange objects."""
     data = DataInterchange(
-        name="Test Data",
-        version="1.0.0",
-        description="Test description"
+        name="Test Data", version="1.0.0", description="Test description"
     )
     assert data.name == "Test Data"
     assert data.version == "1.0.0"
     assert data.description == "Test description"
+
 
 def test_report_metadata_creation(sample_metadata):
     """Test creation of ReportMetadata objects."""
     assert sample_metadata.source == "test-source"
     assert sample_metadata.scan_type == "security"
     assert isinstance(sample_metadata.timestamp, datetime)
+
 
 def test_security_report_creation(sample_finding, sample_metadata):
     """Test creation of SecurityReport objects."""
@@ -66,12 +71,13 @@ def test_security_report_creation(sample_finding, sample_metadata):
         version="1.0.0",
         description="Test security report",
         metadata=sample_metadata,
-        findings=[sample_finding]
+        findings=[sample_finding],
     )
     assert report.name == "Test Report"
     assert report.metadata == sample_metadata
     assert len(report.findings) == 1
     assert report.findings[0] == sample_finding
+
 
 def test_security_report_export_json(sample_finding, sample_metadata):
     """Test JSON export functionality."""
@@ -80,7 +86,7 @@ def test_security_report_export_json(sample_finding, sample_metadata):
         version="1.0.0",
         description="Test security report",
         metadata=sample_metadata,
-        findings=[sample_finding]
+        findings=[sample_finding],
     )
     json_output = report.export(format=ExportFormat.JSON)
     assert isinstance(json_output, str)
@@ -89,6 +95,7 @@ def test_security_report_export_json(sample_finding, sample_metadata):
     assert parsed["name"] == "Test Report"
     assert len(parsed["findings"]) == 1
 
+
 def test_security_report_export_dict(sample_finding, sample_metadata):
     """Test dictionary export functionality."""
     report = SecurityReport(
@@ -96,12 +103,13 @@ def test_security_report_export_dict(sample_finding, sample_metadata):
         version="1.0.0",
         description="Test security report",
         metadata=sample_metadata,
-        findings=[sample_finding]
+        findings=[sample_finding],
     )
     dict_output = report.export(format=ExportFormat.DICT)
     assert isinstance(dict_output, dict)
     assert dict_output["name"] == "Test Report"
     assert len(dict_output["findings"]) == 1
+
 
 def test_security_report_from_json():
     """Test creation of SecurityReport from JSON."""
@@ -114,14 +122,15 @@ def test_security_report_from_json():
             "tool_name": "ash",
             "source": "test-source",
             "scan_type": "security",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         },
-        "findings": []
+        "findings": [],
     }
     report = SecurityReport.from_json(json_data)
     assert report.name == "Test Report"
     assert report.version == "1.0.0"
     assert report.metadata.source == "test-source"
+
 
 def test_security_report_track_history(sample_finding):
     """Test history tracking between reports."""
@@ -135,9 +144,9 @@ def test_security_report_track_history(sample_finding):
             tool_name="ash",
             source="test-source",
             scan_type="security",
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         ),
-        findings=[sample_finding]
+        findings=[sample_finding],
     )
 
     report2 = SecurityReport(
@@ -149,11 +158,11 @@ def test_security_report_track_history(sample_finding):
             tool_name="ash",
             source="test-source",
             scan_type="security",
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         ),
-        findings=[]  # No findings in second report
+        findings=[],  # No findings in second report
     )
 
     history = report2.track_history(report1)
     assert history["resolved_findings"] == 1  # One finding was resolved
-    assert history["new_findings"] == 0       # No new findings
+    assert history["new_findings"] == 0  # No new findings

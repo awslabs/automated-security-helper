@@ -2,6 +2,7 @@
 
 import pytest
 from datetime import datetime, timezone
+from automated_security_helper.models.config import BaseConfig
 from automated_security_helper.models.core import Location, Scanner
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisFinding,
@@ -127,7 +128,7 @@ def test_static_analysis_report_creation(sample_finding):
     """Test creation of StaticAnalysisReport objects."""
     report = StaticAnalysisReport(
         project_name="test-project",
-        scan_timestamp=datetime.now(timezone.utc).strftime('%Y-%M-%d'),
+        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
         scanner_name="test",
         findings=[sample_finding],
         scan_config={
@@ -153,7 +154,7 @@ def test_static_analysis_report_empty():
     """Test creation of empty StaticAnalysisReport."""
     report = StaticAnalysisReport(
         project_name="test-project",
-        scan_timestamp=datetime.now(timezone.utc).strftime('%Y-%M-%d'),
+        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
         scanner_name="test",
         findings=[],
         scan_config={
@@ -277,7 +278,7 @@ def test_static_analysis_report_by_file():
         scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
         scanner_name="test",
         findings=findings,
-        scan_config={"rules": ["security"]},
+        scan_config=BaseConfig(rules=["security"]),
         statistics=StaticAnalysisStatistics(
             files_scanned=3,
             lines_of_code=300,

@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timezone
-from automated_security_helper.models.core import Location, Scanner
+from automated_security_helper.models.core import Location
 from automated_security_helper.models.container_scan import (
     ContainerVulnerability,
     ContainerScanReport,

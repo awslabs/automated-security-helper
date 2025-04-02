@@ -1,9 +1,11 @@
 """Unit tests for ASHARP model."""
+
 import pytest
 from datetime import datetime
 from automated_security_helper.models.core import Location, Scanner, BaseFinding
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.data_interchange import ExportFormat
+
 
 @pytest.fixture
 def sample_scanner_dict():
@@ -13,8 +15,9 @@ def sample_scanner_dict():
         "version": "1.0.0",
         "type": "STATIC",
         "rule_id": "RULE-001",
-        "description": "Security scanner"
+        "description": "Security scanner",
     }
+
 
 @pytest.fixture
 def sample_finding():
@@ -28,21 +31,20 @@ def sample_finding():
         severity="HIGH",
         scanner=scanner,
         location=location,
-        timestamp=datetime.now()
+        timestamp=datetime.now(),
     )
+
 
 def test_asharp_model_creation():
     """Test creation of ASHARPModel."""
     model = ASHARPModel(
-        name="Test Report",
-        version="1.0.0",
-        description="Test description",
-        findings=[]
+        name="Test Report", version="1.0.0", description="Test description", findings=[]
     )
     assert model.name == "Test Report"
     assert model.version == "1.0.0"
     assert model.description == "Test description"
     assert len(model.findings) == 0
+
 
 def test_asharp_model_findings_management(sample_finding):
     """Test findings management functionality."""
@@ -50,7 +52,7 @@ def test_asharp_model_findings_management(sample_finding):
         name="Test Report",
         version="1.0.0",
         description="Test description",
-        findings=[sample_finding]
+        findings=[sample_finding],
     )
 
     # Test deduplication
@@ -67,6 +69,7 @@ def test_asharp_model_findings_management(sample_finding):
     assert len(by_severity) == 1
     assert "HIGH" in by_severity
 
+
 def test_asharp_model_scanner_conversion(sample_scanner_dict):
     """Test scanner conversion functionality."""
     model = ASHARPModel(name="Test Report", version="1.0.0", description="Test")
@@ -75,6 +78,7 @@ def test_asharp_model_scanner_conversion(sample_scanner_dict):
     assert scanner.version == sample_scanner_dict["version"]
     assert scanner.rule_id == sample_scanner_dict["rule_id"]
 
+
 def test_asharp_model_scanners_property(sample_finding):
     """Test scanners property."""
     model = ASHARPModel(
@@ -82,11 +86,12 @@ def test_asharp_model_scanners_property(sample_finding):
         version="1.0.0",
         description="Test description",
         findings=[sample_finding],
-        scanners_used=[sample_finding.scanner]
+        scanners_used=[sample_finding.scanner],
     )
     scanners = model.scanners
     assert len(scanners) == 1
     assert scanners[0].name == sample_finding.scanner.name
+
 
 def test_asharp_model_export():
     """Test model export functionality."""
@@ -102,18 +107,20 @@ def test_asharp_model_export():
     assert isinstance(dict_export, dict)
     assert dict_export["name"] == "Test Report"
 
+
 def test_asharp_model_from_json():
     """Test model creation from JSON."""
     json_data = {
         "name": "Test Report",
         "version": "1.0.0",
         "description": "Test description",
-        "findings": []
+        "findings": [],
     }
     model = ASHARPModel.from_json(json_data)
     assert model.name == "Test Report"
     assert model.version == "1.0.0"
     assert model.description == "Test description"
+
 
 def test_asharp_model_validate_findings_scanners(sample_finding):
     """Test findings scanners validation."""
@@ -121,7 +128,7 @@ def test_asharp_model_validate_findings_scanners(sample_finding):
         name="Test Report",
         version="1.0.0",
         description="Test description",
-        findings=[sample_finding]
+        findings=[sample_finding],
     )
     # Should not raise any exceptions
     model.validate_findings_scanners()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from aws_cdk import App, Aspects
+from aws_cdk import Aspects
 from cdk_nag import AwsSolutionsChecks
 
 import aws_cdk as cdk

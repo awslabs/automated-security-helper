@@ -1,8 +1,10 @@
 """Module containing aggregation functionality for security findings."""
+
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 from automated_security_helper.models.core import BaseFinding
+
 
 class FindingAggregator:
     """Aggregates and correlates findings from multiple scans."""
@@ -29,7 +31,7 @@ class FindingAggregator:
                 finding.location.start_line,
                 finding.scanner.rule_id,
                 finding.title,
-                finding.description
+                finding.description,
             )
             if key not in unique_findings:
                 unique_findings[key] = finding
@@ -54,13 +56,16 @@ class FindingAggregator:
             groups[finding.severity].append(finding)
         return groups
 
+
 class TrendAnalyzer:
     """Analyzes finding trends over time."""
 
     def __init__(self):
         self.scan_history: Dict[datetime, List[BaseFinding]] = {}
 
-    def add_scan_findings(self, scan_time: datetime, findings: List[BaseFinding]) -> None:
+    def add_scan_findings(
+        self, scan_time: datetime, findings: List[BaseFinding]
+    ) -> None:
         """Add findings from a scan at a specific time."""
         self.scan_history[scan_time] = findings
 
@@ -80,26 +85,72 @@ class TrendAnalyzer:
                 trends[finding.severity][scan_time] += 1
         return trends
 
-    def get_new_findings(self, previous_scan: datetime, current_scan: datetime) -> List[BaseFinding]:
+    def get_new_findings(
+        self, previous_scan: datetime, current_scan: datetime
+    ) -> List[BaseFinding]:
         """Get findings that appeared in current scan but not in previous scan."""
-        if previous_scan not in self.scan_history or current_scan not in self.scan_history:
+        if (
+            previous_scan not in self.scan_history
+            or current_scan not in self.scan_history
+        ):
             raise KeyError("Scan times not found in history")
 
-        prev_findings = set((f.location.file_path, f.location.start_line, f.scanner.rule_id,
-                            f.title, f.description) for f in self.scan_history[previous_scan])
+        prev_findings = set(
+            (
+                f.location.file_path,
+                f.location.start_line,
+                f.scanner.rule_id,
+                f.title,
+                f.description,
+            )
+            for f in self.scan_history[previous_scan]
+        )
         current_findings = self.scan_history[current_scan]
 
-        return [f for f in current_findings if (f.location.file_path, f.location.start_line,
-                f.scanner.rule_id, f.title, f.description) not in prev_findings]
+        return [
+            f
+            for f in current_findings
+            if (
+                f.location.file_path,
+                f.location.start_line,
+                f.scanner.rule_id,
+                f.title,
+                f.description,
+            )
+            not in prev_findings
+        ]
 
-    def get_resolved_findings(self, previous_scan: datetime, current_scan: datetime) -> List[BaseFinding]:
+    def get_resolved_findings(
+        self, previous_scan: datetime, current_scan: datetime
+    ) -> List[BaseFinding]:
         """Get findings that were in previous scan but not in current scan."""
-        if previous_scan not in self.scan_history or current_scan not in self.scan_history:
+        if (
+            previous_scan not in self.scan_history
+            or current_scan not in self.scan_history
+        ):
             raise KeyError("Scan times not found in history")
 
-        current_findings = set((f.location.file_path, f.location.start_line, f.scanner.rule_id,
-                              f.title, f.description) for f in self.scan_history[current_scan])
+        current_findings = set(
+            (
+                f.location.file_path,
+                f.location.start_line,
+                f.scanner.rule_id,
+                f.title,
+                f.description,
+            )
+            for f in self.scan_history[current_scan]
+        )
         prev_findings = self.scan_history[previous_scan]
 
-        return [f for f in prev_findings if (f.location.file_path, f.location.start_line,
-                f.scanner.rule_id, f.title, f.description) not in current_findings]
+        return [
+            f
+            for f in prev_findings
+            if (
+                f.location.file_path,
+                f.location.start_line,
+                f.scanner.rule_id,
+                f.title,
+                f.description,
+            )
+            not in current_findings
+        ]

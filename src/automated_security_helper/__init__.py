@@ -3,4 +3,4 @@
 
 import importlib.metadata
 
-__version__ = importlib.metadata.version('automated_security_helper')
+__version__ = importlib.metadata.version("automated_security_helper")
