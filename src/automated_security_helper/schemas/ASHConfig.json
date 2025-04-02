@@ -1,14 +1,582 @@
 {
   "$defs": {
-    "OutputFormat": {
-      "description": "Supported output formats.",
-      "enum": [
-        "json",
-        "yaml",
-        "text"
-      ],
-      "title": "OutputFormat",
-      "type": "string"
+    "BanditScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "description": "Bandit SAST scanner configuration.",
+      "properties": {
+        "bandit": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/ScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true
+          },
+          "description": "Enable Bandit scanner",
+          "title": "Bandit"
+        }
+      },
+      "title": "BanditScanner",
+      "type": "object"
+    },
+    "BuildConfig": {
+      "additionalProperties": true,
+      "description": "Configuration model for build-time settings.",
+      "properties": {
+        "custom_scanners": {
+          "$ref": "#/$defs/CustomBuildScannerConfig",
+          "default": {
+            "sast": {},
+            "sbom": {}
+          },
+          "description": "Scanner configurations by type"
+        },
+        "mode": {
+          "default": "ASH_MODE_ONLINE",
+          "description": "Build mode for the container",
+          "enum": [
+            "ASH_MODE_ONLINE",
+            "ASH_MODE_OFFLINE"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "tool_install_scripts": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Map of tool names to their installation scripts",
+          "title": "Tool Install Scripts",
+          "type": "object"
+        }
+      },
+      "title": "BuildConfig",
+      "type": "object"
+    },
+    "CdkNagPacks": {
+      "additionalProperties": true,
+      "properties": {
+        "AwsSolutionsChecks": {
+          "default": true,
+          "description": "Runs the AwsSolutionsChecks NagPack included with CDK Nag.",
+          "title": "Awssolutionschecks",
+          "type": "boolean"
+        },
+        "HIPAASecurityChecks": {
+          "default": false,
+          "description": "Runs the HIPAASecurityChecks NagPack included with CDK Nag.",
+          "title": "Hipaasecuritychecks",
+          "type": "boolean"
+        },
+        "NIST80053R4Checks": {
+          "default": false,
+          "description": "Runs the NIST80053R4Checks NagPack included with CDK Nag.",
+          "title": "Nist80053R4Checks",
+          "type": "boolean"
+        },
+        "NIST80053R5Checks": {
+          "default": false,
+          "description": "Runs the NIST80053R5Checks NagPack included with CDK Nag.",
+          "title": "Nist80053R5Checks",
+          "type": "boolean"
+        },
+        "PCIDSS321Checks": {
+          "default": false,
+          "description": "Runs the PCIDSS321Checks NagPack included with CDK Nag.",
+          "title": "Pcidss321Checks",
+          "type": "boolean"
+        }
+      },
+      "title": "CdkNagPacks",
+      "type": "object"
+    },
+    "CdkNagScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "description": "CDK Nag IAC SAST scanner configuration.",
+      "properties": {
+        "cdk-nag": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/CdkNagScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "nag_packs": {
+              "AwsSolutionsChecks": true,
+              "HIPAASecurityChecks": false,
+              "NIST80053R4Checks": false,
+              "NIST80053R5Checks": false,
+              "PCIDSS321Checks": false
+            }
+          },
+          "description": "Enable CDK Nag IAC scanner",
+          "title": "Cdk-Nag"
+        }
+      },
+      "title": "CdkNagScanner",
+      "type": "object"
+    },
+    "CdkNagScannerOptions": {
+      "description": "CDK Nag IAC SAST scanner options.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the scanner is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "nag_packs": {
+          "$ref": "#/$defs/CdkNagPacks",
+          "default": {
+            "AwsSolutionsChecks": true,
+            "HIPAASecurityChecks": false,
+            "NIST80053R4Checks": false,
+            "NIST80053R5Checks": false,
+            "PCIDSS321Checks": false
+          },
+          "description": "CDK Nag packs to enable"
+        }
+      },
+      "title": "CdkNagScannerOptions",
+      "type": "object"
+    },
+    "CfnNagScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "description": "CFN Nag IAC SAST scanner configuration.",
+      "properties": {
+        "cfn-nag": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/ScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true
+          },
+          "description": "Enable CFN Nag IAC scanner",
+          "title": "Cfn-Nag"
+        }
+      },
+      "title": "CfnNagScanner",
+      "type": "object"
+    },
+    "CheckovScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "description": "Checkov SAST/IaC scanner configuration.",
+      "properties": {
+        "checkov": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/ScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true
+          },
+          "description": "Enable Checkov scanner",
+          "title": "Checkov"
+        }
+      },
+      "title": "CheckovScanner",
+      "type": "object"
+    },
+    "CustomBuildScannerConfig": {
+      "additionalProperties": {
+        "items": {
+          "$ref": "#/$defs/ScannerConfig"
+        },
+        "type": "array"
+      },
+      "properties": {
+        "sast": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/ScannerConfig"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Scanner configurations by type",
+          "title": "Sast",
+          "type": "object"
+        },
+        "sbom": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/ScannerConfig"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Scanner configurations by type",
+          "title": "Sbom",
+          "type": "object"
+        }
+      },
+      "title": "CustomBuildScannerConfig",
+      "type": "object"
+    },
+    "CustomScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "properties": {},
+      "title": "CustomScanner",
+      "type": "object"
+    },
+    "FileInvocationConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for file scanning.",
+      "properties": {
+        "exclude": {
+          "default": [],
+          "description": "List of file patterns to exclude. Defaults to an empty list, which excludes no files.",
+          "examples": [
+            "tests/"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude",
+          "type": "array"
+        },
+        "include": {
+          "default": [],
+          "description": "List of file patterns to include. Defaults to an empty list, which includes all files.",
+          "examples": [
+            "**/*"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Include",
+          "type": "array"
+        }
+      },
+      "title": "FileInvocationConfig",
+      "type": "object"
+    },
+    "GitSecretsScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "description": "Git Secrets scanner configuration.",
+      "properties": {
+        "git-secrets": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/ScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true
+          },
+          "description": "Enable Git Secrets scanner",
+          "title": "Git-Secrets"
+        }
+      },
+      "title": "GitSecretsScanner",
+      "type": "object"
+    },
+    "GrypeScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "description": "Grype SAST scanner configuration.",
+      "properties": {
+        "grype": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/ScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true
+          },
+          "description": "Enable Grype scanner",
+          "title": "Grype"
+        }
+      },
+      "title": "GrypeScanner",
+      "type": "object"
+    },
+    "NpmAuditScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "description": "JS/TS Dependency scanner configuration.",
+      "properties": {
+        "npm-audit": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/ScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true
+          },
+          "description": "Enable NPM/PNPM/Yarn Audit dependency scanner",
+          "title": "Npm-Audit"
+        }
+      },
+      "title": "NpmAuditScanner",
+      "type": "object"
+    },
+    "SASTScannerConfig": {
+      "additionalProperties": true,
+      "description": "Configuration model for SAST scanners.",
+      "properties": {
+        "output_formats": {
+          "default": [
+            "text",
+            "junitxml",
+            "html"
+          ],
+          "description": "Format for SAST scan results output",
+          "items": {
+            "enum": [
+              "json",
+              "yaml",
+              "text",
+              "html",
+              "junitxml",
+              "sarif",
+              "asff"
+            ],
+            "type": "string"
+          },
+          "title": "Output Formats",
+          "type": "array"
+        },
+        "scanners": {
+          "default": [
+            {
+              "bandit": {
+                "enabled": true
+              }
+            },
+            {
+              "cdk-nag": {
+                "enabled": true,
+                "nag_packs": {
+                  "AwsSolutionsChecks": true,
+                  "HIPAASecurityChecks": false,
+                  "NIST80053R4Checks": false,
+                  "NIST80053R5Checks": false,
+                  "PCIDSS321Checks": false
+                }
+              }
+            },
+            {
+              "cfn-nag": {
+                "enabled": true
+              }
+            },
+            {
+              "checkov": {
+                "enabled": true
+              }
+            },
+            {
+              "git-secrets": {
+                "enabled": true
+              }
+            },
+            {
+              "grype": {
+                "enabled": true
+              }
+            },
+            {
+              "npm-audit": {
+                "enabled": true
+              }
+            },
+            {
+              "semgrep": {
+                "enabled": true
+              }
+            }
+          ],
+          "description": "List of SAST scanners to enable",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CustomScanner"
+              },
+              {
+                "$ref": "#/$defs/BanditScanner"
+              },
+              {
+                "$ref": "#/$defs/CdkNagScanner"
+              },
+              {
+                "$ref": "#/$defs/CfnNagScanner"
+              },
+              {
+                "$ref": "#/$defs/CheckovScanner"
+              },
+              {
+                "$ref": "#/$defs/GitSecretsScanner"
+              },
+              {
+                "$ref": "#/$defs/GrypeScanner"
+              },
+              {
+                "$ref": "#/$defs/NpmAuditScanner"
+              },
+              {
+                "$ref": "#/$defs/SemgrepScanner"
+              }
+            ]
+          },
+          "title": "Scanners",
+          "type": "array"
+        }
+      },
+      "title": "SASTScannerConfig",
+      "type": "object"
+    },
+    "SBOMScannerConfig": {
+      "additionalProperties": true,
+      "description": "Configuration model for SBOM scanners.",
+      "properties": {
+        "output_formats": {
+          "default": [
+            "cyclonedx",
+            "html"
+          ],
+          "description": "Format for SAST scan results output",
+          "items": {
+            "enum": [
+              "json",
+              "yaml",
+              "text",
+              "html",
+              "cyclonedx",
+              "spdx"
+            ],
+            "type": "string"
+          },
+          "title": "Output Formats",
+          "type": "array"
+        },
+        "scanners": {
+          "default": [
+            {
+              "syft": {
+                "enabled": true
+              }
+            }
+          ],
+          "description": "List of SBOM scanners to enable",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CustomScanner"
+              },
+              {
+                "$ref": "#/$defs/SyftScanner"
+              }
+            ]
+          },
+          "title": "Scanners",
+          "type": "array"
+        }
+      },
+      "title": "SBOMScannerConfig",
+      "type": "object"
     },
     "ScannerConfig": {
       "additionalProperties": true,
@@ -23,12 +591,6 @@
           "title": "Args",
           "type": "array"
         },
-        "can_be_overridden": {
-          "default": true,
-          "description": "Whether the scanner configuration can be overridden by runtime configuration",
-          "title": "Can Be Overridden",
-          "type": "boolean"
-        },
         "command": {
           "default": null,
           "description": "The command to invoke the scanner, typically the binary or path to a script",
@@ -41,15 +603,22 @@
           "title": "Enabled",
           "type": "boolean"
         },
-        "missing_command_preference": {
-          "default": "error",
-          "description": "How to handle scanner configurations that are missing commands. 'error' will raise an error, 'warning' will raise a warning, and 'ignore' will skip the scanner with an INFO log added to the aggregated results indicating that the scanner was skipped. Defaults to 'error'.",
+        "file_config": {
+          "$ref": "#/$defs/FileInvocationConfig",
+          "default": {
+            "exclude": [],
+            "include": []
+          },
+          "description": "Configuration for file scanning. Required if invocation_mode is 'file'."
+        },
+        "invocation_mode": {
+          "default": "directory",
+          "description": "Whether to run the scanner on a directory or a file. Defaults to 'directory' to scan the entire directory. If set to 'file', uses the file_config values to identify the files to scan and scan each one individually.",
           "enum": [
-            "error",
-            "warning",
-            "ignore"
+            "directory",
+            "file"
           ],
-          "title": "Missing Command Preference",
+          "title": "Invocation Mode",
           "type": "string"
         },
         "name": {
@@ -60,54 +629,118 @@
           "type": "string"
         },
         "output_format": {
-          "default": "JSON",
-          "description": "Expected output format from the scanner itself. Defaults to JSON",
+          "default": null,
+          "description": "Expected output format from the scanner itself.",
           "title": "Output Format",
           "type": "string"
         },
-        "overridable_properties": {
-          "default": [],
-          "description": "List of properties that can be overridden by runtime configuration",
-          "items": {
-            "type": "string"
-          },
-          "title": "Overridable Properties",
-          "type": "array"
+        "output_stream": {
+          "default": "stdio",
+          "description": "Where to read scanner output from. Can be 'stdio', 'stderr' or 'file'. Defaults to 'stdio' to capture the output of the scanner directly.",
+          "enum": [
+            "stdio",
+            "stderr",
+            "file"
+          ],
+          "title": "Output Stream",
+          "type": "string"
         }
       },
       "title": "ScannerConfig",
+      "type": "object"
+    },
+    "ScannerOptions": {
+      "description": "Base model for scanner options.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the scanner is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "ScannerOptions",
+      "type": "object"
+    },
+    "SemgrepScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "description": "Semgrep SAST scanner configuration.",
+      "properties": {
+        "semgrep": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/ScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true
+          },
+          "description": "Enable Semgrep scanner",
+          "title": "Semgrep"
+        }
+      },
+      "title": "SemgrepScanner",
+      "type": "object"
+    },
+    "SyftScanner": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "$ref": "#/$defs/ScannerOptions"
+          }
+        ]
+      },
+      "description": "Syft SBOM scanner configuration.",
+      "properties": {
+        "syft": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/ScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true
+          },
+          "description": "Enable Syft scanner",
+          "title": "Syft"
+        }
+      },
+      "title": "SyftScanner",
       "type": "object"
     }
   },
   "additionalProperties": true,
   "description": "Main configuration model for Automated Security Helper.",
   "properties": {
-    "container_scan": {
-      "default": [],
-      "description": "Configuration for container scanning tools",
-      "items": {
-        "$ref": "#/$defs/ScannerConfig"
+    "build": {
+      "$ref": "#/$defs/BuildConfig",
+      "default": {
+        "custom_scanners": {
+          "sast": {},
+          "sbom": {}
+        },
+        "mode": "ASH_MODE_ONLINE",
+        "tool_install_scripts": {}
       },
-      "title": "Container Scan",
-      "type": "array"
-    },
-    "dependency_scan": {
-      "default": [],
-      "description": "Configuration for dependency scanning tools",
-      "items": {
-        "$ref": "#/$defs/ScannerConfig"
-      },
-      "title": "Dependency Scan",
-      "type": "array"
-    },
-    "exclude_paths": {
-      "default": [],
-      "description": "List of paths to exclude from scanning",
-      "items": {
-        "type": "string"
-      },
-      "title": "Exclude Paths",
-      "type": "array"
+      "description": "Build-time configuration settings"
     },
     "fail_on_findings": {
       "default": true,
@@ -115,13 +748,13 @@
       "title": "Fail On Findings",
       "type": "boolean"
     },
-    "iac_scan": {
+    "ignore_paths": {
       "default": [],
-      "description": "Configuration for Infrastructure as Code scanning tools",
+      "description": "List of paths to ignore during scanning",
       "items": {
-        "$ref": "#/$defs/ScannerConfig"
+        "type": "string"
       },
-      "title": "Iac Scan",
+      "title": "Ignore Paths",
       "type": "array"
     },
     "max_concurrent_scanners": {
@@ -131,28 +764,50 @@
       "title": "Max Concurrent Scanners",
       "type": "integer"
     },
-    "output_file": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Path to write scan results. If not specified, outputs to stdout",
-      "title": "Output File"
-    },
-    "output_format": {
-      "$ref": "#/$defs/OutputFormat",
-      "default": "json",
-      "description": "Format for scan results output"
+    "output_dir": {
+      "default": "ash_output",
+      "description": "Directory to store scan outputs",
+      "title": "Output Dir",
+      "type": "string"
     },
     "project_name": {
       "description": "Name of the project being scanned",
       "title": "Project Name",
       "type": "string"
+    },
+    "sast": {
+      "$ref": "#/$defs/SASTScannerConfig",
+      "default": {
+        "output_formats": [
+          "text",
+          "junitxml",
+          "html"
+        ],
+        "scanners": [
+          {},
+          {},
+          {},
+          {},
+          {},
+          {},
+          {},
+          {}
+        ]
+      },
+      "description": "SAST scanner configuration"
+    },
+    "sbom": {
+      "$ref": "#/$defs/SBOMScannerConfig",
+      "default": {
+        "output_formats": [
+          "cyclonedx",
+          "html"
+        ],
+        "scanners": [
+          {}
+        ]
+      },
+      "description": "SBOM scanner configuration"
     },
     "scan_paths": {
       "default": [
@@ -170,15 +825,6 @@
       "description": "Minimum severity level to report",
       "title": "Severity Threshold",
       "type": "string"
-    },
-    "static_analysis": {
-      "default": [],
-      "description": "Configuration for static analysis scanners",
-      "items": {
-        "$ref": "#/$defs/ScannerConfig"
-      },
-      "title": "Static Analysis",
-      "type": "array"
     }
   },
   "required": [

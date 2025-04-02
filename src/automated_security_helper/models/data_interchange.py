@@ -70,6 +70,12 @@ class DataInterchange(BaseModel):
         v = v.strip()
         return datetime.strptime(v)
 
+    def model_post_init(self, context):
+        super().model_post_init(context)
+        default_timestamp = datetime.now(timezone.utc)
+        if not self.timestamp:
+            self.timestamp = default_timestamp
+
 
 class ReportMetadata(BaseModel):
     """Metadata for security reports."""
@@ -122,6 +128,12 @@ class ReportMetadata(BaseModel):
             return v
         v = v.strip()
         return datetime.strptime(v)
+
+    def model_post_init(self, context):
+        super().model_post_init(context)
+        default_timestamp = datetime.now(timezone.utc)
+        if not self.generated_at:
+            self.generated_at = default_timestamp
 
 
 class SecurityReport(DataInterchange):

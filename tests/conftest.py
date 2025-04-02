@@ -1,6 +1,27 @@
 """Common test fixtures for ASHARP tests."""
 
 import pytest
+from automated_security_helper.models.config import (
+    ASHConfig,
+    BuildConfig,
+    SASTScannerConfig,
+    SBOMScannerConfig,
+    ScannerConfig,
+)
+from automated_security_helper.models.scanner_types import (
+    BanditScanner,
+    CdkNagPacks,
+    CdkNagScannerOptions,
+    CfnNagScanner,
+    CheckovScanner,
+    NpmAuditScanner,
+    ScannerOptions,
+    SemgrepScanner,
+    CdkNagScanner,
+    GrypeScanner,
+    SyftScanner,
+    CustomScanner,
+)
 
 from automated_security_helper.models.core import Location, Scanner
 from automated_security_helper.models.security_vulnerability import (
@@ -74,3 +95,82 @@ def sample_vulnerability(sample_scanner, sample_location):
         description="A test vulnerability",
         recommendation="Fix the vulnerability",
     )
+
+
+@pytest.fixture
+def ash_config() -> ASHConfig:
+    """Create a test ASHConfig object based on default ash.yaml settings."""
+    conf = ASHConfig(
+        project_name="automated-security-helper",
+        build=BuildConfig(
+            mode="ASH_MODE_OFFLINE",
+            tool_install_scripts={
+                "trivy": [
+                    "wget https://github.com/aquasecurity/trivy/releases/download/v0.61.0/trivy_0.61.0_Linux-64bit.deb",
+                    "dpkg -i trivy_0.61.0_Linux-64bit.deb",
+                ]
+            },
+            custom_scanners={
+                "sast": [
+                    ScannerConfig(
+                        name="trivysast",
+                        command="trivy",
+                        args=["fs", "--format", "sarif"],
+                        output_format="sarif",
+                        output_stream="stdio",
+                    )
+                ],
+                "sbom": [
+                    ScannerConfig(
+                        name="trivysbom",
+                        command="trivy",
+                        args=["fs", "--format", "cyclonedx"],
+                        output_format="cyclonedx",
+                        output_stream="stdio",
+                    )
+                ],
+            },
+        ),
+        fail_on_findings=True,
+        ignore_paths=["tests/**"],
+        output_dir="ash_output",
+        sast=SASTScannerConfig(
+            output_formats=["json", "csv", "junitxml", "html"],
+            scanners=[
+                BanditScanner(),
+                CdkNagScanner(
+                    cdknag=CdkNagScannerOptions(
+                        enabled=True,
+                        nag_packs=CdkNagPacks(
+                            AwsSolutionsChecks=True,
+                            HIPAASecurityChecks=True,
+                            NIST80053R4Checks=True,
+                            NIST80053R5Checks=True,
+                            PCIDSS321Checks=True,
+                        ),
+                    ),
+                ),
+                CfnNagScanner(),
+                CheckovScanner(),
+                CustomScanner(
+                    gitsecrets=ScannerOptions(enabled=True),
+                ),
+                GrypeScanner(),
+                NpmAuditScanner(),
+                SemgrepScanner(),
+                CustomScanner(
+                    trivysast=ScannerOptions(enabled=True),
+                ),
+            ],
+        ),
+        sbom=SBOMScannerConfig(
+            output_formats=["cyclonedx", "html"],
+            scanners=[
+                SyftScanner(),
+                CustomScanner(
+                    trivysbom=ScannerOptions(enabled=True),
+                ),
+            ],
+        ),
+    )
+    return conf

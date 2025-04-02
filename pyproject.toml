@@ -27,8 +27,8 @@ packages = [{include = "automated_security_helper", from = "src"}]
 
 [tool.poetry.scripts]
 asharp = 'automated_security_helper.asharp:main'
-generate_ash_schemas = 'automated_security_helper.schemas.generate_schemas:generate_schemas'
 ash-multi = "automated_security_helper.ash_multi:main"
+schemagen = 'automated_security_helper.schemas.generate_schemas:generate_schemas'
 
 [tool.poetry.dependencies]
 python = "^3.10"

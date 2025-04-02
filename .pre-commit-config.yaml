@@ -5,7 +5,7 @@ repos:
     hooks:
       - id: generate-schemas
         name: Generate ASH JSON schemas
-        entry: poetry run generate_ash_schemas
+        entry: poetry run schemagen
         language: system
         pass_filenames: false
   - repo: https://github.com/pre-commit/pre-commit-hooks

@@ -8,7 +8,7 @@ ash_output
 src/automated_security_helper/models/*generated*
 !tests/test_data/aggregated_results.txt
 refactoring/
-
+tests/test_data/scanners/cdk/test.yaml_cdk_nag_results/cdk_nag_results_*/
 
 ### macOS ###
 # General

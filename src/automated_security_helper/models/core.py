@@ -231,6 +231,16 @@ class BaseFinding(BaseModel):
         v = v.strip()
         return datetime.strptime(v)
 
+    def model_post_init(self, context):
+        super().model_post_init(context)
+        default_timestamp = datetime.now(timezone.utc)
+        if not self.created_at:
+            self.created_at = default_timestamp
+        if not self.updated_at:
+            self.updated_at = default_timestamp
+        if not self.timestamp:
+            self.timestamp = default_timestamp
+
 
 # Define exports at the bottom after all classes are defined
 __all__ = ["Location", "Scanner", "BaseFinding"]

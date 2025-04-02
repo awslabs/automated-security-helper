@@ -32,7 +32,7 @@ class BanditScanner(AbstractScanner, IScanner):
         """Configure the scanner with provided settings."""
         self._config = config
         # Allow output format override through config
-        self._output_format = config.output_format
+        self._output_format = config.output_format if config.output_format else "json"
 
     def validate(self) -> bool:
         """Verify scanner configuration and requirements."""

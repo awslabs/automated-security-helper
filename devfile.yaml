@@ -1,0 +1,20 @@
+schemaVersion: 2.0.0
+metadata:
+  name: python-project
+components:
+  - name: dev
+    container:
+      image: public.ecr.aws/aws-mde/universal-image:latest
+commands:
+  - id: install
+    exec:
+      component: dev
+      commandLine: "pip install --user poetry && ~/.local/bin/poetry install"
+  - id: build
+    exec:
+      component: dev
+      commandLine: "~/.local/bin/poetry build"
+  - id: test
+    exec:
+      component: dev
+      commandLine: "~/.local/bin/poetry run pytest"

@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=./src/automated_security_helper/schemas/ASHConfig.json
+project_name: automated-security-helper
+# Build overrides to customize the container build.
+# Plugins and other settings set during build cannot be overridden at scan time unless
+# they are explicitly allowed here in the build configuration.
+# This only affects containerized ASH runs.
+build:
+  mode: offline # Build image in offline mode
+  tool_install_scripts:
+    trivy:
+      - wget https://github.com/aquasecurity/trivy/releases/download/v0.61.0/trivy_0.61.0_Linux-64bit.deb
+      - dpkg -i trivy_0.61.0_Linux-64bit.deb
+  custom_scanners:
+    sast:
+      - name: trivy-sast
+        command: trivy
+        args: ["fs", "--format", "sarif"]
+        output_format: sarif
+        output_stream: stdio
+    sbom:
+      - name: trivy-sbom
+        command: trivy
+        args: ["fs", "--format", "cyclonedx"]
+        output_format: cyclonedx
+        output_stream: stdio
+# General scan settings
+fail_on_findings: true
+ignore_paths:
+  - `tests/**`
+output_dir: ash_output
+# SAST scanner settings
+sast:
+  output_formats:
+    - json
+    - csv
+    - junitxml
+    - html
+  scanners:
+    # Default scanners
+    - bandit: true
+    - cdk-nag:
+        # Only default property when providing a complex object is `enabled`
+        # The rest are provided by the scanner plugin
+        enabled: true
+        # More complex scanner configuration
+        nag_packs:
+          AwsSolutionsChecks: true
+          HIPAASecurityChecks: true
+          NIST80053R4Checks: true
+          NIST80053R5Checks: true
+          PCIDSS321Checks: true
+    - cfn-nag: true
+    - checkov: true
+    - git-secrets: true
+    - grype: true
+    - npm-audit: true
+    - semgrep: true
+    # Custom scanner provided by plugin at build time, referencable by key
+    - trivy: true
+# SBOM scanner settings
+sbom:
+  output_formats:
+    - cyclonedx
+    - html
+  scanners:
+    - syft: true
+    # Custom scanner provided by plugin at build time, referencable by key
+    - trivy: true

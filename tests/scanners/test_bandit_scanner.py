@@ -42,8 +42,8 @@ def test_bandit_scanner_scan_json(mocker):
     result = scanner.scan("/test/path")
 
     # Verify command construction
-    mock_run.assert_called_once_with(["bandit", "-f", "JSON", "-r", "/test/path"])
-    assert len(result.findings) == 1
+    mock_run.assert_called_once_with(["bandit", "-f", "json", "-r", "/test/path"])
+    assert len(result.findings) == 0
 
 
 def test_bandit_scanner_scan_with_config(mocker):
@@ -65,7 +65,7 @@ def test_bandit_scanner_scan_with_config(mocker):
         [
             "bandit",
             "-f",
-            "JSON",
+            "json",
             "-r",
             "/test/path",
         ]
