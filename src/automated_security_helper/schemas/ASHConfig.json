@@ -1,1 +1,189 @@
-{"$defs": {"OutputFormat": {"description": "Supported output formats.", "enum": ["json", "yaml", "text"], "title": "OutputFormat", "type": "string"}, "ScannerConfig": {"additionalProperties": true, "description": "Configuration model for security scanners.", "properties": {"enabled": {"default": true, "description": "Whether the component is enabled", "title": "Enabled", "type": "boolean"}, "name": {"default": null, "description": "Name of the component. Required", "minLength": 1, "title": "Name", "type": "string"}, "command": {"default": null, "description": "The command to invoke the scanner, typically the binary or path to a script", "title": "Command", "type": "string"}, "args": {"default": [], "description": "List of arguments to pass to the scanner command. Defaults to an empty list.", "items": {"type": "string"}, "title": "Args", "type": "array"}, "output_format": {"default": "JSON", "description": "Expected output format from the scanner itself. Defaults to JSON", "title": "Output Format", "type": "string"}, "missing_command_preference": {"default": "error", "description": "How to handle scanner configurations that are missing commands. 'error' will raise an error, 'warning' will raise a warning, and 'ignore' will skip the scanner with an INFO log added to the aggregated results indicating that the scanner was skipped. Defaults to 'error'.", "enum": ["error", "warning", "ignore"], "title": "Missing Command Preference", "type": "string"}, "can_be_overridden": {"default": true, "description": "Whether the scanner configuration can be overridden by runtime configuration", "title": "Can Be Overridden", "type": "boolean"}, "overridable_properties": {"default": [], "description": "List of properties that can be overridden by runtime configuration", "items": {"type": "string"}, "title": "Overridable Properties", "type": "array"}}, "title": "ScannerConfig", "type": "object"}}, "additionalProperties": true, "description": "Main configuration model for Automated Security Helper.", "properties": {"project_name": {"description": "Name of the project being scanned", "title": "Project Name", "type": "string"}, "output_format": {"$ref": "#/$defs/OutputFormat", "default": "json", "description": "Format for scan results output"}, "output_file": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null, "description": "Path to write scan results. If not specified, outputs to stdout", "title": "Output File"}, "static_analysis": {"default": [], "description": "Configuration for static analysis scanners", "items": {"$ref": "#/$defs/ScannerConfig"}, "title": "Static Analysis", "type": "array"}, "dependency_scan": {"default": [], "description": "Configuration for dependency scanning tools", "items": {"$ref": "#/$defs/ScannerConfig"}, "title": "Dependency Scan", "type": "array"}, "container_scan": {"default": [], "description": "Configuration for container scanning tools", "items": {"$ref": "#/$defs/ScannerConfig"}, "title": "Container Scan", "type": "array"}, "iac_scan": {"default": [], "description": "Configuration for Infrastructure as Code scanning tools", "items": {"$ref": "#/$defs/ScannerConfig"}, "title": "Iac Scan", "type": "array"}, "scan_paths": {"default": ["."], "description": "List of paths to scan", "items": {"type": "string"}, "title": "Scan Paths", "type": "array"}, "exclude_paths": {"default": [], "description": "List of paths to exclude from scanning", "items": {"type": "string"}, "title": "Exclude Paths", "type": "array"}, "severity_threshold": {"default": "LOW", "description": "Minimum severity level to report", "title": "Severity Threshold", "type": "string"}, "fail_on_findings": {"default": true, "description": "Whether to exit with non-zero code if findings are detected", "title": "Fail On Findings", "type": "boolean"}, "max_concurrent_scanners": {"default": 4, "description": "Maximum number of scanners to run concurrently", "minimum": 1, "title": "Max Concurrent Scanners", "type": "integer"}}, "required": ["project_name"], "title": "ASHConfig", "type": "object"}
+{
+  "$defs": {
+    "OutputFormat": {
+      "description": "Supported output formats.",
+      "enum": [
+        "json",
+        "yaml",
+        "text"
+      ],
+      "title": "OutputFormat",
+      "type": "string"
+    },
+    "ScannerConfig": {
+      "additionalProperties": true,
+      "description": "Configuration model for security scanners.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "List of arguments to pass to the scanner command. Defaults to an empty list.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "can_be_overridden": {
+          "default": true,
+          "description": "Whether the scanner configuration can be overridden by runtime configuration",
+          "title": "Can Be Overridden",
+          "type": "boolean"
+        },
+        "command": {
+          "default": null,
+          "description": "The command to invoke the scanner, typically the binary or path to a script",
+          "title": "Command",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "missing_command_preference": {
+          "default": "error",
+          "description": "How to handle scanner configurations that are missing commands. 'error' will raise an error, 'warning' will raise a warning, and 'ignore' will skip the scanner with an INFO log added to the aggregated results indicating that the scanner was skipped. Defaults to 'error'.",
+          "enum": [
+            "error",
+            "warning",
+            "ignore"
+          ],
+          "title": "Missing Command Preference",
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "description": "Name of the component. Required",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "output_format": {
+          "default": "JSON",
+          "description": "Expected output format from the scanner itself. Defaults to JSON",
+          "title": "Output Format",
+          "type": "string"
+        },
+        "overridable_properties": {
+          "default": [],
+          "description": "List of properties that can be overridden by runtime configuration",
+          "items": {
+            "type": "string"
+          },
+          "title": "Overridable Properties",
+          "type": "array"
+        }
+      },
+      "title": "ScannerConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "description": "Main configuration model for Automated Security Helper.",
+  "properties": {
+    "container_scan": {
+      "default": [],
+      "description": "Configuration for container scanning tools",
+      "items": {
+        "$ref": "#/$defs/ScannerConfig"
+      },
+      "title": "Container Scan",
+      "type": "array"
+    },
+    "dependency_scan": {
+      "default": [],
+      "description": "Configuration for dependency scanning tools",
+      "items": {
+        "$ref": "#/$defs/ScannerConfig"
+      },
+      "title": "Dependency Scan",
+      "type": "array"
+    },
+    "exclude_paths": {
+      "default": [],
+      "description": "List of paths to exclude from scanning",
+      "items": {
+        "type": "string"
+      },
+      "title": "Exclude Paths",
+      "type": "array"
+    },
+    "fail_on_findings": {
+      "default": true,
+      "description": "Whether to exit with non-zero code if findings are detected",
+      "title": "Fail On Findings",
+      "type": "boolean"
+    },
+    "iac_scan": {
+      "default": [],
+      "description": "Configuration for Infrastructure as Code scanning tools",
+      "items": {
+        "$ref": "#/$defs/ScannerConfig"
+      },
+      "title": "Iac Scan",
+      "type": "array"
+    },
+    "max_concurrent_scanners": {
+      "default": 4,
+      "description": "Maximum number of scanners to run concurrently",
+      "minimum": 1,
+      "title": "Max Concurrent Scanners",
+      "type": "integer"
+    },
+    "output_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Path to write scan results. If not specified, outputs to stdout",
+      "title": "Output File"
+    },
+    "output_format": {
+      "$ref": "#/$defs/OutputFormat",
+      "default": "json",
+      "description": "Format for scan results output"
+    },
+    "project_name": {
+      "description": "Name of the project being scanned",
+      "title": "Project Name",
+      "type": "string"
+    },
+    "scan_paths": {
+      "default": [
+        "."
+      ],
+      "description": "List of paths to scan",
+      "items": {
+        "type": "string"
+      },
+      "title": "Scan Paths",
+      "type": "array"
+    },
+    "severity_threshold": {
+      "default": "LOW",
+      "description": "Minimum severity level to report",
+      "title": "Severity Threshold",
+      "type": "string"
+    },
+    "static_analysis": {
+      "default": [],
+      "description": "Configuration for static analysis scanners",
+      "items": {
+        "$ref": "#/$defs/ScannerConfig"
+      },
+      "title": "Static Analysis",
+      "type": "array"
+    }
+  },
+  "required": [
+    "project_name"
+  ],
+  "title": "ASHConfig",
+  "type": "object"
+}

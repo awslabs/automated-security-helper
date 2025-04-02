@@ -1,55 +1,55 @@
 [
   {
-    "filename": "/src/test.yaml",
     "file_results": {
       "failure_count": 0,
       "violations": [
         {
+          "element_types": [
+            "resource"
+          ],
           "id": "W51",
-          "name": "MissingBucketPolicyRule",
-          "type": "WARN",
+          "line_numbers": [
+            5
+          ],
+          "logical_resource_ids": [
+            "S3Bucket3"
+          ],
           "message": "S3 bucket should likely have a bucket policy",
-          "logical_resource_ids": [
-            "S3Bucket3"
-          ],
-          "line_numbers": [
-            5
-          ],
-          "element_types": [
-            "resource"
-          ]
+          "name": "MissingBucketPolicyRule",
+          "type": "WARN"
         },
         {
+          "element_types": [
+            "resource"
+          ],
           "id": "W35",
-          "name": "S3BucketAccessLoggingRule",
-          "type": "WARN",
-          "message": "S3 Bucket should have access logging configured",
-          "logical_resource_ids": [
-            "S3Bucket3"
-          ],
           "line_numbers": [
             5
           ],
-          "element_types": [
-            "resource"
-          ]
+          "logical_resource_ids": [
+            "S3Bucket3"
+          ],
+          "message": "S3 Bucket should have access logging configured",
+          "name": "S3BucketAccessLoggingRule",
+          "type": "WARN"
         },
         {
-          "id": "W41",
-          "name": "S3BucketEncryptionSetRule",
-          "type": "WARN",
-          "message": "S3 Bucket should have encryption option set",
-          "logical_resource_ids": [
-            "S3Bucket3"
+          "element_types": [
+            "resource"
           ],
+          "id": "W41",
           "line_numbers": [
             5
           ],
-          "element_types": [
-            "resource"
-          ]
+          "logical_resource_ids": [
+            "S3Bucket3"
+          ],
+          "message": "S3 Bucket should have encryption option set",
+          "name": "S3BucketEncryptionSetRule",
+          "type": "WARN"
         }
       ]
-    }
+    },
+    "filename": "/src/test.yaml"
   }
 ]

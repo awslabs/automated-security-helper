@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "ash-github"
-version = "0.1.0"
+name = "automated-security-helper"
+version = "3.0.0"
 description = "Automated Security Helper for GitHub Actions"
 readme = "README.md"
 license = "Apache-2.0"
@@ -27,7 +27,7 @@ packages = [{include = "automated_security_helper", from = "src"}]
 
 [tool.poetry.scripts]
 asharp = 'automated_security_helper.asharp:main'
-generate_ash_schemas = 'automated_security_helper.models.generate_schemas:generate_schemas'
+generate_ash_schemas = 'automated_security_helper.schemas.generate_schemas:generate_schemas'
 ash-multi = "automated_security_helper.ash_multi:main"
 
 [tool.poetry.dependencies]

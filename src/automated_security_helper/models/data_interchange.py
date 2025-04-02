@@ -35,20 +35,20 @@ class DataInterchange(BaseModel):
         str, Field(..., min_length=1, description="Name of the data interchange format")
     ]
     description: Annotated[
-        str, Field(..., min_length=1, description="Description of the data")
-    ]
+        str, Field(min_length=1, description="Description of the data")
+    ] = None
     timestamp: Annotated[
         datetime,
         Field(
             default_factory=lambda: datetime.now(timezone.utc),
             description="Timestamp of the export in UTC",
         ),
-    ]
-    version: Annotated[str, Field("1.0", description="Version of the export format")]
+    ] = None
+    version: Annotated[str, Field(description="Version of the export format")] = "1.0"
     metadata: Annotated[
         Dict[str, Any],
-        Field(default_factory=dict, description="Additional metadata about the export"),
-    ]
+        Field(description="Additional metadata about the export"),
+    ] = {}
 
     @field_validator("name")
     @classmethod
@@ -58,6 +58,17 @@ class DataInterchange(BaseModel):
         if not v:
             raise ValueError("Name cannot be empty")
         return v
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_datetime(cls, v: Union[str, datetime] = None) -> datetime:
+        """Validate that value is timestamp or, if empty, set to current datetime"""
+        if not v:
+            return datetime.now(timezone.utc)
+        if isinstance(v, datetime):
+            return v
+        v = v.strip()
+        return datetime.strptime(v)
 
 
 class ReportMetadata(BaseModel):
@@ -77,7 +88,7 @@ class ReportMetadata(BaseModel):
     tool_name: Annotated[
         str, Field(..., min_length=1, description="Name of the security tool")
     ]
-    generated_at: Annotated[datetime, Field()] = datetime.now(timezone.utc)
+    generated_at: Annotated[datetime, Field()] = None
     project_name: Annotated[
         str, Field(min_length=1, description="Name of the project being scanned")
     ] = None
@@ -100,6 +111,17 @@ class ReportMetadata(BaseModel):
         if not v:
             raise ValueError(f"{info.field_name} cannot be empty")
         return v
+
+    @field_validator("generated_at")
+    @classmethod
+    def validate_datetime(cls, v: Union[str, datetime] = None) -> datetime:
+        """Validate that value is timestamp or, if empty, set to current datetime"""
+        if not v:
+            return datetime.now(timezone.utc)
+        if isinstance(v, datetime):
+            return v
+        v = v.strip()
+        return datetime.strptime(v)
 
 
 class SecurityReport(DataInterchange):

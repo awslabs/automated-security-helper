@@ -253,10 +253,7 @@ run_security_check() {
       # Invoke the resolved scanner script
       bash -C ${FULL_SCANNER_SCRIPT_PATH}
     else
-      echo -e "${LPURPLE}Found ${CYAN}one or more${LPURPLE} of: [ ${RED}""${ITEMS_TO_SCAN[*]}""${LPURPLE} ] items in source dir,${NC} ${CYAN}running${GREEN} ${DOCKERFILE_TO_EXECUTE} ...${NC}"
-      ${OCI_RUNNER} build -t "${RUNTIME_CONTAINER_NAME}" -f "${DOCKERFILE_LOCATION}"/"${DOCKERFILE_TO_EXECUTE}" ${DOCKER_EXTRA_ARGS} "${SOURCE_DIR}" > /dev/null
-      set +e # the scan will fail the command if it finds any finding. we don't want it to stop our script execution
-      ${OCI_RUNNER} run --name "${RUNTIME_CONTAINER_NAME}" -v "${CFNRULES_LOCATION}":/cfnrules:ro -v "${UTILS_LOCATION}":/utils:ro -v "${SOURCE_DIR}":/src:ro -v "${OUTPUT_DIR}":/out:rw "${RUNTIME_CONTAINER_NAME}"
+      echo -e "${$YELLOW}Multi-container architecture is no longer supported!"
     fi
     #
     # capture the return code of the command invoked through docker
@@ -337,7 +334,6 @@ CFN_EXTENSIONS=("yaml" "yml" "json" "template")
 JS_EXTENSIONS=("js" "jsx" "ts" "tsx")
 GRYPE_EXTENSIONS=("js" "jsx" "ts" "tsx" "py" "java" "go" "cs" "sh" "war" "jar")
 
-DOCKERFILE_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"helper_dockerfiles"
 UTILS_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"utils"
 CFNRULES_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"appsec_cfn_rules"
 

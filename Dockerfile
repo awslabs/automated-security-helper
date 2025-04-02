@@ -137,7 +137,6 @@ RUN mkdir -p /src && \
 #
 # Install CDK Nag stub dependencies
 #
-# Update NPM to latest
 COPY ./utils/cdk-nag-scan /ash/utils/cdk-nag-scan/
 # Limit memory size available for Node to prevent segmentation faults during npm install
 ENV NODE_OPTIONS=--max_old_space_size=512
@@ -151,11 +150,9 @@ COPY --from=poetry-reqs /src/dist/*.whl .
 COPY ./pyproject.toml /ash/pyproject.toml
 RUN python3 -m pip install *.whl && rm *.whl
 
-COPY ./utils/cfn-to-cdk /ash/utils/cfn-to-cdk/
 COPY ./utils/*.* /ash/utils/
 COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
-
 
 #
 # Make sure the ash script is executable

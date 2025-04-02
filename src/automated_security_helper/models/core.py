@@ -4,7 +4,7 @@
 """Core models for security findings."""
 
 from datetime import datetime, timezone
-from typing import Optional, Dict, Literal, Annotated
+from typing import Optional, Dict, Literal, Annotated, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 # Define valid severity levels at module level for use across all finding types
@@ -162,11 +162,31 @@ class BaseFinding(BaseModel):
         Field(
             description="When the finding was created",
         ),
-    ] = datetime.now(timezone.utc)
+    ] = None
     description: Annotated[
         str, Field(description="Detailed description of the finding")
     ] = None
     status: Annotated[str, Field(description="Current status of the finding")] = "OPEN"
+
+    created_at: Annotated[
+        datetime,
+        Field(
+            description="When the finding was first detected (in UTC)",
+        ),
+    ] = None
+    updated_at: Annotated[
+        datetime,
+        Field(
+            description="When the finding was last updated (in UTC)",
+        ),
+    ] = None
+    remediation: Annotated[
+        str, Field(description="Guidance for fixing the finding")
+    ] = None
+    metadata: Annotated[
+        Dict,
+        Field(description="Additional scanner-specific metadata"),
+    ] = {}
 
     @field_validator("severity")
     @classmethod
@@ -200,25 +220,16 @@ class BaseFinding(BaseModel):
             raise ValueError(f"{info.field_name} cannot be empty")
         return v
 
-    created_at: Annotated[
-        datetime,
-        Field(
-            description="When the finding was first detected (in UTC)",
-        ),
-    ] = datetime.now(timezone.utc)
-    updated_at: Annotated[
-        datetime,
-        Field(
-            description="When the finding was last updated (in UTC)",
-        ),
-    ] = datetime.now(timezone.utc)
-    remediation: Annotated[
-        str, Field(description="Guidance for fixing the finding")
-    ] = None
-    metadata: Annotated[
-        Dict,
-        Field(description="Additional scanner-specific metadata"),
-    ] = {}
+    @field_validator("timestamp", "created_at", "updated_at")
+    @classmethod
+    def validate_datetime(cls, v: Union[str, datetime] = None) -> datetime:
+        """Validate that value is timestamp or, if empty, set to current datetime"""
+        if not v:
+            return datetime.now(timezone.utc)
+        if isinstance(v, datetime):
+            return v
+        v = v.strip()
+        return datetime.strptime(v)
 
 
 # Define exports at the bottom after all classes are defined
