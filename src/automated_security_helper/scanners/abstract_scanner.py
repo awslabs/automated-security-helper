@@ -41,21 +41,19 @@ class AbstractScanner(ABC):
             ScannerError: If there is an error running the subprocess
         """
         try:
-            self._process = subprocess.Popen(
-                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-            stdout, stderr = self._process.communicate()
+            result = subprocess.run(command, capture_output=True, check=True)
 
-            if stdout:
-                self._output.extend(stdout.splitlines())
-            if stderr:
-                self._errors.extend(stderr.splitlines())
+            if result.stdout:
+                self._output.extend(result.stdout.splitlines())
+            if result.stderr:
+                self._errors.extend(result.stderr.splitlines())
 
-            if self._process.returncode != 0:
-                raise ScannerError(
-                    f"Scanner failed with return code {self._process.returncode}"
-                )
-
+        except subprocess.CalledProcessError as e:
+            if e.stdout:
+                self._output.extend(e.stdout.splitlines())
+            if e.stderr:
+                self._errors.extend(e.stderr.splitlines())
+            raise ScannerError(f"Scanner failed with return code {e.returncode}")
         except (subprocess.SubprocessError, OSError) as e:
             raise ScannerError(f"Failed to run scanner: {str(e)}")
 

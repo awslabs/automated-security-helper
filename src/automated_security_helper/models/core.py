@@ -119,7 +119,7 @@ class Scanner(BaseModel):
         # Ensure valid format
         import re
 
-        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", v):
+        if not re.match(r"^[\w-]*$", v):
             raise ValueError(
                 "Rule ID must start with alphanumeric and contain only alphanumeric, underscore or hyphen"
             )
@@ -140,7 +140,7 @@ class BaseFinding(BaseModel):
         Field(
             ...,
             min_length=1,
-            pattern="^[A-Za-z0-9_-]+$",
+            pattern=r"^[\w-]+$",
             description="Unique identifier for the finding",
         ),
     ]
@@ -149,9 +149,6 @@ class BaseFinding(BaseModel):
     ]
     severity: Annotated[
         SeverityLevel, Field(..., description="Severity level of the finding")
-    ]
-    description: Annotated[
-        str, Field(..., min_length=1, description="Detailed description of the finding")
     ]
     location: Annotated[
         Location, Field(..., description="Location information for the finding")
@@ -163,13 +160,13 @@ class BaseFinding(BaseModel):
     timestamp: Annotated[
         datetime,
         Field(
-            default_factory=lambda: datetime.now(timezone.utc),
             description="When the finding was created",
         ),
-    ]
-    status: Annotated[
-        str, Field(default="OPEN", description="Current status of the finding")
-    ]
+    ] = datetime.now(timezone.utc)
+    description: Annotated[
+        str, Field(description="Detailed description of the finding")
+    ] = None
+    status: Annotated[str, Field(description="Current status of the finding")] = "OPEN"
 
     @field_validator("severity")
     @classmethod

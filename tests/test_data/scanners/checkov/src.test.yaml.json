@@ -1,0 +1,443 @@
+{
+    "check_type": "cloudformation",
+    "results": {
+        "passed_checks": [
+            {
+                "check_id": "CKV_AWS_19",
+                "bc_check_id": "BC_AWS_S3_14",
+                "check_name": "Ensure the S3 bucket has server-side-encryption enabled",
+                "check_result": {
+                    "result": "PASSED",
+                    "evaluated_keys": [
+                        "Properties/BucketEncryption/ServerSideEncryptionConfiguration/[0]/ServerSideEncryptionByDefault/SSEAlgorithm"
+                    ]
+                },
+                "code_block": [
+                    [
+                        4,
+                        "  S3Bucket3:\n"
+                    ],
+                    [
+                        5,
+                        "    Type: AWS::S3::Bucket"
+                    ]
+                ],
+                "file_path": "/test.yaml",
+                "file_abs_path": "/src/test.yaml",
+                "repo_file_path": "/test.yaml",
+                "file_line_range": [
+                    4,
+                    5
+                ],
+                "resource": "AWS::S3::Bucket.S3Bucket3",
+                "evaluations": {},
+                "check_class": "checkov.cloudformation.checks.resource.aws.S3Encryption",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-14-data-encrypted-at-rest",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": null
+            },
+            {
+                "check_id": "CKV_AWS_20",
+                "bc_check_id": "BC_AWS_S3_1",
+                "check_name": "Ensure the S3 bucket does not allow READ permissions to everyone",
+                "check_result": {
+                    "result": "PASSED",
+                    "evaluated_keys": [
+                        "Properties/AccessControl"
+                    ]
+                },
+                "code_block": [
+                    [
+                        4,
+                        "  S3Bucket3:\n"
+                    ],
+                    [
+                        5,
+                        "    Type: AWS::S3::Bucket"
+                    ]
+                ],
+                "file_path": "/test.yaml",
+                "file_abs_path": "/src/test.yaml",
+                "repo_file_path": "/test.yaml",
+                "file_line_range": [
+                    4,
+                    5
+                ],
+                "resource": "AWS::S3::Bucket.S3Bucket3",
+                "evaluations": {},
+                "check_class": "checkov.cloudformation.checks.resource.aws.S3PublicACLRead",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-1-acl-read-permissions-everyone",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": null
+            },
+            {
+                "check_id": "CKV_AWS_57",
+                "bc_check_id": "BC_AWS_S3_2",
+                "check_name": "Ensure the S3 bucket does not allow WRITE permissions to everyone",
+                "check_result": {
+                    "result": "PASSED",
+                    "evaluated_keys": [
+                        "Properties/AccessControl"
+                    ]
+                },
+                "code_block": [
+                    [
+                        4,
+                        "  S3Bucket3:\n"
+                    ],
+                    [
+                        5,
+                        "    Type: AWS::S3::Bucket"
+                    ]
+                ],
+                "file_path": "/test.yaml",
+                "file_abs_path": "/src/test.yaml",
+                "repo_file_path": "/test.yaml",
+                "file_line_range": [
+                    4,
+                    5
+                ],
+                "resource": "AWS::S3::Bucket.S3Bucket3",
+                "evaluations": {},
+                "check_class": "checkov.cloudformation.checks.resource.aws.S3PublicACLWrite",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-2-acl-write-permissions-everyone",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": null
+            }
+        ],
+        "failed_checks": [
+            {
+                "check_id": "CKV_AWS_55",
+                "bc_check_id": "BC_AWS_S3_21",
+                "check_name": "Ensure S3 bucket has ignore public ACLs enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "Properties/PublicAccessBlockConfiguration/IgnorePublicAcls"
+                    ]
+                },
+                "code_block": [
+                    [
+                        4,
+                        "  S3Bucket3:\n"
+                    ],
+                    [
+                        5,
+                        "    Type: AWS::S3::Bucket"
+                    ]
+                ],
+                "file_path": "/test.yaml",
+                "file_abs_path": "/src/test.yaml",
+                "repo_file_path": "/test.yaml",
+                "file_line_range": [
+                    4,
+                    5
+                ],
+                "resource": "AWS::S3::Bucket.S3Bucket3",
+                "evaluations": {},
+                "check_class": "checkov.cloudformation.checks.resource.aws.S3IgnorePublicACLs",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/bc-aws-s3-21",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": null
+            },
+            {
+                "check_id": "CKV_AWS_21",
+                "bc_check_id": "BC_AWS_S3_16",
+                "check_name": "Ensure the S3 bucket has versioning enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "Properties/VersioningConfiguration/Status"
+                    ]
+                },
+                "code_block": [
+                    [
+                        4,
+                        "  S3Bucket3:\n"
+                    ],
+                    [
+                        5,
+                        "    Type: AWS::S3::Bucket"
+                    ]
+                ],
+                "file_path": "/test.yaml",
+                "file_abs_path": "/src/test.yaml",
+                "repo_file_path": "/test.yaml",
+                "file_line_range": [
+                    4,
+                    5
+                ],
+                "resource": "AWS::S3::Bucket.S3Bucket3",
+                "evaluations": {},
+                "check_class": "checkov.cloudformation.checks.resource.aws.S3Versioning",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-16-enable-versioning",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": null
+            },
+            {
+                "check_id": "CKV_AWS_53",
+                "bc_check_id": "BC_AWS_S3_19",
+                "check_name": "Ensure S3 bucket has block public ACLs enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "Properties/PublicAccessBlockConfiguration/BlockPublicAcls"
+                    ]
+                },
+                "code_block": [
+                    [
+                        4,
+                        "  S3Bucket3:\n"
+                    ],
+                    [
+                        5,
+                        "    Type: AWS::S3::Bucket"
+                    ]
+                ],
+                "file_path": "/test.yaml",
+                "file_abs_path": "/src/test.yaml",
+                "repo_file_path": "/test.yaml",
+                "file_line_range": [
+                    4,
+                    5
+                ],
+                "resource": "AWS::S3::Bucket.S3Bucket3",
+                "evaluations": {},
+                "check_class": "checkov.cloudformation.checks.resource.aws.S3BlockPublicACLs",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/bc-aws-s3-19",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": null
+            },
+            {
+                "check_id": "CKV_AWS_54",
+                "bc_check_id": "BC_AWS_S3_20",
+                "check_name": "Ensure S3 bucket has block public policy enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "Properties/PublicAccessBlockConfiguration/BlockPublicPolicy"
+                    ]
+                },
+                "code_block": [
+                    [
+                        4,
+                        "  S3Bucket3:\n"
+                    ],
+                    [
+                        5,
+                        "    Type: AWS::S3::Bucket"
+                    ]
+                ],
+                "file_path": "/test.yaml",
+                "file_abs_path": "/src/test.yaml",
+                "repo_file_path": "/test.yaml",
+                "file_line_range": [
+                    4,
+                    5
+                ],
+                "resource": "AWS::S3::Bucket.S3Bucket3",
+                "evaluations": {},
+                "check_class": "checkov.cloudformation.checks.resource.aws.S3BlockPublicPolicy",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/bc-aws-s3-20",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": null
+            },
+            {
+                "check_id": "CKV_AWS_18",
+                "bc_check_id": "BC_AWS_S3_13",
+                "check_name": "Ensure the S3 bucket has access logging enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "Properties/LoggingConfiguration"
+                    ]
+                },
+                "code_block": [
+                    [
+                        4,
+                        "  S3Bucket3:\n"
+                    ],
+                    [
+                        5,
+                        "    Type: AWS::S3::Bucket"
+                    ]
+                ],
+                "file_path": "/test.yaml",
+                "file_abs_path": "/src/test.yaml",
+                "repo_file_path": "/test.yaml",
+                "file_line_range": [
+                    4,
+                    5
+                ],
+                "resource": "AWS::S3::Bucket.S3Bucket3",
+                "evaluations": {},
+                "check_class": "checkov.cloudformation.checks.resource.aws.S3AccessLogs",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-13-enable-logging",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": null
+            },
+            {
+                "check_id": "CKV_AWS_56",
+                "bc_check_id": "BC_AWS_S3_22",
+                "check_name": "Ensure S3 bucket has RestrictPublicBuckets enabled",
+                "check_result": {
+                    "result": "FAILED",
+                    "evaluated_keys": [
+                        "Properties/PublicAccessBlockConfiguration/RestrictPublicBuckets"
+                    ]
+                },
+                "code_block": [
+                    [
+                        4,
+                        "  S3Bucket3:\n"
+                    ],
+                    [
+                        5,
+                        "    Type: AWS::S3::Bucket"
+                    ]
+                ],
+                "file_path": "/test.yaml",
+                "file_abs_path": "/src/test.yaml",
+                "repo_file_path": "/test.yaml",
+                "file_line_range": [
+                    4,
+                    5
+                ],
+                "resource": "AWS::S3::Bucket.S3Bucket3",
+                "evaluations": {},
+                "check_class": "checkov.cloudformation.checks.resource.aws.S3RestrictPublicBuckets",
+                "fixed_definition": null,
+                "entity_tags": null,
+                "caller_file_path": null,
+                "caller_file_line_range": null,
+                "resource_address": null,
+                "severity": null,
+                "bc_category": null,
+                "benchmarks": null,
+                "description": null,
+                "short_description": null,
+                "vulnerability_details": null,
+                "connected_node": null,
+                "guideline": "https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/bc-aws-s3-22",
+                "details": [],
+                "check_len": null,
+                "definition_context_file_path": null
+            }
+        ],
+        "skipped_checks": [],
+        "parsing_errors": []
+    },
+    "summary": {
+        "passed": 3,
+        "failed": 6,
+        "skipped": 0,
+        "parsing_errors": 0,
+        "resource_count": 1,
+        "checkov_version": "3.2.396"
+    },
+    "url": "Add an api key '--bc-api-key <api-key>' to see more detailed insights via https://bridgecrew.cloud"
+}

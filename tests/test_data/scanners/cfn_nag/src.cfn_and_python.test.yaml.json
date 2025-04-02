@@ -1,0 +1,55 @@
+[
+  {
+    "filename": "/src/cfn_and_python/test.yaml",
+    "file_results": {
+      "failure_count": 0,
+      "violations": [
+        {
+          "id": "W51",
+          "name": "MissingBucketPolicyRule",
+          "type": "WARN",
+          "message": "S3 bucket should likely have a bucket policy",
+          "logical_resource_ids": [
+            "S3Bucket2"
+          ],
+          "line_numbers": [
+            5
+          ],
+          "element_types": [
+            "resource"
+          ]
+        },
+        {
+          "id": "W35",
+          "name": "S3BucketAccessLoggingRule",
+          "type": "WARN",
+          "message": "S3 Bucket should have access logging configured",
+          "logical_resource_ids": [
+            "S3Bucket2"
+          ],
+          "line_numbers": [
+            5
+          ],
+          "element_types": [
+            "resource"
+          ]
+        },
+        {
+          "id": "W41",
+          "name": "S3BucketEncryptionSetRule",
+          "type": "WARN",
+          "message": "S3 Bucket should have encryption option set",
+          "logical_resource_ids": [
+            "S3Bucket2"
+          ],
+          "line_numbers": [
+            5
+          ],
+          "element_types": [
+            "resource"
+          ]
+        }
+      ]
+    }
+  }
+]

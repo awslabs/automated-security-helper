@@ -1,7 +1,7 @@
 """Models for Infrastructure as Code Scanning findings."""
 
 from enum import Enum
-from typing import Annotated, List, Optional, Dict, Set
+from typing import Annotated, List, Optional, Dict, Set, Union
 import datetime
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from automated_security_helper.models.core import BaseFinding
@@ -29,15 +29,13 @@ class ComplianceFramework(str, Enum):
 class IaCFinding(BaseFinding):
     """Model for Infrastructure as Code security findings."""
 
-    resource_type: str = Field(..., description="Type of cloud resource")
     resource_name: str = Field(..., description="Name of the affected resource")
-    file_path: str = Field(..., description="Path to the IaC file")
-    line_number: int = Field(..., description="Line number in the IaC file")
+    resource_type: Annotated[str, Field(description="Type of cloud resource")] = None
     expected_value: Optional[str] = Field(
         None, description="Expected configuration value"
     )
     actual_value: Optional[str] = Field(None, description="Current configuration value")
-    compliance_frameworks: Set[ComplianceFramework] = Field(
+    compliance_frameworks: Set[Union[ComplianceFramework, str]] = Field(
         default_factory=set, description="Compliance frameworks this violation impacts"
     )
     remediation_terraform: Optional[str] = Field(
