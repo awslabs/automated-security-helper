@@ -14,12 +14,15 @@ from automated_security_helper.models.core import BaseFinding
 class ExportFormat(str, Enum):
     """Supported export formats."""
 
+    TEXT = "text"
     JSON = "json"
     YAML = "yaml"
     CSV = "csv"
     HTML = "html"
     DICT = "dict"
+    JUNITXML = "junitxml"
     SARIF = "sarif"
+    ASFF = "asff"
     CYCLONEDX = "cyclonedx"
     SPDX = "spdx"
 

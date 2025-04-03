@@ -27,7 +27,7 @@ packages = [{include = "automated_security_helper", from = "src"}]
 
 [tool.poetry.scripts]
 asharp = 'automated_security_helper.asharp:main'
-ash-multi = "automated_security_helper.ash_multi:main"
+ashv3 = "automated_security_helper.orchestrator:main"
 schemagen = 'automated_security_helper.schemas.generate_schemas:main'
 
 [tool.poetry.dependencies]

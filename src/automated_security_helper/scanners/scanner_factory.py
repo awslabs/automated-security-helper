@@ -13,16 +13,15 @@ class ScannerFactory:
 
     def __init__(self) -> None:
         """Initialize the scanner factory."""
-        self._scanner_types: Dict[str, Type[AbstractScanner]] = {}
+        self._scanners: Dict[str, Type[AbstractScanner]] = {}
         # Register default scanners
         self._register_default_scanners()
 
     def _register_default_scanners(self) -> None:
         """Register the default set of scanners."""
+        self._scanners = {}  # Clear any existing registrations
         self.register_scanner("bandit", BanditScanner)
         self.register_scanner("cdknag", CDKNagScanner)
-        # TODO : Determine whether to maintain defaults here or in the model definition
-        pass
 
     def register_scanner(
         self, scanner_name: str, scanner_class: Type[AbstractScanner]
@@ -36,10 +35,10 @@ class ScannerFactory:
         Raises:
             ValueError: If scanner_name is already registered
         """
-        if scanner_name in self._scanner_types:
+        if scanner_name in self._scanners:
             raise ValueError(f"Scanner '{scanner_name}' is already registered")
 
-        self._scanner_types[scanner_name] = scanner_class
+        self._scanners[scanner_name] = scanner_class
 
     def create_scanner(
         self, config: Optional[Union[Dict[str, Any], ScannerConfig]] = None
@@ -65,10 +64,10 @@ class ScannerFactory:
         elif isinstance(config, ScannerConfig):
             scanner_name = config.name
 
-        if not scanner_name or scanner_name not in self._scanner_types:
+        if not scanner_name or scanner_name not in self._scanners:
             raise ValueError(f"Scanner '{scanner_name}' is not registered")
 
-        scanner_class = self._scanner_types[scanner_name]
+        scanner_class = self._scanners[scanner_name]
         scanner = scanner_class()
         scanner.configure(config)
         return scanner
@@ -85,10 +84,10 @@ class ScannerFactory:
         Raises:
             ValueError: If scanner type is not registered
         """
-        if scanner_name not in self._scanner_types:
+        if scanner_name not in self._scanners:
             raise ValueError(f"Scanner type '{scanner_name}' is not registered")
-        return self._scanner_types[scanner_name]
+        return self._scanners[scanner_name]
 
     def available_scanners(self) -> Dict[str, Type[AbstractScanner]]:
         """Get all registered scanner types."""
-        return self._scanner_types.copy()
+        return self._scanners.copy()

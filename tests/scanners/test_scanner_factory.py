@@ -15,8 +15,8 @@ def test_scanner_factory_initialization():
     factory = ScannerFactory()
 
     # Check internal state
-    assert hasattr(factory, "_scanner_types")
-    assert isinstance(factory._scanner_types, dict)
+    assert hasattr(factory, "_scanners")
+    assert isinstance(factory._scanners, dict)
 
     # Check default scanners are registered
     scanners = factory.available_scanners()
@@ -32,8 +32,8 @@ def test_scanner_factory_registration():
 
     # Register a new scanner
     factory.register_scanner("test", BanditScanner)
-    assert "test" in factory._scanner_types
-    assert factory._scanner_types["test"] == BanditScanner
+    assert "test" in factory._scanners
+    assert factory._scanners["test"] == BanditScanner
 
     # Verify it's available in scanners list
     scanners = factory.available_scanners()

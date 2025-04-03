@@ -2,6 +2,7 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Annotated, Any, List, Dict, Literal, Union
 from automated_security_helper.models.core import SCANNER_TYPES
+from automated_security_helper.models.data_interchange import ExportFormat
 from automated_security_helper.models.scanner_types import (
     BanditScanner,
     CfnNagScanner,
@@ -253,7 +254,7 @@ class SASTScannerConfig(ScannerClassConfig):
 
     # Additional optional settings
     output_formats: Annotated[
-        List[Literal["json", "yaml", "text", "html", "junitxml", "sarif", "asff"]],
+        List[ExportFormat],
         Field(description="Format for SAST scan results output"),
     ] = [
         "text",

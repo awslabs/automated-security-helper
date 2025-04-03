@@ -10,6 +10,9 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Type, Union, Callable
 
 from automated_security_helper.scanners.abstract_scanner import AbstractScanner
+from automated_security_helper.config.default_config import (
+    DEFAULT_ASH_CONFIG,
+)
 
 
 @dataclass
@@ -141,7 +144,7 @@ class ScanExecutionEngine:
             RuntimeError: If scanner execution fails
         """
         if config is None:
-            return {}
+            config = DEFAULT_ASH_CONFIG.model_dump()
 
         if not isinstance(config, dict):
             raise ValueError("Config must be a dictionary")

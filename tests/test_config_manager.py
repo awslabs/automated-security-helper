@@ -100,7 +100,16 @@ def test_get_parser_config(sample_config):
 
 
 def test_merge_configs():
+    # Reset and create new instance
+    ConfigurationManager._reset()
     config_manager = ConfigurationManager()
+
+    # Debug assertions
+    assert hasattr(config_manager, "_deep_update"), "Missing _deep_update method"
+    assert callable(getattr(config_manager, "_deep_update")), (
+        "_deep_update is not callable"
+    )
+
     base_config = {
         "scanners": {"scanner1": {"type": "static"}},
         "parsers": {"parser1": {"format": "json"}},

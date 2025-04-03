@@ -3,7 +3,10 @@
 
 import os
 import yaml
-from typing import Dict, Type
+import copy
+from typing import Dict, Type, Union
+
+from automated_security_helper.models.config import ASHConfig
 
 
 class ConfigurationManager:
@@ -11,18 +14,20 @@ class ConfigurationManager:
 
     _instance = None
 
+    @classmethod
+    def _reset(cls):
+        """Reset the singleton instance (for testing purposes)."""
+        cls._instance = None
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(ConfigurationManager, cls).__new__(cls)
-            cls._instance._initialize()
+            # Define instance attributes
+            cls._instance._registered_scanners = {}
+            cls._instance._registered_parsers = {}
+            cls._instance._config_pipeline = []
+            cls._instance._override_rules = {}
         return cls._instance
-
-    def _initialize(self):
-        """Initialize the configuration manager state."""
-        self._registered_scanners = {}
-        self._registered_parsers = {}
-        self._config_pipeline = []
-        self._override_rules = {}
 
     def register_scanner(self, scanner_name: str, scanner_class: Type):
         """Register a scanner with the configuration manager.
@@ -59,17 +64,19 @@ class ConfigurationManager:
         """
         self._override_rules[property_path] = rule
 
-    def resolve_configuration(self, base_config: Dict) -> Dict:
+    def resolve_configuration(self, base_config: Union[Dict, "ASHConfig"]) -> Dict:
         """Process a configuration through the resolution pipeline.
 
         Args:
-            base_config: Initial configuration dictionary
+            base_config: Initial configuration dictionary or ASHConfig object
 
         Returns:
             Processed and validated configuration dictionary
         """
-        current_config = base_config.copy()
-
+        if hasattr(base_config, "model_dump"):
+            current_config = base_config.model_dump()
+        else:
+            current_config = base_config.copy()
         # Apply pipeline steps
         for step in self._config_pipeline:
             current_config = step(current_config)
@@ -80,14 +87,14 @@ class ConfigurationManager:
 
         return current_config
 
-    def load_config(self, file_path: str) -> Dict:
+    def load_config(self, file_path: str) -> Union[Dict, ASHConfig]:
         """Load configuration from a YAML file.
 
         Args:
             file_path: Path to the YAML configuration file
 
         Returns:
-            Dictionary containing the configuration
+            Configuration as Dict or ASHConfig object
 
         Raises:
             FileNotFoundError: If the configuration file doesn't exist
@@ -97,9 +104,14 @@ class ConfigurationManager:
             raise FileNotFoundError(f"Configuration file not found: {file_path}")
 
         with open(file_path, "r") as f:
-            return yaml.safe_load(f)
+            config_data = yaml.safe_load(f)
+            try:
+                return ASHConfig.model_validate(config_data)
+            except Exception:
+                # If validation fails, return as regular dict
+                return config_data
 
-    def save_config(self, config: Dict, file_path: str) -> None:
+    def save_config(self, config: Union[Dict, ASHConfig], file_path: str) -> None:
         """Save configuration to a YAML file.
 
         Args:
@@ -107,9 +119,12 @@ class ConfigurationManager:
             file_path: Path where to save the configuration file
         """
         with open(file_path, "w") as f:
-            yaml.dump(config, f)
+            if hasattr(config, "model_dump"):
+                yaml.dump(config.model_dump(), f)
+            else:
+                yaml.dump(config, f)
 
-    def validate_config(self, config: Dict) -> bool:
+    def validate_config(self, config: Union[Dict, ASHConfig]) -> bool:
         """Validate the configuration structure.
 
         Args:
@@ -132,29 +147,58 @@ class ConfigurationManager:
 
         return True
 
-    def get_scanner_config(self, config: Dict) -> Dict:
+    def get_scanner_config(self, config: Union[Dict, ASHConfig]) -> Dict:
         """Get scanner-specific configuration.
 
         Args:
-            config: Complete configuration dictionary
+            config: Complete configuration dictionary or ASHConfig object
 
         Returns:
             Dictionary containing scanner configuration
         """
-        return config["scanners"]
+        if hasattr(config, "model_dump"):
+            return config.model_dump().get("scanners", {})
+        return config.get("scanners", {})
 
-    def get_parser_config(self, config: Dict) -> Dict:
+    def get_parser_config(self, config: Union[Dict, ASHConfig]) -> Dict:
         """Get parser-specific configuration.
 
         Args:
-            config: Complete configuration dictionary
+            config: Complete configuration dictionary or ASHConfig object
 
         Returns:
             Dictionary containing parser configuration
         """
-        return config["parsers"]
+        if hasattr(config, "model_dump"):
+            return config.model_dump().get("parsers", {})
+        return config.get("parsers", {})
 
-    def merge_configs(self, base_config: Dict, override_config: Dict) -> Dict:
+    # Define and bind the deep update method
+    def _deep_update(self, base_dict: Dict, update_dict: Dict) -> None:
+        """Recursively update a dictionary with another dictionary.
+
+        This performs a deep merge of two dictionaries, where nested dictionaries
+        are merged rather than replaced.
+
+        Args:
+            base_dict: Base dictionary to update
+            update_dict: Dictionary to update with
+        """
+        for key, value in update_dict.items():
+            if (
+                key in base_dict
+                and isinstance(base_dict[key], dict)
+                and isinstance(value, dict)
+            ):
+                self._deep_update(base_dict[key], value)
+            else:
+                base_dict[key] = copy.deepcopy(value)
+
+    def merge_configs(
+        self,
+        base_config: Union[Dict, ASHConfig],
+        override_config: Union[Dict, ASHConfig],
+    ) -> Union[Dict, ASHConfig]:
         """Merge two configuration dictionaries.
 
         Args:
@@ -164,21 +208,25 @@ class ConfigurationManager:
         Returns:
             Merged configuration dictionary
         """
-        merged = base_config.copy()
+        # Convert configs to dictionaries if they are ASHConfig objects
+        if hasattr(base_config, "model_dump"):
+            base_dict = base_config.model_dump()
+        else:
+            base_dict = base_config.copy()
 
-        # Merge scanners
-        merged["scanners"] = {
-            **base_config.get("scanners", {}),
-            **override_config.get("scanners", {}),
-        }
+        if hasattr(override_config, "model_dump"):
+            override_dict = override_config.model_dump()
+        else:
+            override_dict = override_config.copy()
 
-        # Merge parsers
-        merged["parsers"] = {
-            **base_config.get("parsers", {}),
-            **override_config.get("parsers", {}),
-        }
+        # Deep merge the configurations
+        self._deep_update(base_dict, override_dict)
 
-        return merged
+        # Try to convert back to ASHConfig if possible
+        try:
+            return ASHConfig.model_validate(base_dict)
+        except Exception:
+            return base_dict
 
     def _apply_override_rule(self, config: Dict, property_path: str, rule: Dict):
         """Apply an override rule to a specific property in the configuration.

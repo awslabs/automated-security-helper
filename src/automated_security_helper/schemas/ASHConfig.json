@@ -285,6 +285,24 @@
       "title": "CustomScanner",
       "type": "object"
     },
+    "ExportFormat": {
+      "description": "Supported export formats.",
+      "enum": [
+        "text",
+        "json",
+        "yaml",
+        "csv",
+        "html",
+        "dict",
+        "junitxml",
+        "sarif",
+        "asff",
+        "cyclonedx",
+        "spdx"
+      ],
+      "title": "ExportFormat",
+      "type": "string"
+    },
     "FileInvocationConfig": {
       "additionalProperties": false,
       "description": "Configuration for file scanning.",
@@ -425,16 +443,7 @@
           ],
           "description": "Format for SAST scan results output",
           "items": {
-            "enum": [
-              "json",
-              "yaml",
-              "text",
-              "html",
-              "junitxml",
-              "sarif",
-              "asff"
-            ],
-            "type": "string"
+            "$ref": "#/$defs/ExportFormat"
           },
           "title": "Output Formats",
           "type": "array"
