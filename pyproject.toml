@@ -28,7 +28,7 @@ packages = [{include = "automated_security_helper", from = "src"}]
 [tool.poetry.scripts]
 asharp = 'automated_security_helper.asharp:main'
 ash-multi = "automated_security_helper.ash_multi:main"
-schemagen = 'automated_security_helper.schemas.generate_schemas:generate_schemas'
+schemagen = 'automated_security_helper.schemas.generate_schemas:main'
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -41,6 +41,7 @@ jupyterlab = "^4.3.6"
 checkov = "^3.2.395"
 pathspec = "^0.12.1"
 semgrep = "^1.116.0"
+junit-xml = "^1.9"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.2"
@@ -49,7 +50,7 @@ pytest-mock = "^3.14.0"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
+addopts = "-rF -l --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
 
 [build-system]
 requires = ["poetry-core"]

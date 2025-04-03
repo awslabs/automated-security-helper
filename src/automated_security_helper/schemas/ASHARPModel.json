@@ -7,7 +7,6 @@
         "created_at": {
           "default": null,
           "description": "When the finding was first detected (in UTC)",
-          "format": "date-time",
           "title": "Created At",
           "type": "string"
         },
@@ -66,7 +65,6 @@
         "timestamp": {
           "default": null,
           "description": "When the finding was created",
-          "format": "date-time",
           "title": "Timestamp",
           "type": "string"
         },
@@ -79,7 +77,6 @@
         "updated_at": {
           "default": null,
           "description": "When the finding was last updated (in UTC)",
-          "format": "date-time",
           "title": "Updated At",
           "type": "string"
         }
@@ -161,7 +158,6 @@
         },
         "generated_at": {
           "default": null,
-          "format": "date-time",
           "title": "Generated At",
           "type": "string"
         },
@@ -251,11 +247,8 @@
             "CONTAINER",
             "IAC",
             "DEPENDENCY",
-            "VULNERABILITY",
-            "SECURITY",
-            "STATIC",
-            "DYNAMIC",
-            "SECRET"
+            "UNKNOWN",
+            "CUSTOM"
           ],
           "title": "Type",
           "type": "string"
@@ -275,7 +268,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Main model class for parsing security scan reports from ASH tooling.\n\nThis model is the primary interface for handling aggregated security findings from\nvarious scanners. It supports both legacy scanner formats and the newer\nscanners_used format.\n\nExample:\n    >>> with open('aggregated_results.json', 'r') as f:\n    ...     report = ASHARPModel.from_json(f.read())\n    >>> print(f\"Found {len(report.findings)} security findings\")\n    >>> for scanner in report.scanners_used:\n    ...     print(f\"Used scanner: {scanner['name']} v{scanner['version']}\")",
+  "description": "Main model class for parsing security scan reports from ASH tooling.\n\nThis model is the primary interface for handling aggregated security findings from\nvarious scanners. It supports both legacy scanner formats and the newer\nscanners_used format.\n\nExample:\n\n```python\nwith open('aggregated_results.json', 'r') as f:\n    report = ASHARPModel.from_json(f.read())\nprint(f\"Found {len(report.findings)} security findings\")\nfor scanner in report.scanners_used:\n    print(f\"Used scanner: {scanner['name']} v{scanner['version']}\")\n```",
   "properties": {
     "description": {
       "default": "AWS Security Hub Aggregated Report",
@@ -316,8 +309,8 @@
       "type": "array"
     },
     "timestamp": {
+      "default": null,
       "description": "Timestamp of the export in UTC",
-      "format": "date-time",
       "title": "Timestamp",
       "type": "string"
     },

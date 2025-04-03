@@ -80,7 +80,7 @@ def debug(x, y=0):
 class DateTimeEncoder(JSONEncoder):
     def default(self, obj):
         if isinstance(obj, (datetime.date, datetime.datetime)):
-            return obj.isoformat()
+            return obj.isoformat(timespec="seconds")
 
 
 ###

@@ -62,7 +62,7 @@ def test_static_analysis_finding_creation(sample_scanner, sample_location):
         scanner=sample_scanner,
         source_file="myfile.py",
         location=sample_location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now().isoformat(timespec="seconds"),
         finding_type="security",
         code_snippet="data = pickle.loads(user_input)",
         line_number=46,
@@ -112,7 +112,7 @@ def test_static_analysis_finding_invalid_finding_type(sample_scanner, sample_loc
             scanner=sample_scanner,
             source_file="myfile.py",
             location=sample_location,
-            timestamp=datetime.now(),
+            timestamp=datetime.now().isoformat(timespec="seconds"),
             finding_type="invalid",  # Invalid finding type
             code_snippet="test code",
             line_number=1,
@@ -128,7 +128,7 @@ def test_static_analysis_report_creation(sample_finding):
     """Test creation of StaticAnalysisReport objects."""
     report = StaticAnalysisReport(
         project_name="test-project",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=[sample_finding],
         scan_config={
@@ -154,7 +154,7 @@ def test_static_analysis_report_empty():
     """Test creation of empty StaticAnalysisReport."""
     report = StaticAnalysisReport(
         project_name="test-project",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=[],
         scan_config={
@@ -183,7 +183,7 @@ def test_static_analysis_report_multiple_findings(sample_finding):
         scanner=sample_finding.scanner,
         source_file="myfile.py",
         location=sample_finding.location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now().isoformat(timespec="seconds"),
         finding_type="security",
         code_snippet='query = f"SELECT * FROM users WHERE id = {user_id}"',
         line_number=50,
@@ -205,7 +205,7 @@ def test_static_analysis_report_multiple_findings(sample_finding):
 
     report = StaticAnalysisReport(
         project_name="test-project",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=[sample_finding, finding2],
         scan_config={
@@ -238,7 +238,7 @@ def test_static_analysis_report_by_file():
             ),
             source_file=f"file{i}.py",
             location=Location(file_path=f"file{i}.py", start_line=i, end_line=i),
-            timestamp=datetime.now(),
+            timestamp=datetime.now().isoformat(timespec="seconds"),
             finding_type="security",
             code_snippet=f"code_{i}",
             line_number=i,
@@ -261,7 +261,7 @@ def test_static_analysis_report_by_file():
             scanner=Scanner(name="test", version="1.0", type="SAST", rule_id="RULE-4"),
             source_file="file1.py",
             location=Location(file_path="file1.py", start_line=10, end_line=10),
-            timestamp=datetime.now(),
+            timestamp=datetime.now().isoformat(timespec="seconds"),
             finding_type="security",
             code_snippet="duplicate_code",
             line_number=10,
@@ -275,7 +275,7 @@ def test_static_analysis_report_by_file():
 
     report = StaticAnalysisReport(
         project_name="test-project",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=findings,
         scan_config=BaseConfig(rules=["security"]),

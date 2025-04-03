@@ -22,7 +22,7 @@ def sample_vulnerability():
             name="base_scanner", version="1.0.0", rule_id="TEST-001", type="SAST"
         ),
         location=Location(file_path="/path/to/file", start_line=10, end_line=5),
-        timestamp=datetime.now(),
+        timestamp=datetime.now().isoformat(timespec="seconds"),
         resource_type="AWS::EC2::SecurityGroup",
         resource_name="WebServerSecurityGroup",
         violation_details={
@@ -46,7 +46,7 @@ def test_iac_vulnerability_creation(base_scanner, base_location):
         severity="HIGH",
         scanner=base_scanner,
         location=base_location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now().isoformat(timespec="seconds"),
         resource_type="AWS::EC2::SecurityGroup",
         resource_name="WebServerSecurityGroup",
         violation_details={
@@ -81,7 +81,7 @@ def test_iac_scan_report_creation(sample_vulnerability):
         metadata=ReportMetadata(report_id="XXXXX", tool_name="cfn-nag"),
         template_path="templates/main.yaml",
         template_type="CloudFormation",
-        timestamp=datetime.now(),
+        timestamp=datetime.now().isoformat(timespec="seconds"),
         findings=[sample_vulnerability],
         resources_checked={
             "AWS::EC2::SecurityGroup": 2,
@@ -102,7 +102,7 @@ def test_iac_scan_report_empty():
         name="CloudFormation IaC Scan Report",
         template_path="templates/main.yaml",
         template_type="cloudformation",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         findings=[],
         resources_checked={},
         metadata=ReportMetadata(
@@ -127,7 +127,7 @@ def test_iac_scan_report_multiple_findings(base_scanner, sample_vulnerability):
         severity="MEDIUM",
         scanner=base_scanner,
         location=Location(file_path="templates/main.yaml", start_line=20, end_line=25),
-        timestamp=datetime.now(),
+        timestamp=datetime.now().isoformat(timespec="seconds"),
         resource_type="AWS::S3::Bucket",
         resource_name="DataBucket",
         violation_details={
@@ -143,7 +143,7 @@ def test_iac_scan_report_multiple_findings(base_scanner, sample_vulnerability):
         metadata=ReportMetadata(report_id="XXXXX", tool_name="cdk-nag"),
         template_path="templates/main.yaml",
         template_type="CloudFormation",
-        timestamp=datetime.now(),
+        timestamp=datetime.now().isoformat(timespec="seconds"),
         findings=[sample_vulnerability, vuln2],
         resources_checked={
             "AWS::EC2::SecurityGroup": 2,
@@ -164,7 +164,7 @@ def test_iac_scan_report_invalid_template_type():
         IaCScanReport(
             template_path="templates/main.yaml",
             template_type="InvalidType",  # Invalid template type
-            scan_timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             findings=[],
             resources_checked={},
         )
@@ -182,7 +182,7 @@ def test_iac_vulnerability_with_policy_violation(base_scanner, base_location):
         severity="HIGH",
         scanner=base_scanner,
         location=base_location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now().isoformat(timespec="seconds"),
         resource_type="AWS::IAM::Policy",
         resource_name="AdminPolicy",
         violation_details={

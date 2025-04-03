@@ -1,6 +1,7 @@
 from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Annotated, List, Dict, Literal, Union
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Annotated, Any, List, Dict, Literal, Union
+from automated_security_helper.models.core import SCANNER_TYPES
 from automated_security_helper.models.scanner_types import (
     BanditScanner,
     CfnNagScanner,
@@ -95,6 +96,25 @@ class ScannerConfig(BaseConfig):
             description="Configuration for file scanning. Required if invocation_mode is 'file'."
         ),
     ] = FileInvocationConfig()
+    type: Annotated[
+        SCANNER_TYPES,
+        Field(description="Type of scanner (e.g., SAST, DAST, SBOM)"),
+    ] = "SAST"
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_scanner_type(cls, scanner_type: Any) -> str:
+        """Normalize scanner type value before validation."""
+        # Type checking
+        if not isinstance(scanner_type, str):
+            raise ValueError(f"Scanner type must be string, got {type(scanner_type)}")
+
+        # Convert/normalize value
+        scanner_type = str(scanner_type).strip().upper()
+        if scanner_type == "STATIC":
+            scanner_type = "SAST"
+
+        return scanner_type
 
     def model_post_init(self, context):
         super().model_post_init(context)

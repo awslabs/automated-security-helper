@@ -69,7 +69,7 @@ def test_container_scan_report_creation(sample_vulnerability):
     report = ContainerScanReport(
         image_name="test-image",
         image_tag="latest",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=[sample_vulnerability],
     )
@@ -82,7 +82,7 @@ def test_container_scan_report_creation(sample_vulnerability):
 def test_container_scan_report_empty():
     """Test creation of empty ContainerScanReport."""
     report = ContainerScanReport(
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         image_name="test-image",
         image_tag="latest",
@@ -102,7 +102,7 @@ def test_container_scan_report_multiple_vulnerabilities(sample_vulnerability):
         severity="MEDIUM",
         scanner=sample_vulnerability.scanner,
         location=sample_vulnerability.location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         package_name="another-package",
         package_version="2.0.0",
         installed_version="2.0.0",
@@ -111,7 +111,7 @@ def test_container_scan_report_multiple_vulnerabilities(sample_vulnerability):
     report = ContainerScanReport(
         image_name="test-image",
         image_tag="latest",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=[sample_vulnerability, vuln2],
     )

@@ -91,9 +91,9 @@ class SBOMReport(DataInterchange):
 
     project_name: Annotated[str, Field(None, description="Alias for name")] = None
     version: Annotated[str, Field(..., description="Version of the report")]
-    generated_at: Annotated[datetime.datetime, Field()] = datetime.datetime.now(
+    generated_at: Annotated[str, Field()] = datetime.datetime.now(
         datetime.timezone.utc
-    )
+    ).isoformat(timespec="seconds")
     components: Annotated[List[SBOMComponent], Field(validation_alias="packages")] = []
     packages: Annotated[List[SBOMComponent], Field(None)] = None
     metadata: Annotated[List[SBOMMetadata], Field()] = []
@@ -112,7 +112,7 @@ class SBOMReport(DataInterchange):
     ) -> Union[str, Dict[str, Any]]:
         """Export the SBOM report in the specified format."""
         if format == ExportFormat.JSON:
-            return self.model_dump_json(indent=2)
+            return self.model_dump_json(indent=2, serialize_as_any=True)
         elif format == ExportFormat.YAML:
             import yaml
 

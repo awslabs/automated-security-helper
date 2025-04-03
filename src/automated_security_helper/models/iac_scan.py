@@ -76,7 +76,6 @@ class IaCScanReport(SecurityReport):
 
     model_config = ConfigDict(
         str_strip_whitespace=True,
-        validate_default=True,
         arbitrary_types_allowed=True,
         extra="forbid",
     )
@@ -96,11 +95,11 @@ class IaCScanReport(SecurityReport):
     ] = {}
 
     timestamp: Annotated[
-        datetime.datetime,
+        str,
         Field(
             description="When the report was generated",
         ),
-    ] = datetime.datetime.now(datetime.timezone.utc)
+    ] = None
 
     @field_validator("template_type")
     @classmethod
@@ -118,6 +117,17 @@ class IaCScanReport(SecurityReport):
         if not v or not v.strip():
             raise ValueError("Template path cannot be empty")
         return v.strip()
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_datetime(cls, v: Union[str, datetime.datetime] = None) -> str:
+        """Validate that value is timestamp or, if empty, set to current datetime"""
+        if not v:
+            # return ISO timestamp str
+            v = datetime.datetime.now(datetime.timezone.utc)
+        if isinstance(v, str):
+            v = datetime.datetime.fromisoformat(v.strip())
+        return v.isoformat(timespec="seconds")
 
 
 class IaCReport(BaseModel):

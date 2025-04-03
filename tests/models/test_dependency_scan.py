@@ -27,7 +27,7 @@ def sample_vulnerability(base_scanner, sample_location):
         severity="HIGH",
         scanner=base_scanner,
         location=sample_location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         package_name="requests",
         installed_version="2.25.0",
         fixed_version="2.26.0",
@@ -46,7 +46,7 @@ def test_dependency_vulnerability_creation(base_scanner, sample_location):
         severity="HIGH",
         scanner=base_scanner,
         location=sample_location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         package_name="requests",
         installed_version="2.25.0",
         fixed_version="2.26.0",
@@ -82,7 +82,7 @@ def test_dependency_vulnerability_invalid_dependency_type(
             severity="HIGH",
             scanner=base_scanner,
             location=sample_location,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             package_name="requests",
             installed_version="2.25.0",
             fixed_version="2.26.0",
@@ -95,7 +95,7 @@ def test_dependency_scan_report_creation(sample_vulnerability):
     report = DependencyScanReport(
         scanner_name="deps",
         manifest_file="npmaudit.json",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         findings=[sample_vulnerability],
         dependencies={"requests": "2.25.0", "urllib3": "1.26.5"},
     )
@@ -110,7 +110,7 @@ def test_dependency_scan_report_empty():
     report = DependencyScanReport(
         scanner_name="deps",
         manifest_file="npmaudit.json",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         findings=[],
         dependencies={},
     )
@@ -129,7 +129,7 @@ def test_dependency_scan_report_multiple_vulnerabilities(sample_vulnerability):
         severity="MEDIUM",
         scanner=sample_vulnerability.scanner,
         location=sample_vulnerability.location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         package_name="urllib3",
         installed_version="1.26.5",
         fixed_version="1.26.6",
@@ -138,7 +138,7 @@ def test_dependency_scan_report_multiple_vulnerabilities(sample_vulnerability):
     report = DependencyScanReport(
         scanner_name="deps",
         manifest_file="npmaudit.json",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         findings=[sample_vulnerability, vuln2],
         dependencies={"requests": "2.25.0", "urllib3": "1.26.5"},
     )

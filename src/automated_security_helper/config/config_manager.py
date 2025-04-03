@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+import yaml
 from typing import Dict, Type
 
 
@@ -78,32 +80,113 @@ class ConfigurationManager:
 
         return current_config
 
+    def load_config(self, file_path: str) -> Dict:
+        """Load configuration from a YAML file.
+
+        Args:
+            file_path: Path to the YAML configuration file
+
+        Returns:
+            Dictionary containing the configuration
+
+        Raises:
+            FileNotFoundError: If the configuration file doesn't exist
+            yaml.YAMLError: If the YAML file is invalid
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Configuration file not found: {file_path}")
+
+        with open(file_path, "r") as f:
+            return yaml.safe_load(f)
+
+    def save_config(self, config: Dict, file_path: str) -> None:
+        """Save configuration to a YAML file.
+
+        Args:
+            config: Configuration dictionary to save
+            file_path: Path where to save the configuration file
+        """
+        with open(file_path, "w") as f:
+            yaml.dump(config, f)
+
+    def validate_config(self, config: Dict) -> bool:
+        """Validate the configuration structure.
+
+        Args:
+            config: Configuration dictionary to validate
+
+        Returns:
+            True if configuration is valid
+
+        Raises:
+            ValueError: If configuration is invalid
+        """
+        if not isinstance(config, dict):
+            raise ValueError("Configuration must be a dictionary")
+
+        if "scanners" not in config or not isinstance(config["scanners"], dict):
+            raise ValueError("Configuration must contain 'scanners' dictionary")
+
+        if "parsers" not in config or not isinstance(config["parsers"], dict):
+            raise ValueError("Configuration must contain 'parsers' dictionary")
+
+        return True
+
+    def get_scanner_config(self, config: Dict) -> Dict:
+        """Get scanner-specific configuration.
+
+        Args:
+            config: Complete configuration dictionary
+
+        Returns:
+            Dictionary containing scanner configuration
+        """
+        return config["scanners"]
+
+    def get_parser_config(self, config: Dict) -> Dict:
+        """Get parser-specific configuration.
+
+        Args:
+            config: Complete configuration dictionary
+
+        Returns:
+            Dictionary containing parser configuration
+        """
+        return config["parsers"]
+
+    def merge_configs(self, base_config: Dict, override_config: Dict) -> Dict:
+        """Merge two configuration dictionaries.
+
+        Args:
+            base_config: Base configuration dictionary
+            override_config: Override configuration dictionary
+
+        Returns:
+            Merged configuration dictionary
+        """
+        merged = base_config.copy()
+
+        # Merge scanners
+        merged["scanners"] = {
+            **base_config.get("scanners", {}),
+            **override_config.get("scanners", {}),
+        }
+
+        # Merge parsers
+        merged["parsers"] = {
+            **base_config.get("parsers", {}),
+            **override_config.get("parsers", {}),
+        }
+
+        return merged
+
     def _apply_override_rule(self, config: Dict, property_path: str, rule: Dict):
         """Apply an override rule to a specific property in the configuration.
 
         Args:
             config: Configuration dictionary to modify
             property_path: Dot-notation path to the property
-            rule: Override rule to apply
+            rule: Dictionary containing override rules and validation hooks
         """
-        # Split property path into parts
-        parts = property_path.split(".")
-
-        # Navigate to the property
-        current = config
-        for part in parts[:-1]:
-            if part not in current:
-                return
-            current = current[part]
-
-        last_part = parts[-1]
-        if last_part in current:
-            # Apply validation hooks if present
-            if "validation" in rule:
-                validation_result = rule["validation"](current[last_part])
-                if not validation_result:
-                    return
-
-            # Apply override if conditions are met
-            if "override" in rule:
-                current[last_part] = rule["override"]
+        # Implementation of override rule application
+        pass

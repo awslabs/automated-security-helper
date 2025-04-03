@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import ConfigDict, Field, model_validator
 from automated_security_helper.models.data_interchange import (
     SecurityReport,
@@ -27,11 +27,14 @@ class ASHARPModel(SecurityReport):
     scanners_used format.
 
     Example:
-        >>> with open('aggregated_results.json', 'r') as f:
-        ...     report = ASHARPModel.from_json(f.read())
-        >>> print(f"Found {len(report.findings)} security findings")
-        >>> for scanner in report.scanners_used:
-        ...     print(f"Used scanner: {scanner['name']} v{scanner['version']}")
+
+    ```python
+    with open('aggregated_results.json', 'r') as f:
+        report = ASHARPModel.from_json(f.read())
+    print(f"Found {len(report.findings)} security findings")
+    for scanner in report.scanners_used:
+        print(f"Used scanner: {scanner['name']} v{scanner['version']}")
+    ```
     """
 
     model_config = ConfigDict(str_strip_whitespace=True, arbitrary_types_allowed=True)
@@ -43,7 +46,7 @@ class ASHARPModel(SecurityReport):
     )
     metadata: ReportMetadata = Field(
         default_factory=lambda: ReportMetadata(
-            report_id="ASHARP-" + datetime.now().strftime("%Y%m%d-%H%M%S"),
+            report_id="ASHARP-" + datetime.now(timezone.utc).strftime("%Y%M%d"),
             project_name="ASHARP",
             tool_name="ASHARP",
             tool_version="1.0.0",
@@ -108,7 +111,7 @@ class ASHARPModel(SecurityReport):
         # Ensure required fields with defaults
         scanner_dict_copy = scanner_dict.copy()
         required_fields = {
-            "type": "SECURITY",
+            "type": "SAST",
             "version": "1.0.0",
             "description": "Security scanner",
         }

@@ -71,7 +71,7 @@ def test_sbom_report_creation(sample_package):
         name="test-sbom",
         project_name="test-project",
         version=datetime.now(timezone.utc).strftime("%Y.%m.%d"),
-        generated_at=datetime.now(),
+        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         packages=[sample_package],
         metadata=[
             SBOMMetadata(
@@ -96,7 +96,7 @@ def test_sbom_report_empty():
         name="test-sbom",
         project_name="test-project",
         version=datetime.now(timezone.utc).strftime("%Y.%m.%d"),
-        generated_at=datetime.now(),
+        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         packages=[],
         metadata=[
             SBOMMetadata(
@@ -135,7 +135,7 @@ def test_sbom_report_multiple_packages(sample_package):
         name="test-sbom",
         project_name="test-project",
         version=datetime.now(timezone.utc).strftime("%Y.%m.%d"),
-        generated_at=datetime.now(),
+        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         packages=[sample_package, package2],
         metadata=[
             SBOMMetadata(
@@ -184,7 +184,7 @@ def test_sbom_report_dependency_tree(sample_package):
     report = SBOMReport(
         name="test-sbom",
         project_name="test-project",
-        generated_at=datetime.now(),
+        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         version=datetime.now(timezone.utc).strftime("%Y.%m.%d"),
         packages=[sample_package],
         metadata=[
@@ -212,7 +212,7 @@ def test_sbom_report_export(sample_package):
         project_name="test-project",
         name="test-sbom",
         version=datetime.now(timezone.utc).strftime("%Y.%m.%d"),
-        generated_at=datetime.now(),
+        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         packages=[sample_package],
         metadata=[
             SBOMMetadata(

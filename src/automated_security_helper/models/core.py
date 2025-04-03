@@ -10,6 +10,9 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 # Define valid severity levels at module level for use across all finding types
 SeverityLevel = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 VALID_SEVERITY_VALUES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"})
+SCANNER_TYPES = Literal[
+    "SAST", "DAST", "SBOM", "CONTAINER", "IAC", "DEPENDENCY", "UNKNOWN", "CUSTOM"
+]
 
 
 class Location(BaseModel):
@@ -38,19 +41,7 @@ class Scanner(BaseModel):
     ]
     version: Annotated[str, Field(description="Version of the scanner")] = "1.0.0"
     type: Annotated[
-        Literal[
-            "SAST",
-            "DAST",
-            "SBOM",
-            "CONTAINER",
-            "IAC",
-            "DEPENDENCY",
-            "VULNERABILITY",
-            "SECURITY",
-            "STATIC",
-            "DYNAMIC",
-            "SECRET",
-        ],
+        SCANNER_TYPES,
         Field(description="Type of scanner (e.g., SAST, DAST, SBOM)"),
     ] = "SAST"
     rule_id: Annotated[
@@ -158,7 +149,7 @@ class BaseFinding(BaseModel):
         Field(..., description="Information about the scanner that found the issue"),
     ]
     timestamp: Annotated[
-        datetime,
+        str,
         Field(
             description="When the finding was created",
         ),
@@ -169,13 +160,13 @@ class BaseFinding(BaseModel):
     status: Annotated[str, Field(description="Current status of the finding")] = "OPEN"
 
     created_at: Annotated[
-        datetime,
+        str,
         Field(
             description="When the finding was first detected (in UTC)",
         ),
     ] = None
     updated_at: Annotated[
-        datetime,
+        str,
         Field(
             description="When the finding was last updated (in UTC)",
         ),
@@ -222,18 +213,17 @@ class BaseFinding(BaseModel):
 
     @field_validator("timestamp", "created_at", "updated_at")
     @classmethod
-    def validate_datetime(cls, v: Union[str, datetime] = None) -> datetime:
+    def validate_datetime(cls, v: Union[str, datetime] = None) -> str:
         """Validate that value is timestamp or, if empty, set to current datetime"""
         if not v:
-            return datetime.now(timezone.utc)
-        if isinstance(v, datetime):
-            return v
-        v = v.strip()
-        return datetime.strptime(v)
+            v = datetime.now(timezone.utc)
+        if isinstance(v, str):
+            v = datetime.fromisoformat(v.strip())
+        return v.isoformat(timespec="seconds")
 
     def model_post_init(self, context):
         super().model_post_init(context)
-        default_timestamp = datetime.now(timezone.utc)
+        default_timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if not self.created_at:
             self.created_at = default_timestamp
         if not self.updated_at:

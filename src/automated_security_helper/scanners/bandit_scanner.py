@@ -2,12 +2,13 @@
 
 import json
 from datetime import datetime, timezone
+import shutil
+from typing import Any, Dict, Optional
 from automated_security_helper.models.core import Location, Scanner
 from automated_security_helper.scanners.abstract_scanner import (
     AbstractScanner,
     ScannerError,
 )
-from automated_security_helper.models.interfaces import IScanner
 from automated_security_helper.models.config import ScannerConfig
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisFinding,
@@ -16,7 +17,7 @@ from automated_security_helper.models.static_analysis import (
 )
 
 
-class BanditScanner(AbstractScanner, IScanner):
+class BanditScanner(AbstractScanner):
     """Implementation of a Python security scanner using Bandit.
 
     This scanner uses Bandit to perform static security analysis of Python code
@@ -25,21 +26,39 @@ class BanditScanner(AbstractScanner, IScanner):
 
     def __init__(self) -> None:
         super().__init__()
-        self._config: ScannerConfig = None
         self._output_format = "json"
+        self._config = ScannerConfig(
+            name="bandit",
+            type="SAST",
+            command="bandit",
+            output_format="json",
+            options={
+                "confidence-level": "HIGH",
+                "severity-level": "HIGH",
+            },
+        )
 
-    def configure(self, config: ScannerConfig) -> None:
+    def configure(self, config: ScannerConfig = None) -> None:
         """Configure the scanner with provided settings."""
-        self._config = config
+        super().configure(config)
         # Allow output format override through config
-        self._output_format = config.output_format if config.output_format else "json"
+        self._output_format = (
+            self._config.output_format if self._config.output_format else "json"
+        )
 
     def validate(self) -> bool:
         """Verify scanner configuration and requirements."""
-        # Minimal validation - could add bandit binary check here
-        return self._config is not None
+        try:
+            exists = (
+                self._config.command and shutil.which(self._config.command) is not None
+            )
+            return exists and self._config is not None
+        except Exception as e:
+            raise ScannerError(f"Error validating scanner: {str(e)}") from e
 
-    def scan(self, target: str) -> StaticAnalysisReport:
+    def scan(
+        self, target: str, options: Optional[Dict[str, Any]] = None
+    ) -> StaticAnalysisReport:
         """Execute Bandit scan and return results.
 
         Args:
@@ -51,6 +70,11 @@ class BanditScanner(AbstractScanner, IScanner):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        try:
+            self._pre_scan(target, options)
+        except ScannerError as exc:
+            raise exc
+
         cmd = ["bandit", "-f", self._output_format, "-r", target]
 
         # Add config-specific args if provided
@@ -108,7 +132,9 @@ class BanditScanner(AbstractScanner, IScanner):
                     project_name=target,
                     findings=findings,
                     statistics=stats,
-                    scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    scan_timestamp=datetime.now(timezone.utc).isoformat(
+                        timespec="seconds"
+                    ),
                     scan_config=self._config,
                 )
 
@@ -136,7 +162,7 @@ class BanditScanner(AbstractScanner, IScanner):
                         source_file=target,
                     )
                 ],
-                scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 scan_config=self._config,
             )
 

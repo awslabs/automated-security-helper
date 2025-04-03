@@ -3,7 +3,7 @@
 import os
 from datetime import datetime, timezone
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import csv
 import shutil
 from pathlib import Path
@@ -18,18 +18,15 @@ from automated_security_helper.scanners.abstract_scanner import (
     AbstractScanner,
     ScannerError,
 )
-from automated_security_helper.models.interfaces import IScanner
 from automated_security_helper.models.config import ScannerConfig
 
 
-class CDKNagScanner(AbstractScanner, IScanner):
+class CDKNagScanner(AbstractScanner):
     """CDK Nag security scanner implementation."""
 
     def __init__(self) -> None:
         """Initialize the CDK Nag scanner."""
         super().__init__()
-        self.config: Dict[str, Any] = {}
-        self.work_dir: Path = None
 
     def configure(self, config: ScannerConfig) -> None:
         """Configure the scanner with the provided configuration.
@@ -37,7 +34,7 @@ class CDKNagScanner(AbstractScanner, IScanner):
         Args:
             config: Scanner configuration
         """
-        self.config = config
+        super().configure(config)
 
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -63,7 +60,7 @@ class CDKNagScanner(AbstractScanner, IScanner):
                 "CDK dependencies not found. Please ensure CDK is installed."
             ) from e
 
-    def scan(self, target: str) -> IaCReport:
+    def scan(self, target: str, options: Optional[Dict[str, Any]] = None) -> IaCReport:
         """Scan the target and return findings.
 
         Args:
@@ -75,6 +72,10 @@ class CDKNagScanner(AbstractScanner, IScanner):
         Raises:
             ScannerError: If scanning fails
         """
+        try:
+            self._pre_scan(target, options)
+        except ScannerError as exc:
+            raise exc
         target_path = Path(target)
         if not target_path.exists():
             raise ScannerError(f"Target {target} does not exist")

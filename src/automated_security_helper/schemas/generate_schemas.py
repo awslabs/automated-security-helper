@@ -1,19 +1,35 @@
 from pathlib import Path
+from typing import Literal
 from automated_security_helper.models.config import ASHConfig
 from automated_security_helper.models.asharp_model import ASHARPModel
 import json
 
 
-def generate_schemas():
+def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
     """Generate JSON schemas for the models."""
     cur_file_path = Path(__file__)
     # create schemas dir if not existing
     schemas_dir = cur_file_path.parent
+    resp = {}
     for model in [ASHConfig, ASHARPModel]:
         json_schema_path = schemas_dir.joinpath(f"{model.__name__}.json").resolve()
         schema = model.model_json_schema()
-        with open(json_schema_path, "w") as f:
-            json.dump(schema, f, indent=2, sort_keys=True)
-            # add final new line so pre-commit doesn't see changes on every run
-            f.writelines("\n")
-    return
+        if output == "dict":
+            resp[model.__name__] = schema
+        elif output == "json":
+            resp[model.__name__] = json.dumps(schema, indent=2, sort_keys=True)
+        else:
+            resp = None
+            with open(json_schema_path, "w") as f:
+                json.dump(schema, f, indent=2, sort_keys=True)
+                # add final new line so pre-commit doesn't see changes on every run
+                f.writelines("\n")
+    return resp
+
+
+def main():
+    generate_schemas("file")
+
+
+if __name__ == "__main__":
+    main()

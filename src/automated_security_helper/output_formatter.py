@@ -7,19 +7,20 @@ This module contains the OutputFormatter class and related formatters for:
 """
 
 from abc import ABC, abstractmethod
-import json
 import csv
 from io import StringIO
 import html
 
-from .result_processor import ASHModel
+import yaml
+
+from .models.asharp_model import ASHARPModel
 
 
 class IOutputFormatter(ABC):
     """Interface for output formatters."""
 
     @abstractmethod
-    def format(self, model: ASHModel) -> str:
+    def format(self, model: ASHARPModel) -> str:
         """Format ASH model into output string."""
         pass
 
@@ -27,16 +28,23 @@ class IOutputFormatter(ABC):
 class JSONFormatter(IOutputFormatter):
     """Formats results as JSON."""
 
-    def format(self, model: ASHModel) -> str:
+    def format(self, model: ASHARPModel) -> str:
         """Format ASH model as JSON string."""
-        data = {"findings": model.findings, "metadata": model.metadata}
-        return json.dumps(data, indent=2)
+        return model.model_dump_json(indent=2, serialize_as_any=True)
+
+
+class YAMLFormatter(IOutputFormatter):
+    """Formats results as YAML."""
+
+    def format(self, model: ASHARPModel) -> str:
+        """Format ASH model as YAML string."""
+        return yaml.dump(model.model_dump(), indent=2)
 
 
 class HTMLFormatter(IOutputFormatter):
     """Formats results as HTML."""
 
-    def format(self, model: ASHModel) -> str:
+    def format(self, model: ASHARPModel) -> str:
         """Format ASH model as HTML string."""
         # Basic HTML template
         template = """
@@ -63,7 +71,7 @@ class HTMLFormatter(IOutputFormatter):
 class CSVFormatter(IOutputFormatter):
     """Formats results as CSV."""
 
-    def format(self, model: ASHModel) -> str:
+    def format(self, model: ASHARPModel) -> str:
         """Format ASH model as CSV string."""
         output = StringIO()
         writer = csv.writer(output)
@@ -82,11 +90,13 @@ class OutputFormatter:
     def __init__(self):
         self._formatters = {
             "json": JSONFormatter(),
+            "yaml": YAMLFormatter(),
+            "yml": YAMLFormatter(),
             "html": HTMLFormatter(),
             "csv": CSVFormatter(),
         }
 
-    def format(self, model: ASHModel, output_format: str) -> str:
+    def format(self, model: ASHARPModel, output_format: str) -> str:
         """Format ASH model using specified formatter."""
         if output_format not in self._formatters:
             raise ValueError(f"Unsupported output format: {output_format}")

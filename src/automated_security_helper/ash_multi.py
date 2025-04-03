@@ -9,11 +9,14 @@ of security scanners and processing their results.
 import argparse
 import json
 import logging
+import logging.config
 import sys
 from typing import Dict
 
+import yaml
+
 from automated_security_helper.config.config_manager import ConfigurationManager
-from automated_security_helper.scanner.scanner_factory import ScannerFactory
+from automated_security_helper.scanners.scanner_factory import ScannerFactory
 from automated_security_helper.execution_engine import (
     ScanExecutionEngine,
     ExecutionStrategy,
@@ -39,11 +42,10 @@ def parse_args():
     return parser.parse_args()
 
 
-def setup_logging(verbose: bool):
+def get_logger(verbose: bool) -> logging.Logger:
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    logger = logging.Logger("ASH", level=level)
+    return logger
 
 
 def load_config(config_path: str) -> Dict:
@@ -62,9 +64,16 @@ def load_config(config_path: str) -> Dict:
 
     try:
         with open(config_path, "r") as f:
-            user_config = json.load(f)
+            if config_path.endswith(".json"):
+                user_config = json.load(f)
+            elif config_path.endswith(".yaml") or config_path.endswith(".yml"):
+                user_config = yaml.safe_load(f)
             # Merge user config with defaults, user config takes precedence
             return {**default_config, **user_config}
+    except yaml.error.YAMLError as e:
+        raise e
+    except FileNotFoundError as e:
+        raise e
     except Exception as e:
         logging.warning(
             f"Failed to load configuration from {config_path}: {e}. Using default configuration."
@@ -74,7 +83,8 @@ def load_config(config_path: str) -> Dict:
 
 def main():
     args = parse_args()
-    setup_logging(args.verbose)
+    logger = get_logger(args.verbose)
+    logger.info("Starting ASH scan")
 
     # Load and process configuration
     config = load_config(args.config)

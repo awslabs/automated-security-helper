@@ -1,7 +1,7 @@
 """Unit tests for ASHARP model."""
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from automated_security_helper.models.core import Location, Scanner, BaseFinding
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.data_interchange import ExportFormat
@@ -13,7 +13,7 @@ def sample_scanner_dict():
     return {
         "name": "test_scanner",
         "version": "1.0.0",
-        "type": "STATIC",
+        "type": "SAST",
         "rule_id": "RULE-001",
         "description": "Security scanner",
     }
@@ -31,7 +31,7 @@ def sample_finding():
         severity="HIGH",
         scanner=scanner,
         location=location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
 
 

@@ -644,6 +644,22 @@
           ],
           "title": "Output Stream",
           "type": "string"
+        },
+        "type": {
+          "default": "SAST",
+          "description": "Type of scanner (e.g., SAST, DAST, SBOM)",
+          "enum": [
+            "SAST",
+            "DAST",
+            "SBOM",
+            "CONTAINER",
+            "IAC",
+            "DEPENDENCY",
+            "UNKNOWN",
+            "CUSTOM"
+          ],
+          "title": "Type",
+          "type": "string"
         }
       },
       "title": "ScannerConfig",

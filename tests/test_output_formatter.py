@@ -1,0 +1,97 @@
+"""Unit tests for output formatter module."""
+
+import json
+import pytest
+from automated_security_helper.output_formatter import (
+    OutputFormatter,
+    JSONFormatter,
+    HTMLFormatter,
+    CSVFormatter,
+)
+from automated_security_helper.models.asharp_model import ASHARPModel
+
+
+@pytest.fixture
+def sample_ash_model():
+    model = ASHARPModel()
+    model.findings = [
+        {
+            "id": "VULN-1",
+            "severity": "HIGH",
+            "description": "SQL Injection vulnerability",
+            "location": "app/user.py:42",
+        }
+    ]
+    model.metadata = {"scanner": "test-scanner", "timestamp": "2023-01-01T00:00:00Z"}
+    return model
+
+
+def test_json_formatter(sample_ash_model):
+    formatter = JSONFormatter()
+    output = formatter.format(sample_ash_model)
+
+    # Verify output is valid JSON
+    parsed = json.loads(output)
+    assert "findings" in parsed
+    assert "metadata" in parsed
+    assert parsed["findings"] == sample_ash_model.findings
+    assert parsed["metadata"] == sample_ash_model.metadata
+
+
+def test_html_formatter(sample_ash_model):
+    formatter = HTMLFormatter()
+    output = formatter.format(sample_ash_model)
+
+    # Verify basic HTML structure
+    assert "<!DOCTYPE html>" in output
+    assert "<html>" in output
+    assert "<title>ASH Results</title>" in output
+    assert "<h1>Security Scan Results</h1>" in output
+
+    # Verify content is included and properly escaped
+    assert "SQL Injection vulnerability" in output
+    assert "&lt;" not in output  # Verify no double-escaping
+
+
+def test_csv_formatter(sample_ash_model):
+    formatter = CSVFormatter()
+    output = formatter.format(sample_ash_model)
+
+    # Verify CSV structure
+    lines = output.strip().split("\n")
+    assert len(lines) >= 1  # At least header row
+
+    # Verify header row
+    header = lines[0].split(",")
+    assert "Finding ID" in header
+    assert "Severity" in header
+    assert "Description" in header
+    assert "Location" in header
+
+
+def test_output_formatter_format_selection():
+    formatter = OutputFormatter()
+    model = ASHARPModel()
+
+    # Test JSON format
+    json_output = formatter.format(model, "json")
+    assert isinstance(json_output, str)
+    assert json.loads(json_output)  # Verify valid JSON
+
+    # Test HTML format
+    html_output = formatter.format(model, "html")
+    assert isinstance(html_output, str)
+    assert "<!DOCTYPE html>" in html_output
+
+    # Test CSV format
+    csv_output = formatter.format(model, "csv")
+    assert isinstance(csv_output, str)
+    assert "Finding ID,Severity,Description,Location" in csv_output
+
+
+def test_output_formatter_invalid_format():
+    formatter = OutputFormatter()
+    model = ASHARPModel()
+
+    with pytest.raises(ValueError):
+        formatter.format(model, "invalid_format")

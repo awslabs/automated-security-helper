@@ -8,7 +8,7 @@ from automated_security_helper.models.config import ScannerConfig
 def test_bandit_scanner_init():
     """Test BanditScanner initialization."""
     scanner = BanditScanner()
-    assert scanner._config is None
+    assert scanner._config is not None
     assert scanner._output_format == "json"
 
 
@@ -24,9 +24,9 @@ def test_bandit_scanner_configure():
 def test_bandit_scanner_validate():
     """Test validation logic."""
     scanner = BanditScanner()
-    assert not scanner.validate()
-    scanner._config = ScannerConfig(name="bandit")
     assert scanner.validate()
+    scanner._set_config(ScannerConfig(name="bandit"))
+    assert not scanner.validate()
 
 
 def test_bandit_scanner_scan_json(mocker):

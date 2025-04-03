@@ -6,25 +6,20 @@ This module contains the ResultProcessor class which is responsible for:
 3. Building ASH models from parsed results
 """
 
-from typing import Dict, Type
+from typing import Any, Dict, List, Type, Union
 from abc import ABC, abstractmethod
+from automated_security_helper.models.asharp_model import ASHARPModel
 
 
 class IResultParser(ABC):
     """Interface for result parsers."""
 
     @abstractmethod
-    def parse(self, raw_results: str) -> Dict:
+    def parse(
+        self, raw_results: str
+    ) -> Dict[str, Union[List[Dict[str, Any]], Dict[str, str]]]:
         """Parse raw scanner results into a structured format."""
         pass
-
-
-class ASHModel:
-    """Data model for ASH results."""
-
-    def __init__(self):
-        self.findings = []
-        self.metadata = {}
 
 
 class ResultProcessor:
@@ -43,14 +38,21 @@ class ResultProcessor:
             raise ValueError(f"No parser registered for scanner type: {scanner_type}")
         return self._parsers[scanner_type]()
 
-    def process_results(self, scanner_type: str, raw_results: str) -> ASHModel:
+    def process_results(self, scanner_type: str, raw_results: str) -> ASHARPModel:
         """Process raw scanner results through the parsing pipeline."""
         parser = self.get_parser(scanner_type)
         parsed_results = parser.parse(raw_results)
-        return self._build_ash_model(parsed_results)
+        model = self._build_ash_model(parsed_results)
+        return model
 
-    def _build_ash_model(self, parsed_results: Dict) -> ASHModel:
+    def _build_ash_model(
+        self, parsed_results: Dict[str, Union[List[Dict[str, Any]], Dict[str, str]]]
+    ) -> ASHARPModel:
         """Build an ASH model from parsed results."""
-        model = ASHModel()
-        # TODO: Implement model building logic
+        model = ASHARPModel()
+        if "findings" in parsed_results:
+            findings: List[Dict[str, Any]] = parsed_results["findings"]
+            model.findings = findings
+        if "metadata" in parsed_results:
+            model.metadata = parsed_results["metadata"]
         return model

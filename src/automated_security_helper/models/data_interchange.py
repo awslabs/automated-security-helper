@@ -38,9 +38,8 @@ class DataInterchange(BaseModel):
         str, Field(min_length=1, description="Description of the data")
     ] = None
     timestamp: Annotated[
-        datetime,
+        str,
         Field(
-            default_factory=lambda: datetime.now(timezone.utc),
             description="Timestamp of the export in UTC",
         ),
     ] = None
@@ -61,18 +60,17 @@ class DataInterchange(BaseModel):
 
     @field_validator("timestamp")
     @classmethod
-    def validate_datetime(cls, v: Union[str, datetime] = None) -> datetime:
+    def validate_datetime(cls, v: Union[str, datetime] = None) -> str:
         """Validate that value is timestamp or, if empty, set to current datetime"""
         if not v:
-            return datetime.now(timezone.utc)
-        if isinstance(v, datetime):
-            return v
-        v = v.strip()
-        return datetime.strptime(v)
+            v = datetime.now(timezone.utc)
+        if isinstance(v, str):
+            v = datetime.fromisoformat(v.strip())
+        return v.isoformat(timespec="seconds")
 
     def model_post_init(self, context):
         super().model_post_init(context)
-        default_timestamp = datetime.now(timezone.utc)
+        default_timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if not self.timestamp:
             self.timestamp = default_timestamp
 
@@ -94,7 +92,7 @@ class ReportMetadata(BaseModel):
     tool_name: Annotated[
         str, Field(..., min_length=1, description="Name of the security tool")
     ]
-    generated_at: Annotated[datetime, Field()] = None
+    generated_at: Annotated[str, Field()] = None
     project_name: Annotated[
         str, Field(min_length=1, description="Name of the project being scanned")
     ] = None
@@ -120,18 +118,17 @@ class ReportMetadata(BaseModel):
 
     @field_validator("generated_at")
     @classmethod
-    def validate_datetime(cls, v: Union[str, datetime] = None) -> datetime:
+    def validate_datetime(cls, v: Union[str, datetime] = None) -> str:
         """Validate that value is timestamp or, if empty, set to current datetime"""
         if not v:
-            return datetime.now(timezone.utc)
-        if isinstance(v, datetime):
-            return v
-        v = v.strip()
-        return datetime.strptime(v)
+            v = datetime.now(timezone.utc)
+        if isinstance(v, str):
+            v = datetime.fromisoformat(v.strip())
+        return v.isoformat(timespec="seconds")
 
     def model_post_init(self, context):
         super().model_post_init(context)
-        default_timestamp = datetime.now(timezone.utc)
+        default_timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if not self.generated_at:
             self.generated_at = default_timestamp
 
@@ -178,7 +175,7 @@ class SecurityReport(DataInterchange):
     ) -> Union[str, Dict[str, Any]]:
         """Export the report in the specified format."""
         if format == ExportFormat.JSON:
-            return self.model_dump_json(indent=2)
+            return self.model_dump_json(indent=2, serialize_as_any=True)
         elif format == ExportFormat.YAML:
             import yaml
 

@@ -58,7 +58,7 @@ class StaticAnalysisReport(BaseModel):
     )
     scan_timestamp: Annotated[
         str, Field(description="Timestamp when scan was performed")
-    ] = datetime.now(timezone.utc).strftime("%Y-%M-%d")
+    ] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     scan_config: Annotated[
         BaseConfig,
         Field(description="Configuration used for the scan"),

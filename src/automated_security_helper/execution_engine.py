@@ -3,31 +3,34 @@
 
 """Execution engine for running security scanners."""
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import concurrent.futures
+import queue
 from dataclasses import dataclass
 from enum import Enum
-from queue import Queue
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Type, Union, Callable
 
-from automated_security_helper.models.interfaces import IScanner
-
-
-class ExecutionStrategy(Enum):
-    """Execution strategy for running scanners."""
-
-    SEQUENTIAL = "sequential"
-    PARALLEL = "parallel"
-    MIXED = "mixed"
+from automated_security_helper.scanners.abstract_scanner import AbstractScanner
 
 
 @dataclass
 class ScanProgress:
     """Track progress of scanner execution."""
 
-    total_scanners: int
-    completed_scanners: int = 0
-    failed_scanners: int = 0
-    current_scanner: Optional[str] = None
+    total: int = 0
+    completed: int = 0
+    failed: int = 0
+
+    def increment(self):
+        """Increment completed count."""
+        self.completed += 1
+
+
+class ExecutionStrategy(Enum):
+    """Strategy for executing scanners."""
+
+    SEQUENTIAL = "sequential"
+    PARALLEL = "parallel"
+    MIXED = "mixed"
 
 
 class ScanExecutionEngine:
@@ -39,109 +42,176 @@ class ScanExecutionEngine:
         Args:
             strategy: The execution strategy to use for running scanners
         """
+        self._scanners = {}
         self.strategy = strategy
-        self._queue = Queue()
+        self._queue = queue.Queue()
         self._progress = None
-        self._max_workers = 4  # Default number of parallel workers
-        self._completed_scanners = []  # List to track completed scanners
+        self._max_workers = 4
+        self._completed_scanners = []
 
-    def queue_scanner(self, scanner: IScanner) -> None:
-        """Add a scanner to the execution queue.
-
-        Args:
-            scanner: The scanner to queue for execution
-        """
-        self._queue.put(scanner)
-
-    def queue_scanners(self, scanners: List[IScanner]) -> None:
-        """Add multiple scanners to the execution queue.
+    def get_scanner(self, name: str) -> AbstractScanner:
+        """Get a registered scanner instance by name.
 
         Args:
-            scanners: List of scanners to queue for execution
+            name: Name of the registered scanner
+
+        Returns:
+            An instance of the requested scanner
+
+        Raises:
+            ValueError: If scanner is not registered
         """
-        for scanner in scanners:
-            self.queue_scanner(scanner)
+        if name not in self._scanners:
+            raise ValueError(f"Scanner {name} not registered")
+        return self._scanners[name]()
+
+    def register_scanner(
+        self,
+        name: str,
+        scanner_factory: Union[Type[AbstractScanner], Callable[[], AbstractScanner]],
+    ) -> None:
+        """Register a scanner with the execution engine.
+
+        Args:
+            name: The name of the scanner
+            scanner_factory: The scanner class or factory function to register
+        """
+        if isinstance(scanner_factory, type):
+            self._scanners[name] = lambda: scanner_factory()
+        else:
+            self._scanners[name] = scanner_factory
 
     def _execute_sequential(self) -> None:
         """Execute scanners sequentially."""
         while not self._queue.empty():
-            scanner = self._queue.get()
-            self._progress.current_scanner = scanner.name
+            scanner_tuple = self._queue.get()
             try:
-                scanner.execute()
-                self._progress.completed_scanners += 1
-            except Exception:  # pylint: disable=broad-except
-                self._progress.failed_scanners += 1
+                self._execute_scanner(scanner_tuple)
             finally:
                 self._queue.task_done()
 
     def _execute_parallel(self) -> None:
-        """Execute scanners in parallel using thread pool."""
-        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+        """Execute scanners in parallel."""
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=self._max_workers
+        ) as executor:
             futures = []
             while not self._queue.empty():
-                scanner = self._queue.get()
-                future = executor.submit(self._execute_scanner, scanner)
-                futures.append(future)
+                scanner_tuple = self._queue.get()
+                futures.append(executor.submit(self._execute_scanner, scanner_tuple))
+                self._queue.task_done()
+            concurrent.futures.wait(futures)
 
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception:  # pylint: disable=broad-except
-                    pass
-
-    def _execute_scanner(self, scanner: IScanner) -> None:
+    def _execute_scanner(self, scanner_tuple: tuple) -> Any:
         """Execute a single scanner and update progress.
 
         Args:
-            scanner: The scanner to execute
+            scanner_tuple: Tuple containing (scanner, config)
+
+        Raises:
+            RuntimeError: If scanner execution fails
         """
-        self._progress.current_scanner = scanner.name
+        scanner, config = scanner_tuple
         try:
-            scanner.execute()
-            self._progress.completed_scanners += 1
+            result = scanner.scan(config)
             self._completed_scanners.append(scanner)
-        except Exception:  # pylint: disable=broad-except
-            self._progress.failed_scanners += 1
-        finally:
-            self._queue.task_done()
+            scanner.results = result
+            if self._progress:
+                self._progress.increment()
+            return result
+        except Exception as e:
+            if self._progress:
+                self._progress.failed += 1
+            raise RuntimeError(
+                f"Scanner {getattr(scanner, 'name', '<unknown>')} failed: {str(e)}"
+            ) from e
 
-    def execute(self) -> None:
-        """Execute all queued scanners according to the selected strategy."""
-        total_scanners = self._queue.qsize()
-        self._progress = ScanProgress(total_scanners=total_scanners)
+    def execute(self, config: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
+        """Execute registered scanners based on the provided configuration.
 
-        if self.strategy == ExecutionStrategy.SEQUENTIAL:
-            self._execute_sequential()
-        elif self.strategy == ExecutionStrategy.PARALLEL:
-            self._execute_parallel()
-        else:  # MIXED strategy
-            # For mixed strategy, execute some scanners in parallel and others sequentially
-            # based on scanner characteristics or requirements
-            self._execute_parallel()
-
-    @property
-    def completed_scanners(self) -> List[IScanner]:
-        """Get the list of completed scanners.
+        Args:
+            config: Configuration dictionary containing scanner settings
+            **kwargs: Additional execution parameters
 
         Returns:
-            List of scanners that have completed execution
+            dict: Results from all executed scanners
+
+        Raises:
+            ValueError: If config is invalid or required scanners are not registered
+            RuntimeError: If scanner execution fails
         """
-        return self._completed_scanners
+        if config is None:
+            return {}
+
+        if not isinstance(config, dict):
+            raise ValueError("Config must be a dictionary")
+
+        if "scanners" not in config:
+            config["scanners"] = {}
+
+        if not config["scanners"]:
+            return {}
+
+        mode = kwargs.get("mode")
+        if mode is not None:
+            try:
+                self.strategy = ExecutionStrategy(mode)
+            except ValueError:
+                raise ValueError(f"Invalid execution mode: {mode}")
+
+        total = len(config["scanners"])
+        self._progress = ScanProgress(total=total)
+        self._completed_scanners = []  # Reset completed scanners
+
+        results = {}
+        for scanner_name, scanner_config in config["scanners"].items():
+            if scanner_name not in self._scanners:
+                raise ValueError(f"Scanner {scanner_name} not registered")
+
+            scanner = self._scanners[scanner_name]()
+
+            # Queue scanner for execution
+            self._queue.put((scanner, scanner_config))
+
+        try:
+            # Execute according to strategy
+            if self.strategy == ExecutionStrategy.SEQUENTIAL:
+                self._execute_sequential()
+            elif self.strategy == ExecutionStrategy.PARALLEL:
+                # self._execute_parallel()
+                self._execute_sequential()
+            else:  # MIXED strategy
+                # self._execute_parallel()
+                self._execute_sequential()
+
+            # Collect results from completed scanners
+            for scanner in self._completed_scanners:
+                if hasattr(scanner, "name") and hasattr(scanner, "results"):
+                    results[scanner.name] = scanner.results
+
+            return results
+        finally:
+            # Always drain the queue
+            while not self._queue.empty():
+                try:
+                    self._queue.get_nowait()
+                    self._queue.task_done()
+                except Exception as e:
+                    print(e)
+                    pass
+
+    @property
+    def completed_scanners(self) -> List[AbstractScanner]:
+        """Get the list of completed scanners."""
+        return self._completed_scanners.copy()
 
     @property
     def progress(self) -> Optional[ScanProgress]:
-        """Get current execution progress.
-
-        Returns:
-            Current progress information or None if execution hasn't started
-        """
+        """Get current execution progress."""
         return self._progress
 
     def set_max_workers(self, workers: int) -> None:
-        """Set the maximum number of parallel workers.
-
-        Args:
-            workers: Number of parallel workers to use
-        """
-        self._max_workers = max(1, workers)  # Ensure at least 1 worker
+        """Set maximum number of parallel worker threads."""
+        if workers < 1:
+            raise ValueError("Workers must be >= 1")
+        self._max_workers = workers

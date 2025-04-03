@@ -38,7 +38,7 @@ def sample_finding(sample_scanner, sample_location):
         severity="HIGH",
         scanner=sample_scanner,
         location=sample_location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         request_method="POST",
         request_url="/api/users",
         request_headers={"Content-Type": "application/json"},
@@ -60,7 +60,7 @@ def test_dynamic_analysis_finding_creation(sample_scanner, sample_location):
         severity="HIGH",
         scanner=sample_scanner,
         location=sample_location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         request_method="POST",
         request_url="/api/users",
         request_headers={"Content-Type": "application/json"},
@@ -100,7 +100,7 @@ def test_dynamic_analysis_finding_invalid_request_method(
             severity="HIGH",
             scanner=sample_scanner,
             location=sample_location,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             request_method="INVALID",  # Invalid HTTP method
             request_url="/api/users",
             request_headers={},
@@ -117,7 +117,7 @@ def test_dynamic_analysis_report_creation(sample_finding):
     report = DynamicAnalysisReport(
         scanner_name="DynaScan",
         target_url="https://example.com",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         findings=[sample_finding],
         scan_coverage={
             "endpoints_tested": 50,
@@ -137,7 +137,7 @@ def test_dynamic_analysis_report_empty():
     report = DynamicAnalysisReport(
         scanner_name="DynaScan",
         target_url="https://example.com",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         findings=[],
         scan_coverage={
             "endpoints_tested": 0,
@@ -160,7 +160,7 @@ def test_dynamic_analysis_report_multiple_findings(sample_finding):
         severity="MEDIUM",
         scanner=sample_finding.scanner,
         location=sample_finding.location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         request_method="GET",
         request_url="/api/comments",
         request_headers={},
@@ -174,7 +174,7 @@ def test_dynamic_analysis_report_multiple_findings(sample_finding):
     report = DynamicAnalysisReport(
         scanner_name="DynaScan",
         target_url="https://example.com",
-        scan_timestamp=datetime.now(timezone.utc).strftime("%Y-%M-%d"),
+        scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         findings=[sample_finding, finding2],
         scan_coverage={
             "endpoints_tested": 100,

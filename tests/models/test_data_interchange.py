@@ -2,7 +2,7 @@
 
 import pytest
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from automated_security_helper.models.core import Location, Scanner, BaseFinding
 from automated_security_helper.models.data_interchange import (
     ExportFormat,
@@ -20,7 +20,7 @@ def sample_metadata():
         tool_name="ash",
         source="test-source",
         scan_type="security",
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
 
 
@@ -36,7 +36,7 @@ def sample_finding():
         severity="HIGH",
         scanner=scanner,
         location=location,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
 
 
@@ -61,7 +61,7 @@ def test_report_metadata_creation(sample_metadata):
     """Test creation of ReportMetadata objects."""
     assert sample_metadata.source == "test-source"
     assert sample_metadata.scan_type == "security"
-    assert isinstance(sample_metadata.timestamp, datetime)
+    assert isinstance(sample_metadata.timestamp, str)
 
 
 def test_security_report_creation(sample_finding, sample_metadata):
@@ -122,7 +122,7 @@ def test_security_report_from_json():
             "tool_name": "ash",
             "source": "test-source",
             "scan_type": "security",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
         },
         "findings": [],
     }
@@ -144,7 +144,7 @@ def test_security_report_track_history(sample_finding):
             tool_name="ash",
             source="test-source",
             scan_type="security",
-            timestamp=datetime.now(),
+            timestamp=datetime.now().isoformat(timespec="seconds"),
         ),
         findings=[sample_finding],
     )
@@ -158,7 +158,7 @@ def test_security_report_track_history(sample_finding):
             tool_name="ash",
             source="test-source",
             scan_type="security",
-            timestamp=datetime.now(),
+            timestamp=datetime.now().isoformat(timespec="seconds"),
         ),
         findings=[],  # No findings in second report
     )
