@@ -9,18 +9,18 @@ from automated_security_helper.models.config import (
     ScannerConfig,
 )
 from automated_security_helper.models.scanner_types import (
-    BanditScanner,
+    BanditScannerConfig,
     CdkNagPacks,
-    CdkNagScannerOptions,
-    CfnNagScanner,
-    CheckovScanner,
-    NpmAuditScanner,
+    CdkNagScannerConfigOptions,
+    CfnNagScannerConfig,
+    CheckovScannerConfig,
+    NpmAuditScannerConfig,
     ScannerOptions,
-    SemgrepScanner,
-    CdkNagScanner,
-    GrypeScanner,
-    SyftScanner,
-    CustomScanner,
+    SemgrepScannerConfig,
+    CdkNagScannerConfig,
+    GrypeScannerConfig,
+    SyftScannerConfig,
+    CustomScannerConfig,
 )
 
 from automated_security_helper.models.core import Location, Scanner
@@ -137,9 +137,9 @@ def ash_config() -> ASHConfig:
         sast=SASTScannerConfig(
             output_formats=["json", "csv", "junitxml", "html"],
             scanners=[
-                BanditScanner(),
-                CdkNagScanner(
-                    cdknag=CdkNagScannerOptions(
+                BanditScannerConfig(),
+                CdkNagScannerConfig(
+                    cdknag=CdkNagScannerConfigOptions(
                         enabled=True,
                         nag_packs=CdkNagPacks(
                             AwsSolutionsChecks=True,
@@ -150,24 +150,25 @@ def ash_config() -> ASHConfig:
                         ),
                     ),
                 ),
-                CfnNagScanner(),
-                CheckovScanner(),
-                CustomScanner(
+                CfnNagScannerConfig(),
+                CheckovScannerConfig(),
+                CustomScannerConfig(
                     gitsecrets=ScannerOptions(enabled=True),
                 ),
-                GrypeScanner(),
-                NpmAuditScanner(),
-                SemgrepScanner(),
-                CustomScanner(
-                    trivysast=ScannerOptions(enabled=True),
+                GrypeScannerConfig(),
+                NpmAuditScannerConfig(),
+                SemgrepScannerConfig(),
+                CustomScannerConfig(
+                    name="trivy-sast",
+                    custom=ScannerOptions(enabled=True),
                 ),
             ],
         ),
         sbom=SBOMScannerConfig(
             output_formats=["cyclonedx", "html"],
             scanners=[
-                SyftScanner(),
-                CustomScanner(
+                SyftScannerConfig(),
+                CustomScannerConfig(
                     trivysbom=ScannerOptions(enabled=True),
                 ),
             ],

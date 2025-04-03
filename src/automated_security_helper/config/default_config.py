@@ -7,17 +7,17 @@ from automated_security_helper.models.config import (
     SBOMScannerConfig,
 )
 from automated_security_helper.models.scanner_types import (
-    BanditScanner,
+    BanditScannerConfig,
     CdkNagPacks,
-    CdkNagScannerOptions,
-    CfnNagScanner,
-    CheckovScanner,
-    GitSecretsScanner,
-    NpmAuditScanner,
-    SemgrepScanner,
-    CdkNagScanner,
-    GrypeScanner,
-    SyftScanner,
+    CdkNagScannerConfigOptions,
+    CfnNagScannerConfig,
+    CheckovScannerConfig,
+    GitSecretsScannerConfig,
+    NpmAuditScannerConfig,
+    SemgrepScannerConfig,
+    CdkNagScannerConfig,
+    GrypeScannerConfig,
+    SyftScannerConfig,
 )
 
 
@@ -30,9 +30,9 @@ DEFAULT_ASH_CONFIG = ASHConfig(
     sast=SASTScannerConfig(
         output_formats=["json", "csv", "junitxml", "html"],
         scanners=[
-            BanditScanner(),
-            CdkNagScanner(
-                cdknag=CdkNagScannerOptions(
+            BanditScannerConfig(),
+            CdkNagScannerConfig(
+                cdknag=CdkNagScannerConfigOptions(
                     enabled=True,
                     nag_packs=CdkNagPacks(
                         AwsSolutionsChecks=True,
@@ -43,18 +43,18 @@ DEFAULT_ASH_CONFIG = ASHConfig(
                     ),
                 ),
             ),
-            CfnNagScanner(),
-            CheckovScanner(),
-            GitSecretsScanner(),
-            GrypeScanner(),
-            NpmAuditScanner(),
-            SemgrepScanner(),
+            CfnNagScannerConfig(),
+            CheckovScannerConfig(),
+            GitSecretsScannerConfig(),
+            GrypeScannerConfig(),
+            NpmAuditScannerConfig(),
+            SemgrepScannerConfig(),
         ],
     ),
     sbom=SBOMScannerConfig(
         output_formats=["cyclonedx", "html"],
         scanners=[
-            SyftScanner(),
+            SyftScannerConfig(),
         ],
     ),
 )

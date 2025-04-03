@@ -1,31 +1,16 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
+"""Execution engine for security scanners."""
 
-"""Execution engine for running security scanners."""
-
+from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
+import logging
 import queue
-from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Type, Union, Callable
+from typing import Any, Dict, List, Optional, Union, Type, Callable
 
+from automated_security_helper.models.config import ASHConfig
 from automated_security_helper.scanners.abstract_scanner import AbstractScanner
-from automated_security_helper.config.default_config import (
-    DEFAULT_ASH_CONFIG,
-)
-
-
-@dataclass
-class ScanProgress:
-    """Track progress of scanner execution."""
-
-    total: int = 0
-    completed: int = 0
-    failed: int = 0
-
-    def increment(self):
-        """Increment completed count."""
-        self.completed += 1
+from automated_security_helper.scanners.scanner_factory import ScannerFactory
+from automated_security_helper.config.default_config import DEFAULT_ASH_CONFIG
 
 
 class ExecutionStrategy(Enum):
@@ -33,7 +18,19 @@ class ExecutionStrategy(Enum):
 
     SEQUENTIAL = "sequential"
     PARALLEL = "parallel"
-    MIXED = "mixed"
+
+
+class ScanProgress:
+    """Tracks progress of security scans."""
+
+    def __init__(self, total: int):
+        """Initialize scan progress tracker."""
+        self.completed = 0
+        self.total = total
+
+    def increment(self):
+        """Increment the completed count."""
+        self.completed += 1
 
 
 class ScanExecutionEngine:
@@ -45,176 +42,231 @@ class ScanExecutionEngine:
         Args:
             strategy: The execution strategy to use for running scanners
         """
+        self._scanner_factory = ScannerFactory()
         self._scanners = {}
         self.strategy = strategy
         self._queue = queue.Queue()
         self._progress = None
-        self._max_workers = 4
         self._completed_scanners = []
+        self._max_workers = 4
 
-    def get_scanner(self, name: str) -> AbstractScanner:
-        """Get a registered scanner instance by name.
-
-        Args:
-            name: Name of the registered scanner
-
-        Returns:
-            An instance of the requested scanner
-
-        Raises:
-            ValueError: If scanner is not registered
-        """
-        if name not in self._scanners:
-            raise ValueError(f"Scanner {name} not registered")
-        return self._scanners[name]()
+        # Ensure default scanners are registered
+        for name, scanner_class in self._scanner_factory.available_scanners().items():
+            self.register_scanner(name, scanner_class)
 
     def register_scanner(
         self,
         name: str,
         scanner_factory: Union[Type[AbstractScanner], Callable[[], AbstractScanner]],
     ) -> None:
-        """Register a scanner with the execution engine.
+        """Register a scanner with both the execution engine and scanner factory.
 
         Args:
-            name: The name of the scanner
-            scanner_factory: The scanner class or factory function to register
+            name: Name of the scanner
+            scanner_factory: Scanner class or factory function
         """
-        if isinstance(scanner_factory, type):
-            self._scanners[name] = lambda: scanner_factory()
-        else:
-            self._scanners[name] = scanner_factory
+        normalized_name = name.lower().replace("scanner", "")
+        self._scanner_factory.register_scanner(normalized_name, scanner_factory)
+        self._scanners = self._scanner_factory.available_scanners()
 
-    def _execute_sequential(self) -> None:
-        """Execute scanners sequentially."""
-        while not self._queue.empty():
-            scanner_tuple = self._queue.get()
-            try:
-                self._execute_scanner(scanner_tuple)
-            finally:
-                self._queue.task_done()
-
-    def _execute_parallel(self) -> None:
-        """Execute scanners in parallel."""
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self._max_workers
-        ) as executor:
-            futures = []
-            while not self._queue.empty():
-                scanner_tuple = self._queue.get()
-                futures.append(executor.submit(self._execute_scanner, scanner_tuple))
-                self._queue.task_done()
-            concurrent.futures.wait(futures)
-
-    def _execute_scanner(self, scanner_tuple: tuple) -> Any:
-        """Execute a single scanner and update progress.
-
-        Args:
-            scanner_tuple: Tuple containing (scanner, config)
-
-        Raises:
-            RuntimeError: If scanner execution fails
-        """
-        scanner, config = scanner_tuple
-        try:
-            result = scanner.scan(config)
-            self._completed_scanners.append(scanner)
-            scanner.results = result
-            if self._progress:
-                self._progress.increment()
-            return result
-        except Exception as e:
-            if self._progress:
-                self._progress.failed += 1
-            raise RuntimeError(
-                f"Scanner {getattr(scanner, 'name', '<unknown>')} failed: {str(e)}"
-            ) from e
-
-    def execute(self, config: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
+    def execute(self, config: Optional[ASHConfig] = None, **kwargs) -> Dict[str, Any]:
         """Execute registered scanners based on the provided configuration.
 
         Args:
-            config: Configuration dictionary containing scanner settings
+            config: ASHConfig instance containing scanner configuration
             **kwargs: Additional execution parameters
 
         Returns:
-            dict: Results from all executed scanners
+            dict: Results from all executed scanners with 'scanners' as the top-level key
 
         Raises:
             ValueError: If config is invalid or required scanners are not registered
             RuntimeError: If scanner execution fails
         """
+        # Always use ASHConfig instance
         if config is None:
-            config = DEFAULT_ASH_CONFIG.model_dump()
+            config = DEFAULT_ASH_CONFIG
+        if not isinstance(config, ASHConfig):
+            raise ValueError("Configuration must be an ASHConfig instance")
 
-        if not isinstance(config, dict):
-            raise ValueError("Config must be a dictionary")
+        # Initialize empty results dictionary
+        results = {"scanners": {}}
 
-        if "scanners" not in config:
-            config["scanners"] = {}
+        # Ensure default scanners are registered
+        for name, scanner_class in self._scanner_factory.available_scanners().items():
+            if name not in self._scanners:
+                self.register_scanner(name, scanner_class)
 
-        if not config["scanners"]:
-            return {}
+        # Ensure required scanner types are registered from the configuration
+        if config.sast and config.sast.scanners:
+            for scanner in config.sast.scanners:
+                scanner_name = scanner.__class__.__name__.lower()
+                if "scanner" in scanner_name:
+                    scanner_name = scanner_name.split("scanner")[0]
+                if scanner_name.endswith("scanner"):
+                    scanner_name = scanner_name[:-7]
+                if scanner_name not in self._scanners:
+                    self.register_scanner(scanner_name, scanner.__class__)
 
-        mode = kwargs.get("mode")
-        if mode is not None:
+        # Extract enabled scanners from ASHConfig
+        enabled_scanners = []
+        if config and hasattr(config, "sast") and config.sast and config.sast.scanners:
+            scanner_list = (
+                config.sast.scanners
+                if isinstance(config.sast.scanners, list)
+                else [config.sast.scanners]
+            )
+
+            for scanner_config in scanner_list:
+                if not getattr(scanner_config, "enabled", True):
+                    continue
+
+                # Get normalized scanner type
+                scanner_type = None
+
+                # Try to get type from class name first
+                if hasattr(scanner_config, "__class__"):
+                    class_name = scanner_config.__class__.__name__.lower()
+                    if "scanner" in class_name:
+                        scanner_type = class_name.split("scanner")[0]
+
+                # Fallback to type field if present
+                if not scanner_type and hasattr(scanner_config, "type"):
+                    type_value = getattr(scanner_config, "type").lower()
+                    if type_value.endswith("scanner"):
+                        scanner_type = type_value[:-7]
+                    else:
+                        scanner_type = type_value
+
+                if not scanner_type:
+                    logging.warning(
+                        f"Could not determine scanner type for config: {scanner_config}"
+                    )
+                    continue
+
+                if scanner_type in self._scanners:
+                    # Convert scanner config to dict
+                    if hasattr(scanner_config, "model_dump"):
+                        config_dict = scanner_config.model_dump()
+                    else:
+                        config_dict = {
+                            k: v
+                            for k, v in vars(scanner_config).items()
+                            if not k.startswith("_")
+                        }
+
+                    config_dict["type"] = scanner_type
+                    enabled_scanners.append((scanner_type, config_dict))
+                else:
+                    logging.warning(
+                        f"Scanner type '{scanner_type}' not registered. Available scanners: {list(self._scanners.keys())}"
+                    )
+
+        # Update execution mode if specified
+        if mode := kwargs.get("mode"):
             try:
                 self.strategy = ExecutionStrategy(mode)
             except ValueError:
                 raise ValueError(f"Invalid execution mode: {mode}")
 
-        total = len(config["scanners"])
+        # Setup progress tracking
+        total = len(enabled_scanners)
         self._progress = ScanProgress(total=total)
-        self._completed_scanners = []  # Reset completed scanners
+        self._completed_scanners = []
 
-        results = {}
-        for scanner_name, scanner_config in config["scanners"].items():
-            if scanner_name not in self._scanners:
-                raise ValueError(f"Scanner {scanner_name} not registered")
-
-            scanner = self._scanners[scanner_name]()
-
-            # Queue scanner for execution
-            self._queue.put((scanner, scanner_config))
-
-        try:
-            # Execute according to strategy
-            if self.strategy == ExecutionStrategy.SEQUENTIAL:
-                self._execute_sequential()
-            elif self.strategy == ExecutionStrategy.PARALLEL:
-                # self._execute_parallel()
-                self._execute_sequential()
-            else:  # MIXED strategy
-                # self._execute_parallel()
-                self._execute_sequential()
-
-            # Collect results from completed scanners
-            for scanner in self._completed_scanners:
-                if hasattr(scanner, "name") and hasattr(scanner, "results"):
-                    results[scanner.name] = scanner.results
-
-            return results
-        finally:
-            # Always drain the queue
-            while not self._queue.empty():
+        # Execute enabled scanners and collect results
+        if enabled_scanners:
+            for scanner_type, scanner_config in enabled_scanners:
                 try:
-                    self._queue.get_nowait()
-                    self._queue.task_done()
+                    if scanner_type not in self._scanners:
+                        logging.warning(
+                            f"Scanner {scanner_type} not registered, skipping"
+                        )
+                        continue
+
+                    # Create and execute scanner
+                    scanner = self._scanners[scanner_type]()
+                    result = self._execute_scanner((scanner, scanner_config))
+                    results["scanners"][scanner_type] = result
                 except Exception as e:
-                    print(e)
-                    pass
+                    logging.error(f"Failed to execute {scanner_type} scanner: {str(e)}")
+                    continue
+        else:
+            # If no enabled scanners found, try to create results from default config scanners
+            try:
+                if (
+                    isinstance(config, ASHConfig)
+                    and config.sast
+                    and config.sast.scanners
+                ):
+                    for scanner in config.sast.scanners:
+                        if getattr(scanner, "enabled", True):
+                            scanner_type = scanner.__class__.__name__.lower().replace(
+                                "scanner", ""
+                            )
+                            try:
+                                result = self._execute_scanner(
+                                    (scanner, scanner.model_dump())
+                                )
+                                results["scanners"][scanner_type] = result
+                            except Exception as e:
+                                logging.error(
+                                    f"Failed to execute default scanner {scanner_type}: {str(e)}"
+                                )
+            except Exception as e:
+                logging.warning(f"Error processing default scanners: {str(e)}")
+
+        return results
+
+    def _execute_scanner(self, scanner_tuple: tuple) -> Any:
+        """Execute a single scanner.
+
+        Args:
+            scanner_tuple: Tuple containing (scanner, config)
+
+        Returns:
+            Scanner results
+        """
+        scanner, config = scanner_tuple
+        try:
+            result = scanner.scan(config)
+            self._progress.increment()
+            self._completed_scanners.append(scanner)
+            return result
+        except Exception as e:
+            raise RuntimeError(e) from e
+
+    def _execute_sequential(self) -> None:
+        """Execute scanners sequentially."""
+        while not self._queue.empty():
+            scanner_tuple = self._queue.get()
+            self._execute_scanner(scanner_tuple)
+
+    def _execute_parallel(self) -> None:
+        """Execute scanners in parallel using thread pool."""
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            futures = []
+            while not self._queue.empty():
+                scanner_tuple = self._queue.get()
+                future = executor.submit(self._execute_scanner, scanner_tuple)
+                futures.append(future)
+
+            # Wait for all scanners to complete
+            concurrent.futures.wait(futures)
+            for future in futures:
+                if future.exception():
+                    raise future.exception()
 
     @property
     def completed_scanners(self) -> List[AbstractScanner]:
-        """Get the list of completed scanners."""
-        return self._completed_scanners.copy()
+        """Get list of completed scanners."""
+        return self._completed_scanners
 
     @property
     def progress(self) -> Optional[ScanProgress]:
-        """Get current execution progress."""
+        """Get current scan progress."""
         return self._progress
 
     def set_max_workers(self, workers: int) -> None:
-        """Set maximum number of parallel worker threads."""
-        if workers < 1:
-            raise ValueError("Workers must be >= 1")
+        """Set maximum number of worker threads for parallel execution."""
         self._max_workers = workers

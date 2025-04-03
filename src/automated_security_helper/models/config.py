@@ -4,16 +4,16 @@ from typing import Annotated, Any, List, Dict, Literal, Union
 from automated_security_helper.models.core import SCANNER_TYPES
 from automated_security_helper.models.data_interchange import ExportFormat
 from automated_security_helper.models.scanner_types import (
-    BanditScanner,
-    CfnNagScanner,
-    CheckovScanner,
-    CustomScanner,
-    GitSecretsScanner,
-    NpmAuditScanner,
-    SemgrepScanner,
-    CdkNagScanner,
-    GrypeScanner,
-    SyftScanner,
+    BanditScannerConfig,
+    CfnNagScannerConfig,
+    CheckovScannerConfig,
+    CustomScannerConfig,
+    GitSecretsScannerConfig,
+    NpmAuditScannerConfig,
+    SemgrepScannerConfig,
+    CdkNagScannerConfig,
+    GrypeScannerConfig,
+    SyftScannerConfig,
 )
 
 
@@ -181,30 +181,30 @@ class SecurityScanConfig(BaseModel):
     sast: Annotated[
         List[
             Union[
-                CustomScanner,
-                BanditScanner,
-                SemgrepScanner,
-                CdkNagScanner,
-                GrypeScanner,
+                CustomScannerConfig,
+                BanditScannerConfig,
+                SemgrepScannerConfig,
+                CdkNagScannerConfig,
+                GrypeScannerConfig,
             ]
         ],
         Field(description="List of SAST scanners to enable"),
     ] = [
-        BanditScanner(),
-        CdkNagScanner(),
-        GrypeScanner(),
-        SemgrepScanner(),
+        BanditScannerConfig(),
+        CdkNagScannerConfig(),
+        GrypeScannerConfig(),
+        SemgrepScannerConfig(),
     ]
     sbom: Annotated[
         List[
             Union[
-                CustomScanner,
-                SyftScanner,
+                CustomScannerConfig,
+                SyftScannerConfig,
             ]
         ],
         Field(description="List of SBOM scanners to enable"),
     ] = [
-        SyftScanner(),
+        SyftScannerConfig(),
     ]
 
 
@@ -266,28 +266,28 @@ class SASTScannerConfig(ScannerClassConfig):
         List[
             Union[
                 # Custom scanners
-                CustomScanner,
+                CustomScannerConfig,
                 # Built-in scanners
-                BanditScanner,
-                CdkNagScanner,
-                CfnNagScanner,
-                CheckovScanner,
-                GitSecretsScanner,
-                GrypeScanner,
-                NpmAuditScanner,
-                SemgrepScanner,
+                BanditScannerConfig,
+                CdkNagScannerConfig,
+                CfnNagScannerConfig,
+                CheckovScannerConfig,
+                GitSecretsScannerConfig,
+                GrypeScannerConfig,
+                NpmAuditScannerConfig,
+                SemgrepScannerConfig,
             ]
         ],
         Field(description="List of SAST scanners to enable"),
     ] = [
-        BanditScanner(),
-        CdkNagScanner(),
-        CfnNagScanner(),
-        CheckovScanner(),
-        GitSecretsScanner(),
-        GrypeScanner(),
-        NpmAuditScanner(),
-        SemgrepScanner(),
+        BanditScannerConfig(),
+        CdkNagScannerConfig(),
+        CfnNagScannerConfig(),
+        CheckovScannerConfig(),
+        GitSecretsScannerConfig(),
+        GrypeScannerConfig(),
+        NpmAuditScannerConfig(),
+        SemgrepScannerConfig(),
     ]
 
 
@@ -306,13 +306,13 @@ class SBOMScannerConfig(ScannerClassConfig):
     scanners: Annotated[
         List[
             Union[
-                CustomScanner,
-                SyftScanner,
+                CustomScannerConfig,
+                SyftScannerConfig,
             ]
         ],
         Field(description="List of SBOM scanners to enable"),
     ] = [
-        SyftScanner(),
+        SyftScannerConfig(),
     ]
 
 

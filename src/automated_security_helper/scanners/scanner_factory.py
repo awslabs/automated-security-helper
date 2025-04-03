@@ -1,6 +1,6 @@
 """Module containing the ScannerFactory class for creating scanner instances."""
 
-from typing import Any, Dict, Optional, Type, Union
+from typing import Dict, Optional, Type, Union
 
 from automated_security_helper.models.config import ScannerConfig
 from automated_security_helper.scanners.abstract_scanner import AbstractScanner
@@ -19,9 +19,14 @@ class ScannerFactory:
 
     def _register_default_scanners(self) -> None:
         """Register the default set of scanners."""
-        self._scanners = {}  # Clear any existing registrations
-        self.register_scanner("bandit", BanditScanner)
-        self.register_scanner("cdknag", CDKNagScanner)
+        # Register each scanner with its normalized name
+        scanner_classes = [BanditScanner, CDKNagScanner]
+        for scanner_class in scanner_classes:
+            name = scanner_class.__name__.lower()
+            if name.endswith("scanner"):
+                name = name[:-7]
+            if name not in self._scanners:
+                self.register_scanner(name, scanner_class)
 
     def register_scanner(
         self, scanner_name: str, scanner_class: Type[AbstractScanner]
@@ -29,65 +34,77 @@ class ScannerFactory:
         """Register a scanner class with the factory.
 
         Args:
-            scanner_name: Name to register the scanner under
-            scanner_class: The scanner class to register
-
-        Raises:
-            ValueError: If scanner_name is already registered
+            scanner_name: Name of scanner to register (will be normalized)
+            scanner_class: Scanner class to register
         """
-        if scanner_name in self._scanners:
-            raise ValueError(f"Scanner '{scanner_name}' is already registered")
+        # Always normalize both the input name and class name
+        input_name = scanner_name.lower()
+        if input_name.endswith("scanner"):
+            input_name = input_name[:-7]
 
-        self._scanners[scanner_name] = scanner_class
+        class_name = scanner_class.__name__.lower()
+        if class_name.endswith("scanner"):
+            class_name = class_name[:-7]
+
+        # Use class name if it exists, otherwise use input name
+        normalized_name = class_name if class_name else input_name
+        self._scanners[normalized_name] = scanner_class
 
     def create_scanner(
-        self, config: Optional[Union[Dict[str, Any], ScannerConfig]] = None
+        self,
+        scanner_type: Union[str, Type[AbstractScanner]],
+        config: Optional[ScannerConfig] = None,
     ) -> AbstractScanner:
-        """Create and configure a scanner instance.
+        """Create a scanner instance of the specified type with optional configuration.
 
         Args:
-            config: Scanner configuration as dict or ScannerConfig object
+            scanner_type: Type of scanner to create
+            config: Optional configuration for the scanner
 
         Returns:
-            Configured scanner instance
+            An instance of the requested scanner type
 
         Raises:
-            ValueError: If scanner type is not registered
-            TypeError: If config is None
+            ValueError: If scanner_type is not registered
         """
-        if config is None:
-            raise TypeError("Scanner configuration cannot be None")
+        if isinstance(scanner_type, str):
+            scanner_name = scanner_type.lower()
+            if scanner_name.endswith("scanner"):
+                scanner_name = scanner_name[:-7]
+            if scanner_name not in self._scanners:
+                raise ValueError(f"Scanner type '{scanner_type}' not registered")
+            scanner_class = self._scanners[scanner_name]
+        else:
+            scanner_class = scanner_type
 
-        scanner_name = ""
-        if isinstance(config, dict):
-            scanner_name = config.get("name", "")
-        elif isinstance(config, ScannerConfig):
-            scanner_name = config.name
-
-        if not scanner_name or scanner_name not in self._scanners:
-            raise ValueError(f"Scanner '{scanner_name}' is not registered")
-
-        scanner_class = self._scanners[scanner_name]
         scanner = scanner_class()
-        scanner.configure(config)
+        if config:
+            scanner.configure(config)
         return scanner
 
     def get_scanner_class(self, scanner_name: str) -> Type[AbstractScanner]:
-        """Get scanner class by name.
+        """Get the scanner class for a given name.
 
         Args:
-            scanner_name: Name of scanner to retrieve
+            scanner_name: Name of scanner to retrieve (will be normalized)
 
         Returns:
-            Scanner class
+            The scanner class
 
         Raises:
-            ValueError: If scanner type is not registered
+            ValueError: If scanner_name is not registered
         """
-        if scanner_name not in self._scanners:
-            raise ValueError(f"Scanner type '{scanner_name}' is not registered")
-        return self._scanners[scanner_name]
+        normalized_name = scanner_name.lower()
+        if normalized_name.endswith("scanner"):
+            normalized_name = normalized_name[:-7]
+        if normalized_name not in self._scanners:
+            raise ValueError(f"Scanner '{scanner_name}' not registered")
+        return self._scanners[normalized_name]
 
     def available_scanners(self) -> Dict[str, Type[AbstractScanner]]:
-        """Get all registered scanner types."""
-        return self._scanners.copy()
+        """Get dictionary of all registered scanners.
+
+        Returns:
+            Dictionary mapping scanner names to scanner classes
+        """
+        return dict(self._scanners)

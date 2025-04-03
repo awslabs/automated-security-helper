@@ -83,32 +83,55 @@ class ASHScanOrchestrator(BaseModel):
 
     def _load_config(self) -> ASHConfig:
         """Load configuration from file or return default configuration."""
-        # Default configuration with best practices
-
         if not self.config_path:
             self._get_logger().info(
                 "No configuration file provided, using default configuration"
             )
-            return self.config
+            return DEFAULT_ASH_CONFIG
 
         try:
             with open(self.config_path, "r") as f:
                 if str(self.config_path).endswith(".json"):
-                    user_config = json.load(f)
+                    config_data = json.load(f)
                 else:
-                    user_config = yaml.safe_load(f)
-                # Merge user config with defaults, user config takes precedence
-                self.config = self.config_manager.merge_configs(
-                    self.config, user_config
-                )
-                return self.config
-        except (yaml.YAMLError, FileNotFoundError) as e:
-            raise e
+                    config_data = yaml.safe_load(f)
+
+                # Transform loaded data into ASHConfig
+                if isinstance(config_data, dict):
+                    try:
+                        # # If config has sast.scanners, process them into proper scanner objects
+                        # if "sast" in config_data and isinstance(config_data["sast"], dict):
+                        #     sast_config = config_data["sast"]
+                        #     if "scanners" in sast_config:
+                        #         scanners = []
+                        #         scanner_configs = sast_config["scanners"] if isinstance(sast_config["scanners"], list) else [sast_config["scanners"]]
+
+                        #         for scanner_config in scanner_configs:
+                        #             if isinstance(scanner_config, dict):
+                        #                 scanner_type = scanner_config.get("type", "").lower().replace("scanner", "")
+                        #                 if scanner_type == "bandit":
+                        #                     scanners.append(BanditScanner(**scanner_config))
+                        #                 elif scanner_type == "cdknag":
+                        #                     scanners.append(CDKNagScanner(**scanner_config))
+
+                        #         sast_config["scanners"] = scanners
+
+                        # Validate and create ASHConfig from processed data
+                        config = ASHConfig(**config_data)
+                        return config
+
+                    except Exception as e:
+                        self._get_logger().warning(
+                            f"Failed to parse configuration: {e}"
+                        )
+                        return DEFAULT_ASH_CONFIG
+                return DEFAULT_ASH_CONFIG
+
         except Exception as e:
-            self.get_logger().warning(
+            self._get_logger().warning(
                 f"Failed to load configuration from {self.config_path}: {e}. Using default configuration."
             )
-            return self.config
+            return DEFAULT_ASH_CONFIG
 
     def execute_scan(self) -> Dict:
         """Execute the security scan and return results."""
@@ -116,14 +139,27 @@ class ASHScanOrchestrator(BaseModel):
         logger.info("Starting ASH scan")
 
         try:
-            # Load and process configuration
+            # Load configuration
             config = self._load_config()
-            resolved_config = self.config_manager.resolve_configuration(config)
 
-            # Execute scanners
-            results = self.execution_engine.execute(resolved_config)
+            # Ensure we have ASHConfig instance after loading
+            if not isinstance(config, ASHConfig):
+                self._get_logger().warning(
+                    "Invalid configuration format, using default"
+                )
+                config = DEFAULT_ASH_CONFIG
 
-            # Process and return results
+            # Create execution engine with default scanners
+            if not hasattr(self, "execution_engine"):
+                self.execution_engine = ScanExecutionEngine(
+                    strategy=ExecutionStrategy.SEQUENTIAL
+                )
+
+            # Execute scanners with config
+            results = self.execution_engine.execute(config)
+
+            # Add empty results if none returned
+            results = results or {"scanners": {}}
             return results
 
         except Exception as e:
@@ -160,7 +196,6 @@ def main():
             config_path=Path(args.config) if args.config else None,
             verbose=args.verbose,
         )
-        # config = orchestrator.config
 
         # Execute scan
         results = orchestrator.execute_scan()

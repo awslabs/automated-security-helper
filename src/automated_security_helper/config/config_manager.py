@@ -64,7 +64,9 @@ class ConfigurationManager:
         """
         self._override_rules[property_path] = rule
 
-    def resolve_configuration(self, base_config: Union[Dict, "ASHConfig"]) -> Dict:
+    def resolve_configuration(
+        self, base_config: Union[Dict, "ASHConfig"]
+    ) -> "ASHConfig":
         """Process a configuration through the resolution pipeline.
 
         Args:

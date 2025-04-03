@@ -1,16 +1,7 @@
 {
   "$defs": {
-    "BanditScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
-      },
+    "BanditScannerConfig": {
+      "additionalProperties": true,
       "description": "Bandit SAST scanner configuration.",
       "properties": {
         "bandit": {
@@ -27,9 +18,15 @@
           },
           "description": "Enable Bandit scanner",
           "title": "Bandit"
+        },
+        "name": {
+          "const": "bandit",
+          "default": "bandit",
+          "title": "Name",
+          "type": "string"
         }
       },
-      "title": "BanditScanner",
+      "title": "BanditScannerConfig",
       "type": "object"
     },
     "BuildConfig": {
@@ -107,17 +104,8 @@
       "title": "CdkNagPacks",
       "type": "object"
     },
-    "CdkNagScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
-      },
+    "CdkNagScannerConfig": {
+      "additionalProperties": true,
       "description": "CDK Nag IAC SAST scanner configuration.",
       "properties": {
         "cdk-nag": {
@@ -126,7 +114,7 @@
               "type": "boolean"
             },
             {
-              "$ref": "#/$defs/CdkNagScannerOptions"
+              "$ref": "#/$defs/CdkNagScannerConfigOptions"
             }
           ],
           "default": {
@@ -141,12 +129,19 @@
           },
           "description": "Enable CDK Nag IAC scanner",
           "title": "Cdk-Nag"
+        },
+        "name": {
+          "const": "cdk-nag",
+          "default": "cdk-nag",
+          "title": "Name",
+          "type": "string"
         }
       },
-      "title": "CdkNagScanner",
+      "title": "CdkNagScannerConfig",
       "type": "object"
     },
-    "CdkNagScannerOptions": {
+    "CdkNagScannerConfigOptions": {
+      "additionalProperties": true,
       "description": "CDK Nag IAC SAST scanner options.",
       "properties": {
         "enabled": {
@@ -167,20 +162,11 @@
           "description": "CDK Nag packs to enable"
         }
       },
-      "title": "CdkNagScannerOptions",
+      "title": "CdkNagScannerConfigOptions",
       "type": "object"
     },
-    "CfnNagScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
-      },
+    "CfnNagScannerConfig": {
+      "additionalProperties": true,
       "description": "CFN Nag IAC SAST scanner configuration.",
       "properties": {
         "cfn-nag": {
@@ -197,22 +183,19 @@
           },
           "description": "Enable CFN Nag IAC scanner",
           "title": "Cfn-Nag"
+        },
+        "name": {
+          "const": "cfn-nag",
+          "default": "cfn-nag",
+          "title": "Name",
+          "type": "string"
         }
       },
-      "title": "CfnNagScanner",
+      "title": "CfnNagScannerConfig",
       "type": "object"
     },
-    "CheckovScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
-      },
+    "CheckovScannerConfig": {
+      "additionalProperties": true,
       "description": "Checkov SAST/IaC scanner configuration.",
       "properties": {
         "checkov": {
@@ -229,9 +212,15 @@
           },
           "description": "Enable Checkov scanner",
           "title": "Checkov"
+        },
+        "name": {
+          "const": "checkov",
+          "default": "checkov",
+          "title": "Name",
+          "type": "string"
         }
       },
-      "title": "CheckovScanner",
+      "title": "CheckovScannerConfig",
       "type": "object"
     },
     "CustomBuildScannerConfig": {
@@ -270,19 +259,34 @@
       "title": "CustomBuildScannerConfig",
       "type": "object"
     },
-    "CustomScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
+    "CustomScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "custom": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/ScannerOptions"
+            }
+          ],
+          "default": {
+            "enabled": true
           },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
+          "description": "Configure custom scanner",
+          "title": "Custom"
+        },
+        "name": {
+          "description": "The name of the scanner.",
+          "title": "Name",
+          "type": "string"
+        }
       },
-      "properties": {},
-      "title": "CustomScanner",
+      "required": [
+        "name"
+      ],
+      "title": "CustomScannerConfig",
       "type": "object"
     },
     "ExportFormat": {
@@ -335,17 +339,8 @@
       "title": "FileInvocationConfig",
       "type": "object"
     },
-    "GitSecretsScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
-      },
+    "GitSecretsScannerConfig": {
+      "additionalProperties": true,
       "description": "Git Secrets scanner configuration.",
       "properties": {
         "git-secrets": {
@@ -362,22 +357,19 @@
           },
           "description": "Enable Git Secrets scanner",
           "title": "Git-Secrets"
+        },
+        "name": {
+          "const": "git-secret",
+          "default": "git-secret",
+          "title": "Name",
+          "type": "string"
         }
       },
-      "title": "GitSecretsScanner",
+      "title": "GitSecretsScannerConfig",
       "type": "object"
     },
-    "GrypeScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
-      },
+    "GrypeScannerConfig": {
+      "additionalProperties": true,
       "description": "Grype SAST scanner configuration.",
       "properties": {
         "grype": {
@@ -394,24 +386,27 @@
           },
           "description": "Enable Grype scanner",
           "title": "Grype"
+        },
+        "name": {
+          "const": "grype",
+          "default": "grype",
+          "title": "Name",
+          "type": "string"
         }
       },
-      "title": "GrypeScanner",
+      "title": "GrypeScannerConfig",
       "type": "object"
     },
-    "NpmAuditScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
-      },
+    "NpmAuditScannerConfig": {
+      "additionalProperties": true,
       "description": "JS/TS Dependency scanner configuration.",
       "properties": {
+        "name": {
+          "const": "npm-audit",
+          "default": "npm-audit",
+          "title": "Name",
+          "type": "string"
+        },
         "npm-audit": {
           "anyOf": [
             {
@@ -428,7 +423,7 @@
           "title": "Npm-Audit"
         }
       },
-      "title": "NpmAuditScanner",
+      "title": "NpmAuditScannerConfig",
       "type": "object"
     },
     "SASTScannerConfig": {
@@ -453,7 +448,8 @@
             {
               "bandit": {
                 "enabled": true
-              }
+              },
+              "name": "bandit"
             },
             {
               "cdk-nag": {
@@ -465,34 +461,41 @@
                   "NIST80053R5Checks": false,
                   "PCIDSS321Checks": false
                 }
-              }
+              },
+              "name": "cdk-nag"
             },
             {
               "cfn-nag": {
                 "enabled": true
-              }
+              },
+              "name": "cfn-nag"
             },
             {
               "checkov": {
                 "enabled": true
-              }
+              },
+              "name": "checkov"
             },
             {
               "git-secrets": {
                 "enabled": true
-              }
+              },
+              "name": "git-secret"
             },
             {
               "grype": {
                 "enabled": true
-              }
+              },
+              "name": "grype"
             },
             {
+              "name": "npm-audit",
               "npm-audit": {
                 "enabled": true
               }
             },
             {
+              "name": "semgrep",
               "semgrep": {
                 "enabled": true
               }
@@ -502,31 +505,31 @@
           "items": {
             "anyOf": [
               {
-                "$ref": "#/$defs/CustomScanner"
+                "$ref": "#/$defs/CustomScannerConfig"
               },
               {
-                "$ref": "#/$defs/BanditScanner"
+                "$ref": "#/$defs/BanditScannerConfig"
               },
               {
-                "$ref": "#/$defs/CdkNagScanner"
+                "$ref": "#/$defs/CdkNagScannerConfig"
               },
               {
-                "$ref": "#/$defs/CfnNagScanner"
+                "$ref": "#/$defs/CfnNagScannerConfig"
               },
               {
-                "$ref": "#/$defs/CheckovScanner"
+                "$ref": "#/$defs/CheckovScannerConfig"
               },
               {
-                "$ref": "#/$defs/GitSecretsScanner"
+                "$ref": "#/$defs/GitSecretsScannerConfig"
               },
               {
-                "$ref": "#/$defs/GrypeScanner"
+                "$ref": "#/$defs/GrypeScannerConfig"
               },
               {
-                "$ref": "#/$defs/NpmAuditScanner"
+                "$ref": "#/$defs/NpmAuditScannerConfig"
               },
               {
-                "$ref": "#/$defs/SemgrepScanner"
+                "$ref": "#/$defs/SemgrepScannerConfig"
               }
             ]
           },
@@ -564,6 +567,7 @@
         "scanners": {
           "default": [
             {
+              "name": "syft",
               "syft": {
                 "enabled": true
               }
@@ -573,10 +577,10 @@
           "items": {
             "anyOf": [
               {
-                "$ref": "#/$defs/CustomScanner"
+                "$ref": "#/$defs/CustomScannerConfig"
               },
               {
-                "$ref": "#/$defs/SyftScanner"
+                "$ref": "#/$defs/SyftScannerConfig"
               }
             ]
           },
@@ -675,6 +679,7 @@
       "type": "object"
     },
     "ScannerOptions": {
+      "additionalProperties": true,
       "description": "Base model for scanner options.",
       "properties": {
         "enabled": {
@@ -687,19 +692,16 @@
       "title": "ScannerOptions",
       "type": "object"
     },
-    "SemgrepScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
-      },
+    "SemgrepScannerConfig": {
+      "additionalProperties": true,
       "description": "Semgrep SAST scanner configuration.",
       "properties": {
+        "name": {
+          "const": "semgrep",
+          "default": "semgrep",
+          "title": "Name",
+          "type": "string"
+        },
         "semgrep": {
           "anyOf": [
             {
@@ -716,22 +718,19 @@
           "title": "Semgrep"
         }
       },
-      "title": "SemgrepScanner",
+      "title": "SemgrepScannerConfig",
       "type": "object"
     },
-    "SyftScanner": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "$ref": "#/$defs/ScannerOptions"
-          }
-        ]
-      },
+    "SyftScannerConfig": {
+      "additionalProperties": true,
       "description": "Syft SBOM scanner configuration.",
       "properties": {
+        "name": {
+          "const": "syft",
+          "default": "syft",
+          "title": "Name",
+          "type": "string"
+        },
         "syft": {
           "anyOf": [
             {
@@ -748,7 +747,7 @@
           "title": "Syft"
         }
       },
-      "title": "SyftScanner",
+      "title": "SyftScannerConfig",
       "type": "object"
     }
   },
@@ -809,14 +808,61 @@
           "html"
         ],
         "scanners": [
-          {},
-          {},
-          {},
-          {},
-          {},
-          {},
-          {},
-          {}
+          {
+            "bandit": {
+              "enabled": true
+            },
+            "name": "bandit"
+          },
+          {
+            "cdk-nag": {
+              "enabled": true,
+              "nag_packs": {
+                "AwsSolutionsChecks": true,
+                "HIPAASecurityChecks": false,
+                "NIST80053R4Checks": false,
+                "NIST80053R5Checks": false,
+                "PCIDSS321Checks": false
+              }
+            },
+            "name": "cdk-nag"
+          },
+          {
+            "cfn-nag": {
+              "enabled": true
+            },
+            "name": "cfn-nag"
+          },
+          {
+            "checkov": {
+              "enabled": true
+            },
+            "name": "checkov"
+          },
+          {
+            "git-secrets": {
+              "enabled": true
+            },
+            "name": "git-secret"
+          },
+          {
+            "grype": {
+              "enabled": true
+            },
+            "name": "grype"
+          },
+          {
+            "name": "npm-audit",
+            "npm-audit": {
+              "enabled": true
+            }
+          },
+          {
+            "name": "semgrep",
+            "semgrep": {
+              "enabled": true
+            }
+          }
         ]
       },
       "description": "SAST scanner configuration"
@@ -829,7 +875,12 @@
           "html"
         ],
         "scanners": [
-          {}
+          {
+            "name": "syft",
+            "syft": {
+              "enabled": true
+            }
+          }
         ]
       },
       "description": "SBOM scanner configuration"
