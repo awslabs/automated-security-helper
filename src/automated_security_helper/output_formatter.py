@@ -6,6 +6,7 @@ This module contains the OutputFormatter class and related formatters for:
 - CSV output
 """
 
+import logging
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.data_interchange import ExportFormat
 from automated_security_helper.outputs import (
@@ -25,7 +26,13 @@ from automated_security_helper.outputs import (
 class OutputFormatter:
     """Main formatter class that manages different output formats."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        logger: logging.Logger = logging.Logger(name=__name__),
+    ):
+        logger.info("Initializing OutputFormatter")
+        self.logger = logger
+
         self._formatters = {
             "asff": ASFFFormatter(),
             "csv": CSVFormatter(),

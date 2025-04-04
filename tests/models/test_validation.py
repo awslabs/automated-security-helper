@@ -1,7 +1,7 @@
 """Unit tests for validation module."""
 
 from automated_security_helper.models.validation import ConfigurationValidator
-from automated_security_helper.models.config import ScannerConfig
+from automated_security_helper.config.config import ParserConfig, ScannerPluginConfig
 
 
 def test_validate_config():
@@ -10,24 +10,24 @@ def test_validate_config():
 
     # Test valid dict config
     valid_dict = {"name": "test", "type": "static"}
-    is_valid, error = validator.validate_config(valid_dict, ScannerConfig)
+    is_valid, error = validator.validate_config(valid_dict, ScannerPluginConfig)
     assert is_valid is True
     assert error is None
 
     # Test valid model config
-    valid_model = ScannerConfig(name="test", type="static")
-    is_valid, error = validator.validate_config(valid_model, ScannerConfig)
+    valid_model = ScannerPluginConfig(name="test", type="static")
+    is_valid, error = validator.validate_config(valid_model, ScannerPluginConfig)
     assert is_valid is True
     assert error is None
 
     # Test invalid config
     invalid_config = {}
-    is_valid, error = validator.validate_config(invalid_config, ScannerConfig)
+    is_valid, error = validator.validate_config(invalid_config, ScannerPluginConfig)
     assert is_valid is False
     assert "Empty configuration" in str(error)
 
     # Test invalid type
-    is_valid, error = validator.validate_config(None, ScannerConfig)  # type: ignore
+    is_valid, error = validator.validate_config(None, ScannerPluginConfig)  # type: ignore
     assert not is_valid
     assert error is not None
 
@@ -61,18 +61,17 @@ def test_validate_parser_config():
     validator = ConfigurationValidator()
 
     # Test valid parser config
-    valid_parser_config = {
-        "name": "json-parser",
-        "type": "json",
-        "output_format": "json",
-        "config": {"format": "json"},
-    }
-    is_valid, error = validator.validate_parser_config(valid_parser_config)
+    valid_parser_config = ParserConfig(
+        name="json_parser",
+        type="SAST",
+        output_format="json",
+    )
+    is_valid, error = validator.validate_parser_config(valid_parser_config.model_dump())
     assert is_valid is True
     assert error is None
 
     # Test invalid parser config
-    invalid_parser_config = {"name": "json-parser", "type": "json"}
+    invalid_parser_config = {"name": "json_parser", "type": "json"}
     is_valid, error = validator.validate_parser_config(invalid_parser_config)
     assert is_valid is False
     assert error is not None
@@ -90,13 +89,13 @@ def test_validate_configs_integration():
         {"name": "scanner1", "type": "STATIC"},
         {"name": "scanner2", "type": "IAC"},
     ]
-    results = validator.validate_configs(valid_configs, ScannerConfig)
+    results = validator.validate_configs(valid_configs, ScannerPluginConfig)
     assert all(result[0] for result in results)
     assert all(result[1] is None for result in results)
 
     # Test invalid configs
     invalid_configs = [{}, {"invalid": "config"}]
-    results = validator.validate_configs(invalid_configs, ScannerConfig)
+    results = validator.validate_configs(invalid_configs, ScannerPluginConfig)
     print(results)
     assert all(not result[0] for result in results)
     assert all(result[1] is not None for result in results)

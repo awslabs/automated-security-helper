@@ -50,7 +50,7 @@ pytest-mock = "^3.14.0"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-rF -l --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
+addopts = "--junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
 
 [build-system]
 requires = ["poetry-core"]

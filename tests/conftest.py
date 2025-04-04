@@ -1,14 +1,14 @@
 """Common test fixtures for ASHARP tests."""
 
 import pytest
-from automated_security_helper.models.config import (
+from automated_security_helper.config.config import (
     ASHConfig,
     BuildConfig,
     SASTScannerConfig,
     SBOMScannerConfig,
-    ScannerConfig,
+    ScannerPluginConfig,
 )
-from automated_security_helper.models.scanner_types import (
+from automated_security_helper.config.scanner_types import (
     BanditScannerConfig,
     CdkNagPacks,
     CdkNagScannerConfigOptions,
@@ -112,7 +112,7 @@ def ash_config() -> ASHConfig:
             },
             custom_scanners={
                 "sast": [
-                    ScannerConfig(
+                    ScannerPluginConfig(
                         name="trivysast",
                         command="trivy",
                         args=["fs", "--format", "sarif"],
@@ -121,7 +121,7 @@ def ash_config() -> ASHConfig:
                     )
                 ],
                 "sbom": [
-                    ScannerConfig(
+                    ScannerPluginConfig(
                         name="trivysbom",
                         command="trivy",
                         args=["fs", "--format", "cyclonedx"],
@@ -159,7 +159,8 @@ def ash_config() -> ASHConfig:
                 NpmAuditScannerConfig(),
                 SemgrepScannerConfig(),
                 CustomScannerConfig(
-                    name="trivy-sast",
+                    name="trivysast",
+                    type="SAST",
                     custom=ScannerOptions(enabled=True),
                 ),
             ],
@@ -169,7 +170,9 @@ def ash_config() -> ASHConfig:
             scanners=[
                 SyftScannerConfig(),
                 CustomScannerConfig(
-                    trivysbom=ScannerOptions(enabled=True),
+                    name="trivysbom",
+                    type="SBOM",
+                    custom=ScannerOptions(enabled=True),
                 ),
             ],
         ),

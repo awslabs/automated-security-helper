@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timezone
-from automated_security_helper.models.config import BaseConfig
+from automated_security_helper.config.config import ScannerBaseConfig
 from automated_security_helper.models.core import Location, Scanner
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisFinding,
@@ -127,7 +127,7 @@ def test_static_analysis_finding_invalid_finding_type(sample_scanner, sample_loc
 def test_static_analysis_report_creation(sample_finding):
     """Test creation of StaticAnalysisReport objects."""
     report = StaticAnalysisReport(
-        project_name="test-project",
+        name="test-project",
         scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=[sample_finding],
@@ -142,10 +142,10 @@ def test_static_analysis_report_creation(sample_finding):
             "findings_by_type": {"security": 1, "performance": 0, "style": 0},
         },
     )
-    assert report.project_name == "test-project"
+    assert report.name == "test-project"
     assert len(report.findings) == 1
     assert report.findings[0] == sample_finding
-    assert "security" in report.scan_config.rules
+    assert "security" in report.scan_config["rules"]
     assert report.statistics.files_scanned == 50
     assert report.statistics.findings_by_type["security"] == 1
 
@@ -153,7 +153,7 @@ def test_static_analysis_report_creation(sample_finding):
 def test_static_analysis_report_empty():
     """Test creation of empty StaticAnalysisReport."""
     report = StaticAnalysisReport(
-        project_name="test-project",
+        name="test-project",
         scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=[],
@@ -168,7 +168,7 @@ def test_static_analysis_report_empty():
             findings_by_type={"security": 0},
         ),
     )
-    assert report.project_name == "test-project"
+    assert report.name == "test-project"
     assert len(report.findings) == 0
     assert report.statistics.findings_by_type["security"] == 0
 
@@ -204,7 +204,7 @@ def test_static_analysis_report_multiple_findings(sample_finding):
     )
 
     report = StaticAnalysisReport(
-        project_name="test-project",
+        name="test-project",
         scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=[sample_finding, finding2],
@@ -274,11 +274,11 @@ def test_static_analysis_report_by_file():
     )
 
     report = StaticAnalysisReport(
-        project_name="test-project",
+        name="test-project",
         scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         scanner_name="test",
         findings=findings,
-        scan_config=BaseConfig(rules=["security"]),
+        scan_config=ScannerBaseConfig(rules=["security"]),
         statistics=StaticAnalysisStatistics(
             files_scanned=3,
             lines_of_code=300,

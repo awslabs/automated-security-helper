@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
-from .config import ScannerConfig, ParserConfig
+from ..config.config import ScannerPluginConfig, ParserConfig
 from .core import Location
 
 
@@ -8,7 +8,7 @@ class IScanner(ABC):
     """Interface for security scanners."""
 
     @abstractmethod
-    def configure(self, config: ScannerConfig) -> None:
+    def configure(self, config: ScannerPluginConfig) -> None:
         """Configure the scanner with provided configuration."""
         pass
 

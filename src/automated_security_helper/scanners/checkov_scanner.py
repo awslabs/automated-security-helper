@@ -1,12 +1,9 @@
-"""Module containing the Bandit security scanner implementation."""
+"""Module containing the Checkov security scanner implementation."""
 
 import json
 from datetime import datetime, timezone
-import logging
-import shutil
-from typing import Any, Dict, Optional
-from automated_security_helper.models.core import Location, Scanner
-from automated_security_helper.models.data_interchange import ExportFormat
+from typing import Any, Dict, List, Optional
+from automated_security_helper.models.core import Location
 from automated_security_helper.scanners.scanner_plugin import (
     ScannerPlugin,
     ScannerError,
@@ -19,65 +16,33 @@ from automated_security_helper.models.static_analysis import (
 )
 
 
-logger = logging.Logger(__name__, logging.INFO)
-
-
-class BanditScanner(ScannerPlugin):
-    """Implementation of a Python security scanner using Bandit.
-
-    This scanner uses Bandit to perform static security analysis of Python code
-    and returns results in a structured format using the StaticAnalysisReport model.
-    """
-
-    _default_config = ScannerPluginConfig(
-        name="bandit",
-        type="SAST",
-        command="bandit",
-        scan_path_arg="-r",
-        scan_path_arg_position="before_args",
-        format_arg="-f",
-        format_arg_position="before_args",
-        format_arg_value="json",
-        invocation_mode="directory",
-        args=[],
-        output_stream="stdout",
-        enabled=True,
-        output_format="json",
-    )
-    _output_format = ExportFormat.JSON
+class CheckovScanner(ScannerPlugin):
+    """ """
 
     def __init__(self) -> None:
         super().__init__()
-        self._config = self._default_config
+        self._output_format = "json"
+        self._config = ScannerPluginConfig(
+            name="checkov",
+            type="SAST",
+            command="checkov",
+            output_format="json",
+        )
 
-    def configure(
-        self,
-        config: ScannerPluginConfig = None,
-    ) -> None:
+    def configure(self, config: ScannerPluginConfig = None) -> None:
         """Configure the scanner with provided settings."""
         super().configure(config)
         # Allow output format override through config
-        self._default_config.format_arg_value = self._output_format.value
         self._output_format = (
             self._config.output_format
-            if self._config and self._config.output_format
-            else ExportFormat.JSON
+            if self._config.output_format in ["json", "sarif"]
+            else "json"
         )
-
-    def validate(self) -> bool:
-        """Verify scanner configuration and requirements."""
-        try:
-            exists = (
-                self._config.command and shutil.which(self._config.command) is not None
-            )
-            return exists and self._config is not None
-        except Exception as e:
-            raise ScannerError(f"Error validating scanner: {str(e)}") from e
 
     def scan(
         self, target: str, options: Optional[Dict[str, Any]] = None
     ) -> StaticAnalysisReport:
-        """Execute Bandit scan and return results.
+        """Execute Checkov scan and return results.
 
         Args:
             target: Path to scan
@@ -93,13 +58,6 @@ class BanditScanner(ScannerPlugin):
         except ScannerError as exc:
             raise exc
 
-        # Add config-specific args if provided
-        if self._config:
-            if "confidence" in self._config:
-                self._config.args.extend(["-l", self._config["confidence"]])
-            if "severity" in self._config:
-                self._config.args.extend(["-i", self._config["severity"]])
-
         try:
             start_time = datetime.now()
             final_args = self._resolve_arguments(target=target)
@@ -107,13 +65,13 @@ class BanditScanner(ScannerPlugin):
             end_time = datetime.now()
             scan_duration = (end_time - start_time).total_seconds()
 
-            # Parse Bandit JSON output
+            # Parse Checkov JSON output
             if self._output_format == "json":
-                bandit_results = json.loads("".join(self.output()))
+                checkov_results = json.loads("".join(self.output()))
 
                 # Create findings list
-                findings = []
-                for result in bandit_results.get("results", []):
+                findings: List[StaticAnalysisFinding] = []
+                for result in checkov_results.get("results", []):
                     finding = StaticAnalysisFinding(
                         title=result.get("test_name", "Unknown Issue"),
                         description=result.get("issue_text", ""),
@@ -127,7 +85,7 @@ class BanditScanner(ScannerPlugin):
                     findings.append(finding)
 
                 # Create statistics
-                metrics = bandit_results.get("metrics", {})
+                metrics = checkov_results.get("metrics", {})
 
                 # Count findings by severity
                 severity_counts = {}
@@ -145,7 +103,7 @@ class BanditScanner(ScannerPlugin):
 
                 # Create and return report
                 return StaticAnalysisReport(
-                    scanner_name="bandit",
+                    scanner_name="checkov",
                     project_name=target,
                     findings=findings,
                     statistics=stats,
@@ -157,7 +115,8 @@ class BanditScanner(ScannerPlugin):
 
             # For other formats, create basic report with raw output
             return StaticAnalysisReport(
-                name=target,
+                scanner_name="checkov",
+                project_name=target,
                 findings=[
                     StaticAnalysisFinding(
                         id="raw_output",
@@ -167,13 +126,7 @@ class BanditScanner(ScannerPlugin):
                             start_line=1,
                             end_line=10,
                         ),
-                        scanner=Scanner(
-                            name="bandit",
-                            type="SAST",
-                            rule_id="XXXX",
-                            version="1.0.0",
-                        ),
-                        title="Raw Bandit Output",
+                        title="Raw Checkov Output",
                         description="".join(self.output()),
                         source_file=target,
                     )
@@ -184,4 +137,5 @@ class BanditScanner(ScannerPlugin):
 
         except Exception as e:
             # Check if there are useful error details
-            raise ScannerError(f"Bandit scan failed: {str(e)}")
+            error_output = "".join(self.errors())
+            raise ScannerError(f"Checkov scan failed: {str(e)}\nErrors: {error_output}")

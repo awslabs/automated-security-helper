@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 
 from pydantic import BaseModel, ValidationError
 
-from automated_security_helper.models.config import ParserConfig, ScannerConfig
+from automated_security_helper.config.config import ParserConfig, ScannerPluginConfig
 
 
 class ConfigurationValidator:
@@ -104,7 +104,7 @@ class ConfigurationValidator:
                 return False, "Name is required"
 
             # Special handling for scanner configs
-            if config_type is ScannerConfig:
+            if config_type is ScannerPluginConfig:
                 return ConfigurationValidator.validate_scanner_config(config)
 
             # Regular validation
@@ -136,7 +136,7 @@ class ConfigurationValidator:
         )
 
         # Special handling for scanner configs
-        if config_type is ScannerConfig and "type" in config_dict:
+        if config_type is ScannerPluginConfig and "type" in config_dict:
             scanner_type = config_dict.get("type")
             if isinstance(scanner_type, str):
                 scanner_type = scanner_type.strip().upper()
@@ -154,7 +154,7 @@ class ConfigurationValidator:
 
     @staticmethod
     def validate_scanner_config(
-        config: Union[Dict[str, Any], ScannerConfig],
+        config: Union[Dict[str, Any], ScannerPluginConfig],
     ) -> tuple[bool, Optional[str]]:
         """Validate scanner configuration.
 
@@ -169,7 +169,7 @@ class ConfigurationValidator:
             if not config:
                 return False, "Empty configuration"
 
-            if isinstance(config, ScannerConfig):
+            if isinstance(config, ScannerPluginConfig):
                 return True, None
 
             if not isinstance(config, dict):
@@ -193,7 +193,7 @@ class ConfigurationValidator:
 
             # Validate config
             try:
-                ScannerConfig.model_validate(config)
+                ScannerPluginConfig.model_validate(config)
                 return True, None
             except ValidationError as e:
                 return False, f"Invalid scanner config: {str(e)}"
@@ -241,7 +241,7 @@ class ConfigurationValidator:
                 continue
 
             # Validate config
-            if config_type is ScannerConfig:
+            if config_type is ScannerPluginConfig:
                 results.append(validator.validate_scanner_config(config))
             else:
                 # Handle non-scanner configs

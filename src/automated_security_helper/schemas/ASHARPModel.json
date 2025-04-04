@@ -40,10 +40,6 @@
           "title": "Remediation",
           "type": "string"
         },
-        "scanner": {
-          "$ref": "#/$defs/Scanner",
-          "description": "Information about the scanner that found the issue"
-        },
         "severity": {
           "description": "Severity level of the finding",
           "enum": [
@@ -85,8 +81,7 @@
         "id",
         "title",
         "severity",
-        "location",
-        "scanner"
+        "location"
       ],
       "title": "BaseFinding",
       "type": "object"
@@ -169,6 +164,7 @@
           "type": "string"
         },
         "report_id": {
+          "default": null,
           "description": "Unique identifier for the report",
           "minLength": 1,
           "pattern": "^[\\w-]+$",
@@ -191,12 +187,6 @@
           "title": "Summary Stats",
           "type": "object"
         },
-        "tool_name": {
-          "description": "Name of the security tool",
-          "minLength": 1,
-          "title": "Tool Name",
-          "type": "string"
-        },
         "tool_version": {
           "default": null,
           "description": "Version of the security tool",
@@ -205,10 +195,6 @@
           "type": "string"
         }
       },
-      "required": [
-        "report_id",
-        "tool_name"
-      ],
       "title": "ReportMetadata",
       "type": "object"
     },
@@ -225,7 +211,7 @@
         "name": {
           "description": "Name of the scanner",
           "minLength": 1,
-          "pattern": "^[\\w-]+$",
+          "pattern": "^[a-zA-Z][\\w-]*$",
           "title": "Name",
           "type": "string"
         },
@@ -241,14 +227,17 @@
           "default": "SAST",
           "description": "Type of scanner (e.g., SAST, DAST, SBOM)",
           "enum": [
-            "SAST",
-            "DAST",
-            "SBOM",
             "CONTAINER",
-            "IAC",
+            "DAST",
             "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
             "UNKNOWN",
-            "CUSTOM"
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
           ],
           "title": "Type",
           "type": "string"
@@ -267,7 +256,7 @@
       "type": "object"
     }
   },
-  "additionalProperties": false,
+  "additionalProperties": true,
   "description": "Main model class for parsing security scan reports from ASH tooling.\n\nThis model is the primary interface for handling aggregated security findings from\nvarious scanners. It supports both legacy scanner formats and the newer\nscanners_used format.\n\nExample:\n\n```python\nwith open('aggregated_results.json', 'r') as f:\n    report = ASHARPModel.from_json(f.read())\nprint(f\"Found {len(report.findings)} security findings\")\nfor scanner in report.scanners_used:\n    print(f\"Used scanner: {scanner['name']} v{scanner['version']}\")\n```",
   "properties": {
     "description": {
@@ -298,6 +287,15 @@
       "description": "Type of security scan",
       "title": "Scan Type",
       "type": "string"
+    },
+    "scanned_paths": {
+      "default": [],
+      "description": "The list of paths or path patterns that were scanned as part of this report.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Scanned Paths",
+      "type": "array"
     },
     "scanners_used": {
       "default": [],

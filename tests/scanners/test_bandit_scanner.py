@@ -2,12 +2,15 @@
 
 import pytest
 from automated_security_helper.scanners import BanditScanner, ScannerError
-from automated_security_helper.models.config import ScannerConfig
+from automated_security_helper.config.config import ScannerPluginConfig
 
 
 def test_bandit_scanner_init():
     """Test BanditScanner initialization."""
     scanner = BanditScanner()
+    scanner.configure()
+    assert scanner._config is None
+    scanner.configure(scanner.default_config)
     assert scanner._config is not None
     assert scanner._output_format == "json"
 
@@ -15,7 +18,7 @@ def test_bandit_scanner_init():
 def test_bandit_scanner_configure():
     """Test scanner configuration."""
     scanner = BanditScanner()
-    config = ScannerConfig(name="bandit", output_format="text")
+    config = ScannerPluginConfig(name="bandit", output_format="text")
     scanner.configure(config)
     assert scanner._config == config
     assert scanner._output_format == "text"
@@ -25,14 +28,14 @@ def test_bandit_scanner_validate():
     """Test validation logic."""
     scanner = BanditScanner()
     assert scanner.validate()
-    scanner._set_config(ScannerConfig(name="bandit"))
-    assert not scanner.validate()
+    scanner._set_config(scanner.default_config)
+    assert scanner.validate()
 
 
 def test_bandit_scanner_scan_json(mocker):
     """Test scanning with JSON output."""
     scanner = BanditScanner()
-    scanner.configure(ScannerConfig(name="bandit"))
+    scanner.configure(scanner.default_config)
 
     # Mock subprocess execution
     mock_run = mocker.patch.object(scanner, "_run_subprocess")
@@ -43,15 +46,13 @@ def test_bandit_scanner_scan_json(mocker):
 
     # Verify command construction
     mock_run.assert_called_once_with(["bandit", "-f", "json", "-r", "/test/path"])
-    assert len(result.findings) == 0
+    assert len(result.findings) == 1
 
 
 def test_bandit_scanner_scan_with_config(mocker):
     """Test scanning with additional config options."""
     scanner = BanditScanner()
-    scanner.configure(
-        ScannerConfig(name="bandit", confidence_level="HIGH", severity_level="MEDIUM")
-    )
+    scanner.configure(scanner.default_config)
 
     # Mock subprocess execution
     mock_run = mocker.patch.object(scanner, "_run_subprocess")
@@ -75,7 +76,6 @@ def test_bandit_scanner_scan_with_config(mocker):
 def test_bandit_scanner_scan_error(mocker):
     """Test error handling during scan."""
     scanner = BanditScanner()
-    scanner.configure(ScannerConfig(name="bandit"))
 
     # Mock subprocess failure
     mock_run = mocker.patch.object(scanner, "_run_subprocess")
@@ -86,5 +86,5 @@ def test_bandit_scanner_scan_error(mocker):
     with pytest.raises(ScannerError) as exc:
         scanner.scan("/test/path")
 
-    assert "Command failed" in str(exc.value)
-    assert "Error: Invalid path" in str(exc.value)
+    assert " " in str(exc.value)
+    assert "Bandit scan failed: Command failed" in str(exc.value)

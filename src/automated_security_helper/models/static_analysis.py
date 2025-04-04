@@ -3,13 +3,12 @@
 
 """Models for Static Analysis findings."""
 
-from datetime import datetime, timezone
 from typing import Annotated, List
 from pydantic import BaseModel, Field
 
 # Import base classes using relative imports
-from automated_security_helper.models.config import BaseConfig
 from automated_security_helper.models.core import BaseFinding
+from automated_security_helper.models.data_interchange import SecurityReport
 
 
 class StaticAnalysisFinding(BaseFinding):
@@ -45,24 +44,13 @@ class StaticAnalysisStatistics(BaseModel):
     ] = 0.0
 
 
-class StaticAnalysisReport(BaseModel):
+class StaticAnalysisReport(SecurityReport):
     """Container for static analysis findings."""
 
-    scanner_name: Annotated[str, Field(description="Name of the static analysis tool")]
-    project_name: Annotated[
-        str, Field(description="Name of the static analysis tool")
-    ] = None
     findings: Annotated[List[StaticAnalysisFinding], Field()] = []
     statistics: Annotated[StaticAnalysisStatistics, Field()] = (
         StaticAnalysisStatistics()
     )
-    scan_timestamp: Annotated[
-        str, Field(description="Timestamp when scan was performed")
-    ] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    scan_config: Annotated[
-        BaseConfig,
-        Field(description="Configuration used for the scan"),
-    ] = None
 
     def group_findings_by_file(self):
         """Group findings by source file."""

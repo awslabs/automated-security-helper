@@ -4,9 +4,10 @@
 import argparse
 import json
 import logging
+import shutil
 import sys
 from pathlib import Path
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,10 +18,9 @@ from automated_security_helper.execution_engine import (
     ExecutionStrategy,
     ScanExecutionEngine,
 )
-from automated_security_helper.models.config import ASHConfig
+from automated_security_helper.config.config import ASHConfig
 from automated_security_helper.models.data_interchange import ExportFormat
 from automated_security_helper.result_processor import ResultProcessor
-from automated_security_helper.scanners.scanner_factory import ScannerFactory
 
 
 class ASHScanOrchestrator(BaseModel):
@@ -30,6 +30,9 @@ class ASHScanOrchestrator(BaseModel):
 
     source_dir: Annotated[Path, Field(..., description="Source directory to scan")]
     output_dir: Annotated[Path, Field(..., description="Output directory for results")]
+    work_dir: Annotated[
+        Path, Field(Path("./work"), description="Working directory for scan operations")
+    ]
     config: Annotated[
         ASHConfig, Field(description="The resolved ASH configuration")
     ] = DEFAULT_ASH_CONFIG
@@ -45,24 +48,66 @@ class ASHScanOrchestrator(BaseModel):
         Optional[Path], Field(None, description="Path to configuration file")
     ]
     verbose: Annotated[bool, Field(False, description="Enable verbose logging")]
+    debug: Annotated[bool, Field(False, description="Enable debug logging")]
+    offline: Annotated[bool, Field(False, description="Run in offline mode")]
+    no_run: Annotated[bool, Field(False, description="Only build container image")]
+    build_target: Annotated[
+        str, Field("default", description="Build target for container image")
+    ]
+    oci_runner: Annotated[str, Field("docker", description="OCI runner to use")]
+    no_cleanup: Annotated[
+        bool, Field(False, description="Keep work directory after scan")
+    ]
     metadata: Annotated[
-        Dict,
+        Dict[str, Any],
         Field(default_factory=dict, description="Additional metadata for the scan"),
     ]
 
     # Core components
-    scanner_factory: Annotated[ScannerFactory, Field(description="Scanner factory")] = (
-        ScannerFactory()
-    )
     config_manager: Annotated[
-        ConfigurationManager, Field(description="Configuration manager")
-    ] = ConfigurationManager()
+        ConfigurationManager | None, Field(description="Configuration manager")
+    ] = None
     result_processor: Annotated[
-        ResultProcessor, Field(description="Result processor")
-    ] = ResultProcessor()
-    execution_engine: Annotated[ScanExecutionEngine, Field()] = ScanExecutionEngine(
-        ExecutionStrategy.PARALLEL
-    )
+        ResultProcessor | None, Field(description="Result processor")
+    ] = None
+    execution_engine: Annotated[ScanExecutionEngine | None, Field()] = None
+    logger: Annotated[logging.Logger | None, Field()] = logging.Logger(name=__name__)
+
+    def ensure_directories(self):
+        """Ensure required directories exist.
+
+        Creates source_dir if it doesn't exist, work_dir if it doesn't exist or if no_cleanup
+        is True, and output_dir if it doesn't exist.
+        """
+        # Create source directory if it doesn't exist
+        if not self.source_dir.exists():
+            self.source_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create work directory if it doesn't exist or if no_cleanup is True
+        if not self.work_dir.exists() or self.no_cleanup:
+            # Remove existing work dir if no_cleanup is True to ensure clean state
+            if self.work_dir.exists() and self.no_cleanup:
+                shutil.rmtree(self.work_dir)
+            self.work_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create output directory if it doesn't exist
+        if not self.output_dir.exists():
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def model_post_init(self, context):
+        super().model_post_init(context)
+        self.logger = self._get_logger()
+        self.config_manager = ConfigurationManager()
+        self.result_processor = ResultProcessor(
+            logger=self.logger,
+        )
+        self.execution_engine = ScanExecutionEngine(
+            source_dir=self.source_dir,
+            output_dir=self.output_dir,
+            work_dir=self.work_dir,
+            strategy=ExecutionStrategy.SEQUENTIAL,
+            logger=self.logger,
+        )
 
     def _get_logger(self) -> logging.Logger:
         """Configure and return a logger instance."""
@@ -84,7 +129,7 @@ class ASHScanOrchestrator(BaseModel):
     def _load_config(self) -> ASHConfig:
         """Load configuration from file or return default configuration."""
         if not self.config_path:
-            self._get_logger().info(
+            self.logger.info(
                 "No configuration file provided, using default configuration"
             )
             return DEFAULT_ASH_CONFIG
@@ -99,23 +144,6 @@ class ASHScanOrchestrator(BaseModel):
                 # Transform loaded data into ASHConfig
                 if isinstance(config_data, dict):
                     try:
-                        # # If config has sast.scanners, process them into proper scanner objects
-                        # if "sast" in config_data and isinstance(config_data["sast"], dict):
-                        #     sast_config = config_data["sast"]
-                        #     if "scanners" in sast_config:
-                        #         scanners = []
-                        #         scanner_configs = sast_config["scanners"] if isinstance(sast_config["scanners"], list) else [sast_config["scanners"]]
-
-                        #         for scanner_config in scanner_configs:
-                        #             if isinstance(scanner_config, dict):
-                        #                 scanner_type = scanner_config.get("type", "").lower().replace("scanner", "")
-                        #                 if scanner_type == "bandit":
-                        #                     scanners.append(BanditScanner(**scanner_config))
-                        #                 elif scanner_type == "cdknag":
-                        #                     scanners.append(CDKNagScanner(**scanner_config))
-
-                        #         sast_config["scanners"] = scanners
-
                         # Validate and create ASHConfig from processed data
                         config = ASHConfig(**config_data)
                         return config
@@ -128,7 +156,7 @@ class ASHScanOrchestrator(BaseModel):
                 return DEFAULT_ASH_CONFIG
 
         except Exception as e:
-            self._get_logger().warning(
+            self.logger.warning(
                 f"Failed to load configuration from {self.config_path}: {e}. Using default configuration."
             )
             return DEFAULT_ASH_CONFIG
@@ -139,6 +167,8 @@ class ASHScanOrchestrator(BaseModel):
         logger.info("Starting ASH scan")
 
         try:
+            # Ensure required directories exist
+            self.ensure_directories()
             # Load configuration
             config = self._load_config()
 
@@ -152,8 +182,14 @@ class ASHScanOrchestrator(BaseModel):
             # Create execution engine with default scanners
             if not hasattr(self, "execution_engine"):
                 self.execution_engine = ScanExecutionEngine(
-                    strategy=ExecutionStrategy.SEQUENTIAL
+                    source_dir=self.source_dir,
+                    output_dir=self.output_dir,
+                    work_dir=self.work_dir,
+                    logger=self.logger,
+                    strategy=ExecutionStrategy.SEQUENTIAL,
                 )
+
+            # self.execution_engine._scanner_factory
 
             # Execute scanners with config
             results = self.execution_engine.execute(config)
@@ -178,6 +214,32 @@ def parse_args():
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose logging"
+    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Run in offline mode (skips NPM/PNPM/Yarn Audit checks)",
+    )
+    parser.add_argument(
+        "--no-run",
+        action="store_true",
+        help="Only build the container image, do not run scans",
+    )
+    parser.add_argument(
+        "--build-target",
+        default="default",
+        help="Specify build target for container image (e.g. 'ci' for elevated access)",
+    )
+    parser.add_argument(
+        "--oci-runner",
+        default="docker",
+        help="Specify OCI runner to use (e.g. 'docker', 'finch')",
+    )
+    parser.add_argument(
+        "--no-cleanup",
+        action="store_true",
+        help="Keep working directory after scan completes",
     )
 
     return parser.parse_args()

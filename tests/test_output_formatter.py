@@ -22,7 +22,7 @@ def sample_ash_model():
             "location": "app/user.py:42",
         }
     ]
-    model.metadata = {"scanner": "test-scanner", "timestamp": "2023-01-01T00:00:00Z"}
+    model.metadata = {"scanner": "test_scanner", "timestamp": "2023-01-01T00:00:00Z"}
     return model
 
 

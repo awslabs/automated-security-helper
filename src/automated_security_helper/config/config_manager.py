@@ -1,18 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 import os
 import yaml
 import copy
 from typing import Dict, Type, Union
 
-from automated_security_helper.models.config import ASHConfig
+from automated_security_helper.config.config import ASHConfig
 
 
 class ConfigurationManager:
     """Singleton class responsible for managing scanner configurations and parsers."""
 
     _instance = None
+    logger = logging.Logger(name=__name__)
 
     @classmethod
     def _reset(cls):
@@ -27,6 +29,7 @@ class ConfigurationManager:
             cls._instance._registered_parsers = {}
             cls._instance._config_pipeline = []
             cls._instance._override_rules = {}
+            cls._instance.logger = logging.Logger(name=__name__)
         return cls._instance
 
     def register_scanner(self, scanner_name: str, scanner_class: Type):
@@ -175,8 +178,8 @@ class ConfigurationManager:
             return config.model_dump().get("parsers", {})
         return config.get("parsers", {})
 
-    # Define and bind the deep update method
-    def _deep_update(self, base_dict: Dict, update_dict: Dict) -> None:
+    @staticmethod
+    def _deep_update(base_dict: Dict, update_dict: Dict) -> Dict:
         """Recursively update a dictionary with another dictionary.
 
         This performs a deep merge of two dictionaries, where nested dictionaries
@@ -186,15 +189,17 @@ class ConfigurationManager:
             base_dict: Base dictionary to update
             update_dict: Dictionary to update with
         """
+        base_cp = base_dict.copy()
         for key, value in update_dict.items():
             if (
-                key in base_dict
-                and isinstance(base_dict[key], dict)
+                key in base_cp
+                and isinstance(base_cp[key], dict)
                 and isinstance(value, dict)
             ):
-                self._deep_update(base_dict[key], value)
+                base_cp[key] = ConfigurationManager._deep_update(base_cp[key], value)
             else:
-                base_dict[key] = copy.deepcopy(value)
+                base_cp[key] = copy.deepcopy(value)
+        return base_cp
 
     def merge_configs(
         self,
@@ -222,13 +227,13 @@ class ConfigurationManager:
             override_dict = override_config.copy()
 
         # Deep merge the configurations
-        self._deep_update(base_dict, override_dict)
+        new_base = self._deep_update(base_dict, override_dict)
 
         # Try to convert back to ASHConfig if possible
         try:
-            return ASHConfig.model_validate(base_dict)
+            return ASHConfig.model_validate(new_base)
         except Exception:
-            return base_dict
+            return new_base
 
     def _apply_override_rule(self, config: Dict, property_path: str, rule: Dict):
         """Apply an override rule to a specific property in the configuration.

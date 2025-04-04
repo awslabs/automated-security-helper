@@ -31,7 +31,9 @@ class DataInterchange(BaseModel):
     """Base model for data interchange capabilities."""
 
     model_config = ConfigDict(
-        str_strip_whitespace=True, arbitrary_types_allowed=True, extra="allow"
+        str_strip_whitespace=True,
+        arbitrary_types_allowed=True,
+        extra="allow",
     )
 
     name: Annotated[
@@ -81,20 +83,24 @@ class DataInterchange(BaseModel):
 class ReportMetadata(BaseModel):
     """Metadata for security reports."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+        json_encoders={
+            datetime: lambda v: v.isoformat(),
+            ExportFormat: lambda v: str(v),
+        },
+    )
 
     report_id: Annotated[
         str,
         Field(
-            ...,
             min_length=1,
             pattern=r"^[\w-]+$",
             description="Unique identifier for the report",
         ),
-    ]
-    tool_name: Annotated[
-        str, Field(..., min_length=1, description="Name of the security tool")
-    ]
+    ] = None
     generated_at: Annotated[str, Field()] = None
     project_name: Annotated[
         str, Field(min_length=1, description="Name of the project being scanned")
@@ -110,7 +116,7 @@ class ReportMetadata(BaseModel):
         Field(description="Summary statistics (e.g., count by severity)"),
     ] = {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
 
-    @field_validator("report_id", "project_name", "tool_name")
+    @field_validator("project_name")
     @classmethod
     def validate_non_empty_str(cls, v: str, info) -> str:
         """Validate string fields are not empty."""
@@ -134,26 +140,41 @@ class ReportMetadata(BaseModel):
         default_timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if not self.generated_at:
             self.generated_at = default_timestamp
+        if not self.report_id:
+            self.report_id = (
+                f"ASH-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            )
 
 
 class SecurityReport(DataInterchange):
     """Model for comprehensive security reports."""
 
     model_config = ConfigDict(
-        str_strip_whitespace=True, arbitrary_types_allowed=True, extra="forbid"
+        str_strip_whitespace=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+        json_encoders={datetime: lambda v: v.isoformat()},
     )
-
-    metadata: Annotated[ReportMetadata, Field(description="Report metadata")]
+    scanned_paths: Annotated[
+        List[str],
+        Field(
+            description="The list of paths or path patterns that were scanned as part of this report."
+        ),
+    ] = []
+    scan_type: Annotated[str, Field(description="Type of security scan")] = "security"
     findings: Annotated[
         List[BaseFinding], Field(description="List of security findings")
     ] = []
-    scanners_used: Annotated[
-        List[Dict[str, str]], Field(description="List of scanners used in this report")
-    ] = []
-    scan_type: Annotated[str, Field(description="Type of security scan")] = "security"
+
     description: Annotated[
         str, Field(description="Description of the security scan report")
     ] = "Security scan report"
+    scanners_used: Annotated[
+        List[Dict[str, str]], Field(description="List of scanners used in this report")
+    ] = []
+    metadata: Annotated[ReportMetadata, Field(description="Report metadata")] = (
+        ReportMetadata()
+    )
 
     @field_validator("scan_type")
     @classmethod
@@ -178,7 +199,17 @@ class SecurityReport(DataInterchange):
     ) -> Union[str, Dict[str, Any]]:
         """Export the report in the specified format."""
         if format == ExportFormat.JSON:
-            return self.model_dump_json(indent=2, serialize_as_any=True)
+            return self.model_dump_json(
+                exclude={
+                    "metadata": {"parent_report"},
+                    "findings": {"__all__": {"id"}},
+                },
+                exclude_none=True,
+                exclude_defaults=True,
+                exclude_unset=True,
+                by_alias=True,
+                indent=2,
+            )
         elif format == ExportFormat.YAML:
             import yaml
 

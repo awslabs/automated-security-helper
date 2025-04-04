@@ -1,10 +1,9 @@
-from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Annotated, Any, List, Dict, Literal, Union
-from automated_security_helper.models.core import SCANNER_TYPES
+from typing import Annotated, Any, Callable, List, Dict, Literal, Union
 from automated_security_helper.models.data_interchange import ExportFormat
-from automated_security_helper.models.scanner_types import (
+from automated_security_helper.config.scanner_types import (
     BanditScannerConfig,
+    ScannerBaseConfig,
     CfnNagScannerConfig,
     CheckovScannerConfig,
     CustomScannerConfig,
@@ -15,24 +14,6 @@ from automated_security_helper.models.scanner_types import (
     GrypeScannerConfig,
     SyftScannerConfig,
 )
-
-
-class BaseConfig(BaseModel):
-    """Base configuration model with common settings."""
-
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        arbitrary_types_allowed=True,
-        extra="allow",
-    )
-
-    enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
-        True
-    )
-    name: Annotated[
-        str,
-        Field(min_length=1, description="Name of the component. Required"),
-    ] = None
 
 
 class FileInvocationConfig(BaseModel):
@@ -60,8 +41,8 @@ class FileInvocationConfig(BaseModel):
     ] = []
 
 
-class ScannerConfig(BaseConfig):
-    """Configuration model for security scanners."""
+class ScannerPluginConfig(ScannerBaseConfig):
+    """Configuration model for scanner plugins."""
 
     command: Annotated[
         str,
@@ -75,16 +56,6 @@ class ScannerConfig(BaseConfig):
             description="List of arguments to pass to the scanner command. Defaults to an empty list."
         ),
     ] = []
-    output_format: Annotated[
-        str,
-        Field(description="Expected output format from the scanner itself."),
-    ] = None
-    output_stream: Annotated[
-        Literal["stdio", "stderr", "file"],
-        Field(
-            description="Where to read scanner output from. Can be 'stdio', 'stderr' or 'file'. Defaults to 'stdio' to capture the output of the scanner directly."
-        ),
-    ] = "stdio"
     invocation_mode: Annotated[
         Literal["directory", "file"],
         Field(
@@ -97,10 +68,76 @@ class ScannerConfig(BaseConfig):
             description="Configuration for file scanning. Required if invocation_mode is 'file'."
         ),
     ] = FileInvocationConfig()
-    type: Annotated[
-        SCANNER_TYPES,
-        Field(description="Type of scanner (e.g., SAST, DAST, SBOM)"),
-    ] = "SAST"
+    output_format: Annotated[
+        ExportFormat | None,
+        Field(description="Expected output format from the scanner itself."),
+    ] = None
+    scan_path_arg_position: Annotated[
+        Literal["before_args", "after_args"],
+        Field(
+            description="Whether to place the scan path argument before or after the scanner command args. Defaults to 'after_args'."
+        ),
+    ] = "after_args"
+    scan_path_arg: Annotated[
+        str | None,
+        Field(
+            description="Argument to pass the scan path to when invoking the scanner command. Defaults to not including an arg for the scan path value, which results in the path being passed to the scanner as a positional argument at the scan_path_arg_position specified. If the ",
+            examples=[
+                "-f",
+                "--file",
+                "-p",
+                "--path",
+            ],
+        ),
+    ] = None
+    format_arg_position: Annotated[
+        Literal["before_args", "after_args"],
+        Field(
+            description="Whether to place the format argument before or after the scanner command args. Defaults to 'before_args'."
+        ),
+    ] = "before_args"
+    format_arg: Annotated[
+        str | None,
+        Field(
+            description="Argument to pass the format option to when invoking the scanner command. Defaults to not including an arg for the format value, which results in the format option being passed to the scanner as a positional argument at the format_arg_position specified. If a value is provided, the value will be passed into the runtime args prior to the format option.",
+            examples=[
+                "--format",
+                "-f",
+                "--output-format",
+            ],
+        ),
+    ] = None
+    format_arg_value: Annotated[
+        str | None,
+        Field(
+            description="Value to pass to the format argument when invoking the scanner command. Defaults to 'json', but typically is explicitly set in ScannerPlugin implementations as a frozen property.",
+            examples=[
+                "json",
+                "sarif",
+                "cyclonedx",
+            ],
+        ),
+    ] = "json"
+    get_tool_version_command: Annotated[
+        List[str],
+        Field(description="Command to run that should return the scanner version"),
+    ] = []
+    output_stream: Annotated[
+        Literal["stdout", "stderr", "file"],
+        Field(
+            description="Where to read scanner output from. Can be 'stdout', 'stderr' or 'file'. Defaults to 'stdout' to capture the output of the scanner directly."
+        ),
+    ] = "stdout"
+
+    @field_validator("get_tool_version_command", check_fields=False)
+    @classmethod
+    def resolve_tool_version(
+        cls, get_tool_version_command: List[str] | Callable[[], List[str]]
+    ) -> List[str]:
+        if callable(get_tool_version_command):
+            return get_tool_version_command()
+        else:
+            return get_tool_version_command
 
     @field_validator("type", mode="before")
     @classmethod
@@ -133,15 +170,15 @@ class BuildToolInstall(BaseModel):
 class CustomBuildScannerConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    __pydantic_extra__: Dict[str, List[ScannerConfig]] = Field(init=False)
+    __pydantic_extra__: Dict[str, List[ScannerPluginConfig]] = Field(init=False)
 
     sast: Annotated[
-        Dict[str, List[ScannerConfig]],
+        Dict[str, List[ScannerPluginConfig]],
         Field(description="Scanner configurations by type"),
     ] = {}
 
     sbom: Annotated[
-        Dict[str, List[ScannerConfig]],
+        Dict[str, List[ScannerPluginConfig]],
         Field(description="Scanner configurations by type"),
     ] = {}
 
@@ -208,7 +245,7 @@ class SecurityScanConfig(BaseModel):
     ]
 
 
-class ParserConfig(BaseConfig):
+class ParserConfig(ScannerBaseConfig):
     """Configuration model for scanner result parsers."""
 
     output_format: Annotated[
@@ -233,16 +270,6 @@ class ParserConfig(BaseConfig):
     ] = {}
 
 
-class OutputFormat(str, Enum):
-    """Supported output formats."""
-
-    JSON = "json"
-    YAML = "yaml"
-    TEXT = "text"
-    SARIF = "sarif"
-    CYCLONEDX = "cyclonedx"
-
-
 class ScannerClassConfig(BaseModel):
     """Configuration model for scanner classes."""
 
@@ -257,9 +284,10 @@ class SASTScannerConfig(ScannerClassConfig):
         List[ExportFormat],
         Field(description="Format for SAST scan results output"),
     ] = [
-        "text",
-        "junitxml",
-        "html",
+        ExportFormat.TEXT,
+        ExportFormat.JSON,
+        ExportFormat.JUNITXML,
+        ExportFormat.HTML,
     ]
 
     scanners: Annotated[
@@ -296,11 +324,22 @@ class SBOMScannerConfig(ScannerClassConfig):
 
     # Additional optional settings
     output_formats: Annotated[
-        List[Literal["json", "yaml", "text", "html", "cyclonedx", "spdx"]],
-        Field(description="Format for SAST scan results output"),
+        List[
+            Literal[
+                ExportFormat.TEXT,
+                ExportFormat.YAML,
+                ExportFormat.JSON,
+                ExportFormat.JUNITXML,
+                ExportFormat.HTML,
+                ExportFormat.CYCLONEDX,
+                ExportFormat.SPDX,
+            ]
+        ],
+        Field(description="Format for SBOM scan results output"),
     ] = [
-        "cyclonedx",
-        "html",
+        ExportFormat.JSON,
+        ExportFormat.HTML,
+        ExportFormat.CYCLONEDX,
     ]
 
     scanners: Annotated[

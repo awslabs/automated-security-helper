@@ -2,7 +2,7 @@
 
 import pytest
 
-from automated_security_helper.models.config import ScannerConfig
+from automated_security_helper.config.config import ScannerPluginConfig
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 from automated_security_helper.scanners.cdk_nag_scanner import CDKNagScanner
 from automated_security_helper.scanners.scanner_factory import (
@@ -58,15 +58,15 @@ def test_create_bandit_scanner():
     factory = ScannerFactory()
 
     # Test with ScannerConfig
-    config = ScannerConfig(name="bandit", type="SAST")
-    scanner = factory.create_scanner(config)
+    config = ScannerPluginConfig(name="bandit", type="SAST")
+    scanner = factory.create_scanner(config.name, config)
     assert isinstance(scanner, BanditScanner)
     assert scanner.name == "bandit"
     assert scanner.type == "SAST"
 
     # Test with dict config
     dict_config = {"name": "bandit", "type": "SAST"}
-    scanner = factory.create_scanner(dict_config)
+    scanner = factory.create_scanner(dict_config["name"], dict_config)
     assert isinstance(scanner, BanditScanner)
     assert scanner.name == "bandit"
     assert scanner.type == "SAST"
@@ -77,15 +77,15 @@ def test_create_cdk_nag_scanner():
     factory = ScannerFactory()
 
     # Test with ScannerConfig
-    config = ScannerConfig(name="cdknag", type="IAC")
-    scanner = factory.create_scanner(config)
+    config = ScannerPluginConfig(name="cdknag", type="IAC")
+    scanner = factory.create_scanner(config.name, config)
     assert isinstance(scanner, CDKNagScanner)
     assert scanner.name == "cdknag"
     assert scanner.type == "IAC"
 
     # Test with dict config
     dict_config = {"name": "cdknag", "type": "IAC"}
-    scanner = factory.create_scanner(dict_config)
+    scanner = factory.create_scanner(dict_config["name"], dict_config)
     assert isinstance(scanner, CDKNagScanner)
     assert scanner.name == "cdknag"
     assert scanner.type == "IAC"
@@ -96,9 +96,9 @@ def test_create_invalid_scanner():
     factory = ScannerFactory()
 
     # Test non-existent scanner
-    config = ScannerConfig(name="invalid", type="UNKNOWN")
-    with pytest.raises(ValueError, match="Scanner 'invalid' is not registered"):
-        factory.create_scanner(config)
+    config = ScannerPluginConfig(name="invalid", type="UNKNOWN")
+    with pytest.raises(ValueError, match="Unable to determine scanner class"):
+        factory.create_scanner(config.name, config)
 
 
 def test_scanner_factory_config_validation():
@@ -106,12 +106,12 @@ def test_scanner_factory_config_validation():
     factory = ScannerFactory()
 
     # Test with missing name in dict config
-    with pytest.raises(ValueError, match="Scanner '' is not registered"):
-        factory.create_scanner({})
+    with pytest.raises(ValueError, match="Unable to determine scanner class"):
+        factory.create_scanner("test", {})
 
     # Test with None config
-    with pytest.raises(TypeError, match="Scanner configuration cannot be None"):
-        factory.create_scanner(None)  # type: ignore
+    with pytest.raises(ValueError, match="Unable to determine scanner class"):
+        factory.create_scanner("test", None)
 
 
 def test_scanner_factory_type_lookup():
@@ -123,7 +123,7 @@ def test_scanner_factory_type_lookup():
     assert factory.get_scanner_class("cdknag") == CDKNagScanner
 
     # Test invalid lookup
-    with pytest.raises(ValueError, match="Scanner type 'invalid' is not registered"):
+    with pytest.raises(ValueError, match="Unable to determine scanner class"):
         factory.get_scanner_class("invalid")
 
 
@@ -138,7 +138,7 @@ def test_scanner_factory_default_scanners():
 
     # Test creating all default scanners
     for name, scanner_class in scanners.items():
-        config = ScannerConfig(name=name, type="SAST")
-        scanner = factory.create_scanner(config)
+        config = ScannerPluginConfig(name=name, type="SAST")
+        scanner = factory.create_scanner(name, config)
         assert isinstance(scanner, scanner_class)
         assert scanner.name == name

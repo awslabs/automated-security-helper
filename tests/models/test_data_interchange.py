@@ -94,6 +94,8 @@ def test_security_report_export_json(sample_finding, sample_metadata):
     parsed = json.loads(json_output)
     assert parsed["name"] == "Test Report"
     assert len(parsed["findings"]) == 1
+    assert "timestamp" in parsed["findings"][0]  # Verify timestamp is in output
+    assert "finding_id" not in parsed["findings"][0]  # Verify id is not in output
 
 
 def test_security_report_export_dict(sample_finding, sample_metadata):

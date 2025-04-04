@@ -11,7 +11,19 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 SeverityLevel = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 VALID_SEVERITY_VALUES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"})
 SCANNER_TYPES = Literal[
-    "SAST", "DAST", "SBOM", "CONTAINER", "IAC", "DEPENDENCY", "UNKNOWN", "CUSTOM"
+    # Standard scanner types
+    "CONTAINER",
+    "DAST",
+    "DEPENDENCY",
+    "IAC",
+    "SAST",
+    "SBOM",
+    "SECRETS",
+    "UNKNOWN",
+    "CUSTOM",
+    # Specialized scanner types
+    "BANDIT",
+    "CDKNAG",
 ]
 
 
@@ -37,7 +49,9 @@ class Scanner(BaseModel):
 
     name: Annotated[
         str,
-        Field(min_length=1, pattern=r"^[\w-]+$", description="Name of the scanner"),
+        Field(
+            min_length=1, pattern=r"^[a-zA-Z][\w-]*$", description="Name of the scanner"
+        ),
     ]
     version: Annotated[str, Field(description="Version of the scanner")] = "1.0.0"
     type: Annotated[
@@ -59,38 +73,6 @@ class Scanner(BaseModel):
         extra="allow",
         arbitrary_types_allowed=True,
     )
-
-    @field_validator("type")
-    @classmethod
-    def validate_scanner_type(cls, v: str) -> str:
-        """Validate scanner type."""
-        valid_types = {
-            "SAST",
-            "DAST",
-            "SBOM",
-            "CONTAINER",
-            "IAC",
-            "DEPENDENCY",
-            "VULNERABILITY",
-            "SECURITY",
-            "STATIC",
-            "DYNAMIC",
-            "SECRET",
-        }
-        type_mapping = {
-            "SAST": "STATIC",
-            "DAST": "DYNAMIC",
-            "CONTAINER_SCAN": "CONTAINER",
-            "SECURITY_SCAN": "SECURITY",
-        }
-        v = v.upper()
-        if v.endswith("_SCAN"):
-            v = v[:-5]
-        if v in type_mapping:
-            v = type_mapping[v]
-        if v not in valid_types:
-            raise ValueError(f"Scanner type must be one of {sorted(valid_types)}")
-        return v
 
     @field_validator("name")
     @classmethod
@@ -124,6 +106,7 @@ class BaseFinding(BaseModel):
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
         extra="allow",
+        json_encoders={datetime: lambda v: v.isoformat()},
     )
 
     id: Annotated[
@@ -133,8 +116,21 @@ class BaseFinding(BaseModel):
             min_length=1,
             pattern=r"^[\w-]+$",
             description="Unique identifier for the finding",
+            # alias="finding_id"
         ),
     ]
+
+    # @model_validator(mode='before')
+    # @classmethod
+    # def handle_id_finding_id(cls, data: Any) -> Any:
+    #     """Convert between id and finding_id."""
+    #     if isinstance(data, dict):
+    #         if 'finding_id' in data and 'id' not in data:
+    #             data['id'] = data['finding_id']
+    #         elif 'id' in data:
+    #             data['finding_id'] = data['id']
+    #     return data
+
     title: Annotated[
         str, Field(..., min_length=1, description="Title or name of the finding")
     ]
@@ -143,10 +139,6 @@ class BaseFinding(BaseModel):
     ]
     location: Annotated[
         Location, Field(..., description="Location information for the finding")
-    ]
-    scanner: Annotated[
-        Scanner,
-        Field(..., description="Information about the scanner that found the issue"),
     ]
     timestamp: Annotated[
         str,

@@ -6,6 +6,7 @@ This module contains the ResultProcessor class which is responsible for:
 3. Building ASH models from parsed results
 """
 
+import logging
 from typing import Any, Dict, List, Type, Union
 from abc import ABC, abstractmethod
 from automated_security_helper.models.asharp_model import ASHARPModel
@@ -25,7 +26,12 @@ class IResultParser(ABC):
 class ResultProcessor:
     """Processes scanner results through parsing pipeline."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        logger: logging.Logger = logging.Logger(name=__file__),
+    ):
+        logger.info("Initializing ResultProcessor")
+        self.logger = logger
         self._parsers: Dict[str, Type[IResultParser]] = {}
 
     def register_parser(self, scanner_type: str, parser_class: Type[IResultParser]):

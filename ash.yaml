@@ -12,13 +12,13 @@ build:
       - dpkg -i trivy_0.61.0_Linux-64bit.deb
   custom_scanners:
     sast:
-      - name: trivy-sast
+      - name: trivysast
         command: trivy
         args: ["fs", "--format", "sarif"]
         output_format: sarif
         output_stream: stdio
     sbom:
-      - name: trivy-sbom
+      - name: trivysbom
         command: trivy
         args: ["fs", "--format", "cyclonedx"]
         output_format: cyclonedx
@@ -38,7 +38,7 @@ sast:
   scanners:
     # Default scanners
     - bandit: true
-    - cdk-nag:
+    - cdknag:
         # Only default property when providing a complex object is `enabled`
         # The rest are provided by the scanner plugin
         enabled: true
@@ -49,14 +49,17 @@ sast:
           NIST80053R4Checks: true
           NIST80053R5Checks: true
           PCIDSS321Checks: true
-    - cfn-nag: true
+    - cfnnag: true
     - checkov: true
     - git-secrets: true
     - grype: true
-    - npm-audit: true
+    - npmaudit: true
     - semgrep: true
     # Custom scanner provided by plugin at build time, referencable by key
-    - trivy: true
+    - name: trivysast
+      type: SAST
+      custom:
+        enabled: true
 # SBOM scanner settings
 sbom:
   output_formats:
@@ -65,4 +68,7 @@ sbom:
   scanners:
     - syft: true
     # Custom scanner provided by plugin at build time, referencable by key
-    - trivy: true
+    - name: trivysbom
+      type: SBOM
+      custom:
+        enabled: true

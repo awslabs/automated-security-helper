@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Literal
-from automated_security_helper.models.config import ASHConfig
+from automated_security_helper.config.config import ASHConfig
 from automated_security_helper.models.asharp_model import ASHARPModel
 import json
 

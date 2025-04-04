@@ -44,7 +44,7 @@ def test_ash_model():
     assert isinstance(model.findings, list)
     assert isinstance(model.metadata, ReportMetadata)
     assert len(model.findings) == 0
-    assert len(model.metadata.__dict__.keys()) == 7
+    assert len(model.metadata.__dict__.keys()) == 6
 
     # Test property assignment
     test_findings = [{"id": "TEST"}]

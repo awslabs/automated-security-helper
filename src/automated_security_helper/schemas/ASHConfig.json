@@ -19,10 +19,34 @@
           "description": "Enable Bandit scanner",
           "title": "Bandit"
         },
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "name": {
           "const": "bandit",
           "default": "bandit",
           "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "default": "SAST",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
           "type": "string"
         }
       },
@@ -130,10 +154,34 @@
           "description": "Enable CDK Nag IAC scanner",
           "title": "Cdk-Nag"
         },
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "name": {
           "const": "cdk-nag",
           "default": "cdk-nag",
           "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "default": "IAC",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
           "type": "string"
         }
       },
@@ -146,7 +194,7 @@
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the scanner is enabled",
+          "description": "Whether the component is enabled",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -184,10 +232,34 @@
           "description": "Enable CFN Nag IAC scanner",
           "title": "Cfn-Nag"
         },
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "name": {
           "const": "cfn-nag",
           "default": "cfn-nag",
           "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "default": "IAC",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
           "type": "string"
         }
       },
@@ -213,10 +285,34 @@
           "description": "Enable Checkov scanner",
           "title": "Checkov"
         },
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "name": {
           "const": "checkov",
           "default": "checkov",
           "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "default": "IAC",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
           "type": "string"
         }
       },
@@ -226,7 +322,7 @@
     "CustomBuildScannerConfig": {
       "additionalProperties": {
         "items": {
-          "$ref": "#/$defs/ScannerConfig"
+          "$ref": "#/$defs/ScannerPluginConfig"
         },
         "type": "array"
       },
@@ -234,7 +330,7 @@
         "sast": {
           "additionalProperties": {
             "items": {
-              "$ref": "#/$defs/ScannerConfig"
+              "$ref": "#/$defs/ScannerPluginConfig"
             },
             "type": "array"
           },
@@ -246,7 +342,7 @@
         "sbom": {
           "additionalProperties": {
             "items": {
-              "$ref": "#/$defs/ScannerConfig"
+              "$ref": "#/$defs/ScannerPluginConfig"
             },
             "type": "array"
           },
@@ -277,9 +373,33 @@
           "description": "Configure custom scanner",
           "title": "Custom"
         },
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "name": {
-          "description": "The name of the scanner.",
+          "description": "The name of the custom scanner.",
           "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "default": "CUSTOM",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
           "type": "string"
         }
       },
@@ -343,6 +463,12 @@
       "additionalProperties": true,
       "description": "Git Secrets scanner configuration.",
       "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "git-secrets": {
           "anyOf": [
             {
@@ -363,6 +489,24 @@
           "default": "git-secret",
           "title": "Name",
           "type": "string"
+        },
+        "type": {
+          "default": "SECRETS",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
+          "type": "string"
         }
       },
       "title": "GitSecretsScannerConfig",
@@ -372,6 +516,12 @@
       "additionalProperties": true,
       "description": "Grype SAST scanner configuration.",
       "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "grype": {
           "anyOf": [
             {
@@ -392,6 +542,24 @@
           "default": "grype",
           "title": "Name",
           "type": "string"
+        },
+        "type": {
+          "default": "SAST",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
+          "type": "string"
         }
       },
       "title": "GrypeScannerConfig",
@@ -401,6 +569,12 @@
       "additionalProperties": true,
       "description": "JS/TS Dependency scanner configuration.",
       "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "name": {
           "const": "npm-audit",
           "default": "npm-audit",
@@ -421,6 +595,24 @@
           },
           "description": "Enable NPM/PNPM/Yarn Audit dependency scanner",
           "title": "Npm-Audit"
+        },
+        "type": {
+          "default": "DEPENDENCY",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
+          "type": "string"
         }
       },
       "title": "NpmAuditScannerConfig",
@@ -433,6 +625,7 @@
         "output_formats": {
           "default": [
             "text",
+            "json",
             "junitxml",
             "html"
           ],
@@ -449,7 +642,9 @@
               "bandit": {
                 "enabled": true
               },
-              "name": "bandit"
+              "enabled": true,
+              "name": "bandit",
+              "type": "SAST"
             },
             {
               "cdk-nag": {
@@ -462,43 +657,57 @@
                   "PCIDSS321Checks": false
                 }
               },
-              "name": "cdk-nag"
+              "enabled": true,
+              "name": "cdk-nag",
+              "type": "IAC"
             },
             {
               "cfn-nag": {
                 "enabled": true
               },
-              "name": "cfn-nag"
+              "enabled": true,
+              "name": "cfn-nag",
+              "type": "IAC"
             },
             {
               "checkov": {
                 "enabled": true
               },
-              "name": "checkov"
+              "enabled": true,
+              "name": "checkov",
+              "type": "IAC"
             },
             {
+              "enabled": true,
               "git-secrets": {
                 "enabled": true
               },
-              "name": "git-secret"
+              "name": "git-secret",
+              "type": "SECRETS"
             },
             {
+              "enabled": true,
               "grype": {
                 "enabled": true
               },
-              "name": "grype"
+              "name": "grype",
+              "type": "SAST"
             },
             {
+              "enabled": true,
               "name": "npm-audit",
               "npm-audit": {
                 "enabled": true
-              }
+              },
+              "type": "DEPENDENCY"
             },
             {
+              "enabled": true,
               "name": "semgrep",
               "semgrep": {
                 "enabled": true
-              }
+              },
+              "type": "SAST"
             }
           ],
           "description": "List of SAST scanners to enable",
@@ -546,15 +755,17 @@
       "properties": {
         "output_formats": {
           "default": [
-            "cyclonedx",
-            "html"
+            "json",
+            "html",
+            "cyclonedx"
           ],
-          "description": "Format for SAST scan results output",
+          "description": "Format for SBOM scan results output",
           "items": {
             "enum": [
-              "json",
-              "yaml",
               "text",
+              "yaml",
+              "json",
+              "junitxml",
               "html",
               "cyclonedx",
               "spdx"
@@ -567,10 +778,12 @@
         "scanners": {
           "default": [
             {
+              "enabled": true,
               "name": "syft",
               "syft": {
                 "enabled": true
-              }
+              },
+              "type": "SBOM"
             }
           ],
           "description": "List of SBOM scanners to enable",
@@ -591,9 +804,23 @@
       "title": "SBOMScannerConfig",
       "type": "object"
     },
-    "ScannerConfig": {
+    "ScannerOptions": {
       "additionalProperties": true,
-      "description": "Configuration model for security scanners.",
+      "description": "Base model for scanner options.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "ScannerOptions",
+      "type": "object"
+    },
+    "ScannerPluginConfig": {
+      "additionalProperties": true,
+      "description": "Configuration model for scanner plugins.",
       "properties": {
         "args": {
           "default": [],
@@ -624,6 +851,61 @@
           },
           "description": "Configuration for file scanning. Required if invocation_mode is 'file'."
         },
+        "format_arg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Argument to pass the format option to when invoking the scanner command. Defaults to not including an arg for the format value, which results in the format option being passed to the scanner as a positional argument at the format_arg_position specified. If a value is provided, the value will be passed into the runtime args prior to the format option.",
+          "examples": [
+            "--format",
+            "-f",
+            "--output-format"
+          ],
+          "title": "Format Arg"
+        },
+        "format_arg_position": {
+          "default": "before_args",
+          "description": "Whether to place the format argument before or after the scanner command args. Defaults to 'before_args'.",
+          "enum": [
+            "before_args",
+            "after_args"
+          ],
+          "title": "Format Arg Position",
+          "type": "string"
+        },
+        "format_arg_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "json",
+          "description": "Value to pass to the format argument when invoking the scanner command. Defaults to 'json', but typically is explicitly set in ScannerPlugin implementations as a frozen property.",
+          "examples": [
+            "json",
+            "sarif",
+            "cyclonedx"
+          ],
+          "title": "Format Arg Value"
+        },
+        "get_tool_version_command": {
+          "default": [],
+          "description": "Command to run that should return the scanner version",
+          "items": {
+            "type": "string"
+          },
+          "title": "Get Tool Version Command",
+          "type": "array"
+        },
         "invocation_mode": {
           "default": "directory",
           "description": "Whether to run the scanner on a directory or a file. Defaults to 'directory' to scan the entire directory. If set to 'file', uses the file_config values to identify the files to scan and scan each one individually.",
@@ -636,66 +918,97 @@
         },
         "name": {
           "default": null,
-          "description": "Name of the component. Required",
+          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
           "minLength": 1,
+          "pattern": "^[a-zA-Z][\\w-]+$",
           "title": "Name",
           "type": "string"
         },
         "output_format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExportFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
-          "description": "Expected output format from the scanner itself.",
-          "title": "Output Format",
-          "type": "string"
+          "description": "Expected output format from the scanner itself."
         },
         "output_stream": {
-          "default": "stdio",
-          "description": "Where to read scanner output from. Can be 'stdio', 'stderr' or 'file'. Defaults to 'stdio' to capture the output of the scanner directly.",
+          "default": "stdout",
+          "description": "Where to read scanner output from. Can be 'stdout', 'stderr' or 'file'. Defaults to 'stdout' to capture the output of the scanner directly.",
           "enum": [
-            "stdio",
+            "stdout",
             "stderr",
             "file"
           ],
           "title": "Output Stream",
           "type": "string"
         },
-        "type": {
-          "default": "SAST",
-          "description": "Type of scanner (e.g., SAST, DAST, SBOM)",
+        "scan_path_arg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Argument to pass the scan path to when invoking the scanner command. Defaults to not including an arg for the scan path value, which results in the path being passed to the scanner as a positional argument at the scan_path_arg_position specified. If the ",
+          "examples": [
+            "-f",
+            "--file",
+            "-p",
+            "--path"
+          ],
+          "title": "Scan Path Arg"
+        },
+        "scan_path_arg_position": {
+          "default": "after_args",
+          "description": "Whether to place the scan path argument before or after the scanner command args. Defaults to 'after_args'.",
           "enum": [
-            "SAST",
-            "DAST",
-            "SBOM",
+            "before_args",
+            "after_args"
+          ],
+          "title": "Scan Path Arg Position",
+          "type": "string"
+        },
+        "type": {
+          "default": "UNKNOWN",
+          "description": "Type of scanner. Valid options include: typing.Literal['CONTAINER', 'DAST', 'DEPENDENCY', 'IAC', 'SAST', 'SBOM', 'SECRETS', 'UNKNOWN', 'CUSTOM', 'BANDIT', 'CDKNAG']",
+          "enum": [
             "CONTAINER",
-            "IAC",
+            "DAST",
             "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
             "UNKNOWN",
-            "CUSTOM"
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
           ],
           "title": "Type",
           "type": "string"
         }
       },
-      "title": "ScannerConfig",
-      "type": "object"
-    },
-    "ScannerOptions": {
-      "additionalProperties": true,
-      "description": "Base model for scanner options.",
-      "properties": {
-        "enabled": {
-          "default": true,
-          "description": "Whether the scanner is enabled",
-          "title": "Enabled",
-          "type": "boolean"
-        }
-      },
-      "title": "ScannerOptions",
+      "title": "ScannerPluginConfig",
       "type": "object"
     },
     "SemgrepScannerConfig": {
       "additionalProperties": true,
       "description": "Semgrep SAST scanner configuration.",
       "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "name": {
           "const": "semgrep",
           "default": "semgrep",
@@ -716,6 +1029,24 @@
           },
           "description": "Enable Semgrep scanner",
           "title": "Semgrep"
+        },
+        "type": {
+          "default": "SAST",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
+          "type": "string"
         }
       },
       "title": "SemgrepScannerConfig",
@@ -725,6 +1056,12 @@
       "additionalProperties": true,
       "description": "Syft SBOM scanner configuration.",
       "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
         "name": {
           "const": "syft",
           "default": "syft",
@@ -745,6 +1082,24 @@
           },
           "description": "Enable Syft scanner",
           "title": "Syft"
+        },
+        "type": {
+          "default": "SBOM",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM",
+            "BANDIT",
+            "CDKNAG"
+          ],
+          "title": "Type",
+          "type": "string"
         }
       },
       "title": "SyftScannerConfig",
@@ -804,6 +1159,7 @@
       "default": {
         "output_formats": [
           "text",
+          "json",
           "junitxml",
           "html"
         ],
@@ -812,7 +1168,9 @@
             "bandit": {
               "enabled": true
             },
-            "name": "bandit"
+            "enabled": true,
+            "name": "bandit",
+            "type": "SAST"
           },
           {
             "cdk-nag": {
@@ -825,43 +1183,57 @@
                 "PCIDSS321Checks": false
               }
             },
-            "name": "cdk-nag"
+            "enabled": true,
+            "name": "cdk-nag",
+            "type": "IAC"
           },
           {
             "cfn-nag": {
               "enabled": true
             },
-            "name": "cfn-nag"
+            "enabled": true,
+            "name": "cfn-nag",
+            "type": "IAC"
           },
           {
             "checkov": {
               "enabled": true
             },
-            "name": "checkov"
+            "enabled": true,
+            "name": "checkov",
+            "type": "IAC"
           },
           {
+            "enabled": true,
             "git-secrets": {
               "enabled": true
             },
-            "name": "git-secret"
+            "name": "git-secret",
+            "type": "SECRETS"
           },
           {
+            "enabled": true,
             "grype": {
               "enabled": true
             },
-            "name": "grype"
+            "name": "grype",
+            "type": "SAST"
           },
           {
+            "enabled": true,
             "name": "npm-audit",
             "npm-audit": {
               "enabled": true
-            }
+            },
+            "type": "DEPENDENCY"
           },
           {
+            "enabled": true,
             "name": "semgrep",
             "semgrep": {
               "enabled": true
-            }
+            },
+            "type": "SAST"
           }
         ]
       },
@@ -871,15 +1243,18 @@
       "$ref": "#/$defs/SBOMScannerConfig",
       "default": {
         "output_formats": [
-          "cyclonedx",
-          "html"
+          "json",
+          "html",
+          "cyclonedx"
         ],
         "scanners": [
           {
+            "enabled": true,
             "name": "syft",
             "syft": {
               "enabled": true
-            }
+            },
+            "type": "SBOM"
           }
         ]
       },

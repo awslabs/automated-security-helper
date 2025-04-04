@@ -78,9 +78,8 @@ def test_iac_scan_report_creation(sample_vulnerability):
     """Test creation of IaCScanReport objects."""
     report = IaCScanReport(
         name="CloudFormation IaC Scan Report",
-        metadata=ReportMetadata(report_id="XXXXX", tool_name="cfn-nag"),
-        template_path="templates/main.yaml",
-        template_type="CloudFormation",
+        metadata=ReportMetadata(report_id="XXXXX", tool_name="cdk-nag"),
+        iac_framework="CloudFormation",
         timestamp=datetime.now().isoformat(timespec="seconds"),
         findings=[sample_vulnerability],
         resources_checked={
@@ -89,8 +88,7 @@ def test_iac_scan_report_creation(sample_vulnerability):
             "AWS::IAM::Role": 1,
         },
     )
-    assert report.template_path == "templates/main.yaml"
-    assert report.template_type == "cloudformation"
+    assert report.iac_framework == "CloudFormation"
     assert len(report.findings) == 1
     assert report.findings[0] == sample_vulnerability
     assert report.resources_checked["AWS::EC2::SecurityGroup"] == 2
@@ -100,8 +98,7 @@ def test_iac_scan_report_empty():
     """Test creation of empty IaCScanReport."""
     report = IaCScanReport(
         name="CloudFormation IaC Scan Report",
-        template_path="templates/main.yaml",
-        template_type="cloudformation",
+        iac_framework="CloudFormation",
         timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         findings=[],
         resources_checked={},
@@ -110,8 +107,7 @@ def test_iac_scan_report_empty():
             tool_name="cfn-nag",
         ),
     )
-    assert report.template_path == "templates/main.yaml"
-    assert report.template_type == "cloudformation"
+    assert report.iac_framework == "CloudFormation"
     assert len(report.findings) == 0
 
 

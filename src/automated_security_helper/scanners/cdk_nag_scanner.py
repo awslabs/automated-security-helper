@@ -10,30 +10,49 @@ from pathlib import Path
 import subprocess
 
 from automated_security_helper.models.core import Location, Scanner
-from automated_security_helper.models.iac_scan import (
-    IaCReport,
-    IaCFinding,
+from automated_security_helper.models.data_interchange import (
+    ExportFormat,
+    ReportMetadata,
 )
-from automated_security_helper.scanners.abstract_scanner import (
-    AbstractScanner,
+from automated_security_helper.models.iac_scan import (
+    IaCScanReport,
+    IaCVulnerability,
+)
+from automated_security_helper.scanners.scanner_plugin import (
+    ScannerPlugin,
     ScannerError,
 )
-from automated_security_helper.models.config import ScannerConfig
+from automated_security_helper.config.config import ScannerPluginConfig
 
 
-class CDKNagScanner(AbstractScanner):
+class CDKNagScanner(ScannerPlugin):
     """CDK Nag security scanner implementation."""
 
+    _default_config = ScannerPluginConfig(
+        name="cdknag",
+        enabled=True,
+        type="SAST",
+        command="cdk",
+        args=[
+            "synth",
+            "--quiet",
+        ],
+        scan_path_arg="--context",
+        scan_path_arg_position="after_args",
+        invocation_mode="directory",
+        output_stream="file",
+        output_format=ExportFormat.CSV,
+    )
+
     def __init__(self) -> None:
-        """Initialize the CDK Nag scanner."""
         super().__init__()
+        self._config = self._default_config
 
-    def configure(self, config: ScannerConfig) -> None:
-        """Configure the scanner with the provided configuration.
-
-        Args:
-            config: Scanner configuration
-        """
+    def configure(
+        self,
+        config: ScannerPluginConfig = None,
+    ) -> None:
+        """Configure the scanner with provided settings."""
         super().configure(config)
 
     def validate(self) -> bool:
@@ -60,7 +79,9 @@ class CDKNagScanner(AbstractScanner):
                 "CDK dependencies not found. Please ensure CDK is installed."
             ) from e
 
-    def scan(self, target: str, options: Optional[Dict[str, Any]] = None) -> IaCReport:
+    def scan(
+        self, target: str, options: Optional[Dict[str, Any]] = None
+    ) -> IaCScanReport:
         """Scan the target and return findings.
 
         Args:
@@ -136,7 +157,7 @@ class CDKNagScanner(AbstractScanner):
         if failed_files:
             for f in failed_files:
                 all_findings.append(
-                    IaCFinding(
+                    IaCVulnerability(
                         id=re.sub(pattern=r"\W+", repl="-", string=f[0].as_posix()),
                         severity="CRITICAL",
                         scanner=Scanner(
@@ -155,12 +176,21 @@ class CDKNagScanner(AbstractScanner):
                     )
                 )
 
-        return IaCReport(
+        return IaCScanReport(
+            name="CDK Nag",
+            iac_framework="CDK",
+            scanners_used=[
+                {"cdk": "1.0.0"}  # TODO - Extract tool version on validate step
+            ],
+            resources_checked={},
             scanner_name="cdk-nag",
             template_path=str(target_path),
-            scan_timestamp=timestamp,
             findings=all_findings,
             template_format="CloudFormation",
+            metadata=ReportMetadata(
+                report_id=timestamp,
+                tool_name="cdk-nag",
+            ),
         )
 
     def _run_cdk_synthesis(self, target_filename: str, scanner_dir: Path) -> None:
@@ -217,7 +247,7 @@ class CDKNagScanner(AbstractScanner):
                 f"Failed to process CDK nag scanner files: {str(e)}"
             ) from e
 
-    def _parse_findings(self, specific_csv: str = None) -> List[IaCFinding]:
+    def _parse_findings(self, specific_csv: str = None) -> List[IaCVulnerability]:
         """Parse CDK nag findings from output CSV files.
 
         Returns:
@@ -238,7 +268,7 @@ class CDKNagScanner(AbstractScanner):
                         string=row.get("Rule ID", "UnknownRule"),
                         flags=re.IGNORECASE,
                     )
-                    finding = IaCFinding(
+                    finding = IaCVulnerability(
                         id=finding_id,
                         title=row.get("Rule ID", "Unknown Rule"),
                         description=row.get("Rule Info", ""),

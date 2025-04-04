@@ -3,7 +3,7 @@
 import glob
 import os
 import pytest
-from automated_security_helper.scanners.abstract_scanner import ScannerError
+from automated_security_helper.scanners.scanner_plugin import ScannerError
 from automated_security_helper.scanners.cdk_nag_scanner import CDKNagScanner
 
 # def test_scanner_validate_script_missing(tmp_path):
