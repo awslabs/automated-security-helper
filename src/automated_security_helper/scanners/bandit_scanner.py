@@ -109,7 +109,7 @@ class BanditScanner(ScannerPlugin):
 
             # Parse Bandit JSON output
             if self._output_format == "json":
-                bandit_results = json.loads("".join(self.output()))
+                bandit_results = json.loads("".join(self.output))
 
                 # Create findings list
                 findings = []

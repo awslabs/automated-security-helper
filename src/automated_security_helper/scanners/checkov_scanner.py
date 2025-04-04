@@ -67,7 +67,7 @@ class CheckovScanner(ScannerPlugin):
 
             # Parse Checkov JSON output
             if self._output_format == "json":
-                checkov_results = json.loads("".join(self.output()))
+                checkov_results = json.loads("".join(self.output))
 
                 # Create findings list
                 findings: List[StaticAnalysisFinding] = []
