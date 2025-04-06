@@ -1,0 +1,33 @@
+{
+  "configurations": [
+    {
+      "args": [
+        "--source",
+        ".",
+        "--output",
+        "./ash_output",
+        "--verbose",
+        "--config",
+        "./ash.yaml",
+        "--strategy",
+        "parallel",
+        "--scanners",
+        "cdknag"
+      ],
+      "console": "integratedTerminal",
+      "name": "ASH: Test Orchestrator",
+      "program": "./src/automated_security_helper/orchestrator.py",
+      "request": "launch",
+      "type": "debugpy"
+    },
+    {
+      "args": [],
+      "console": "integratedTerminal",
+      "name": "ASH: Test CDK Nag Headless Wrapper",
+      "program": "./src/automated_security_helper/utils/cdk_nag_wrapper.py",
+      "request": "launch",
+      "type": "debugpy"
+    }
+  ],
+  "version": "0.2.0"
+}
