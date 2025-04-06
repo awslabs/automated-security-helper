@@ -11,6 +11,7 @@ __all__ = [
     "IaCFinding",
     "IaCVulnerability",
     "IaCScanReport",
+    "CheckResultType",
 ]
 
 
@@ -22,6 +23,15 @@ class ComplianceFramework(str, Enum):
     NIST = "NIST"
     SOC2 = "SOC2"
     PCI = "PCI"
+
+
+class CheckResultType(str, Enum):
+    """Types of check results from IaC scanning."""
+
+    FAILED = "failed_checks"
+    PASSED = "passed_checks"
+    SKIPPED = "skipped_checks"
+    ERROR = "parsing_errors"
 
 
 class IaCFinding(BaseFinding):
@@ -67,6 +77,10 @@ class IaCVulnerability(IaCFinding):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     violation_details: Dict[str, str] = Field(
         default_factory=dict, description="Details about the security violation"
+    )
+    check_result_type: CheckResultType = Field(
+        default=CheckResultType.FAILED,
+        description="Type of check result (failed, passed, skipped, error)",
     )
 
 

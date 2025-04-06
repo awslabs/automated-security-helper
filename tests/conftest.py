@@ -6,6 +6,7 @@ import yaml
 from automated_security_helper.config.config import (
     ASHConfig,
     BuildConfig,
+    CustomBuildScannerConfig,
     SASTScannerConfig,
     SASTScannerListConfig,
     SBOMScannerConfig,
@@ -160,8 +161,8 @@ def ash_config() -> ASHConfig:
                     "dpkg -i trivy_0.61.0_Linux-64bit.deb",
                 ]
             },
-            custom_scanners={
-                "sast": [
+            custom_scanners=CustomBuildScannerConfig(
+                sast=[
                     ScannerPluginConfig(
                         name="trivy-sast",
                         command="trivy",
@@ -180,7 +181,7 @@ def ash_config() -> ASHConfig:
                         type="SAST",
                     )
                 ],
-                "sbom": [
+                sbom=[
                     ScannerPluginConfig(
                         name="trivy-sbom",
                         command="trivy",
@@ -189,7 +190,7 @@ def ash_config() -> ASHConfig:
                         output_stream="stdio",
                     )
                 ],
-            },
+            ),
         ),
         fail_on_findings=True,
         ignore_paths=["tests/**"],

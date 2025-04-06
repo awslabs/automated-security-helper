@@ -6,7 +6,6 @@
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Type
-import tempfile
 import pytest
 from unittest.mock import Mock, patch
 
@@ -39,13 +38,8 @@ class MockEngine(ScanExecutionEngine):
         output_dir=None,
     ):
         # Create directories and logger
-        source_dir = source_dir or Path(
-            tempfile.mkdtemp(prefix="ash-pytest", suffix="source")
-        )
-        output_dir = output_dir or Path(
-            tempfile.mkdtemp(prefix="ash-pytest", suffix="output")
-        )
-        work_dir = output_dir.joinpath("work")
+        source_dir = source_dir or TEST_SOURCE_DIR
+        output_dir = output_dir or TEST_OUTPUT_DIR
         logger = logging.Logger("test_logger", level=logging.DEBUG)
 
         # Initialize default config
@@ -103,11 +97,11 @@ class MockEngine(ScanExecutionEngine):
                 if name not in self._scanners:
                     raise ValueError(f"Scanner {name} not registered")
                 scanner_fn = self._scanners[name]
-                source_dir = Path("/tmp/source")
-                output_dir = Path("/tmp/output")
+                source_dir = TEST_SOURCE_DIR
+                output_dir = TEST_OUTPUT_DIR
                 if config and isinstance(config, dict):
-                    source_dir = Path(config.get("source_dir", "/tmp/source"))
-                    output_dir = Path(config.get("output_dir", "/tmp/output"))
+                    source_dir = Path(config.get("source_dir", TEST_SOURCE_DIR))
+                    output_dir = Path(config.get("output_dir", TEST_OUTPUT_DIR))
                 return scanner_fn(source_dir, output_dir)
 
         # Initialize with clean factory
@@ -117,7 +111,6 @@ class MockEngine(ScanExecutionEngine):
         super().__init__(
             source_dir=source_dir,
             output_dir=output_dir,
-            work_dir=work_dir,
             strategy=strategy,
             logger=logger,
         )
@@ -438,7 +431,6 @@ def test_execute_with_sequential_mode(test_source_dir, test_output_dir):
     # Execute with scanner configs
     config = ASHConfig(
         project_name="test",
-        working_dir=test_source_dir,
         output_dir=Path(test_output_dir).as_posix(),
         fail_on_findings=False,
         sast=SASTScannerConfig(

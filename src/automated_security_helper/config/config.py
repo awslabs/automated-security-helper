@@ -8,6 +8,7 @@ from automated_security_helper.config.scanner_types import (
     CheckovScannerConfig,
     CustomScannerConfig,
     GitSecretsScannerConfig,
+    JupyterNotebookScannerConfig,
     NpmAuditScannerConfig,
     SemgrepScannerConfig,
     CdkNagScannerConfig,
@@ -299,6 +300,9 @@ class ScannerListConfig(ScannerClassConfig):
 
 class SASTScannerListConfig(ScannerListConfig):
     bandit: Annotated[BanditScannerConfig | bool, Field()] = BanditScannerConfig()
+    jupyter: Annotated[JupyterNotebookScannerConfig | bool, Field()] = (
+        JupyterNotebookScannerConfig()
+    )
     cdknag: Annotated[CdkNagScannerConfig | bool, Field()] = CdkNagScannerConfig()
     cfnnag: Annotated[CfnNagScannerConfig | bool, Field()] = CfnNagScannerConfig()
     checkov: Annotated[CheckovScannerConfig | bool, Field()] = CheckovScannerConfig()

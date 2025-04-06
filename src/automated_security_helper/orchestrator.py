@@ -33,8 +33,8 @@ class ASHScanOrchestrator(BaseModel):
     source_dir: Annotated[Path, Field(..., description="Source directory to scan")]
     output_dir: Annotated[Path, Field(..., description="Output directory for results")]
     work_dir: Annotated[
-        Path, Field(Path("./work"), description="Working directory for scan operations")
-    ]
+        Path, Field(description="Working directory for scan operations")
+    ] = None
     config: Annotated[
         ASHConfig, Field(description="The resolved ASH configuration")
     ] = DEFAULT_ASH_CONFIG
@@ -114,6 +114,8 @@ class ASHScanOrchestrator(BaseModel):
         self.logger = get_logger(
             level=logging.DEBUG if self.verbose else logging.INFO,
         )
+        if self.work_dir is None:
+            self.work_dir = self.output_dir.joinpath("work")
         self.config_manager = ConfigurationManager()
         self.result_processor = ResultProcessor(
             logger=self.logger,
@@ -126,7 +128,6 @@ class ASHScanOrchestrator(BaseModel):
         self.execution_engine = ScanExecutionEngine(
             source_dir=self.source_dir,
             output_dir=self.output_dir,
-            work_dir=self.work_dir,
             strategy=self.strategy,
             logger=self.logger,
             enabled_scanners=self.enabled_scanners,

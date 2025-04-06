@@ -209,6 +209,44 @@
       "title": "ReportMetadata",
       "type": "object"
     },
+    "ScanStatistics": {
+      "description": "Statistics for static analysis scan results.",
+      "properties": {
+        "files_scanned": {
+          "default": 0,
+          "description": "Total number of files scanned",
+          "title": "Files Scanned",
+          "type": "integer"
+        },
+        "findings_by_type": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Count of findings by severity level",
+          "title": "Findings By Type",
+          "type": "object"
+        },
+        "lines_of_code": {
+          "default": 0,
+          "description": "Total number of lines of code",
+          "title": "Lines Of Code",
+          "type": "integer"
+        },
+        "scan_duration_seconds": {
+          "default": 0.0,
+          "description": "Duration of scan in seconds",
+          "title": "Scan Duration Seconds",
+          "type": "number"
+        },
+        "total_findings": {
+          "default": 0,
+          "description": "Total number of findings",
+          "title": "Total Findings",
+          "type": "integer"
+        }
+      },
+      "title": "ScanStatistics",
+      "type": "object"
+    },
     "Scanner": {
       "additionalProperties": true,
       "description": "Represents metadata about the security scanner.",
@@ -314,6 +352,16 @@
       },
       "title": "Scanners Used",
       "type": "array"
+    },
+    "statistics": {
+      "$ref": "#/$defs/ScanStatistics",
+      "default": {
+        "files_scanned": 0,
+        "findings_by_type": {},
+        "lines_of_code": 0,
+        "scan_duration_seconds": 0.0,
+        "total_findings": 0
+      }
     },
     "timestamp": {
       "default": null,

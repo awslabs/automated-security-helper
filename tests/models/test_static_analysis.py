@@ -7,7 +7,7 @@ from automated_security_helper.models.core import Location, Scanner
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisFinding,
     StaticAnalysisReport,
-    StaticAnalysisStatistics,
+    ScanStatistics,
 )
 
 
@@ -162,7 +162,7 @@ def test_static_analysis_report_empty():
             "ignored_paths": [],
             "max_line_length": 100,
         },
-        statistics=StaticAnalysisStatistics(
+        statistics=ScanStatistics(
             files_scanned=0,
             lines_of_code=0,
             findings_by_type={"security": 0},
@@ -213,7 +213,7 @@ def test_static_analysis_report_multiple_findings(sample_finding):
             "ignored_paths": ["tests/", "docs/"],
             "max_line_length": 100,
         },
-        statistics=StaticAnalysisStatistics(
+        statistics=ScanStatistics(
             files_scanned=50,
             lines_of_code=5000,
             findings_by_type={"security": 2, "performance": 0, "style": 0},
@@ -279,7 +279,7 @@ def test_static_analysis_report_by_file():
         scanner_name="test",
         findings=findings,
         scan_config=ScannerBaseConfig(rules=["security"]),
-        statistics=StaticAnalysisStatistics(
+        statistics=ScanStatistics(
             files_scanned=3,
             lines_of_code=300,
             findings_by_type={"security": 4},

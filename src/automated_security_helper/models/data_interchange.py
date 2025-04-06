@@ -146,6 +146,24 @@ class ReportMetadata(BaseModel):
             )
 
 
+class ScanStatistics(BaseModel):
+    """Statistics for static analysis scan results."""
+
+    files_scanned: Annotated[
+        int, Field(description="Total number of files scanned")
+    ] = 0
+    lines_of_code: Annotated[
+        int, Field(description="Total number of lines of code")
+    ] = 0
+    total_findings: Annotated[int, Field(description="Total number of findings")] = 0
+    findings_by_type: Annotated[
+        dict, Field(description="Count of findings by severity level")
+    ] = {}
+    scan_duration_seconds: Annotated[
+        float, Field(description="Duration of scan in seconds")
+    ] = 0.0
+
+
 class SecurityReport(DataInterchange):
     """Model for comprehensive security reports."""
 
@@ -172,6 +190,7 @@ class SecurityReport(DataInterchange):
     scanners_used: Annotated[
         List[Dict[str, str]], Field(description="List of scanners used in this report")
     ] = []
+    statistics: Annotated[ScanStatistics, Field()] = ScanStatistics()
     metadata: Annotated[ReportMetadata, Field(description="Report metadata")] = (
         ReportMetadata()
     )

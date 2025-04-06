@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
-from automated_security_helper.models.core import Location, Scanner
+from automated_security_helper.models.core import Location
 from automated_security_helper.models.data_interchange import ExportFormat
 from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
@@ -19,9 +19,8 @@ from automated_security_helper.config.config import (
     ScannerPluginConfig,
 )
 from automated_security_helper.models.static_analysis import (
-    StaticAnalysisFinding,
     StaticAnalysisReport,
-    StaticAnalysisStatistics,
+    ScanStatistics,
 )
 
 
@@ -145,90 +144,62 @@ class BanditScanner(ScannerPlugin):
 
     def _parse_outputs(self, *args, **kwargs):
         # Parse Bandit JSON output
-        if self._output_format == "json" or self.results_file.endswith(".json"):
-            with open(self.results_file, "r") as f:
-                bandit_results = json.load(f)
+        with open(self.results_file, "r") as f:
+            bandit_results = json.load(f)
 
-            # Create findings list
-            findings = []
-            for result in bandit_results.get("results", []):
-                finding = SecurityVulnerability(
-                    id=result.get("filename") + "/" + result.get("test_id"),
-                    location=Location(
-                        file_path=result.get("filename", ""),
-                        start_line=result.get("line_range", [0, 0])[0],
-                        end_line=result.get("line_range", [0, 0])[1],
-                        snippet=result.get("code", None),
-                    ),
-                    title=result.get("test_name", "Unknown Issue"),
-                    description=" ".join(
-                        [item for item in [result.get("issue_text", False)] if item]
-                    ),
-                    link=result.get("more_info", None),
-                    cwe_id=result.get("issue_cwe", {}).get("id", None),
-                    cwe_link=result.get("issue_cwe", {}).get("link", None),
-                    severity=result.get("issue_severity", "UNKNOWN").upper(),
-                    source_file=result.get("filename", None),
-                    line_number=result.get("line_number", None),
-                    code_snippet=result.get("code", None),
-                    remediation_advice=result.get("more_info", None),
-                    confidence=result.get("issue_confidence", "UNKNOWN").upper(),
-                    # raw=result,
-                )
-                findings.append(finding)
-
-            # Create statistics
-            metrics = bandit_results.get("metrics", {})
-
-            # Count findings by severity
-            severity_counts = {}
-            for finding in findings:
-                severity = finding.severity
-                severity_counts[severity] = severity_counts.get(severity, 0) + 1
-
-            stats = StaticAnalysisStatistics(
-                files_scanned=metrics.get("_totals", {}).get("loc", 0),
-                lines_of_code=metrics.get("_totals", {}).get("loc", 0),
-                total_findings=len(findings),
-                findings_by_type=severity_counts,
-                scan_duration_seconds=kwargs["scan_duration"],
+        # Create findings list
+        findings = []
+        for result in bandit_results.get("results", []):
+            finding = SecurityVulnerability(
+                id=result.get("filename") + "/" + result.get("test_id"),
+                location=Location(
+                    file_path=result.get("filename", ""),
+                    start_line=result.get("line_range", [0, 0])[0],
+                    end_line=result.get("line_range", [0, 0])[1],
+                    snippet=result.get("code", None),
+                ),
+                title=result.get("test_name", "Unknown Issue"),
+                description=" ".join(
+                    [item for item in [result.get("issue_text", False)] if item]
+                ),
+                link=result.get("more_info", None),
+                cwe_id=result.get("issue_cwe", {}).get("id", None),
+                cwe_link=result.get("issue_cwe", {}).get("link", None),
+                severity=result.get("issue_severity", "UNKNOWN").upper(),
+                source_file=result.get("filename", None),
+                line_number=result.get("line_number", None),
+                code_snippet=result.get("code", None),
+                remediation_advice=result.get("more_info", None),
+                confidence=result.get("issue_confidence", "UNKNOWN").upper(),
+                # raw=result,
             )
+            findings.append(finding)
 
-            # Create and return report
-            return StaticAnalysisReport(
-                scanner_name="bandit",
-                scanners_used=[{"bandit": version("bandit")}],
-                project_name=self.name,
-                findings=findings,
-                statistics=stats,
-                scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                scan_config=self._config,
-            )
+        # Create statistics
+        metrics = bandit_results.get("metrics", {})
 
-        # For other formats, create basic report with raw output
+        # Count findings by severity
+        severity_counts = {}
+        for finding in findings:
+            severity = finding.severity
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+        stats = ScanStatistics(
+            files_scanned=metrics.get("_totals", {}).get("loc", 0),
+            lines_of_code=metrics.get("_totals", {}).get("loc", 0),
+            total_findings=len(findings),
+            findings_by_type=severity_counts,
+            scan_duration_seconds=kwargs["scan_duration"],
+        )
+
+        # Create and return report
         return StaticAnalysisReport(
             name=self.name,
+            scanner_name="bandit",
             scanners_used=[{"bandit": version("bandit")}],
-            findings=[
-                StaticAnalysisFinding(
-                    id="raw_output",
-                    severity="HIGH",
-                    location=Location(
-                        file_path="test/bad_path.py",
-                        start_line=1,
-                        end_line=10,
-                    ),
-                    scanner=Scanner(
-                        name="bandit",
-                        type="SAST",
-                        rule_id="XXXX",
-                        version="1.0.0",
-                    ),
-                    title="Raw Bandit Output",
-                    description="".join(self.output()),
-                    source_file=self.name,
-                )
-            ],
+            project_name=self.name,
+            findings=findings,
+            statistics=stats,
             scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             scan_config=self._config,
         )

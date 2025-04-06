@@ -19,7 +19,7 @@
         "options": {
           "$ref": "#/$defs/BaseScannerOptions",
           "default": {},
-          "description": "Enable Bandit scanner"
+          "description": "Configure Bandit scanner"
         },
         "type": {
           "default": "SAST",
@@ -251,7 +251,7 @@
         "options": {
           "$ref": "#/$defs/BaseScannerOptions",
           "default": {},
-          "description": "Enable Checkov scanner"
+          "description": "Configure Checkov scanner"
         },
         "type": {
           "default": "IAC",
@@ -455,7 +455,7 @@
         "options": {
           "$ref": "#/$defs/BaseScannerOptions",
           "default": {},
-          "description": "Enable Grype scanner"
+          "description": "Configure Grype scanner"
         },
         "type": {
           "default": "SAST",
@@ -475,6 +475,47 @@
         }
       },
       "title": "GrypeScannerConfig",
+      "type": "object"
+    },
+    "JupyterNotebookScannerConfig": {
+      "additionalProperties": true,
+      "description": "Jupyter Notebook (.ipynb) SAST scanner configuration.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "jupyter",
+          "default": "jupyter",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/BaseScannerOptions",
+          "default": {},
+          "description": "Configure Jupyter Notebook scanner"
+        },
+        "type": {
+          "default": "SAST",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "JupyterNotebookScannerConfig",
       "type": "object"
     },
     "NpmAuditScannerConfig": {
@@ -580,6 +621,12 @@
             "grype": {
               "enabled": true,
               "name": "grype",
+              "options": {},
+              "type": "SAST"
+            },
+            "jupyter": {
+              "enabled": true,
+              "name": "jupyter",
               "options": {},
               "type": "SAST"
             },
@@ -723,6 +770,23 @@
             "type": "SAST"
           },
           "title": "Grype"
+        },
+        "jupyter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JupyterNotebookScannerConfig"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "name": "jupyter",
+            "options": {},
+            "type": "SAST"
+          },
+          "title": "Jupyter"
         },
         "npmaudit": {
           "anyOf": [
@@ -1068,7 +1132,7 @@
         "options": {
           "$ref": "#/$defs/BaseScannerOptions",
           "default": {},
-          "description": "Enable Semgrep scanner"
+          "description": "Configure Semgrep scanner"
         },
         "type": {
           "default": "SAST",
@@ -1109,7 +1173,7 @@
         "options": {
           "$ref": "#/$defs/BaseScannerOptions",
           "default": {},
-          "description": "Enable Syft scanner"
+          "description": "Configure Syft scanner"
         },
         "type": {
           "default": "SBOM",
@@ -1231,6 +1295,12 @@
           "grype": {
             "enabled": true,
             "name": "grype",
+            "options": {},
+            "type": "SAST"
+          },
+          "jupyter": {
+            "enabled": true,
+            "name": "jupyter",
             "options": {},
             "type": "SAST"
           },

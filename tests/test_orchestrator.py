@@ -49,7 +49,6 @@ def test_execute_scan_no_config(test_source_dir, test_output_dir):
     orchestrator = ASHScanOrchestrator(
         source_dir=test_source_dir,
         output_dir=test_output_dir,
-        work_dir=test_output_dir.joinpath("work"),
         config_path=None,
     )
     result = orchestrator.execute_scan()

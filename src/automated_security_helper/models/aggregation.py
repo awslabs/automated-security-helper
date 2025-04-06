@@ -41,7 +41,7 @@ class FindingAggregator:
         """Group findings by their scanner rule ID."""
         groups = {}
         for finding in self.findings:
-            rule_id = finding.scanner.rule_id
+            rule_id = finding.id
             if rule_id not in groups:
                 groups[rule_id] = []
             groups[rule_id].append(finding)

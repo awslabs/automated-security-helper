@@ -25,7 +25,7 @@ def sample_finding():
     scanner = Scanner(name="test_scanner", version="1.0.0", rule_id="RULE-001")
     location = Location(file_path="/path/to/file", start_line=10, end_line=20)
     return BaseFinding(
-        id="ash-1",
+        id="RULE-001",
         title="Test Finding",
         description="This is a test finding",
         severity="HIGH",

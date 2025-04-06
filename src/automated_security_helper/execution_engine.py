@@ -43,7 +43,6 @@ class ScanExecutionEngine:
         self,
         source_dir: Path,
         output_dir: Path,
-        work_dir: Path,
         enabled_scanners: List[str] = [],
         strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL,
         logger: logging.Logger = logging.Logger(name=__name__),
@@ -71,7 +70,7 @@ class ScanExecutionEngine:
         self._enabled_scanners = enabled_scanners
         self.source_dir = source_dir
         self.output_dir = output_dir
-        self.work_dir = work_dir
+        self.work_dir = output_dir.joinpath("work")
 
     def register_scanner(
         self,

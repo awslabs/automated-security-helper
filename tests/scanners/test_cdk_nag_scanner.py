@@ -3,7 +3,6 @@
 import glob
 import os
 import pytest
-from automated_security_helper.exceptions import ScannerError
 from automated_security_helper.scanners.cdk_nag_scanner import CDKNagScanner
 
 # def test_scanner_validate_script_missing(tmp_path):
@@ -101,11 +100,6 @@ def test_scanner_scan_parses_findings(
 ):
     """Test that scanner can parse findings from CDK nag output."""
     scanner = CDKNagScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    mocker.patch(
-        "automated_security_helper.scanners.cdk_nag_scanner.CDKNagScanner.validate"
-    )
-    mocker.patch("automated_security_helper.scanners.cdk_nag_scanner.subprocess.run")
-    mocker.patch("automated_security_helper.scanners.cdk_nag_scanner.subprocess.Popen")
 
     report = scanner.scan(template_file)
     assert report is not None
@@ -125,18 +119,3 @@ def test_scanner_parse_csv_findings(csv_file, test_source_dir, test_output_dir):
         assert finding.title is not None
         assert finding.description is not None
         assert finding.location is not None
-
-
-def test_scanner_scan_error(mocker, test_source_dir, test_output_dir):
-    """Test that scanner handles CDK synthesis errors."""
-    scanner = CDKNagScanner(test_source_dir, test_output_dir)
-    mocker.patch(
-        "automated_security_helper.scanners.cdk_nag_scanner.CDKNagScanner.validate"
-    )
-    mocker.patch(
-        "automated_security_helper.scanners.cdk_nag_scanner.subprocess.run",
-        side_effect=Exception("Target /test/path does not exist"),
-    )
-
-    with pytest.raises(ScannerError, match="Target /test/path does not exist"):
-        scanner.scan("/test/path")

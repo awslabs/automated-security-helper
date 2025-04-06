@@ -23,10 +23,13 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 
-packages = [{include = "automated_security_helper", from = "src"}]
+packages = [
+  {include = "automated_security_helper", from = "src"},
+  {include = "asharp", from = "src"},
+]
 
 [tool.poetry.scripts]
-asharp = 'automated_security_helper.asharp:main'
+asharp = 'asharp.asharp:main'
 ashv3 = "automated_security_helper.orchestrator:main"
 schemagen = 'automated_security_helper.schemas.generate_schemas:main'
 get-scan-set = 'automated_security_helper.utils.get_scan_set:main'
@@ -55,7 +58,7 @@ pytest-mock = "^3.14.0"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "--junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
+addopts = "-rA -l --cov-report term-missing --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
 
 [build-system]
 requires = ["poetry-core"]

@@ -4,7 +4,7 @@
 """Models for Static Analysis findings."""
 
 from typing import Annotated, List
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 # Import base classes using relative imports
 from automated_security_helper.models.core import BaseFinding
@@ -26,31 +26,10 @@ class StaticAnalysisFinding(BaseFinding):
     ] = None
 
 
-class StaticAnalysisStatistics(BaseModel):
-    """Statistics for static analysis scan results."""
-
-    files_scanned: Annotated[
-        int, Field(description="Total number of files scanned")
-    ] = 0
-    lines_of_code: Annotated[
-        int, Field(description="Total number of lines of code")
-    ] = 0
-    total_findings: Annotated[int, Field(description="Total number of findings")] = 0
-    findings_by_type: Annotated[
-        dict, Field(description="Count of findings by severity level")
-    ] = {}
-    scan_duration_seconds: Annotated[
-        float, Field(description="Duration of scan in seconds")
-    ] = 0.0
-
-
 class StaticAnalysisReport(SecurityReport):
     """Container for static analysis findings."""
 
     findings: Annotated[List[StaticAnalysisFinding], Field()] = []
-    statistics: Annotated[StaticAnalysisStatistics, Field()] = (
-        StaticAnalysisStatistics()
-    )
 
     def group_findings_by_file(self):
         """Group findings by source file."""

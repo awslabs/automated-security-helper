@@ -3,12 +3,12 @@
     {
       "args": [
         "--source",
-        ".",
+        "${workspaceFolder}",
         "--output",
-        "./ash_output",
+        "${workspaceFolder}/ash_output",
         "--verbose",
         "--config",
-        "./ash.yaml",
+        "${workspaceFolder}/ash.yaml",
         "--strategy",
         "parallel",
         "--scanners",

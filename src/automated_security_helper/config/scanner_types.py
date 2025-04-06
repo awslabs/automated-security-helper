@@ -67,7 +67,17 @@ class BanditScannerConfig(ScannerBaseConfig):
     name: Literal["bandit"] = "bandit"
     type: SCANNER_TYPES = "SAST"
     options: Annotated[
-        BaseScannerOptions, Field(description="Enable Bandit scanner")
+        BaseScannerOptions, Field(description="Configure Bandit scanner")
+    ] = BaseScannerOptions()
+
+
+class JupyterNotebookScannerConfig(ScannerBaseConfig):
+    """Jupyter Notebook (.ipynb) SAST scanner configuration."""
+
+    name: Literal["jupyter"] = "jupyter"
+    type: SCANNER_TYPES = "SAST"
+    options: Annotated[
+        BaseScannerOptions, Field(description="Configure Jupyter Notebook scanner")
     ] = BaseScannerOptions()
 
 
@@ -161,7 +171,7 @@ class SemgrepScannerConfig(ScannerBaseConfig):
     name: Literal["semgrep"] = "semgrep"
     type: SCANNER_TYPES = "SAST"
     options: Annotated[
-        BaseScannerOptions, Field(description="Enable Semgrep scanner")
+        BaseScannerOptions, Field(description="Configure Semgrep scanner")
     ] = BaseScannerOptions()
 
 
@@ -171,7 +181,7 @@ class CheckovScannerConfig(ScannerBaseConfig):
     name: Literal["checkov"] = "checkov"
     type: SCANNER_TYPES = "IAC"
     options: Annotated[
-        BaseScannerOptions, Field(description="Enable Checkov scanner")
+        BaseScannerOptions, Field(description="Configure Checkov scanner")
     ] = BaseScannerOptions()
 
 
@@ -181,7 +191,7 @@ class GrypeScannerConfig(ScannerBaseConfig):
     name: Literal["grype"] = "grype"
     type: SCANNER_TYPES = "SAST"
     options: Annotated[
-        BaseScannerOptions, Field(description="Enable Grype scanner")
+        BaseScannerOptions, Field(description="Configure Grype scanner")
     ] = BaseScannerOptions()
 
 
@@ -190,6 +200,6 @@ class SyftScannerConfig(ScannerBaseConfig):
 
     name: Literal["syft"] = "syft"
     type: SCANNER_TYPES = "SBOM"
-    options: Annotated[BaseScannerOptions, Field(description="Enable Syft scanner")] = (
-        BaseScannerOptions()
-    )
+    options: Annotated[
+        BaseScannerOptions, Field(description="Configure Syft scanner")
+    ] = BaseScannerOptions()
