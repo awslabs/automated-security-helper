@@ -97,7 +97,7 @@ class ReportMetadata(BaseModel):
         str,
         Field(
             min_length=1,
-            pattern=r"^[\w-]+$",
+            pattern=r"^[A-Za-z][\/\.\w-]+$",
             description="Unique identifier for the report",
         ),
     ] = None

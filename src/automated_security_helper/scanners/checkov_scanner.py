@@ -2,12 +2,15 @@
 
 import json
 from datetime import datetime, timezone
+import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from automated_security_helper.models.core import Location
+from automated_security_helper.models.data_interchange import ExportFormat
 from automated_security_helper.scanners.scanner_plugin import (
     ScannerPlugin,
-    ScannerError,
 )
+from automated_security_helper.exceptions import ScannerError
 from automated_security_helper.config.config import ScannerPluginConfig
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisFinding,
@@ -19,25 +22,36 @@ from automated_security_helper.models.static_analysis import (
 class CheckovScanner(ScannerPlugin):
     """ """
 
-    def __init__(self) -> None:
-        super().__init__()
+    _default_config = ScannerPluginConfig(
+        name="checkov",
+        type="IAC",
+        command="checkov",
+        output_arg="-o",
+        scan_path_arg="-r",
+        scan_path_arg_position="before_args",
+        format_arg="-f",
+        format_arg_value="json",
+        format_arg_position="before_args",
+        invocation_mode="directory",
+        get_tool_version_command=["bandit", "--version"],
+        output_stream="file",
+        enabled=True,
+        output_format="json",
+    )
+    _output_format = ExportFormat.JSON
+
+    def __init__(
+        self,
+        source_dir: Path,
+        output_dir: Path,
+        logger: Optional[logging.Logger] = logging.Logger(__name__),
+    ) -> None:
+        super().__init__(source_dir=source_dir, output_dir=output_dir, logger=logger)
         self._output_format = "json"
-        self._config = ScannerPluginConfig(
-            name="checkov",
-            type="SAST",
-            command="checkov",
-            output_format="json",
-        )
 
     def configure(self, config: ScannerPluginConfig = None) -> None:
         """Configure the scanner with provided settings."""
         super().configure(config)
-        # Allow output format override through config
-        self._output_format = (
-            self._config.output_format
-            if self._config.output_format in ["json", "sarif"]
-            else "json"
-        )
 
     def scan(
         self, target: str, options: Optional[Dict[str, Any]] = None

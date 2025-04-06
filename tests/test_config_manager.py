@@ -7,30 +7,6 @@ import yaml
 from automated_security_helper.config.config_manager import ConfigurationManager
 
 
-@pytest.fixture
-def sample_config():
-    return {
-        "scanners": {"bandit": {"type": "static", "config_file": "bandit.yaml"}},
-        "parsers": {"bandit": {"format": "json"}},
-    }
-
-
-@pytest.fixture
-def config_file():
-    # Create a temporary config file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        yaml.dump(
-            {
-                "scanners": {
-                    "bandit": {"type": "static", "config_file": "bandit.yaml"}
-                },
-                "parsers": {"bandit": {"format": "json"}},
-            },
-            f,
-        )
-        return f.name
-
-
 def test_load_config(config_file):
     config_manager = ConfigurationManager()
     config = config_manager.load_config(config_file)

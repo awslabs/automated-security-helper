@@ -21,6 +21,8 @@ from automated_security_helper.execution_engine import (
 from automated_security_helper.config.config import ASHConfig
 from automated_security_helper.models.data_interchange import ExportFormat
 from automated_security_helper.result_processor import ResultProcessor
+from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.log import ASH_LOGGER, get_logger
 
 
 class ASHScanOrchestrator(BaseModel):
@@ -36,6 +38,11 @@ class ASHScanOrchestrator(BaseModel):
     config: Annotated[
         ASHConfig, Field(description="The resolved ASH configuration")
     ] = DEFAULT_ASH_CONFIG
+
+    strategy: Annotated[
+        ExecutionStrategy,
+        Field(description="Whether to execute scanners in parallel or sequentially"),
+    ] = ExecutionStrategy.PARALLEL
     scan_output_format: Annotated[
         List[ExportFormat],
         Field(description="Output format for results", alias="scan_output_formats"),
@@ -54,6 +61,12 @@ class ASHScanOrchestrator(BaseModel):
     build_target: Annotated[
         str, Field("default", description="Build target for container image")
     ]
+    enabled_scanners: Annotated[
+        List[str],
+        Field(
+            description="List of enabled scanners. Defaults to all registered.",
+        ),
+    ] = []
     oci_runner: Annotated[str, Field("docker", description="OCI runner to use")]
     no_cleanup: Annotated[
         bool, Field(False, description="Keep work directory after scan")
@@ -76,14 +89,13 @@ class ASHScanOrchestrator(BaseModel):
     def ensure_directories(self):
         """Ensure required directories exist.
 
-        Creates source_dir if it doesn't exist, work_dir if it doesn't exist or if no_cleanup
+        Creates work_dir if it doesn't exist or if no_cleanup
         is True, and output_dir if it doesn't exist.
         """
-        # Create source directory if it doesn't exist
-        if not self.source_dir.exists():
-            self.source_dir.mkdir(parents=True, exist_ok=True)
-
         # Create work directory if it doesn't exist or if no_cleanup is True
+        self.logger.debug(
+            f"Creating work directory if it does not exist: {self.source_dir}"
+        )
         if not self.work_dir.exists() or self.no_cleanup:
             # Remove existing work dir if no_cleanup is True to ensure clean state
             if self.work_dir.exists() and self.no_cleanup:
@@ -91,22 +103,33 @@ class ASHScanOrchestrator(BaseModel):
             self.work_dir.mkdir(parents=True, exist_ok=True)
 
         # Create output directory if it doesn't exist
+        self.logger.debug(
+            f"Creating output directory if it does not exist: {self.source_dir}"
+        )
         if not self.output_dir.exists():
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def model_post_init(self, context):
         super().model_post_init(context)
-        self.logger = self._get_logger()
+        self.logger = get_logger(
+            level=logging.DEBUG if self.verbose else logging.INFO,
+        )
         self.config_manager = ConfigurationManager()
         self.result_processor = ResultProcessor(
             logger=self.logger,
+        )
+        self.scan_set = scan_set(
+            source=self.source_dir,
+            output=self.work_dir,
+            debug=self.verbose,
         )
         self.execution_engine = ScanExecutionEngine(
             source_dir=self.source_dir,
             output_dir=self.output_dir,
             work_dir=self.work_dir,
-            strategy=ExecutionStrategy.SEQUENTIAL,
+            strategy=self.strategy,
             logger=self.logger,
+            enabled_scanners=self.enabled_scanners,
         )
 
     def _get_logger(self) -> logging.Logger:
@@ -129,11 +152,12 @@ class ASHScanOrchestrator(BaseModel):
     def _load_config(self) -> ASHConfig:
         """Load configuration from file or return default configuration."""
         if not self.config_path:
-            self.logger.info(
+            self.logger.debug(
                 "No configuration file provided, using default configuration"
             )
             return DEFAULT_ASH_CONFIG
 
+        self.logger.debug(f"Loading configuration from {self.config_path}")
         try:
             with open(self.config_path, "r") as f:
                 if str(self.config_path).endswith(".json"):
@@ -143,9 +167,11 @@ class ASHScanOrchestrator(BaseModel):
 
                 # Transform loaded data into ASHConfig
                 if isinstance(config_data, dict):
+                    self.logger.debug("Transforming file config")
                     try:
                         # Validate and create ASHConfig from processed data
                         config = ASHConfig(**config_data)
+                        self.logger.debug("Config transformed, returning config")
                         return config
 
                     except Exception as e:
@@ -185,13 +211,14 @@ class ASHScanOrchestrator(BaseModel):
                     source_dir=self.source_dir,
                     output_dir=self.output_dir,
                     work_dir=self.work_dir,
-                    logger=self.logger,
-                    strategy=ExecutionStrategy.SEQUENTIAL,
+                    strategy=ExecutionStrategy.PARALLEL,
+                    # logger=self.logger,
                 )
 
             # self.execution_engine._scanner_factory
 
             # Execute scanners with config
+            self.logger.info("Starting ASH execution engine")
             results = self.execution_engine.execute(config)
 
             # Add empty results if none returned
@@ -206,11 +233,30 @@ class ASHScanOrchestrator(BaseModel):
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="ASH Multi-Scanner")
-    parser.add_argument("source", help="Source directory to scan")
-    parser.add_argument("-o", "--output", required=True, help="Output file path")
+    parser.add_argument(
+        "-s", "--source-dir", dest="source", help="Source directory to scan"
+    )
+    parser.add_argument(
+        "-o", "--output-dir", dest="output", required=False, help="Output file path"
+    )
     parser.add_argument("-c", "--config", help="Path to configuration file")
     parser.add_argument(
-        "-f", "--format", default="json", help="Output format (default: json)"
+        "-f",
+        "--format",
+        default="json",
+        help="Output format (default: json)",
+        choices=[
+            "json",
+            "text",
+            "html",
+            "csv",
+            "yaml",
+            "junitxml",
+            "sarif",
+            "asff",
+            "cyclonedx",
+            "spdx",
+        ],
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose logging"
@@ -237,6 +283,19 @@ def parse_args():
         help="Specify OCI runner to use (e.g. 'docker', 'finch')",
     )
     parser.add_argument(
+        "--strategy",
+        default="sequential",
+        help="Whether to run scanners in parallel or sequential",
+        choices=[
+            "sequential",
+            "parallel",
+        ],
+    )
+    parser.add_argument(
+        "--scanners",
+        help="Specific scanner names to run",
+    )
+    parser.add_argument(
         "--no-cleanup",
         action="store_true",
         help="Keep working directory after scan completes",
@@ -251,24 +310,49 @@ def main():
 
     try:
         # Create orchestrator instance
+        source_dir = (Path(args.source) if args.source else Path().cwd()).absolute()
+        output_dir = (
+            Path(args.output) if args.output else source_dir.joinpath("ash_output")
+        ).absolute()
+        enabled_scanners = (args.scanners).split(",") if args.scanners else []
+        ASH_LOGGER.info(f"Enabled scanners: {enabled_scanners}")
         orchestrator = ASHScanOrchestrator(
-            source_dir=Path(args.source),
-            output_dir=Path(args.output).parent,
-            output_format=args.format,
+            source_dir=source_dir,
+            output_dir=output_dir,
+            work_dir=output_dir.joinpath("work"),
+            scan_output_format=[
+                ExportFormat.HTML,
+                ExportFormat.JSON,
+                ExportFormat.TEXT,
+                ExportFormat.YAML,
+            ],
+            enabled_scanners=enabled_scanners,
             config_path=Path(args.config) if args.config else None,
-            verbose=args.verbose,
+            verbose=args.verbose or args.debug,
+            strategy=(
+                ExecutionStrategy.SEQUENTIAL
+                if args.strategy == "sequential"
+                else ExecutionStrategy.PARALLEL
+            ),
         )
 
         # Execute scan
         results = orchestrator.execute_scan()
+        results["scanners"] = {
+            k: v.model_dump() if hasattr(v, "model_dump") else v
+            for k, v in results["scanners"].items()
+        }
 
         # Write results to output file
-        output_file = Path(args.output)
+        output_file = output_dir.joinpath(
+            f"ash_aggregated_results.{'yaml' if args.format == 'yaml' else 'json'}"
+        )
+        if args.format == "yaml":
+            content = yaml.safe_dump(results)
+        else:
+            content = json.dumps(results, default=str)
         with open(output_file, "w") as f:
-            if args.format == "json":
-                json.dump(results, f, indent=2)
-            else:
-                yaml.dump(results, f)
+            f.write(content)
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

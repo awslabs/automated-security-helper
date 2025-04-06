@@ -29,6 +29,7 @@ packages = [{include = "automated_security_helper", from = "src"}]
 asharp = 'automated_security_helper.asharp:main'
 ashv3 = "automated_security_helper.orchestrator:main"
 schemagen = 'automated_security_helper.schemas.generate_schemas:main'
+get-scan-set = 'automated_security_helper.utils.get_scan_set:main'
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -42,6 +43,10 @@ checkov = "^3.2.395"
 pathspec = "^0.12.1"
 semgrep = "^1.116.0"
 junit-xml = "^1.9"
+aws-cdk-lib = "^2.188.0"
+constructs = "^10.4.2"
+cdk-nag = "^2.35.64"
+cfn-flip = "^1.3.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.2"

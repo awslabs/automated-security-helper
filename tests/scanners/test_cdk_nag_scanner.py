@@ -3,7 +3,7 @@
 import glob
 import os
 import pytest
-from automated_security_helper.scanners.scanner_plugin import ScannerError
+from automated_security_helper.exceptions import ScannerError
 from automated_security_helper.scanners.cdk_nag_scanner import CDKNagScanner
 
 # def test_scanner_validate_script_missing(tmp_path):
@@ -71,9 +71,12 @@ from automated_security_helper.scanners.cdk_nag_scanner import CDKNagScanner
 
 
 @pytest.fixture
-def scanner():
+def scanner(test_source_dir, test_output_dir):
     """Create a CDK Nag scanner instance for testing."""
-    return CDKNagScanner()
+    return CDKNagScanner(
+        source_dir=test_source_dir,
+        output_dir=test_output_dir,
+    )
 
 
 def get_template_files():
@@ -93,22 +96,25 @@ def get_csv_files():
 
 
 @pytest.mark.parametrize("template_file", get_template_files())
-def test_scanner_scan_parses_findings(mocker, template_file):
+def test_scanner_scan_parses_findings(
+    mocker, template_file, test_source_dir, test_output_dir
+):
     """Test that scanner can parse findings from CDK nag output."""
-    scanner = CDKNagScanner()
+    scanner = CDKNagScanner(source_dir=test_source_dir, output_dir=test_output_dir)
     mocker.patch(
         "automated_security_helper.scanners.cdk_nag_scanner.CDKNagScanner.validate"
     )
     mocker.patch("automated_security_helper.scanners.cdk_nag_scanner.subprocess.run")
+    mocker.patch("automated_security_helper.scanners.cdk_nag_scanner.subprocess.Popen")
 
     report = scanner.scan(template_file)
     assert report is not None
 
 
 @pytest.mark.parametrize("csv_file", get_csv_files())
-def test_scanner_parse_csv_findings(csv_file):
+def test_scanner_parse_csv_findings(csv_file, test_source_dir, test_output_dir):
     """Test that scanner can parse findings from CSV file."""
-    scanner = CDKNagScanner()
+    scanner = CDKNagScanner(source_dir=test_source_dir, output_dir=test_output_dir)
     findings = scanner._parse_findings(csv_file)
 
     assert findings is not None
@@ -121,9 +127,9 @@ def test_scanner_parse_csv_findings(csv_file):
         assert finding.location is not None
 
 
-def test_scanner_scan_error(mocker):
+def test_scanner_scan_error(mocker, test_source_dir, test_output_dir):
     """Test that scanner handles CDK synthesis errors."""
-    scanner = CDKNagScanner()
+    scanner = CDKNagScanner(test_source_dir, test_output_dir)
     mocker.patch(
         "automated_security_helper.scanners.cdk_nag_scanner.CDKNagScanner.validate"
     )

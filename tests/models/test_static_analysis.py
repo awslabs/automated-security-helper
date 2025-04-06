@@ -29,7 +29,7 @@ def sample_location():
 def sample_finding(sample_scanner, sample_location):
     """Create a sample static analysis finding for testing."""
     return StaticAnalysisFinding(
-        id=f"SAST-{round(datetime.now().timestamp())}",
+        id="SAST/PICKLE/001",
         title="Insecure Deserialization",
         description="Unsafe pickle.loads() usage detected",
         severity="HIGH",
@@ -229,7 +229,7 @@ def test_static_analysis_report_by_file():
     """Test grouping findings by file functionality."""
     findings = [
         StaticAnalysisFinding(
-            id=f"{i}",
+            id=f"FINDING-{i}",
             title=f"Finding {i}",
             description=f"Description {i}",
             severity="HIGH",

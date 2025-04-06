@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timezone
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field
 from automated_security_helper.models.data_interchange import (
     SecurityReport,
     ReportMetadata,
@@ -138,21 +138,6 @@ class ASHARPModel(SecurityReport):
         if not hasattr(self, "_scanners"):
             self._scanners = self.scanners_used if self.scanners_used else []
         return self._scanners.copy()  # Return copy to prevent modification
-
-    @model_validator(mode="after")
-    def validate_findings_scanners(self):
-        """Ensure all findings have proper Scanner objects.
-
-        This validator converts any scanner dictionaries in findings into proper Scanner objects.
-        """
-        for finding in self.findings:
-            if isinstance(finding.scanner, dict):
-                finding.scanner = Scanner(
-                    name=finding.scanner["name"],
-                    version=finding.scanner.get("version", ""),
-                    type=finding.scanner["type"],
-                )
-        return self
 
     @classmethod
     def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "ASHARPModel":

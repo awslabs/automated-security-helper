@@ -53,65 +53,93 @@ def test_scanner_factory_multiple_registrations():
         factory.register_scanner("test", CDKNagScanner)
 
 
-def test_create_bandit_scanner():
+def test_create_bandit_scanner(test_source_dir, test_output_dir):
     """Test creation of Bandit scanner instance."""
     factory = ScannerFactory()
 
     # Test with ScannerConfig
-    config = ScannerPluginConfig(name="bandit", type="SAST")
-    scanner = factory.create_scanner(config.name, config)
+    config = ScannerPluginConfig(
+        name="bandit",
+        type="SAST",
+        source_dir=test_source_dir,
+        output_dir=test_output_dir,
+    )
+    scanner = factory.create_scanner(
+        config.name, config, test_source_dir, test_output_dir
+    )
     assert isinstance(scanner, BanditScanner)
     assert scanner.name == "bandit"
     assert scanner.type == "SAST"
 
     # Test with dict config
-    dict_config = {"name": "bandit", "type": "SAST"}
-    scanner = factory.create_scanner(dict_config["name"], dict_config)
+    dict_config = {
+        "name": "bandit",
+        "type": "SAST",
+        "source_dir": str(test_source_dir),
+        "output_dir": str(test_output_dir),
+    }
+    scanner = factory.create_scanner(
+        dict_config["name"], dict_config, test_source_dir, test_output_dir
+    )
     assert isinstance(scanner, BanditScanner)
     assert scanner.name == "bandit"
     assert scanner.type == "SAST"
 
 
-def test_create_cdk_nag_scanner():
+def test_create_cdk_nag_scanner(test_source_dir, test_output_dir):
     """Test creation of CDK Nag scanner instance."""
     factory = ScannerFactory()
 
     # Test with ScannerConfig
-    config = ScannerPluginConfig(name="cdknag", type="IAC")
-    scanner = factory.create_scanner(config.name, config)
+    config = ScannerPluginConfig(
+        name="cdknag",
+        type="IAC",
+        source_dir=test_source_dir,
+        output_dir=test_output_dir,
+    )
+    scanner = factory.create_scanner(
+        config.name, config, test_source_dir, test_output_dir
+    )
     assert isinstance(scanner, CDKNagScanner)
     assert scanner.name == "cdknag"
     assert scanner.type == "IAC"
 
     # Test with dict config
-    dict_config = {"name": "cdknag", "type": "IAC"}
-    scanner = factory.create_scanner(dict_config["name"], dict_config)
+    dict_config = {
+        "name": "cdknag",
+        "type": "IAC",
+        "source_dir": str(test_source_dir),
+        "output_dir": str(test_output_dir),
+    }
+    scanner = factory.create_scanner(
+        dict_config["name"], dict_config, test_source_dir, test_output_dir
+    )
     assert isinstance(scanner, CDKNagScanner)
     assert scanner.name == "cdknag"
     assert scanner.type == "IAC"
 
 
-def test_create_invalid_scanner():
+def test_create_invalid_scanner(test_source_dir, test_output_dir):
     """Test creating scanner with invalid configuration."""
     factory = ScannerFactory()
 
     # Test non-existent scanner
     config = ScannerPluginConfig(name="invalid", type="UNKNOWN")
     with pytest.raises(ValueError, match="Unable to determine scanner class"):
-        factory.create_scanner(config.name, config)
+        factory.create_scanner(config.name, config, test_source_dir, test_output_dir)
 
 
-def test_scanner_factory_config_validation():
+def test_scanner_factory_config_validation(test_source_dir, test_output_dir):
     """Test scanner configuration validation."""
     factory = ScannerFactory()
 
     # Test with missing name in dict config
     with pytest.raises(ValueError, match="Unable to determine scanner class"):
-        factory.create_scanner("test", {})
+        factory.create_scanner("test", {}, test_source_dir, test_output_dir)
 
     # Test with None config
     with pytest.raises(ValueError, match="Unable to determine scanner class"):
-        factory.create_scanner("test", None)
+        factory.create_scanner("test", None, test_source_dir, test_output_dir)
 
 
 def test_scanner_factory_type_lookup():
@@ -127,7 +155,7 @@ def test_scanner_factory_type_lookup():
         factory.get_scanner_class("invalid")
 
 
-def test_scanner_factory_default_scanners():
+def test_scanner_factory_default_scanners(test_source_dir, test_output_dir):
     """Test that default scanners are properly registered and can be created."""
     factory = ScannerFactory()
 
@@ -139,6 +167,6 @@ def test_scanner_factory_default_scanners():
     # Test creating all default scanners
     for name, scanner_class in scanners.items():
         config = ScannerPluginConfig(name=name, type="SAST")
-        scanner = factory.create_scanner(name, config)
+        scanner = factory.create_scanner(name, config, test_source_dir, test_output_dir)
         assert isinstance(scanner, scanner_class)
         assert scanner.name == name

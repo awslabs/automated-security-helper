@@ -1,11 +1,15 @@
 """Common test fixtures for ASHARP tests."""
 
+from pathlib import Path
 import pytest
+import yaml
 from automated_security_helper.config.config import (
     ASHConfig,
     BuildConfig,
     SASTScannerConfig,
+    SASTScannerListConfig,
     SBOMScannerConfig,
+    SBOMScannerListConfig,
     ScannerPluginConfig,
 )
 from automated_security_helper.config.scanner_types import (
@@ -14,8 +18,9 @@ from automated_security_helper.config.scanner_types import (
     CdkNagScannerConfigOptions,
     CfnNagScannerConfig,
     CheckovScannerConfig,
+    GitSecretsScannerConfig,
     NpmAuditScannerConfig,
-    ScannerOptions,
+    BaseScannerOptions,
     SemgrepScannerConfig,
     CdkNagScannerConfig,
     GrypeScannerConfig,
@@ -27,6 +32,51 @@ from automated_security_helper.models.core import Location, Scanner
 from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
 )
+
+
+TEST_DIR = Path(__file__).parent.joinpath("pytest-temp")
+TEST_SOURCE_DIR = TEST_DIR.joinpath("source")
+TEST_OUTPUT_DIR = TEST_DIR.joinpath("output")
+
+
+@pytest.fixture
+def test_source_dir() -> Path:
+    """Create a temporary source directory."""
+    if not TEST_SOURCE_DIR.exists():
+        TEST_SOURCE_DIR.mkdir(parents=True)
+    return TEST_SOURCE_DIR
+
+
+@pytest.fixture
+def test_output_dir() -> Path:
+    """Create a temporary output directory."""
+    if not TEST_OUTPUT_DIR.exists():
+        TEST_OUTPUT_DIR.mkdir(parents=True)
+    return TEST_OUTPUT_DIR
+
+
+@pytest.fixture
+def sample_config():
+    return {
+        "scanners": {"bandit": {"type": "static", "config_file": "bandit.yaml"}},
+        "parsers": {"bandit": {"format": "json"}},
+    }
+
+
+@pytest.fixture
+def config_file(test_source_dir):
+    # Create a temporary config file
+    with open(test_source_dir.joinpath("config.yaml"), "w") as f:
+        yaml.dump(
+            {
+                "scanners": {
+                    "bandit": {"type": "static", "config_file": "bandit.yaml"}
+                },
+                "parsers": {"bandit": {"format": "json"}},
+            },
+            f,
+        )
+        return f.name
 
 
 @pytest.fixture
@@ -113,16 +163,26 @@ def ash_config() -> ASHConfig:
             custom_scanners={
                 "sast": [
                     ScannerPluginConfig(
-                        name="trivysast",
+                        name="trivy-sast",
                         command="trivy",
                         args=["fs", "--format", "sarif"],
                         output_format="sarif",
                         output_stream="stdio",
+                        get_tool_version_command=[
+                            "trivy",
+                            "--version",
+                        ],
+                        format_arg="--format",
+                        format_arg_value="sarif",
+                        format_arg_position="before_args",
+                        scan_path_arg_position="after_args",
+                        invocation_mode="directory",
+                        type="SAST",
                     )
                 ],
                 "sbom": [
                     ScannerPluginConfig(
-                        name="trivysbom",
+                        name="trivy-sbom",
                         command="trivy",
                         args=["fs", "--format", "cyclonedx"],
                         output_format="cyclonedx",
@@ -136,11 +196,11 @@ def ash_config() -> ASHConfig:
         output_dir="ash_output",
         sast=SASTScannerConfig(
             output_formats=["json", "csv", "junitxml", "html"],
-            scanners=[
-                BanditScannerConfig(),
-                CdkNagScannerConfig(
-                    cdknag=CdkNagScannerConfigOptions(
-                        enabled=True,
+            scanners=SASTScannerListConfig(
+                bandit=BanditScannerConfig(),
+                cdknag=CdkNagScannerConfig(
+                    enabled=True,
+                    options=CdkNagScannerConfigOptions(
                         nag_packs=CdkNagPacks(
                             AwsSolutionsChecks=True,
                             HIPAASecurityChecks=True,
@@ -150,31 +210,31 @@ def ash_config() -> ASHConfig:
                         ),
                     ),
                 ),
-                CfnNagScannerConfig(),
-                CheckovScannerConfig(),
-                CustomScannerConfig(
-                    gitsecrets=ScannerOptions(enabled=True),
+                cfnnag=CfnNagScannerConfig(),
+                checkov=CheckovScannerConfig(),
+                gitsecrets=GitSecretsScannerConfig(
+                    options=BaseScannerOptions(enabled=True),
                 ),
-                GrypeScannerConfig(),
-                NpmAuditScannerConfig(),
-                SemgrepScannerConfig(),
-                CustomScannerConfig(
-                    name="trivysast",
+                grype=GrypeScannerConfig(),
+                npmaudit=NpmAuditScannerConfig(),
+                semgrep=SemgrepScannerConfig(),
+                trivysasy=CustomScannerConfig(
+                    name="trivy-sast",
                     type="SAST",
-                    custom=ScannerOptions(enabled=True),
+                    custom=BaseScannerOptions(enabled=True),
                 ),
-            ],
+            ),
         ),
         sbom=SBOMScannerConfig(
             output_formats=["cyclonedx", "html"],
-            scanners=[
-                SyftScannerConfig(),
-                CustomScannerConfig(
-                    name="trivysbom",
+            scanners=SBOMScannerListConfig(
+                syft=SyftScannerConfig(),
+                trivysbom=CustomScannerConfig(
+                    name="trivy-sbom",
                     type="SBOM",
-                    custom=ScannerOptions(enabled=True),
+                    custom=BaseScannerOptions(enabled=True),
                 ),
-            ],
+            ),
         ),
     )
     return conf

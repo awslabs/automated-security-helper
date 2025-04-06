@@ -2,6 +2,8 @@
 
 import json
 import pytest
+from automated_security_helper.models.core import Location
+from automated_security_helper.models.iac_scan import IaCVulnerability
 from automated_security_helper.output_formatter import (
     OutputFormatter,
     JSONFormatter,
@@ -13,16 +15,24 @@ from automated_security_helper.models.asharp_model import ASHARPModel
 
 @pytest.fixture
 def sample_ash_model():
-    model = ASHARPModel()
-    model.findings = [
-        {
-            "id": "VULN-1",
-            "severity": "HIGH",
-            "description": "SQL Injection vulnerability",
-            "location": "app/user.py:42",
-        }
-    ]
-    model.metadata = {"scanner": "test_scanner", "timestamp": "2023-01-01T00:00:00Z"}
+    model = ASHARPModel(
+        findings=[
+            IaCVulnerability(
+                id="finding-1",
+                title="AwsSolutionsChecks/finding-1 - SQL Injection",
+                compliance_frameworks=["AwsSolutionsChecks"],
+                description="SQL Injection vulnerability",
+                severity="HIGH",
+                location=Location(
+                    file_path="path/to/file", snippet="sql.query(user_input + ';GO')"
+                ),
+                resource_name="LambdaFunction1",
+                rule_id="AwsSolutionsChecks/finding-1",
+                status="open",
+            )
+        ],
+        metadata={"scanner": "test_scanner", "timestamp": "2023-01-01T00:00:00Z"},
+    )
     return model
 
 
@@ -34,8 +44,8 @@ def test_json_formatter(sample_ash_model):
     parsed = json.loads(output)
     assert "findings" in parsed
     assert "metadata" in parsed
-    assert parsed["findings"] == sample_ash_model.findings
-    assert parsed["metadata"] == sample_ash_model.metadata
+    assert parsed["findings"][0] == sample_ash_model.findings[0].model_dump()
+    assert parsed["metadata"] == sample_ash_model.metadata.model_dump()
 
 
 def test_html_formatter(sample_ash_model):

@@ -1,5 +1,6 @@
 """Module containing the ScannerFactory class for creating scanner instances."""
 
+from pathlib import Path
 import re
 from typing import Callable, Dict, List, Type, Union
 
@@ -90,6 +91,8 @@ class ScannerFactory:
         self,
         scanner_name: str,
         config: ScannerPluginConfig,
+        source_dir: Path,
+        output_dir: Path,
     ) -> ScannerPlugin:
         """Create a scanner instance of the specified type with optional configuration.
 
@@ -122,7 +125,10 @@ class ScannerFactory:
             raise ValueError("No scanner config provided, unable to create scanner")
 
         # Create and configure scanner instance
-        instance = scanner_class()
+        instance = scanner_class(
+            source_dir=source_dir,
+            output_dir=output_dir,
+        )
         instance.configure(config)
 
         return instance

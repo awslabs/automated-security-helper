@@ -1,7 +1,7 @@
 """Models for Infrastructure as Code Scanning findings."""
 
 from enum import Enum
-from typing import Annotated, List, Optional, Dict, Set, Union
+from typing import Annotated, List, Optional, Dict, Union
 from pydantic import Field, ConfigDict
 from automated_security_helper.models.core import BaseFinding
 from automated_security_helper.models.data_interchange import SecurityReport
@@ -33,9 +33,10 @@ class IaCFinding(BaseFinding):
         None, description="Expected configuration value"
     )
     actual_value: Optional[str] = Field(None, description="Current configuration value")
-    compliance_frameworks: Set[Union[ComplianceFramework, str]] = Field(
-        default_factory=set, description="Compliance frameworks this violation impacts"
-    )
+    compliance_frameworks: Annotated[
+        List[Union[ComplianceFramework, str]],
+        Field(description="Compliance frameworks this violation impacts"),
+    ] = []
     remediation_terraform: Optional[str] = Field(
         None, description="Terraform remediation steps"
     )

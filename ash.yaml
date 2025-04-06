@@ -5,28 +5,44 @@ project_name: automated-security-helper
 # they are explicitly allowed here in the build configuration.
 # This only affects containerized ASH runs.
 build:
-  mode: offline # Build image in offline mode
+  mode: ASH_MODE_OFFLINE # Build image in offline mode
   tool_install_scripts:
     trivy:
       - wget https://github.com/aquasecurity/trivy/releases/download/v0.61.0/trivy_0.61.0_Linux-64bit.deb
       - dpkg -i trivy_0.61.0_Linux-64bit.deb
   custom_scanners:
     sast:
-      - name: trivysast
+      - name: trivy-sast
         command: trivy
-        args: ["fs", "--format", "sarif"]
+        args: ["fs"]
         output_format: sarif
-        output_stream: stdio
+        output_stream: stdout
+        format_arg: '--format'
+        format_arg_value: sarif
+        format_arg_position: after_args
+        get_tool_version_command:
+          - trivy
+          - '--version'
+        scan_path_arg_position: after_args
+        type: SAST
     sbom:
-      - name: trivysbom
+      - name: trivy-sbom
         command: trivy
-        args: ["fs", "--format", "cyclonedx"]
+        args: ["fs"]
         output_format: cyclonedx
-        output_stream: stdio
+        output_stream: stdout
+        format_arg: '--format'
+        format_arg_value: cyclonedx
+        format_arg_position: after_args
+        get_tool_version_command:
+          - trivy
+          - '--version'
+        scan_path_arg_position: after_args
+        type: SBOM
 # General scan settings
 fail_on_findings: true
 ignore_paths:
-  - `tests/**`
+  - 'tests/**'
 output_dir: ash_output
 # SAST scanner settings
 sast:
@@ -37,38 +53,36 @@ sast:
     - html
   scanners:
     # Default scanners
-    - bandit: true
-    - cdknag:
-        # Only default property when providing a complex object is `enabled`
-        # The rest are provided by the scanner plugin
-        enabled: true
-        # More complex scanner configuration
+    bandit: true
+    cdknag:
+      enabled: true
+      options:
         nag_packs:
           AwsSolutionsChecks: true
-          HIPAASecurityChecks: true
-          NIST80053R4Checks: true
-          NIST80053R5Checks: true
-          PCIDSS321Checks: true
-    - cfnnag: true
-    - checkov: true
-    - git-secrets: true
-    - grype: true
-    - npmaudit: true
-    - semgrep: true
+          HIPAASecurityChecks: false
+          NIST80053R4Checks: false
+          NIST80053R5Checks: false
+          PCIDSS321Checks: false
+    cfnnag: true
+    checkov: true
+    gitsecrets: true
+    grype: true
+    npmaudit: true
+    semgrep: true
     # Custom scanner provided by plugin at build time, referencable by key
-    - name: trivysast
+    trivysast:
+      name: trivy-sast
       type: SAST
-      custom:
-        enabled: true
+      enabled: true
 # SBOM scanner settings
 sbom:
   output_formats:
     - cyclonedx
     - html
   scanners:
-    - syft: true
+    syft: true
     # Custom scanner provided by plugin at build time, referencable by key
-    - name: trivysbom
+    trivysbom:
+      name: trivy-sbom
       type: SBOM
-      custom:
-        enabled: true
+      enabled: true

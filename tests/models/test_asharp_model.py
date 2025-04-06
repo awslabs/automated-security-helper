@@ -120,15 +120,3 @@ def test_asharp_model_from_json():
     assert model.name == "Test Report"
     assert model.version == "1.0.0"
     assert model.description == "Test description"
-
-
-def test_asharp_model_validate_findings_scanners(sample_finding):
-    """Test findings scanners validation."""
-    model = ASHARPModel(
-        name="Test Report",
-        version="1.0.0",
-        description="Test description",
-        findings=[sample_finding],
-    )
-    # Should not raise any exceptions
-    model.validate_findings_scanners()

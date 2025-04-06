@@ -1,11 +1,11 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from automated_security_helper.models.core import SCANNER_TYPES
 
 
 # Base models
-class ScannerOptions(BaseModel):
+class BaseScannerOptions(BaseModel):
     """Base model for scanner options."""
 
     model_config = ConfigDict(
@@ -13,13 +13,16 @@ class ScannerOptions(BaseModel):
         arbitrary_types_allowed=True,
         extra="allow",
     )
-    enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
-        True
-    )
 
 
-class ScannerBaseConfig(ScannerOptions):
+class ScannerBaseConfig(BaseModel):
     """Base configuration model with common settings."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        arbitrary_types_allowed=True,
+        extra="allow",
+    )
 
     name: Annotated[
         str,
@@ -36,6 +39,9 @@ class ScannerBaseConfig(ScannerOptions):
         SCANNER_TYPES,
         Field(description=f"Type of scanner. Valid options include: {SCANNER_TYPES}"),
     ] = "UNKNOWN"
+    options: Annotated[BaseScannerOptions, Field(description="Scanner options")] = (
+        BaseScannerOptions()
+    )
 
 
 # SAST Scanner Models
@@ -50,9 +56,9 @@ class CustomScannerConfig(ScannerBaseConfig):
         ),
     ]
     type: SCANNER_TYPES = "CUSTOM"
-    custom: Annotated[
-        Union[bool, ScannerOptions], Field(description="Configure custom scanner")
-    ] = ScannerOptions()
+    options: Annotated[
+        BaseScannerOptions, Field(description="Configure custom scanner")
+    ] = BaseScannerOptions()
 
 
 class BanditScannerConfig(ScannerBaseConfig):
@@ -60,9 +66,9 @@ class BanditScannerConfig(ScannerBaseConfig):
 
     name: Literal["bandit"] = "bandit"
     type: SCANNER_TYPES = "SAST"
-    bandit: Annotated[
-        Union[bool, ScannerOptions], Field(description="Enable Bandit scanner")
-    ] = ScannerOptions()
+    options: Annotated[
+        BaseScannerOptions, Field(description="Enable Bandit scanner")
+    ] = BaseScannerOptions()
 
 
 class CdkNagPacks(BaseModel):
@@ -92,7 +98,7 @@ class CdkNagPacks(BaseModel):
     ] = False
 
 
-class CdkNagScannerConfigOptions(ScannerOptions):
+class CdkNagScannerConfigOptions(BaseScannerOptions):
     """CDK Nag IAC SAST scanner options."""
 
     nag_packs: Annotated[
@@ -106,48 +112,47 @@ class CdkNagScannerConfigOptions(ScannerOptions):
 class CdkNagScannerConfig(ScannerBaseConfig):
     """CDK Nag IAC SAST scanner configuration."""
 
-    name: Literal["cdk-nag"] = "cdk-nag"
+    name: Literal["cdknag"] = "cdknag"
     type: SCANNER_TYPES = "IAC"
-    cdknag: Annotated[
-        Union[bool, CdkNagScannerConfigOptions],
-        Field(description="Enable CDK Nag IAC scanner", alias="cdk-nag"),
+    options: Annotated[
+        CdkNagScannerConfigOptions,
+        Field(description="Enable CDK Nag IAC scanner"),
     ] = CdkNagScannerConfigOptions()
 
 
 class CfnNagScannerConfig(ScannerBaseConfig):
     """CFN Nag IAC SAST scanner configuration."""
 
-    name: Literal["cfn-nag"] = "cfn-nag"
+    name: Literal["cfnnag"] = "cfnnag"
     type: SCANNER_TYPES = "IAC"
-    cfnnag: Annotated[
-        Union[bool, ScannerOptions],
-        Field(description="Enable CFN Nag IAC scanner", alias="cfn-nag"),
-    ] = ScannerOptions()
+    options: Annotated[
+        BaseScannerOptions,
+        Field(description="Enable CFN Nag IAC scanner"),
+    ] = BaseScannerOptions()
 
 
 class NpmAuditScannerConfig(ScannerBaseConfig):
     """JS/TS Dependency scanner configuration."""
 
-    name: Literal["npm-audit"] = "npm-audit"
+    name: Literal["npmaudit"] = "npmaudit"
     type: SCANNER_TYPES = "DEPENDENCY"
-    npmaudit: Annotated[
-        Union[bool, ScannerOptions],
+    options: Annotated[
+        BaseScannerOptions,
         Field(
             description="Enable NPM/PNPM/Yarn Audit dependency scanner",
-            alias="npm-audit",
         ),
-    ] = ScannerOptions()
+    ] = BaseScannerOptions()
 
 
 class GitSecretsScannerConfig(ScannerBaseConfig):
     """Git Secrets scanner configuration."""
 
-    name: Literal["git-secret"] = "git-secret"
+    name: Literal["gitsecrets"] = "gitsecrets"
     type: SCANNER_TYPES = "SECRETS"
-    gitsecrets: Annotated[
-        Union[bool, ScannerOptions],
-        Field(description="Enable Git Secrets scanner", alias="git-secrets"),
-    ] = ScannerOptions()
+    options: Annotated[
+        BaseScannerOptions,
+        Field(description="Enable Git Secrets scanner"),
+    ] = BaseScannerOptions()
 
 
 class SemgrepScannerConfig(ScannerBaseConfig):
@@ -155,9 +160,9 @@ class SemgrepScannerConfig(ScannerBaseConfig):
 
     name: Literal["semgrep"] = "semgrep"
     type: SCANNER_TYPES = "SAST"
-    semgrep: Annotated[
-        Union[bool, ScannerOptions], Field(description="Enable Semgrep scanner")
-    ] = ScannerOptions()
+    options: Annotated[
+        BaseScannerOptions, Field(description="Enable Semgrep scanner")
+    ] = BaseScannerOptions()
 
 
 class CheckovScannerConfig(ScannerBaseConfig):
@@ -165,9 +170,9 @@ class CheckovScannerConfig(ScannerBaseConfig):
 
     name: Literal["checkov"] = "checkov"
     type: SCANNER_TYPES = "IAC"
-    checkov: Annotated[
-        Union[bool, ScannerOptions], Field(description="Enable Checkov scanner")
-    ] = ScannerOptions()
+    options: Annotated[
+        BaseScannerOptions, Field(description="Enable Checkov scanner")
+    ] = BaseScannerOptions()
 
 
 class GrypeScannerConfig(ScannerBaseConfig):
@@ -175,9 +180,9 @@ class GrypeScannerConfig(ScannerBaseConfig):
 
     name: Literal["grype"] = "grype"
     type: SCANNER_TYPES = "SAST"
-    grype: Annotated[
-        Union[bool, ScannerOptions], Field(description="Enable Grype scanner")
-    ] = ScannerOptions()
+    options: Annotated[
+        BaseScannerOptions, Field(description="Enable Grype scanner")
+    ] = BaseScannerOptions()
 
 
 class SyftScannerConfig(ScannerBaseConfig):
@@ -185,6 +190,6 @@ class SyftScannerConfig(ScannerBaseConfig):
 
     name: Literal["syft"] = "syft"
     type: SCANNER_TYPES = "SBOM"
-    syft: Annotated[
-        Union[bool, ScannerOptions], Field(description="Enable Syft scanner")
-    ] = ScannerOptions()
+    options: Annotated[BaseScannerOptions, Field(description="Enable Syft scanner")] = (
+        BaseScannerOptions()
+    )

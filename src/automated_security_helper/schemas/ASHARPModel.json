@@ -19,8 +19,14 @@
         "id": {
           "description": "Unique identifier for the finding",
           "minLength": 1,
-          "pattern": "^[\\w-]+$",
+          "pattern": "^[A-Za-z][\\/\\.\\w-]+$",
           "title": "Id",
+          "type": "string"
+        },
+        "link": {
+          "default": null,
+          "description": "Link to more information about the finding",
+          "title": "Link",
           "type": "string"
         },
         "location": {
@@ -33,6 +39,11 @@
           "description": "Additional scanner-specific metadata",
           "title": "Metadata",
           "type": "object"
+        },
+        "raw": {
+          "default": null,
+          "description": "Raw result from the scanner",
+          "title": "Raw"
         },
         "remediation": {
           "default": null,
@@ -167,7 +178,7 @@
           "default": null,
           "description": "Unique identifier for the report",
           "minLength": 1,
-          "pattern": "^[\\w-]+$",
+          "pattern": "^[A-Za-z][\\/\\.\\w-]+$",
           "title": "Report Id",
           "type": "string"
         },
@@ -219,7 +230,7 @@
           "default": null,
           "description": "Unique identifier for the scanner rule",
           "minLength": 1,
-          "pattern": "^[\\w-]+$",
+          "pattern": "^[A-Za-z][\\/\\.\\w-]+$",
           "title": "Rule Id",
           "type": "string"
         },
@@ -235,9 +246,7 @@
             "SBOM",
             "SECRETS",
             "UNKNOWN",
-            "CUSTOM",
-            "BANDIT",
-            "CDKNAG"
+            "CUSTOM"
           ],
           "title": "Type",
           "type": "string"

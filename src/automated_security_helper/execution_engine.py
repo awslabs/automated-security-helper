@@ -1,7 +1,7 @@
 """Execution engine for security scanners."""
 
 import multiprocessing
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 import logging
@@ -11,8 +11,9 @@ from automated_security_helper.scanners.scanner_factory import ScannerFactory
 from automated_security_helper.scanners.scanner_plugin import ScannerPlugin
 from automated_security_helper.config.scanner_types import ScannerBaseConfig
 
-import concurrent.futures
 from enum import Enum
+
+from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class ExecutionStrategy(Enum):
@@ -43,6 +44,7 @@ class ScanExecutionEngine:
         source_dir: Path,
         output_dir: Path,
         work_dir: Path,
+        enabled_scanners: List[str] = [],
         strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL,
         logger: logging.Logger = logging.Logger(name=__name__),
     ):
@@ -66,6 +68,7 @@ class ScanExecutionEngine:
         self._strategy = strategy
         self._max_workers = min(4, multiprocessing.cpu_count())
         self._progress = None
+        self._enabled_scanners = enabled_scanners
         self.source_dir = source_dir
         self.output_dir = output_dir
         self.work_dir = work_dir
@@ -89,6 +92,14 @@ class ScanExecutionEngine:
         """
         # Normalize scanner name for consistent lookup
         scanner_name = name.lower().strip()
+        if (
+            len(self._enabled_scanners) > 0
+            and scanner_name not in self._enabled_scanners
+        ):
+            ASH_LOGGER.warn(
+                f"Skipping registration of scanner {scanner_name}. Not enabled"
+            )
+            return
 
         # Determine scanner class and factory function
         if isinstance(scanner_factory, type):
@@ -96,6 +107,7 @@ class ScanExecutionEngine:
 
             def factory_fn():
                 return scanner_class()
+
         else:
             factory_fn = scanner_factory
             scanner_instance = factory_fn()
@@ -152,37 +164,44 @@ class ScanExecutionEngine:
             RuntimeError: If scanner execution fails critically
         """
         # Always use ASHConfig instance
+        self.logger.debug("Entering: ScanExecutionEngine.execute()")
         if config is None:
+            self.logger.debug(
+                "Defaulting config due to there not being a resolved configuration yet."
+            )
             config = DEFAULT_ASH_CONFIG
         if not isinstance(config, ASHConfig):
             raise ValueError("Configuration must be an ASHConfig instance")
 
-        # Update execution mode if specified in kwargs
-        if mode := kwargs.get("mode"):
-            try:
-                self._strategy = ExecutionStrategy(mode)
-            except ValueError:
-                raise ValueError(f"Invalid execution mode: {mode}")
-
-        # Initialize results dictionary
-        results = {"scanners": {}}
-
-        # Initialize empty list for enabled scanners
+        # Reset state for new execution
+        self._completed_scanners = []
+        self._queue = multiprocessing.Queue()
         enabled_scanners = []
-        processed_scanners = set()
+
+        # Create queue of scanner tuples for execution
+        self._queue = multiprocessing.Queue()
+        enabled_scanners = []
+        processed_scanners = []
 
         # Get all registered scanners from factory
+        self.logger.debug("Fetching registered scanners")
         try:
-            registered_scanners = self._scanner_factory.available_scanners()
-            logging.info(
+            registered_scanners = {
+                k: v
+                for k, v in self._scanner_factory.available_scanners().items()
+                if len(self._enabled_scanners) == 0 or k in self._enabled_scanners
+            }
+            self.logger.debug(
                 f"Using registered scanners: {list(registered_scanners.keys())}"
             )
         except AttributeError:
             registered_scanners = {}
 
         # Process registered scanners first
+        self.logger.debug("Processing registered scanners")
         for scanner_name, scanner_class in registered_scanners.items():
             try:
+                self.logger.debug(f"Processing registered scanner: {scanner_name}")
                 # Get scanner config from class or instance
                 if hasattr(scanner_class, "_default_config"):
                     # Use class default config
@@ -206,64 +225,64 @@ class ScanExecutionEngine:
                 enabled_scanners.append((scanner_name, config_dict))
 
             except Exception as e:
-                logging.warning(
+                self.logger.debug(
                     f"Failed to get config for scanner {scanner_name}: {str(e)}"
                 )
 
         # Process scanner configs from ASH config if provided
-        if config and hasattr(config, "sast") and config.sast and config.sast.scanners:
-            scanner_configs = config.sast.scanners
-            if not isinstance(scanner_configs, list):
-                scanner_configs = [scanner_configs]
+        # if config and hasattr(config, "sast") and config.sast and config.sast.scanners:
+        #     scanner_configs = config.sast.scanners
+        #     if not isinstance(scanner_configs, list):
+        #         scanner_configs = [scanner_configs]
 
-            # Clear any default configs
-            enabled_scanners = []
+        #     # Clear any default configs
+        #     enabled_scanners = []
 
-            for scanner_config in scanner_configs:
-                if not getattr(scanner_config, "enabled", True):
-                    continue
+        #     for scanner_config in scanner_configs:
+        #         if not getattr(scanner_config, "enabled", True):
+        #             continue
 
-                # Get scanner type from config class name
-                scanner_type = scanner_config.type
-                scanner_name = scanner_config.name
+        #         # Get scanner type from config class name
+        #         scanner_type = scanner_config.type
+        #         scanner_name = scanner_config.name
 
-                if "scanner" in scanner_type:
-                    scanner_type = scanner_type.split("scanner")[0]
+        #         if "scanner" in scanner_type:
+        #             scanner_type = scanner_type.split("scanner")[0]
 
-                # Try to find scanner in factory
-                if scanner_name in self._scanner_factory._scanners:
-                    # Convert scanner config to dict
-                    if hasattr(scanner_config, "model_dump"):
-                        config_dict = scanner_config.model_dump()
-                    else:
-                        config_dict = {
-                            k: v
-                            for k, v in vars(scanner_config).items()
-                            if not k.startswith("_")
-                        }
+        #         # Try to find scanner in factory
+        #         if scanner_name in self._scanner_factory._scanners:
+        #             # Convert scanner config to dict
+        #             if hasattr(scanner_config, "model_dump"):
+        #                 config_dict = scanner_config.model_dump()
+        #             else:
+        #                 config_dict = {
+        #                     k: v
+        #                     for k, v in vars(scanner_config).items()
+        #                     if not k.startswith("_")
+        #                 }
 
-                    config_dict["type"] = scanner_type
-                    enabled_scanners.append((scanner_name, config_dict))
-                else:
-                    # Try normalized name as fallback
-                    normalized_type = (
-                        scanner_type.replace("scanner", "").lower().strip()
-                    )
-                    if normalized_type in self._scanner_factory._scanners:
-                        if hasattr(scanner_config, "model_dump"):
-                            config_dict = scanner_config.model_dump()
-                        else:
-                            config_dict = {
-                                k: v
-                                for k, v in vars(scanner_config).items()
-                                if not k.startswith("_")
-                            }
-                        config_dict["type"] = normalized_type
-                        enabled_scanners.append((normalized_type, config_dict))
-                    else:
-                        logging.debug(
-                            f"Scanner type '{scanner_type}' not registered. Available scanners: {list(self._scanner_factory.available_scanners())}"
-                        )
+        #             config_dict["type"] = scanner_type
+        #             enabled_scanners.append((scanner_name, config_dict))
+        #         else:
+        #             # Try normalized name as fallback
+        #             normalized_type = (
+        #                 scanner_type.replace("scanner", "").lower().strip()
+        #             )
+        #             if normalized_type in self._scanner_factory._scanners:
+        #                 if hasattr(scanner_config, "model_dump"):
+        #                     config_dict = scanner_config.model_dump()
+        #                 else:
+        #                     config_dict = {
+        #                         k: v
+        #                         for k, v in vars(scanner_config).items()
+        #                         if not k.startswith("_")
+        #                     }
+        #                 config_dict["type"] = normalized_type
+        #                 enabled_scanners.append((normalized_type, config_dict))
+        #             else:
+        #                 self.logger.debug(
+        #                     f"Scanner type '{scanner_type}' not registered. Available scanners: {list(self._scanner_factory.available_scanners())}"
+        #                 )
 
         # Skip execution mode update here since it's handled at the start
 
@@ -287,14 +306,18 @@ class ScanExecutionEngine:
                 try:
                     # Validate scanner is registered
                     if scanner_type not in self._scanner_factory._scanners:
-                        logging.warning(
+                        self.logger.debug(
                             f"Scanner {scanner_type} not registered, skipping"
                         )
                         continue
 
                     # Create new scanner instance
                     scanner_class = self._scanner_factory._scanners[scanner_type]
-                    scanner = scanner_class()
+                    scanner = scanner_class(
+                        source_dir=self.source_dir,
+                        output_dir=self.output_dir,
+                        logger=self.logger,
+                    )
 
                     try:
                         # Configure scanner
@@ -306,8 +329,10 @@ class ScanExecutionEngine:
                         scanner.configure(config_obj)
 
                         # Execute scan against source directory
-                        logging.info(f"Executing {scanner_type}")
-                        result = scanner.scan(str(self.source_dir))
+                        self.logger.info(
+                            f"Executing {scanner_type} against directory: {self.source_dir.as_posix()}"
+                        )
+                        result = scanner.scan(self.source_dir.as_posix())
 
                         # Use scanner name from config for results
                         scanner_name = (
@@ -318,12 +343,12 @@ class ScanExecutionEngine:
                         # Store results
                         if result:
                             results["scanners"][scanner_name] = result
-                            logging.info(
+                            self.logger.info(
                                 f"Scanner {scanner_name} completed successfully"
                             )
 
                     except Exception as e:
-                        logging.error(f"Scanner config/execution error: {str(e)}")
+                        self.logger.error(f"Scanner config/execution error: {str(e)}")
                         results["scanners"][scanner_name] = {
                             "status": "error",
                             "error": str(e),
@@ -333,7 +358,9 @@ class ScanExecutionEngine:
                     self._progress.increment()
                     self._completed_scanners.append(scanner)
                 except Exception as e:
-                    logging.error(f"Failed to execute {scanner_type} scanner: {str(e)}")
+                    self.logger.error(
+                        f"Failed to execute {scanner_type} scanner: {str(e)}"
+                    )
                     continue
         # Return results without using any default scanner configs
         return results
@@ -358,26 +385,26 @@ class ScanExecutionEngine:
         scanner_plugin: ScannerPlugin = scanner_tuple[0]
         scanner_config: ScannerBaseConfig = scanner_tuple[1]
         try:
-            self.logger.warning(f"scanner_name: {scanner_plugin.__class__.__name__}")
-            self.logger.warning(f"scanner_config: {scanner_config}")
+            self.logger.debug(f"scanner_name: {scanner_plugin.__class__.__name__}")
+            self.logger.debug(f"scanner_config: {scanner_config}")
             # Create scanner instance
-            self.logger.warning(f"Getting scanner: {scanner_plugin.__class__.__name__}")
+            self.logger.debug(f"Getting scanner: {scanner_plugin.__class__.__name__}")
 
             # Configure if needed
             if scanner_config:
-                self.logger.warning(
+                self.logger.debug(
                     f"Configuring scanner {scanner_plugin.__class__.__name__}: {scanner_config}"
                 )
                 scanner_plugin.configure(scanner_config)
 
             # Execute scan
-            self.logger.warning(f"Executing {scanner_plugin.__class__.__name__}.scan()")
+            self.logger.debug(f"Executing {scanner_plugin.__class__.__name__}.scan()")
             result = scanner_plugin.scan()
 
-            self.logger.warning("Executing engine.progress.increment()")
+            self.logger.debug("Executing engine.progress.increment()")
             self._progress.increment()
 
-            self.logger.warning(
+            self.logger.debug(
                 f"Appending {scanner_plugin.__class__.__name__} to engine.completed_scanners"
             )
             self._completed_scanners.append(scanner_plugin)
@@ -388,10 +415,7 @@ class ScanExecutionEngine:
             self.logger.error(
                 f"Failed to execute {scanner_plugin.__class__.__name__} scanner: {e}"
             )
-            return None
-
-        except Exception as e:
-            raise RuntimeError(e) from e
+            raise
 
     def _execute_sequential(self) -> None:
         """Execute scanners sequentially."""
@@ -403,16 +427,19 @@ class ScanExecutionEngine:
         """Execute scanners in parallel using thread pool."""
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = []
+            # Submit all scanners to the thread pool
             while not self._queue.empty():
                 scanner_tuple = self._queue.get()
                 future = executor.submit(self._execute_scanner, scanner_tuple)
                 futures.append(future)
 
-            # Wait for all scanners to complete
-            concurrent.futures.wait(futures)
-            for future in futures:
-                if future.exception():
-                    raise future.exception()
+            # Wait for all futures to complete and handle any exceptions
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    self.logger.error(f"Scanner execution failed: {str(e)}")
+                    raise
 
     @property
     def completed_scanners(self) -> List[ScannerPlugin]:

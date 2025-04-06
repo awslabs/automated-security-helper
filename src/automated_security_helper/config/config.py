@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Annotated, Any, Callable, List, Dict, Literal, Union
+from typing import Annotated, Any, Callable, List, Dict, Literal
 from automated_security_helper.models.data_interchange import ExportFormat
 from automated_security_helper.config.scanner_types import (
     BanditScannerConfig,
@@ -118,6 +118,23 @@ class ScannerPluginConfig(ScannerBaseConfig):
             ],
         ),
     ] = "json"
+    output_arg: Annotated[
+        str | None,
+        Field(
+            description="Argument to pass the output option to when invoking the scanner command. Defaults to not including an arg for the output value, which results in the output option being passed to the scanner as a positional argument at the format_arg_position specified. If a value is provided, the value will be passed into the runtime args prior to the output option.",
+            examples=[
+                "--output",
+                "-o",
+                "--outfile",
+            ],
+        ),
+    ] = None
+    output_arg_position: Annotated[
+        Literal["before_args", "after_args"],
+        Field(
+            description="Whether to place the output argument before or after the scanner command args. Defaults to 'before_args'."
+        ),
+    ] = "before_args"
     get_tool_version_command: Annotated[
         List[str],
         Field(description="Command to run that should return the scanner version"),
@@ -173,14 +190,14 @@ class CustomBuildScannerConfig(BaseModel):
     __pydantic_extra__: Dict[str, List[ScannerPluginConfig]] = Field(init=False)
 
     sast: Annotated[
-        Dict[str, List[ScannerPluginConfig]],
+        List[ScannerPluginConfig],
         Field(description="Scanner configurations by type"),
-    ] = {}
+    ] = []
 
     sbom: Annotated[
-        Dict[str, List[ScannerPluginConfig]],
+        List[ScannerPluginConfig],
         Field(description="Scanner configurations by type"),
-    ] = {}
+    ] = []
 
 
 class BuildConfig(BaseModel):
@@ -211,38 +228,38 @@ class ScannerTypeConfig(BaseModel):
     ] = True
 
 
-class SecurityScanConfig(BaseModel):
-    """Configuration model for security scanning settings."""
+# class SecurityScanConfig(BaseModel):
+#     """Configuration model for security scanning settings."""
 
-    model_config = ConfigDict(extra="allow")
-    sast: Annotated[
-        List[
-            Union[
-                CustomScannerConfig,
-                BanditScannerConfig,
-                SemgrepScannerConfig,
-                CdkNagScannerConfig,
-                GrypeScannerConfig,
-            ]
-        ],
-        Field(description="List of SAST scanners to enable"),
-    ] = [
-        BanditScannerConfig(),
-        CdkNagScannerConfig(),
-        GrypeScannerConfig(),
-        SemgrepScannerConfig(),
-    ]
-    sbom: Annotated[
-        List[
-            Union[
-                CustomScannerConfig,
-                SyftScannerConfig,
-            ]
-        ],
-        Field(description="List of SBOM scanners to enable"),
-    ] = [
-        SyftScannerConfig(),
-    ]
+#     model_config = ConfigDict(extra="allow")
+#     sast: Annotated[
+#         List[
+#             Union[
+#                 CustomScannerConfig,
+#                 BanditScannerConfig,
+#                 SemgrepScannerConfig,
+#                 CdkNagScannerConfig,
+#                 GrypeScannerConfig,
+#             ]
+#         ],
+#         Field(description="List of SAST scanners to enable"),
+#     ] = [
+#         BanditScannerConfig(),
+#         CdkNagScannerConfig(),
+#         GrypeScannerConfig(),
+#         SemgrepScannerConfig(),
+#     ]
+#     sbom: Annotated[
+#         List[
+#             Union[
+#                 CustomScannerConfig,
+#                 SyftScannerConfig,
+#             ]
+#         ],
+#         Field(description="List of SBOM scanners to enable"),
+#     ] = [
+#         SyftScannerConfig(),
+#     ]
 
 
 class ParserConfig(ScannerBaseConfig):
@@ -276,6 +293,27 @@ class ScannerClassConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ScannerListConfig(ScannerClassConfig):
+    __pydantic_extra__: Dict[str, CustomScannerConfig | bool]
+
+
+class SASTScannerListConfig(ScannerListConfig):
+    bandit: Annotated[BanditScannerConfig | bool, Field()] = BanditScannerConfig()
+    cdknag: Annotated[CdkNagScannerConfig | bool, Field()] = CdkNagScannerConfig()
+    cfnnag: Annotated[CfnNagScannerConfig | bool, Field()] = CfnNagScannerConfig()
+    checkov: Annotated[CheckovScannerConfig | bool, Field()] = CheckovScannerConfig()
+    gitsecrets: Annotated[GitSecretsScannerConfig | bool, Field()] = (
+        GitSecretsScannerConfig()
+    )
+    grype: Annotated[GrypeScannerConfig | bool, Field()] = GrypeScannerConfig()
+    npmaudit: Annotated[NpmAuditScannerConfig | bool, Field()] = NpmAuditScannerConfig()
+    semgrep: Annotated[SemgrepScannerConfig | bool, Field()] = SemgrepScannerConfig()
+
+
+class SBOMScannerListConfig(ScannerListConfig):
+    syft: Annotated[SyftScannerConfig | bool, Field()] = SyftScannerConfig()
+
+
 class SASTScannerConfig(ScannerClassConfig):
     """Configuration model for SAST scanners."""
 
@@ -291,32 +329,11 @@ class SASTScannerConfig(ScannerClassConfig):
     ]
 
     scanners: Annotated[
-        List[
-            Union[
-                # Custom scanners
-                CustomScannerConfig,
-                # Built-in scanners
-                BanditScannerConfig,
-                CdkNagScannerConfig,
-                CfnNagScannerConfig,
-                CheckovScannerConfig,
-                GitSecretsScannerConfig,
-                GrypeScannerConfig,
-                NpmAuditScannerConfig,
-                SemgrepScannerConfig,
-            ]
-        ],
-        Field(description="List of SAST scanners to enable"),
-    ] = [
-        BanditScannerConfig(),
-        CdkNagScannerConfig(),
-        CfnNagScannerConfig(),
-        CheckovScannerConfig(),
-        GitSecretsScannerConfig(),
-        GrypeScannerConfig(),
-        NpmAuditScannerConfig(),
-        SemgrepScannerConfig(),
-    ]
+        SASTScannerListConfig,
+        Field(
+            description="SAST scanners to enable and their corresponding configurations."
+        ),
+    ] = SASTScannerListConfig()
 
 
 class SBOMScannerConfig(ScannerClassConfig):
@@ -343,16 +360,11 @@ class SBOMScannerConfig(ScannerClassConfig):
     ]
 
     scanners: Annotated[
-        List[
-            Union[
-                CustomScannerConfig,
-                SyftScannerConfig,
-            ]
-        ],
-        Field(description="List of SBOM scanners to enable"),
-    ] = [
-        SyftScannerConfig(),
-    ]
+        SBOMScannerListConfig,
+        Field(
+            description="SBOM scanners to enable and their corresponding configurations."
+        ),
+    ] = SBOMScannerListConfig()
 
 
 class ASHConfig(BaseModel):

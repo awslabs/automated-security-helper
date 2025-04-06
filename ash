@@ -187,7 +187,7 @@ else
           ${MOUNT_OUTPUT_DIR} \
           ${DOCKER_RUN_EXTRA_ARGS} \
           ${ASH_IMAGE_NAME} \
-            ash \
+            ashv3 \
               --source-dir /src  \
               ${OUTPUT_DIR_OPTION}  \
               $ASH_ARGS

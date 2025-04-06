@@ -230,4 +230,4 @@ HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD type ash || exit 1
 
 ENTRYPOINT [ ]
-CMD [ "ash" ]
+CMD [ "ashv3", "--verbose", "--source", "/src", "--output","/out", "--strategy", "sequential", "--scanners", "bandit,cdknag" ]

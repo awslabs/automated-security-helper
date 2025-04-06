@@ -3,8 +3,9 @@
 
 """Core models for security findings."""
 
+import re
 from datetime import datetime, timezone
-from typing import Optional, Dict, Literal, Annotated, Union
+from typing import Any, Optional, Dict, Literal, Annotated, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 # Define valid severity levels at module level for use across all finding types
@@ -21,9 +22,6 @@ SCANNER_TYPES = Literal[
     "SECRETS",
     "UNKNOWN",
     "CUSTOM",
-    # Specialized scanner types
-    "BANDIT",
-    "CDKNAG",
 ]
 
 
@@ -62,7 +60,7 @@ class Scanner(BaseModel):
         str,
         Field(
             min_length=1,
-            pattern=r"^[\w-]+$",
+            pattern=r"^[A-Za-z][\/\.\w-]+$",
             description="Unique identifier for the scanner rule",
         ),
     ] = None
@@ -90,9 +88,8 @@ class Scanner(BaseModel):
         if not v:
             raise ValueError("Rule ID cannot be empty")
         # Ensure valid format
-        import re
 
-        if not re.match(r"^[\w-]*$", v):
+        if not re.match(r"^[A-Za-z][\/\.\w-]+$", v):
             raise ValueError(
                 "Rule ID must start with alphanumeric and contain only alphanumeric, underscore or hyphen"
             )
@@ -114,7 +111,7 @@ class BaseFinding(BaseModel):
         Field(
             ...,
             min_length=1,
-            pattern=r"^[\w-]+$",
+            pattern=r"^[A-Za-z][\/\.\w-]+$",
             description="Unique identifier for the finding",
             # alias="finding_id"
         ),
@@ -140,6 +137,9 @@ class BaseFinding(BaseModel):
     location: Annotated[
         Location, Field(..., description="Location information for the finding")
     ]
+    link: Annotated[
+        str, Field(description="Link to more information about the finding")
+    ] = None
     timestamp: Annotated[
         str,
         Field(
@@ -170,6 +170,10 @@ class BaseFinding(BaseModel):
         Dict,
         Field(description="Additional scanner-specific metadata"),
     ] = {}
+    raw: Annotated[
+        Any,
+        Field(description="Raw result from the scanner"),
+    ] = None
 
     @field_validator("severity")
     @classmethod

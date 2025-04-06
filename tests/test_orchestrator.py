@@ -1,9 +1,7 @@
 """Tests for orchestrator module."""
 
 import json
-import logging
 import os
-from pathlib import Path
 import tempfile
 import pytest
 import yaml
@@ -24,51 +22,34 @@ def default_config():
         os.unlink(f.name)
 
 
-@pytest.fixture
-def source_dir():
-    """Create a temporary source directory."""
-    with tempfile.TemporaryDirectory() as d:
-        yield Path(d)
-
-
-@pytest.fixture
-def output_dir():
-    """Create a temporary output directory."""
-    with tempfile.TemporaryDirectory() as d:
-        yield Path(d)
-
-
-def test_execute_scan_with_config(source_dir, output_dir):
+def test_execute_scan_with_config(test_source_dir, test_output_dir):
     """Test executing scan with configuration file."""
-    with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as f:
-        # Create minimal config that gets transformed to ASHConfig
-        try:
-            config_to_dump: dict = json.loads(
-                json.dumps(DEFAULT_ASH_CONFIG.model_dump(), default=str)
-            )
-            logging.Logger(__file__).warning(config_to_dump)
-            f.flush()
+    # Create minimal config that gets transformed to ASHConfig
+    try:
+        with open(test_source_dir.joinpath("ash.yaml"), "w") as f:
+            config_to_dump: dict = json.loads(DEFAULT_ASH_CONFIG.model_dump_json())
             with open(f.name, "w") as f:
                 yaml.safe_dump(config_to_dump, f)
-            orchestrator = ASHScanOrchestrator(
-                source_dir=source_dir,
-                output_dir=output_dir,
-                work_dir=output_dir.joinpath("work"),
-                config_path=f.name,
-            )
-            result = orchestrator.execute_scan()
-            assert isinstance(result, dict)
-            assert "scanners" in result
-        finally:
-            os.unlink(f.name)
+
+        orchestrator = ASHScanOrchestrator(
+            source_dir=test_source_dir,
+            output_dir=test_output_dir,
+            config_path=f.name,
+        )
+        result = orchestrator.execute_scan()
+        assert isinstance(result, dict)
+        assert "scanners" in result
+    finally:
+        pass
+        os.unlink(f.name)
 
 
-def test_execute_scan_no_config(source_dir, output_dir):
+def test_execute_scan_no_config(test_source_dir, test_output_dir):
     """Test executing scan without configuration file."""
     orchestrator = ASHScanOrchestrator(
-        source_dir=source_dir,
-        output_dir=output_dir,
-        work_dir=output_dir.joinpath("work"),
+        source_dir=test_source_dir,
+        output_dir=test_output_dir,
+        work_dir=test_output_dir.joinpath("work"),
         config_path=None,
     )
     result = orchestrator.execute_scan()

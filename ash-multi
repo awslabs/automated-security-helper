@@ -104,7 +104,7 @@ get_all_files() {
   pushd . >/dev/null 2>&1
   # cd to the source directory as a starting point
   cd "${_ASH_SOURCE_DIR}"
-  src_files=$(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" --source $(pwd) --output "${_ASH_OUTPUT_DIR}" ${ASH_SCANSET_ARGS})
+  src_files=$(get-scan-set --source $(pwd) --output "${_ASH_OUTPUT_DIR}" ${ASH_SCANSET_ARGS})
   popd >/dev/null 2>&1
 
   all_files+=( "$src_files" )
@@ -503,7 +503,7 @@ IFS=$'\n' # Support directories with spaces, make the loop iterate over newline 
 pushd . >/dev/null 2>&1
 cd "${SOURCE_DIR}"
 # We do not include --output here explicitly to only yield the relative path
-for zipfile in $(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" --source . | grep '\.zip$');
+for zipfile in $(get-scan-set --source . | grep '\.zip$');
 do
   tgt_dir=$(dirname "${OUTPUT_DIR}"/work/"${zipfile:2}")/"$(basename "${zipfile%.*}")"
   mkdir -p "${tgt_dir}"
