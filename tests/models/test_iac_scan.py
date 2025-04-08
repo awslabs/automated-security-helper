@@ -14,13 +14,10 @@ def sample_vulnerability():
         id="vuln-1",
         file_path="test.template.json",
         line_number=20,
-        rule_id="XXXXXX",
+        rule_id="TEST-01",
         title="Insecure Security Group",
         description="Security group allows unrestricted access",
         severity="HIGH",
-        scanner=Scanner(
-            name="base_scanner", version="1.0.0", rule_id="TEST-001", type="SAST"
-        ),
         location=Location(file_path="/path/to/file", start_line=10, end_line=5),
         timestamp=datetime.now().isoformat(timespec="seconds"),
         resource_type="AWS::EC2::SecurityGroup",
@@ -69,7 +66,6 @@ def test_iac_vulnerability_inheritance(sample_vulnerability):
     assert hasattr(sample_vulnerability, "title")
     assert hasattr(sample_vulnerability, "description")
     assert hasattr(sample_vulnerability, "severity")
-    assert hasattr(sample_vulnerability, "scanner")
     assert hasattr(sample_vulnerability, "location")
     assert hasattr(sample_vulnerability, "timestamp")
 
@@ -82,6 +78,9 @@ def test_iac_scan_report_creation(sample_vulnerability):
         iac_framework="CloudFormation",
         timestamp=datetime.now().isoformat(timespec="seconds"),
         findings=[sample_vulnerability],
+        scanners_used=[
+            Scanner(name="base_scanner", version="1.0.0", type="SAST"),
+        ],
         resources_checked={
             "AWS::EC2::SecurityGroup": 2,
             "AWS::S3::Bucket": 3,

@@ -3,10 +3,10 @@
 import junit_xml
 
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.outputs.interfaces import IOutputFormatter
+from automated_security_helper.models.interfaces import IOutputReporter
 
 
-class JUnitXMLFormatter(IOutputFormatter):
+class JUnitXMLReporter(IOutputReporter):
     """Formats results as JUnitXML."""
 
     def format(self, model: ASHARPModel) -> str:

@@ -5,9 +5,7 @@ import pytest
 from automated_security_helper.config.config import ScannerPluginConfig
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 from automated_security_helper.scanners.cdk_nag_scanner import CDKNagScanner
-from automated_security_helper.scanners.scanner_factory import (
-    ScannerFactory,
-)
+from automated_security_helper.scanner_factory import ScannerFactory
 
 
 def test_scanner_factory_initialization():

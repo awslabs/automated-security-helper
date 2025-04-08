@@ -2,36 +2,120 @@
 
 from pathlib import Path
 import re
-from typing import Callable, Dict, List, Type, Union
+import logging
+from typing import Callable, Dict, Optional, Type, Union
+from importlib import import_module
 
 from automated_security_helper.config.config import ScannerPluginConfig
-from automated_security_helper.scanners.scanner_plugin import ScannerPlugin
+from automated_security_helper.models.scanner_plugin import ScannerPlugin
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 from automated_security_helper.scanners.cdk_nag_scanner import CDKNagScanner
+from automated_security_helper.scanners.jupyter_scanner import JupyterScanner
+from automated_security_helper.utils.log import ASH_LOGGER
+
+# Core scanners that must be available
+_CORE_SCANNERS = [
+    BanditScanner,
+    CDKNagScanner,
+    JupyterScanner,
+]  # Required always-available scanners
+
+# Configuration for optional scanners that will be loaded dynamically if available
+_OPTIONAL_SCANNER_CONFIGS = {
+    "jupyter": {
+        "module_path": "automated_security_helper.scanners.jupyter_scanner",
+        "class_name": "JupyterScanner",
+    }
+}
 
 
 class ScannerFactory:
     """Factory class for creating and configuring scanner instances."""
 
-    default_scanners: List[Type[ScannerPlugin]] = [
-        BanditScanner,
-        CDKNagScanner,
-    ]
-
-    def __init__(self) -> None:
-        """Initialize the scanner factory."""
+    def __init__(self, logger: Optional[logging.Logger] = None) -> None:
+        """Initialize the scanner factory with empty scanner registry."""
+        self.default_scanners = set()
         self._scanners: Dict[
             str, Union[Type[ScannerPlugin], Callable[[], ScannerPlugin]]
         ] = {}
-        # Register default scanners
         self._register_default_scanners()
 
     def _register_default_scanners(self) -> None:
         """Register the default set of scanners."""
-        # Register each scanner with its normalized name
+        registered = set()  # Track registered scanner names
+
+        # First ensure core scanners are registered in scanner dict
+        for scanner_class in _CORE_SCANNERS:
+            scanner_name = scanner_class.__name__.lower().strip()
+            if scanner_name not in self._scanners:
+                # Register the scanner class directly first
+                self._scanners[scanner_name] = scanner_class
+                self.default_scanners.add(scanner_class)
+                registered.add(scanner_name)
+
+                # Also register base name if 'scanner' suffix present
+                if scanner_name.endswith("scanner"):
+                    base_name = scanner_name[:-7].strip()
+                    if base_name and base_name not in self._scanners:
+                        self._scanners[base_name] = scanner_class
+                        registered.add(base_name)
+
+        # Try to register optional scanners
+        for scanner_type, config in _OPTIONAL_SCANNER_CONFIGS.items():
+            try:
+                module = import_module(config["module_path"])
+                scanner_class = getattr(module, config["class_name"])
+                scanner_name = scanner_class.__name__.lower().strip()
+                if scanner_name not in self._scanners:
+                    self._scanners[scanner_name] = scanner_class
+                    self.default_scanners.add(scanner_class)
+                    registered.add(scanner_name)
+            except (ImportError, AttributeError):
+                # Skip if scanner module is not available
+                continue
+
+        # Process all default scanners
         for scanner_class in self.default_scanners:
-            name = scanner_class._default_config.name
-            self.register_scanner(name, scanner_class)
+            try:
+                # Skip invalid scanner classes
+                if not issubclass(scanner_class, ScannerPlugin):
+                    ASH_LOGGER.warning(
+                        f"Invalid scanner class: {scanner_class.__name__}"
+                    )
+                    continue
+
+                # Check for required config
+                if not hasattr(scanner_class, "_default_config"):
+                    ASH_LOGGER.warning(
+                        f"Scanner {scanner_class.__name__} missing _default_config"
+                    )
+                    continue
+
+                config = scanner_class._default_config
+                if not hasattr(config, "name") or not config.name:
+                    ASH_LOGGER.warning(
+                        f"Scanner {scanner_class.__name__} missing required name in default config"
+                    )
+                    continue
+
+                scanner_name = scanner_class.__name__.lower().strip()
+
+                # Only register if not already present
+                if scanner_name not in self._scanners:
+                    self._scanners[scanner_name] = scanner_class
+                    registered.add(scanner_name)
+
+                # Also register base name if 'scanner' suffix present
+                if scanner_name.endswith("scanner"):
+                    base_name = scanner_name[:-7].strip()
+                    if base_name and base_name not in self._scanners:
+                        self._scanners[base_name] = scanner_class
+                        registered.add(base_name)
+
+            except Exception as e:
+                ASH_LOGGER.warning(
+                    f"Failed to register scanner {scanner_class.__name__}: {str(e)}"
+                )
 
     @staticmethod
     def _normalize_scanner_name(scanner_name: str) -> str:
@@ -52,13 +136,16 @@ class ScannerFactory:
     ) -> None:
         """Register a scanner with the factory.
 
+        The scanner name will be normalized to lowercase. Both the original name and base
+        name without 'scanner' suffix (if present) will be registered.
+
         Args:
             scanner_name: Name of scanner to register (will be normalized)
             scanner_input: Scanner class or factory function to register
 
         Raises:
-            TypeError: If scanner_input is not valid
-            ValueError: If scanner already registered or name is empty
+            ValueError: If scanner name is empty or already registered
+            TypeError: If scanner input is not valid
         """
         if not scanner_name:
             raise ValueError("Scanner name cannot be empty")
@@ -90,9 +177,10 @@ class ScannerFactory:
     def create_scanner(
         self,
         scanner_name: str,
-        config: ScannerPluginConfig,
-        source_dir: Path,
-        output_dir: Path,
+        config: Optional[ScannerPluginConfig] = None,
+        source_dir: Optional[Path] = None,
+        output_dir: Optional[Path] = None,
+        logger: Optional[logging.Logger] = None,
     ) -> ScannerPlugin:
         """Create a scanner instance of the specified type with optional configuration.
 

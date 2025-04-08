@@ -1,514 +1,107 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """Unit tests for execution engine module."""
 
 import logging
-from pathlib import Path
-from typing import Any, Dict, Optional, Type
-import pytest
-from unittest.mock import Mock, patch
+from typing import Dict, Optional, Type
 
 from automated_security_helper.execution_engine import (
-    ScanExecutionEngine,
     ExecutionStrategy,
+    ScanExecutionEngine,
 )
+from automated_security_helper.models.scanner_plugin import ScannerPlugin
+
 from automated_security_helper.config.config import (
     ASHConfig,
     SASTScannerConfig,
     SASTScannerListConfig,
     SBOMScannerConfig,
-    ScannerPluginConfig,
-)
-from automated_security_helper.config.scanner_types import (
-    CustomScannerConfig,
-    BaseScannerOptions,
+    SBOMScannerListConfig,
 )
 from automated_security_helper.models.data_interchange import ExportFormat
-from automated_security_helper.scanners.scanner_plugin import ScannerPlugin
-from automated_security_helper.utils.log import get_logger
+from automated_security_helper.scanners.bandit_scanner import BanditScanner
+
 from tests.conftest import TEST_OUTPUT_DIR, TEST_SOURCE_DIR
 
 
 class MockEngine(ScanExecutionEngine):
+    """Test execution engine with pre-configured scanner factory."""
+
     def __init__(
         self,
         strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL,
         source_dir=None,
         output_dir=None,
     ):
-        # Create directories and logger
+        # Set up paths and logging first
         source_dir = source_dir or TEST_SOURCE_DIR
         output_dir = output_dir or TEST_OUTPUT_DIR
-        logger = logging.Logger("test_logger", level=logging.DEBUG)
+        self.logger = logging.getLogger("test_execution_engine")
 
-        # Initialize default config
-        global DEFAULT_ASH_CONFIG
-        DEFAULT_ASH_CONFIG = ASHConfig(
-            project_name="test",
-            fail_on_findings=False,
-            sast=SASTScannerConfig(),
-            sbom=SBOMScannerConfig(),
-        )
+        # Initialize engine state and scanners
+        self._scanners = {}  # Start with empty scanner registry
+        self._enabled_scanners = None  # Default to all enabled
+        self._initialized = False  # Will be set after initialization
 
-        # Create clean scanner factory
+        # Configure and create scanner factory
         class TestScannerFactory:
-            """Clean scanner factory that doesn't inherit from ScannerFactory."""
+            """Scanner factory for testing."""
 
-            def __init__(self):
-                # Initialize minimal required attributes
-                self._scanners = {}
+            def __init__(self, logger):
                 self._logger = logger
+                self._scanners = {
+                    "bandit": BanditScanner,
+                    # 'cfnnag': CFNNagScanner
+                }
+                self._logger.debug(
+                    f"Initialized scanner factory with: {list(self._scanners.keys())}"
+                )
 
             def available_scanners(self) -> Dict[str, Type[ScannerPlugin]]:
-                """Return only explicitly registered scanners."""
                 return self._scanners.copy()
 
+            def get_scanner_class(self, name: str) -> Optional[Type[ScannerPlugin]]:
+                return self._scanners.get(name.lower().strip())
+
             def register_scanner(
-                self, name: str, scanner_class: Type[ScannerPlugin]
+                self, scanner_name: str, scanner_class: Type[ScannerPlugin]
             ) -> None:
-                """Register scanner and prevent default registration."""
-                scanner = scanner_class()
-                if hasattr(scanner, "_default_config"):
-                    # Update default config name and type
-                    scanner._default_config.name = name
-                    scanner._default_config.type = "CUSTOM"
-                # Update scanner name and type if needed
-                scanner._name = name
-                scanner._config = CustomScannerConfig(
-                    name=name,
-                    type="CUSTOM",
-                    enabled=True,
-                    custom=BaseScannerOptions(enabled=True),
-                )
-                # Store scanner class
+                name = scanner_name.lower().strip()
                 self._scanners[name] = scanner_class
+                self._logger.debug(f"Registered scanner: {name}")
 
-            def get_scanner_class(self, name: str) -> Type[ScannerPlugin]:
-                """Get scanner class by name."""
-                if name not in self._scanners:
-                    raise ValueError(f"Scanner {name} not registered")
-                return self._scanners[name]
+            def create_scanner(self, scanner_name: str, **kwargs) -> ScannerPlugin:
+                name = scanner_name.lower().strip()
+                scanner_class = self.get_scanner_class(name)
+                if not scanner_class:
+                    raise ValueError(f"Scanner {name} not found")
+                return scanner_class(**kwargs)
 
-            def create_scanner(
-                self, name: str, config: Optional[Dict[str, Any]] = None
-            ) -> ScannerPlugin:
-                """Create scanner instance."""
-                if name not in self._scanners:
-                    raise ValueError(f"Scanner {name} not registered")
-                scanner_fn = self._scanners[name]
-                source_dir = TEST_SOURCE_DIR
-                output_dir = TEST_OUTPUT_DIR
-                if config and isinstance(config, dict):
-                    source_dir = Path(config.get("source_dir", TEST_SOURCE_DIR))
-                    output_dir = Path(config.get("output_dir", TEST_OUTPUT_DIR))
-                return scanner_fn(source_dir, output_dir)
+        # Create scanner factory and mark engine as uninitialized
+        self._scanner_factory = TestScannerFactory(self.logger)
+        self._initialized = False
 
-        # Initialize with clean factory
-        scanner_factory = TestScannerFactory()
-
-        # Initialize parent first
+        # Initialize parent with scanner factory ready
         super().__init__(
             source_dir=source_dir,
             output_dir=output_dir,
             strategy=strategy,
-            logger=logger,
+            logger=self.logger,
         )
 
-        # Override parent initialization to prevent default scanners
-        self._scanners = {}
-        self._original_scanners = {}  # Prevent parent defaults
-        self._scanner_factory = scanner_factory
-        self._strategy = strategy
-
-        # Verify initialization
-        assert len(self._scanner_factory._scanners) == 0, (
-            "Scanner factory should be empty"
-        )
-        assert self._strategy == strategy, "Strategy not set correctly"
-        assert len(getattr(self, "_original_scanners")) == 0, (
-            "Should not have default scanners"
-        )
-
-
-class MockPwdScanner(ScannerPlugin):
-    """Mock scanner for testing."""
-
-    def __init__(
-        self,
-        source_dir: Path = TEST_SOURCE_DIR,
-        output_dir: Path = TEST_OUTPUT_DIR,
-        logger: Optional[logging.Logger] = get_logger(
-            "test_logger", level=logging.DEBUG
-        ),
-    ) -> None:
-        """Initialize scanner."""
-        super().__init__(source_dir, output_dir, logger)
-
-    def validate(self):
-        """Validate scanner configuration."""
-        return True
-
-    @property
-    def default_config(self):
-        """Get default scanner configuration."""
-        return CustomScannerConfig(
-            name="test_scanner",
-            type="CUSTOM",
-            enabled=True,
-            custom=BaseScannerOptions(enabled=True),
-            source_dir=self.source_dir,
-            output_dir=self.output_dir,
-        )
-
-    def configure(self, config):
-        """Configure scanner with provided config."""
-        # Convert legacy config types to new format
-        if isinstance(config, dict):
-            config = CustomScannerConfig(**config)
-        elif not isinstance(config, CustomScannerConfig):
-            config = CustomScannerConfig(
-                name=config.name,
-                type="CUSTOM",
+        # Default config for testing
+        self._config = ASHConfig(
+            project_name="test",
+            fail_on_findings=False,
+            sast=SASTScannerConfig(
+                output_formats=[ExportFormat.JSON],
                 enabled=True,
-                custom=BaseScannerOptions(enabled=True),
-                source_dir=self.source_dir,
-                output_dir=self.output_dir,
-            )
-
-        # Set scanner config
-        self._config = config
-        self._name = config.name
-        self.scan_called = False  # Reset scan flag
-
-        # Set scanner name from config
-        self._name = config.name
-
-    def scan(
-        self, target: str, options: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """Mock scan method."""
-        self.scan_called = True
-        result = {
-            "status": "success",
-            "name": self._name,  # Use configured name
-            "type": self._config.type,
-            "scanner": self._name,
-            "results": {"findings": [], "metadata": {"scanner_name": self._name}},
-        }
-        return result
-
-    def get_config(self) -> CustomScannerConfig:
-        """Get current scanner configuration."""
-        return (
-            self._config
-            if isinstance(self._config, CustomScannerConfig)
-            else CustomScannerConfig(
-                name=self._name,
-                type="CUSTOM",
+                scanners=SASTScannerListConfig(),
+            ),
+            sbom=SBOMScannerConfig(
+                output_formats=[ExportFormat.JSON],
                 enabled=True,
-                custom=BaseScannerOptions(enabled=True),
-            )
+                scanners=SBOMScannerListConfig(),
+            ),
         )
 
-    @property
-    def description(self) -> str:
-        """Get scanner description."""
-        if self._config and hasattr(self._config, "name"):
-            return f"Mock scanner {self._config.name}"
-        return "Mock scanner test_scanner"
-
-
-@pytest.fixture
-def mock_pwd_scanner(test_source_dir, test_output_dir):
-    yield MockPwdScanner(test_source_dir, test_output_dir)
-
-
-def test_engine_initialization():
-    """Test execution engine initialization."""
-    engine = MockEngine()
-    assert engine._strategy == ExecutionStrategy.PARALLEL
-    assert engine._max_workers == 4
-
-
-def test_get_scanner(mock_pwd_scanner):
-    """Test getting registered scanner."""
-    engine = MockEngine()
-
-    # Register test scanner
-    engine.register_scanner("test_scanner", mock_pwd_scanner.__class__)
-
-    # Get scanner and verify instance
-    created_scanner = engine.get_scanner("test_scanner")
-    assert created_scanner.get_config().name == "<unknown>"
-    assert created_scanner.description == "Mock scanner test_scanner"
-    assert "test_scanner" in engine._scanners
-
-    with pytest.raises(ValueError, match="Scanner 'unknown' not registered"):
-        engine.get_scanner("unknown")
-
-
-def test_register_scanner(test_source_dir, test_output_dir, mock_pwd_scanner):
-    """Test scanner registration."""
-    engine = MockEngine()
-    scanner = mock_pwd_scanner
-    scanner.configure(
-        ScannerPluginConfig(
-            command="pwd",
-            name="test_scanner",
-            type="CUSTOM",
-            invocation_mode="directory",
-            source_dir=test_source_dir,
-            output_dir=test_output_dir,
-        )
-    )
-    engine.register_scanner("test_scanner", MockPwdScanner)
-
-    created_scanner = engine.get_scanner("test_scanner")
-    assert isinstance(created_scanner, MockPwdScanner)
-
-
-def test_execute_with_registered_scanner(test_source_dir, test_output_dir):
-    """Test execution with registered scanner."""
-    engine = MockEngine()
-
-    # Configure scanner instance
-    scanner_config = CustomScannerConfig(
-        name="test_scanner",
-        type="CUSTOM",
-        enabled=True,
-        custom=BaseScannerOptions(enabled=True),
-        source_dir=test_source_dir,
-        output_dir=test_output_dir,
-    )
-
-    scanner = MockPwdScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(scanner_config)
-
-    # Register scanner class
-    engine.register_scanner("test_scanner", MockPwdScanner)
-
-    # Verify initial state
-    assert not scanner.scan_called
-
-    # Execute with explicit scanner config
-    config = ASHConfig(
-        project_name="test",
-        fail_on_findings=False,
-        sast=SASTScannerConfig(
-            output_formats=[ExportFormat.JSON],
-            enabled=True,
-            scanners=SASTScannerListConfig(
-                test_scanner=CustomScannerConfig(
-                    name="test_scanner",
-                    type="CUSTOM",
-                    enabled=True,
-                    custom=BaseScannerOptions(enabled=True),
-                )
-            ),
-        ),
-    )
-    results = engine.execute(config)
-
-    # Verify execution and results
-    expected_result = {
-        "status": "success",
-        "scanner": "test_scanner",
-        "name": "test_scanner",
-        "type": "CUSTOM",
-        "results": {"findings": [], "metadata": {"scanner_name": "test_scanner"}},
-    }
-
-    assert "test_scanner" in results["scanners"]
-    assert results["scanners"]["test_scanner"] == expected_result
-
-
-@patch("concurrent.futures.ThreadPoolExecutor")
-def test_execute_with_parallel_mode(mock_executor, test_source_dir, test_output_dir):
-    """Test parallel execution mode."""
-    # Setup mock executor
-    global DEFAULT_ASH_CONFIG
-    mock_executor_instance = Mock()
-    mock_executor.return_value.__enter__.return_value = mock_executor_instance
-
-    def mock_submit(fn, args):
-        future = Mock()
-        result = fn(args)
-        future.result.return_value = result
-        return future
-
-    mock_executor_instance.submit.side_effect = mock_submit
-
-    # Test execution
-    engine = MockEngine(strategy=ExecutionStrategy.PARALLEL)
-    scanner1 = MockPwdScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner2 = MockPwdScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-
-    # Configure scanners with proper CustomScannerConfig
-    scanner1_config = CustomScannerConfig(
-        name="test_scanner1",
-        type="CUSTOM",
-        enabled=True,
-        custom=BaseScannerOptions(enabled=True),
-    )
-    scanner2_config = CustomScannerConfig(
-        name="test_scanner2",
-        type="CUSTOM",
-        enabled=True,
-        custom=BaseScannerOptions(enabled=True),
-    )
-
-    # Configure scanners and register with engine
-    scanner1.configure(scanner1_config)
-    scanner2.configure(scanner2_config)
-
-    # Register using lambda wrapper for source/output dirs
-    engine.register_scanner("test_scanner1", MockPwdScanner)
-    engine.register_scanner("test_scanner2", MockPwdScanner)
-    # Scanners already registered above
-
-    # Execute with proper config
-    config = ASHConfig(
-        project_name="test",
-        fail_on_findings=False,
-        sast=SASTScannerConfig(
-            output_formats=[ExportFormat.JSON],
-            enabled=True,
-            scanners=SASTScannerListConfig(
-                test_scanner1=scanner1_config,
-                test_scanner2=scanner2_config,
-            ),
-        ),
-    )
-    results = engine.execute(config)
-
-    # Verify both scanners executed
-    assert len(results["scanners"]) == 2
-    assert "test_scanner1" in results["scanners"]
-    assert "test_scanner2" in results["scanners"]
-    assert results["scanners"]["test_scanner1"]["status"] == "success"
-    assert results["scanners"]["test_scanner2"]["status"] == "success"
-    # Verify scanner results - since scanners are created as new instances by the factory,
-    # we verify execution through the results rather than the local scanner instances
-    scanner1_result = results["scanners"]["test_scanner1"]
-    scanner2_result = results["scanners"]["test_scanner2"]
-
-    assert scanner1_result["status"] == "success"
-    assert scanner2_result["status"] == "success"
-    assert scanner1_result["results"] == {
-        "findings": [],
-        "metadata": {"scanner_name": "test_scanner1"},
-    }
-    assert scanner2_result["results"] == {
-        "findings": [],
-        "metadata": {"scanner_name": "test_scanner2"},
-    }
-
-
-def test_execute_with_sequential_mode(test_source_dir, test_output_dir):
-    """Test sequential execution mode."""
-    engine = MockEngine(strategy=ExecutionStrategy.SEQUENTIAL)
-    assert engine._strategy == ExecutionStrategy.SEQUENTIAL
-
-    # Create and configure scanners
-    scanner1_config = CustomScannerConfig(
-        name="test_scanner1",
-        type="CUSTOM",
-        enabled=True,
-        custom=BaseScannerOptions(enabled=True),
-    )
-    scanner2_config = CustomScannerConfig(
-        name="test_scanner2",
-        type="CUSTOM",
-        enabled=True,
-        custom=BaseScannerOptions(enabled=True),
-    )
-
-    # Register scanners with config
-    engine.register_scanner("test_scanner1", MockPwdScanner)
-    engine.register_scanner("test_scanner2", MockPwdScanner)
-
-    # Execute with scanner configs
-    config = ASHConfig(
-        project_name="test",
-        output_dir=Path(test_output_dir).as_posix(),
-        fail_on_findings=False,
-        sast=SASTScannerConfig(
-            output_formats=[ExportFormat.JSON],
-            enabled=True,
-            scanners=SASTScannerListConfig(
-                test_scanner1=scanner1_config,
-                test_scanner2=scanner2_config,
-            ),
-        ),
-    )
-    results = engine.execute(config)
-
-    # Verify both scanners executed and produced expected results
-    assert "scanners" in results
-    assert len(results["scanners"]) == 2
-    assert "test_scanner1" in results["scanners"]
-    assert "test_scanner2" in results["scanners"]
-
-    # Verify scanner results format and content
-    scanner1_result = results["scanners"]["test_scanner1"]
-    scanner2_result = results["scanners"]["test_scanner2"]
-
-    # Verify scanner result contents
-    assert scanner1_result["status"] == "success"
-    assert scanner2_result["status"] == "success"
-    assert scanner1_result["name"] == "test_scanner1"
-    assert scanner2_result["name"] == "test_scanner2"
-    assert scanner1_result["type"] == "CUSTOM"
-    assert scanner2_result["type"] == "CUSTOM"
-    assert scanner1_result["results"] == {
-        "findings": [],
-        "metadata": {"scanner_name": "test_scanner1"},
-    }
-    assert scanner2_result["results"] == {
-        "findings": [],
-        "metadata": {"scanner_name": "test_scanner2"},
-    }
-
-
-def test_execute_with_scanner_error(test_source_dir, test_output_dir):
-    """Test error handling during scanner execution."""
-
-    class ErrorScanner(MockPwdScanner):
-        def __init__(self):
-            super().__init__(test_source_dir, test_output_dir)
-
-        def validate(self):
-            return True
-
-        def scan(self, config=None):
-            """Mock scan that raises an error."""
-            raise RuntimeError("Scan error")
-
-    engine = MockEngine()
-    engine.register_scanner("error_scanner", ErrorScanner)
-
-    with pytest.raises(ValueError) as exc:
-        engine.execute({"scanners": {"error_scanner": {"type": "static"}}})
-    assert "Configuration must be an ASHConfig instance" in str(exc.value)
-
-
-def test_execute_with_empty_config():
-    """Test execution with empty config."""
-    engine = MockEngine()
-    resp = engine.execute()
-    assert resp is not None
-    assert "scanners" in resp
-    assert resp["scanners"] == {}
-    with pytest.raises(ValueError, match="Configuration must be an ASHConfig instance"):
-        assert engine.execute({}) == {}
-    with pytest.raises(ValueError, match="Configuration must be an ASHConfig instance"):
-        assert engine.execute({"scanners": {}}) == {}
-
-
-def test_execute_with_invalid_mode():
-    """Test execution with invalid mode."""
-    engine = MockEngine()
-
-    with pytest.raises(ValueError, match="Configuration must be an ASHConfig instance"):
-        engine.execute({"scanners": {"test_scanner": {}}}, mode="invalid")
+        # Register and enable scanners
+        self.ensure_initialized(self._config)

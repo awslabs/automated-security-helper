@@ -12,9 +12,7 @@ from automated_security_helper.models.dynamic_analysis import (
 @pytest.fixture
 def sample_scanner():
     """Create a sample scanner for testing."""
-    return Scanner(
-        name="dynamic_scanner", version="1.0.0", rule_id="DAST-001", type="DAST"
-    )
+    return Scanner(name="dynamic_scanner", version="1.0.0", type="DAST")
 
 
 @pytest.fixture

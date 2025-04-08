@@ -137,9 +137,9 @@ class ScannerPluginConfig(ScannerBaseConfig):
         ),
     ] = "before_args"
     get_tool_version_command: Annotated[
-        List[str],
+        List[str] | Callable[[], str] | None,
         Field(description="Command to run that should return the scanner version"),
-    ] = []
+    ] = None
     output_stream: Annotated[
         Literal["stdout", "stderr", "file"],
         Field(
@@ -150,8 +150,8 @@ class ScannerPluginConfig(ScannerBaseConfig):
     @field_validator("get_tool_version_command", check_fields=False)
     @classmethod
     def resolve_tool_version(
-        cls, get_tool_version_command: List[str] | Callable[[], List[str]]
-    ) -> List[str]:
+        cls, get_tool_version_command: List[str] | Callable[[], str]
+    ) -> List[str] | str:
         if callable(get_tool_version_command):
             return get_tool_version_command()
         else:
@@ -178,29 +178,6 @@ class ScannerPluginConfig(ScannerBaseConfig):
             self.name = self.command
 
 
-class BuildToolInstall(BaseModel):
-    """Configuration model for tool installation during build."""
-
-    model_config = ConfigDict(extra="allow")
-    script: Annotated[str, Field(description="Installation script for the tool")] = ""
-
-
-class CustomBuildScannerConfig(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    __pydantic_extra__: Dict[str, List[ScannerPluginConfig]] = Field(init=False)
-
-    sast: Annotated[
-        List[ScannerPluginConfig],
-        Field(description="Scanner configurations by type"),
-    ] = []
-
-    sbom: Annotated[
-        List[ScannerPluginConfig],
-        Field(description="Scanner configurations by type"),
-    ] = []
-
-
 class BuildConfig(BaseModel):
     """Configuration model for build-time settings."""
 
@@ -215,9 +192,9 @@ class BuildConfig(BaseModel):
         Field(description="Map of tool names to their installation scripts"),
     ] = {}
     custom_scanners: Annotated[
-        CustomBuildScannerConfig,
+        List[ScannerPluginConfig],
         Field(description="Scanner configurations by type"),
-    ] = CustomBuildScannerConfig()
+    ] = []
 
 
 class ScannerTypeConfig(BaseModel):

@@ -124,7 +124,6 @@ class ASHARPModel(SecurityReport):
             version=scanner_dict_copy["version"],
             type=scanner_dict_copy["type"],
             description=scanner_dict_copy["description"],
-            rule_id=scanner_dict_copy["rule_id"],
         )
 
     @property

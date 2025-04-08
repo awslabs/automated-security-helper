@@ -12,7 +12,6 @@ from typing import Annotated, Any, Dict, List, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from automated_security_helper.config.config_manager import ConfigurationManager
 from automated_security_helper.config.default_config import DEFAULT_ASH_CONFIG
 from automated_security_helper.execution_engine import (
     ExecutionStrategy,
@@ -36,8 +35,8 @@ class ASHScanOrchestrator(BaseModel):
         Path, Field(description="Working directory for scan operations")
     ] = None
     config: Annotated[
-        ASHConfig, Field(description="The resolved ASH configuration")
-    ] = DEFAULT_ASH_CONFIG
+        ASHConfig | None, Field(description="The resolved ASH configuration")
+    ] = None
 
     strategy: Annotated[
         ExecutionStrategy,
@@ -77,9 +76,6 @@ class ASHScanOrchestrator(BaseModel):
     ]
 
     # Core components
-    config_manager: Annotated[
-        ConfigurationManager | None, Field(description="Configuration manager")
-    ] = None
     result_processor: Annotated[
         ResultProcessor | None, Field(description="Result processor")
     ] = None
@@ -116,7 +112,6 @@ class ASHScanOrchestrator(BaseModel):
         )
         if self.work_dir is None:
             self.work_dir = self.output_dir.joinpath("work")
-        self.config_manager = ConfigurationManager()
         self.result_processor = ResultProcessor(
             logger=self.logger,
         )
@@ -125,30 +120,20 @@ class ASHScanOrchestrator(BaseModel):
             output=self.work_dir,
             debug=self.verbose,
         )
+        self.config = self._load_config()
+
         self.execution_engine = ScanExecutionEngine(
             source_dir=self.source_dir,
             output_dir=self.output_dir,
             strategy=self.strategy,
             logger=self.logger,
             enabled_scanners=self.enabled_scanners,
+            config=self.config,
         )
 
     def _get_logger(self) -> logging.Logger:
         """Configure and return a logger instance."""
-        logger = logging.getLogger("ash-multi")
-        log_level = logging.DEBUG if self.verbose else logging.INFO
-        logger.setLevel(log_level)
-
-        if not logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setLevel(log_level)
-            formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-            )
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
-
-        return logger
+        return self.logger
 
     def _load_config(self) -> ASHConfig:
         """Load configuration from file or return default configuration."""
@@ -176,9 +161,7 @@ class ASHScanOrchestrator(BaseModel):
                         return config
 
                     except Exception as e:
-                        self._get_logger().warning(
-                            f"Failed to parse configuration: {e}"
-                        )
+                        self.logger.warning(f"Failed to parse configuration: {e}")
                         return DEFAULT_ASH_CONFIG
                 return DEFAULT_ASH_CONFIG
 
@@ -190,8 +173,7 @@ class ASHScanOrchestrator(BaseModel):
 
     def execute_scan(self) -> Dict:
         """Execute the security scan and return results."""
-        logger = self._get_logger()
-        logger.info("Starting ASH scan")
+        self.logger.info("Starting ASH scan")
 
         try:
             # Ensure required directories exist
@@ -201,9 +183,7 @@ class ASHScanOrchestrator(BaseModel):
 
             # Ensure we have ASHConfig instance after loading
             if not isinstance(config, ASHConfig):
-                self._get_logger().warning(
-                    "Invalid configuration format, using default"
-                )
+                self.logger.warning("Invalid configuration format, using default")
                 config = DEFAULT_ASH_CONFIG
 
             # Create execution engine with default scanners
@@ -227,7 +207,7 @@ class ASHScanOrchestrator(BaseModel):
             return results
 
         except Exception as e:
-            logger.error(f"Error during scan execution: {e}")
+            self.logger.error(f"Error during scan execution: {e}")
             raise
 
 
@@ -326,6 +306,7 @@ def main():
                 ExportFormat.JSON,
                 ExportFormat.TEXT,
                 ExportFormat.YAML,
+                ExportFormat.JUNITXML,
             ],
             enabled_scanners=enabled_scanners,
             config_path=Path(args.config) if args.config else None,

@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.outputs.interfaces import IOutputFormatter
+from automated_security_helper.models.interfaces import IOutputReporter
 
 
-class JSONFormatter(IOutputFormatter):
+class JSONReporter(IOutputReporter):
     """Formats results as JSON."""
 
     def format(self, model: ASHARPModel) -> str:

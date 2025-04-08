@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
+
+from automated_security_helper.models.asharp_model import ASHARPModel
 from ..config.config import ScannerPluginConfig, ParserConfig
 from .core import Location
 
@@ -48,3 +50,12 @@ class IScanner(ABC):
     def _parse_results(self, raw_results: Any):
         """Parse raw scanner output."""
         return self.parser.parse(raw_results)
+
+
+class IOutputReporter(ABC):
+    """Interface for output formatters."""
+
+    @abstractmethod
+    def format(self, model: ASHARPModel) -> str:
+        """Format ASH model into output string."""
+        pass

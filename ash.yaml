@@ -1,5 +1,6 @@
 # yaml-language-server: $schema=./src/automated_security_helper/schemas/ASHConfig.json
 project_name: automated-security-helper
+ash_image_tag: 'awslabs/ash:v3.0.0'
 # Build overrides to customize the container build.
 # Plugins and other settings set during build cannot be overridden at scan time unless
 # they are explicitly allowed here in the build configuration.

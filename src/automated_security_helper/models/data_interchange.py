@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Union, Annotated
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
-from automated_security_helper.models.core import BaseFinding
+from automated_security_helper.models.core import BaseFinding, Scanner
 
 
 class ExportFormat(str, Enum):
@@ -188,12 +188,29 @@ class SecurityReport(DataInterchange):
         str, Field(description="Description of the security scan report")
     ] = "Security scan report"
     scanners_used: Annotated[
-        List[Dict[str, str]], Field(description="List of scanners used in this report")
+        List[Dict[str, str] | Scanner],
+        Field(description="List of scanners used in this report"),
     ] = []
     statistics: Annotated[ScanStatistics, Field()] = ScanStatistics()
     metadata: Annotated[ReportMetadata, Field(description="Report metadata")] = (
         ReportMetadata()
     )
+
+    def add_finding(self, finding: BaseFinding) -> None:
+        """Add a finding to the report."""
+        self.findings.append(finding)
+
+    def merge(self, other: "SecurityReport") -> None:
+        """Merge another report into this one."""
+        self.findings.extend(other.findings)
+        # Merge metadata, preserving existing values
+        for key, value in other.metadata.items():
+            if key not in self.metadata:
+                self.metadata[key] = value
+            elif isinstance(self.metadata[key], list) and isinstance(
+                other.metadata[key], list
+            ):
+                self.metadata[key].extend(other.metadata[key])
 
     @field_validator("scan_type")
     @classmethod

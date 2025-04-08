@@ -1,12 +1,12 @@
 """Common test fixtures for ASHARP tests."""
 
 from pathlib import Path
+import sys
 import pytest
 import yaml
 from automated_security_helper.config.config import (
     ASHConfig,
     BuildConfig,
-    CustomBuildScannerConfig,
     SASTScannerConfig,
     SASTScannerListConfig,
     SBOMScannerConfig,
@@ -20,6 +20,7 @@ from automated_security_helper.config.scanner_types import (
     CfnNagScannerConfig,
     CheckovScannerConfig,
     GitSecretsScannerConfig,
+    JupyterNotebookScannerConfig,
     NpmAuditScannerConfig,
     BaseScannerOptions,
     SemgrepScannerConfig,
@@ -38,6 +39,22 @@ from automated_security_helper.models.security_vulnerability import (
 TEST_DIR = Path(__file__).parent.joinpath("pytest-temp")
 TEST_SOURCE_DIR = TEST_DIR.joinpath("source")
 TEST_OUTPUT_DIR = TEST_DIR.joinpath("output")
+
+
+def is_debugging():
+    return "debugpy" in sys.modules
+
+
+# enable_stop_on_exceptions if the debugger is running during a test
+if is_debugging():
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_exception_interact(call):
+        raise call.excinfo.value
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_internalerror(excinfo):
+        raise excinfo.value
 
 
 @pytest.fixture
@@ -89,9 +106,7 @@ def base_location():
 @pytest.fixture
 def base_scanner():
     """Create a base scanner instance for testing."""
-    return Scanner(
-        name="base_scanner", version="1.0.0", rule_id="TEST-001", type="SAST"
-    )
+    return Scanner(name="base_scanner", version="1.0.0", type="SAST")
 
 
 @pytest.fixture
@@ -100,7 +115,6 @@ def container_scanner():
     return Scanner(
         name="container_scanner",
         version="1.0.0",
-        rule_id="CVE-2023-001",
         type="CONTAINER",
     )
 
@@ -111,7 +125,6 @@ def dependency_scanner():
     return Scanner(
         name="dependency_scanner",
         version="1.0.0",
-        rule_id="CVE-2023-1234",
         type="DEPENDENCY",
     )
 
@@ -119,7 +132,7 @@ def dependency_scanner():
 @pytest.fixture
 def iac_scanner():
     """Create an IAC scanner instance."""
-    return Scanner(name="iac_scanner", version="1.0.0", rule_id="IAC-001", type="IAC")
+    return Scanner(name="iac_scanner", version="1.0.0", type="IAC")
 
 
 # Legacy fixtures for backward compatibility
@@ -161,36 +174,32 @@ def ash_config() -> ASHConfig:
                     "dpkg -i trivy_0.61.0_Linux-64bit.deb",
                 ]
             },
-            custom_scanners=CustomBuildScannerConfig(
-                sast=[
-                    ScannerPluginConfig(
-                        name="trivy-sast",
-                        command="trivy",
-                        args=["fs", "--format", "sarif"],
-                        output_format="sarif",
-                        output_stream="stdio",
-                        get_tool_version_command=[
-                            "trivy",
-                            "--version",
-                        ],
-                        format_arg="--format",
-                        format_arg_value="sarif",
-                        format_arg_position="before_args",
-                        scan_path_arg_position="after_args",
-                        invocation_mode="directory",
-                        type="SAST",
-                    )
-                ],
-                sbom=[
-                    ScannerPluginConfig(
-                        name="trivy-sbom",
-                        command="trivy",
-                        args=["fs", "--format", "cyclonedx"],
-                        output_format="cyclonedx",
-                        output_stream="stdio",
-                    )
-                ],
-            ),
+            custom_scanners=[
+                ScannerPluginConfig(
+                    name="trivy-sast",
+                    command="trivy",
+                    args=["fs", "--format", "sarif"],
+                    output_format="sarif",
+                    output_stream="stdio",
+                    get_tool_version_command=[
+                        "trivy",
+                        "--version",
+                    ],
+                    format_arg="--format",
+                    format_arg_value="sarif",
+                    format_arg_position="before_args",
+                    scan_path_arg_position="after_args",
+                    invocation_mode="directory",
+                    type="SAST",
+                ),
+                ScannerPluginConfig(
+                    name="trivy-sbom",
+                    command="trivy",
+                    args=["fs", "--format", "cyclonedx"],
+                    output_format="cyclonedx",
+                    output_stream="stdio",
+                ),
+            ],
         ),
         fail_on_findings=True,
         ignore_paths=["tests/**"],
@@ -216,6 +225,7 @@ def ash_config() -> ASHConfig:
                 gitsecrets=GitSecretsScannerConfig(
                     options=BaseScannerOptions(enabled=True),
                 ),
+                jupyter=JupyterNotebookScannerConfig(),
                 grype=GrypeScannerConfig(),
                 npmaudit=NpmAuditScannerConfig(),
                 semgrep=SemgrepScannerConfig(),

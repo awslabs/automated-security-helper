@@ -6,9 +6,9 @@ from automated_security_helper.models.core import Location
 from automated_security_helper.models.iac_scan import IaCVulnerability
 from automated_security_helper.output_formatter import (
     OutputFormatter,
-    JSONFormatter,
-    HTMLFormatter,
-    CSVFormatter,
+    JSONReporter,
+    HTMLReporter,
+    CSVReporter,
 )
 from automated_security_helper.models.asharp_model import ASHARPModel
 
@@ -37,7 +37,7 @@ def sample_ash_model():
 
 
 def test_json_formatter(sample_ash_model):
-    formatter = JSONFormatter()
+    formatter = JSONReporter()
     output = formatter.format(sample_ash_model)
 
     # Verify output is valid JSON
@@ -49,7 +49,7 @@ def test_json_formatter(sample_ash_model):
 
 
 def test_html_formatter(sample_ash_model):
-    formatter = HTMLFormatter()
+    formatter = HTMLReporter()
     output = formatter.format(sample_ash_model)
 
     # Verify basic HTML structure
@@ -64,7 +64,7 @@ def test_html_formatter(sample_ash_model):
 
 
 def test_csv_formatter(sample_ash_model):
-    formatter = CSVFormatter()
+    formatter = CSVReporter()
     output = formatter.format(sample_ash_model)
 
     # Verify CSV structure

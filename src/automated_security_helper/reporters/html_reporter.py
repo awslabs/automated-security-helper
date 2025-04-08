@@ -3,10 +3,10 @@
 import html
 
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.outputs.interfaces import IOutputFormatter
+from automated_security_helper.models.interfaces import IOutputReporter
 
 
-class HTMLFormatter(IOutputFormatter):
+class HTMLReporter(IOutputReporter):
     """Formats results as HTML."""
 
     def format(self, model: ASHARPModel) -> str:

@@ -7,12 +7,15 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 from automated_security_helper.models.core import Location
-from automated_security_helper.models.data_interchange import ExportFormat
+from automated_security_helper.models.data_interchange import (
+    ExportFormat,
+    ScanStatistics,
+)
 from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
 )
 from automated_security_helper.exceptions import ScannerError
-from automated_security_helper.scanners.scanner_plugin import (
+from automated_security_helper.models.scanner_plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.config.config import (
@@ -20,11 +23,7 @@ from automated_security_helper.config.config import (
 )
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisReport,
-    ScanStatistics,
 )
-
-
-logger = logging.Logger(__name__, logging.INFO)
 
 
 class BanditScanner(ScannerPlugin):

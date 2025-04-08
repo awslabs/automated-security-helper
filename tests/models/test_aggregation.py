@@ -12,9 +12,7 @@ from automated_security_helper.models.aggregation import (
 @pytest.fixture
 def sample_finding():
     """Create a sample finding for testing."""
-    scanner = Scanner(
-        name="test_scanner", version="1.0.0", rule_id="RULE-001", type="SAST"
-    )
+    scanner = Scanner(name="test_scanner", version="1.0.0", type="SAST")
     location = Location(file_path="/path/to/file", start_line=10, end_line=20)
     return BaseFinding(
         id="TEST-001",
@@ -60,9 +58,7 @@ def test_finding_aggregator_group_by_type(sample_finding):
         title=sample_finding.title,
         description=sample_finding.description,
         severity=sample_finding.severity,
-        scanner=Scanner(
-            name="test_scanner", version="1.0.0", rule_id="RULE-002", type="SAST"
-        ),
+        scanner=Scanner(name="test_scanner", version="1.0.0", type="SAST"),
         location=sample_finding.location,
     )
     aggregator.add_finding(sample_finding)
@@ -106,9 +102,7 @@ def test_trend_analyzer(sample_finding):
         title="New Finding",
         description="A new test finding",
         severity="MEDIUM",
-        scanner=Scanner(
-            name="test_scanner", version="1.0.0", rule_id="RULE-002", type="SAST"
-        ),
+        scanner=Scanner(name="test_scanner", version="1.0.0", type="SAST"),
         location=Location(file_path="/path/to/other/file", start_line=15, end_line=25),
     )
     analyzer.add_scan_findings(second_scan_time, [finding2])

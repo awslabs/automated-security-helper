@@ -14,7 +14,6 @@ def sample_scanner_dict():
         "name": "test_scanner",
         "version": "1.0.0",
         "type": "SAST",
-        "rule_id": "RULE-001",
         "description": "Security scanner",
     }
 
@@ -22,7 +21,7 @@ def sample_scanner_dict():
 @pytest.fixture
 def sample_finding():
     """Create a sample finding for testing."""
-    scanner = Scanner(name="test_scanner", version="1.0.0", rule_id="RULE-001")
+    scanner = Scanner(name="test_scanner", version="1.0.0")
     location = Location(file_path="/path/to/file", start_line=10, end_line=20)
     return BaseFinding(
         id="RULE-001",
@@ -63,7 +62,6 @@ def test_asharp_model_findings_management(sample_finding):
     # Test grouping
     by_type = model.group_findings_by_type()
     assert len(by_type) == 1
-    assert sample_finding.scanner.rule_id in by_type
 
     by_severity = model.group_findings_by_severity()
     assert len(by_severity) == 1
@@ -76,7 +74,6 @@ def test_asharp_model_scanner_conversion(sample_scanner_dict):
     scanner = model._convert_to_scanner(sample_scanner_dict)
     assert scanner.name == sample_scanner_dict["name"]
     assert scanner.version == sample_scanner_dict["version"]
-    assert scanner.rule_id == sample_scanner_dict["rule_id"]
 
 
 def test_asharp_model_scanners_property(sample_finding):

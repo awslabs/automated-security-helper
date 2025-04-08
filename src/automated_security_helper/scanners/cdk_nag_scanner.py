@@ -18,7 +18,7 @@ from automated_security_helper.models.iac_scan import (
     IaCScanReport,
     IaCVulnerability,
 )
-from automated_security_helper.scanners.scanner_plugin import (
+from automated_security_helper.models.scanner_plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.config.config import ScannerPluginConfig
@@ -184,7 +184,14 @@ class CDKNagScanner(ScannerPlugin):
         return IaCScanReport(
             name="CDK Nag",
             iac_framework="CloudFormation",
-            scanners_used=[{"cdk_nag": version("cdk_nag")}],
+            scanners_used=[
+                Scanner(
+                    name="cdk-nag",
+                    description="CDK Nag - AWS Solutions Rules applied against rendered CloudFormation templates.",
+                    type="IAC",
+                    version=version("cdk_nag"),
+                ),
+            ],
             resources_checked={},
             scanner_name="cdk-nag",
             template_path=str(target_path),
@@ -229,13 +236,6 @@ class CDKNagScanner(ScannerPlugin):
                         ],
                         location=Location(
                             file_path=row.get("Resource ID", csv_file),
-                        ),
-                        scanner=Scanner(
-                            name="cdk-nag",
-                            description="CDK Nag - AWS Solutions Rules applied against rendered CloudFormation templates.",
-                            rule_id=row.get("Rule ID", ""),
-                            type="IAC",
-                            # version=   # # TODO implement tool version cataloguing
                         ),
                         severity=(
                             "CRITICAL"

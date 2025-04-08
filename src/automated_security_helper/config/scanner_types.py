@@ -1,18 +1,25 @@
+from typing import (
+    Annotated,
+    Literal,
+    TypeVar,
+)
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Annotated, Literal
 
 from automated_security_helper.models.core import SCANNER_TYPES
 
+T = TypeVar("T", bound="ScannerBaseConfig")
 
-# Base models
+
 class BaseScannerOptions(BaseModel):
-    """Base model for scanner options."""
+    """Base class for scanner options."""
 
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        arbitrary_types_allowed=True,
-        extra="allow",
-    )
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+
+class BasePluginOptions(BaseModel):
+    """Base class for plugin options."""
+
+    enabled: bool = True
 
 
 class ScannerBaseConfig(BaseModel):
@@ -44,7 +51,6 @@ class ScannerBaseConfig(BaseModel):
     )
 
 
-# SAST Scanner Models
 class CustomScannerConfig(ScannerBaseConfig):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
@@ -125,8 +131,7 @@ class CdkNagScannerConfig(ScannerBaseConfig):
     name: Literal["cdknag"] = "cdknag"
     type: SCANNER_TYPES = "IAC"
     options: Annotated[
-        CdkNagScannerConfigOptions,
-        Field(description="Enable CDK Nag IAC scanner"),
+        CdkNagScannerConfigOptions, Field(description="Configure CDK Nag scanner")
     ] = CdkNagScannerConfigOptions()
 
 

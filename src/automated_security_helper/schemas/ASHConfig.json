@@ -43,7 +43,7 @@
     },
     "BaseScannerOptions": {
       "additionalProperties": true,
-      "description": "Base model for scanner options.",
+      "description": "Base class for scanner options.",
       "properties": {},
       "title": "BaseScannerOptions",
       "type": "object"
@@ -53,12 +53,13 @@
       "description": "Configuration model for build-time settings.",
       "properties": {
         "custom_scanners": {
-          "$ref": "#/$defs/CustomBuildScannerConfig",
-          "default": {
-            "sast": [],
-            "sbom": []
+          "default": [],
+          "description": "Scanner configurations by type",
+          "items": {
+            "$ref": "#/$defs/ScannerPluginConfig"
           },
-          "description": "Scanner configurations by type"
+          "title": "Custom Scanners",
+          "type": "array"
         },
         "mode": {
           "default": "ASH_MODE_ONLINE",
@@ -150,7 +151,7 @@
               "PCIDSS321Checks": false
             }
           },
-          "description": "Enable CDK Nag IAC scanner"
+          "description": "Configure CDK Nag scanner"
         },
         "type": {
           "default": "IAC",
@@ -271,36 +272,6 @@
         }
       },
       "title": "CheckovScannerConfig",
-      "type": "object"
-    },
-    "CustomBuildScannerConfig": {
-      "additionalProperties": {
-        "items": {
-          "$ref": "#/$defs/ScannerPluginConfig"
-        },
-        "type": "array"
-      },
-      "properties": {
-        "sast": {
-          "default": [],
-          "description": "Scanner configurations by type",
-          "items": {
-            "$ref": "#/$defs/ScannerPluginConfig"
-          },
-          "title": "Sast",
-          "type": "array"
-        },
-        "sbom": {
-          "default": [],
-          "description": "Scanner configurations by type",
-          "items": {
-            "$ref": "#/$defs/ScannerPluginConfig"
-          },
-          "title": "Sbom",
-          "type": "array"
-        }
-      },
-      "title": "CustomBuildScannerConfig",
       "type": "object"
     },
     "CustomScannerConfig": {
@@ -981,13 +952,20 @@
           "title": "Format Arg Value"
         },
         "get_tool_version_command": {
-          "default": [],
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "Command to run that should return the scanner version",
-          "items": {
-            "type": "string"
-          },
-          "title": "Get Tool Version Command",
-          "type": "array"
+          "title": "Get Tool Version Command"
         },
         "invocation_mode": {
           "default": "directory",
@@ -1202,10 +1180,7 @@
     "build": {
       "$ref": "#/$defs/BuildConfig",
       "default": {
-        "custom_scanners": {
-          "sast": [],
-          "sbom": []
-        },
+        "custom_scanners": [],
         "mode": "ASH_MODE_ONLINE",
         "tool_install_scripts": {}
       },

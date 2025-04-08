@@ -264,14 +264,6 @@
           "title": "Name",
           "type": "string"
         },
-        "rule_id": {
-          "default": null,
-          "description": "Unique identifier for the scanner rule",
-          "minLength": 1,
-          "pattern": "^[A-Za-z][\\/\\.\\w-]+$",
-          "title": "Rule Id",
-          "type": "string"
-        },
         "type": {
           "default": "SAST",
           "description": "Type of scanner (e.g., SAST, DAST, SBOM)",

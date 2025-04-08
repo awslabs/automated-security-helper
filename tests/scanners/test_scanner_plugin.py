@@ -9,7 +9,7 @@ from automated_security_helper.config.config import ScannerPluginConfig
 
 import logging
 
-from automated_security_helper.scanners.scanner_plugin import (
+from automated_security_helper.models.scanner_plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.exceptions import ScannerError
@@ -65,7 +65,7 @@ def test_scanner_initialization(test_source_dir, test_output_dir):
 def test_scanner_initialization_none(test_source_dir, test_output_dir):
     """Test scanner initialization with no config."""
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    assert scanner.name == "scannerplugin"
+    assert scanner.name == "test_scanner"
     assert scanner.type == ""
     assert scanner.config is not None
     assert scanner.options == {}

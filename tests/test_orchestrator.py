@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 import tempfile
 import pytest
 import yaml
@@ -22,7 +23,7 @@ def default_config():
         os.unlink(f.name)
 
 
-def test_execute_scan_with_config(test_source_dir, test_output_dir):
+def test_execute_scan_with_config(test_source_dir: Path, test_output_dir: Path):
     """Test executing scan with configuration file."""
     # Create minimal config that gets transformed to ASHConfig
     try:
@@ -32,8 +33,8 @@ def test_execute_scan_with_config(test_source_dir, test_output_dir):
                 yaml.safe_dump(config_to_dump, f)
 
         orchestrator = ASHScanOrchestrator(
-            source_dir=test_source_dir,
-            output_dir=test_output_dir,
+            source_dir=test_source_dir.as_posix(),
+            output_dir=test_output_dir.as_posix(),
             config_path=f.name,
         )
         result = orchestrator.execute_scan()
@@ -44,11 +45,11 @@ def test_execute_scan_with_config(test_source_dir, test_output_dir):
         os.unlink(f.name)
 
 
-def test_execute_scan_no_config(test_source_dir, test_output_dir):
-    """Test executing scan without configuration file."""
+def test_execute_scan_no_config(test_source_dir: Path, test_output_dir: Path):
+    """Test executing scan whout configuration file."""
     orchestrator = ASHScanOrchestrator(
-        source_dir=test_source_dir,
-        output_dir=test_output_dir,
+        source_dir=str(test_source_dir),
+        output_dir=str(test_output_dir),
         config_path=None,
     )
     result = orchestrator.execute_scan()

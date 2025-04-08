@@ -27,6 +27,16 @@
       "program": "./src/automated_security_helper/utils/cdk_nag_wrapper.py",
       "request": "launch",
       "type": "debugpy"
+    },
+    {
+      "console": "integratedTerminal",
+      "env": {
+        "_PYTEST_RAISE": "1"
+      },
+      "justMyCode": true,
+      "name": "Debug Tests",
+      "request": "launch",
+      "type": "debugpy"
     }
   ],
   "version": "0.2.0"

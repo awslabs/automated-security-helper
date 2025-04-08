@@ -1,7 +1,7 @@
 """Test module for BanditScanner implementation."""
 
 import pytest
-from automated_security_helper.scanners import BanditScanner
+from automated_security_helper.scanners.bandit_scanner import BanditScanner
 from automated_security_helper.exceptions import ScannerError
 from automated_security_helper.config.config import ScannerPluginConfig
 

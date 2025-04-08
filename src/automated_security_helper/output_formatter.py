@@ -9,17 +9,17 @@ This module contains the OutputFormatter class and related formatters for:
 import logging
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.data_interchange import ExportFormat
-from automated_security_helper.outputs import (
-    ASFFFormatter,
-    CSVFormatter,
-    CycloneDXFormatter,
-    HTMLFormatter,
-    JSONFormatter,
-    JUnitXMLFormatter,
-    SARIFFormatter,
-    SPDXFormatter,
-    TextFormatter,
-    YAMLFormatter,
+from automated_security_helper.reporters import (
+    ASFFReporter,
+    CSVReporter,
+    CycloneDXReporter,
+    HTMLReporter,
+    JSONReporter,
+    JUnitXMLReporter,
+    SARIFReporter,
+    SPDXReporter,
+    TextReporter,
+    YAMLReporter,
 )
 
 
@@ -34,17 +34,17 @@ class OutputFormatter:
         self.logger = logger
 
         self._formatters = {
-            "asff": ASFFFormatter(),
-            "csv": CSVFormatter(),
-            "cyclonedx": CycloneDXFormatter(),
-            "dict": JSONFormatter(),
-            "html": HTMLFormatter(),
-            "json": JSONFormatter(),
-            "junitxml": JUnitXMLFormatter(),
-            "sarif": SARIFFormatter(),
-            "spdx": SPDXFormatter(),
-            "text": TextFormatter(),
-            "yaml": YAMLFormatter(),
+            "asff": ASFFReporter(),
+            "csv": CSVReporter(),
+            "cyclonedx": CycloneDXReporter(),
+            "dict": JSONReporter(),
+            "html": HTMLReporter(),
+            "json": JSONReporter(),
+            "junitxml": JUnitXMLReporter(),
+            "sarif": SARIFReporter(),
+            "spdx": SPDXReporter(),
+            "text": TextReporter(),
+            "yaml": YAMLReporter(),
         }
 
     def format(self, model: ASHARPModel, output_format: ExportFormat) -> str:

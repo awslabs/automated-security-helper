@@ -3,7 +3,6 @@
 
 """Core models for security findings."""
 
-import re
 from datetime import datetime, timezone
 from typing import Any, Optional, Dict, Literal, Annotated, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
@@ -56,14 +55,6 @@ class Scanner(BaseModel):
         SCANNER_TYPES,
         Field(description="Type of scanner (e.g., SAST, DAST, SBOM)"),
     ] = "SAST"
-    rule_id: Annotated[
-        str,
-        Field(
-            min_length=1,
-            pattern=r"^[A-Za-z][\/\.\w-]+$",
-            description="Unique identifier for the scanner rule",
-        ),
-    ] = None
     description: Annotated[str, Field(description="Description of the scanner")] = None
 
     model_config = ConfigDict(
@@ -79,21 +70,6 @@ class Scanner(BaseModel):
         if not v.strip():
             raise ValueError("Scanner name cannot be empty")
         return v.strip()
-
-    @field_validator("rule_id")
-    @classmethod
-    def validate_rule_id(cls, v: str) -> str:
-        """Validate rule ID is not empty."""
-        v = v.strip()
-        if not v:
-            raise ValueError("Rule ID cannot be empty")
-        # Ensure valid format
-
-        if not re.match(r"^[A-Za-z][\/\.\w-]+$", v):
-            raise ValueError(
-                "Rule ID must start with alphanumeric and contain only alphanumeric, underscore or hyphen"
-            )
-        return v
 
 
 class BaseFinding(BaseModel):

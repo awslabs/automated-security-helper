@@ -27,7 +27,7 @@ def sample_metadata():
 @pytest.fixture
 def sample_finding():
     """Create a sample finding for testing."""
-    scanner = Scanner(name="test_scanner", version="1.0.0", rule_id="RULE-001")
+    scanner = Scanner(name="test_scanner", version="1.0.0")
     location = Location(file_path="/path/to/file", start_line=10, end_line=20)
     return BaseFinding(
         id="finding-1",

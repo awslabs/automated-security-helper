@@ -3,10 +3,10 @@
 import yaml
 
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.outputs.interfaces import IOutputFormatter
+from automated_security_helper.models.interfaces import IOutputReporter
 
 
-class YAMLFormatter(IOutputFormatter):
+class YAMLReporter(IOutputReporter):
     """Formats results as YAML."""
 
     def format(self, model: ASHARPModel) -> str:

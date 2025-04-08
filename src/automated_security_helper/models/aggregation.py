@@ -29,7 +29,6 @@ class FindingAggregator:
             key = (
                 finding.location.file_path,
                 finding.location.start_line,
-                finding.scanner.rule_id,
                 finding.title,
                 finding.description,
             )
@@ -99,7 +98,6 @@ class TrendAnalyzer:
             (
                 f.location.file_path,
                 f.location.start_line,
-                f.scanner.rule_id,
                 f.title,
                 f.description,
             )
@@ -113,7 +111,6 @@ class TrendAnalyzer:
             if (
                 f.location.file_path,
                 f.location.start_line,
-                f.scanner.rule_id,
                 f.title,
                 f.description,
             )
@@ -134,7 +131,6 @@ class TrendAnalyzer:
             (
                 f.location.file_path,
                 f.location.start_line,
-                f.scanner.rule_id,
                 f.title,
                 f.description,
             )
@@ -148,7 +144,6 @@ class TrendAnalyzer:
             if (
                 f.location.file_path,
                 f.location.start_line,
-                f.scanner.rule_id,
                 f.title,
                 f.description,
             )

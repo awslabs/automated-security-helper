@@ -3,13 +3,13 @@
 import yaml
 
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.outputs.interfaces import IOutputFormatter
+from automated_security_helper.models.interfaces import IOutputReporter
 
 
-class SARIFFormatter(IOutputFormatter):
-    """Formats results as SARIF."""
+class TextReporter(IOutputReporter):
+    """Formats results as text."""
 
     def format(self, model: ASHARPModel) -> str:
-        """Format ASH model in SARIF."""
-        # TODO - Replace with SARIF adapter
+        """Format ASH model as text string."""
+        # TODO - Replace with aggregated_results.txt simulator
         return yaml.dump(model.model_dump(), indent=2)

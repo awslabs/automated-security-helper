@@ -4,10 +4,10 @@ import csv
 from io import StringIO
 
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.outputs.interfaces import IOutputFormatter
+from automated_security_helper.models.interfaces import IOutputReporter
 
 
-class CSVFormatter(IOutputFormatter):
+class CSVReporter(IOutputReporter):
     """Formats results as CSV."""
 
     def format(self, model: ASHARPModel) -> str:

@@ -4,19 +4,17 @@ import pytest
 from datetime import datetime, timezone
 from automated_security_helper.config.config import ScannerBaseConfig
 from automated_security_helper.models.core import Location, Scanner
+from automated_security_helper.models.data_interchange import ScanStatistics
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisFinding,
     StaticAnalysisReport,
-    ScanStatistics,
 )
 
 
 @pytest.fixture
 def sample_scanner():
     """Create a sample scanner for testing."""
-    return Scanner(
-        name="static_analyzer", version="1.0.0", rule_id="SAST-001", type="SAST"
-    )
+    return Scanner(name="static_analyzer", version="1.0.0", type="SAST")
 
 
 @pytest.fixture
@@ -233,9 +231,7 @@ def test_static_analysis_report_by_file():
             title=f"Finding {i}",
             description=f"Description {i}",
             severity="HIGH",
-            scanner=Scanner(
-                name="test", version="1.0", type="SAST", rule_id=f"RULE-{i}"
-            ),
+            scanner=Scanner(name="test", version="1.0", type="SAST"),
             source_file=f"file{i}.py",
             location=Location(file_path=f"file{i}.py", start_line=i, end_line=i),
             timestamp=datetime.now().isoformat(timespec="seconds"),
@@ -258,7 +254,7 @@ def test_static_analysis_report_by_file():
             title="Duplicate File Finding",
             description="Another finding in file1.py",
             severity="MEDIUM",
-            scanner=Scanner(name="test", version="1.0", type="SAST", rule_id="RULE-4"),
+            scanner=Scanner(name="test", version="1.0", type="SAST"),
             source_file="file1.py",
             location=Location(file_path="file1.py", start_line=10, end_line=10),
             timestamp=datetime.now().isoformat(timespec="seconds"),

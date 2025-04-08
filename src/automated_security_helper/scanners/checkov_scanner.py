@@ -6,14 +6,14 @@ from datetime import datetime
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from automated_security_helper.models.core import Location
+from automated_security_helper.models.core import Location, Scanner
 from automated_security_helper.models.data_interchange import ExportFormat
 from automated_security_helper.models.iac_scan import (
     IaCScanReport,
     IaCVulnerability,
     CheckResultType,
 )
-from automated_security_helper.scanners.scanner_plugin import (
+from automated_security_helper.models.scanner_plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.exceptions import ScannerError
@@ -38,7 +38,6 @@ class CheckovScanner(ScannerPlugin):
         format_arg_value="json",
         format_arg_position="before_args",
         invocation_mode="directory",
-        get_tool_version_command=["bandit", "--version"],
         output_stream="file",
         enabled=True,
         output_format="json",
@@ -51,6 +50,13 @@ class CheckovScanner(ScannerPlugin):
         output_dir: Path,
         logger: Optional[logging.Logger] = logging.Logger(__name__),
     ) -> None:
+        """Initialize the scanner.
+
+        Args:
+            source_dir: Source directory to scan
+            output_dir: Output directory for results
+            logger: Optional logger instance
+        """
         super().__init__(source_dir=source_dir, output_dir=output_dir, logger=logger)
         self._output_format = "json"
 
@@ -90,9 +96,11 @@ class CheckovScanner(ScannerPlugin):
             description=result.get("check_name", ""),
             location=location,
             resource_name=result.get("resource", ""),
-            resource_type=result.get("resource", "").split(".")[0]
-            if result.get("resource", "")
-            else None,
+            resource_type=(
+                result.get("resource", "").split(".")[0]
+                if result.get("resource", "")
+                else None
+            ),
             rule_id=result.get("check_id", ""),
             check_result_type=check_type,
             violation_details={
@@ -184,7 +192,9 @@ class CheckovScanner(ScannerPlugin):
             return IaCScanReport(
                 name="checkov",
                 description="Checkov security scan report",
-                scanners_used=[{"checkov": version("checkov")}],
+                scanners_used=[
+                    Scanner(name="checkov", version=version("checkov"), type="IAC"),
+                ],
                 findings=findings,
                 statistics=stats,
                 scan_config=self._config,

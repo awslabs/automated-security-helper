@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import subprocess
 
 from automated_security_helper.config.config import ScannerPluginConfig
+from automated_security_helper.models.core import BaseFinding
 from automated_security_helper.models.data_interchange import (
     ExportFormat,
     SecurityReport,
@@ -37,34 +38,54 @@ class ScannerPlugin(IScanner):
     _errors: List[str] = []
     _options: Dict[str, Any] = {}
     _config: ScannerPluginConfig | None = None
-    _default_config: ScannerPluginConfig | None = ScannerPluginConfig(
-        name="scannerplugin",
-        command="scannerplugin",  # This does not exist
-    )
+    _default_config: ScannerPluginConfig | None = None
     _protected_config_properties: List[str] = ["name", "type", "options"]
 
     def __init__(
         self,
-        source_dir: Path,
-        output_dir: Path,
-        logger: Optional[logging.Logger] = logging.Logger(__name__),
+        source_dir: Optional[Path] = None,
+        output_dir: Optional[Path] = None,
+        logger: Optional[logging.Logger] = None,
+        config: Optional[ScannerPluginConfig] = None,
     ) -> None:
+        """Initialize scanner plugin.
+
+        Note: config parameter takes precedence over default_config().
+        If no config is provided, default_config() will be called.
+        """
         """Initialize the scanner.
 
         Args:
-            config: Scanner configuration as dict or ScannerConfig object
+            source_dir: Source directory to scan
+            output_dir: Output directory for results
+            logger: Optional logger instance
+            config: Optional scanner configuration
         """
+        # Convert paths to Path objects if they're strings
+        if source_dir and not isinstance(source_dir, Path):
+            source_dir = Path(source_dir)
+        if output_dir and not isinstance(output_dir, Path):
+            output_dir = Path(output_dir)
+
+        # Use default paths if none provided
+        if not source_dir:
+            source_dir = Path(".")
+        if not output_dir:
+            output_dir = Path("output")
         self.source_dir = source_dir
         self.output_dir = output_dir
         self.work_dir = self.output_dir.joinpath("work")
-        self.logger = logger
-        self._config = self._default_config
-        self.results_dir = self.output_dir.joinpath("scanners").joinpath(
-            self._default_config.name if self._default_config else "unknown"
+        self.logger = logger if logger else logging.getLogger(__name__)
+        # Use provided config, otherwise try to get default config
+        self._config = config if config is not None else self.default_config
+
+        # Set up results directory using scanner name from config
+        scanner_name = (
+            getattr(self._config, "name", "unknown") if self._config else "unknown"
         )
-        self.results_file = self.results_dir.joinpath(
-            f"{self._default_config.name}_output.json"
-        ).as_posix()
+        self.results_dir = self.output_dir.joinpath("scanners").joinpath(scanner_name)
+        output_name = f"{self._config.name if self._config else 'unknown'}_output.json"
+        self.results_file = self.results_dir.joinpath(output_name).as_posix()
         if self.results_dir.exists():
             shutil.rmtree(self.results_dir)
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -191,17 +212,68 @@ class ScannerPlugin(IScanner):
     @abstractmethod
     def scan(
         self, target: str, options: Optional[Dict[str, Any]] = None
-    ) -> SecurityReport:
+    ) -> Dict[str, Any]:
         """Execute the security scan.
 
         Args:
             target: The target to scan (file, directory, etc.)
             options: Optional dictionary of scan options specific to the scanner
 
+        Returns:
+            Dict[str, Any]: Raw scan results with findings and metadata
+
         Raises:
             ScannerError: If there is an error during scanning
         """
-        pass
+        # Pre-scan setup and validation
+        self._pre_scan(target, options)
+
+        # Build and execute scan command
+        command = self._resolve_arguments(target)
+        if options:
+            command.extend(self._build_option_args(options))
+
+        try:
+            output = self._run_subprocess(command)
+            if self.parser:
+                parsed_results = self.parser.parse(output)
+            else:
+                parsed_results = output
+
+            return {
+                "findings": parsed_results.get("findings", []),
+                "metadata": {
+                    "scanner_name": self.name,
+                    "scanner_version": self.tool_version,
+                    "scan_type": self.type,
+                    **parsed_results.get("metadata", {}),
+                },
+            }
+        except Exception as e:
+            raise ScannerError(f"Error during scan execution: {str(e)}")
+
+    def _build_security_report(self, scan_results: Any) -> SecurityReport:
+        """Convert scan results into a SecurityReport."""
+
+        report = SecurityReport(
+            name=self.name,
+            scanner_version=self.version,
+            metadata={"scan_type": self.type},
+        )
+
+        # Handle both parsed and raw results
+        results_list = (
+            scan_results if isinstance(scan_results, list) else [scan_results]
+        )
+
+        for result in results_list:
+            if isinstance(result, dict):
+                finding = BaseFinding(
+                    **result,
+                )
+                report.add_finding(finding)
+
+        return report
 
     def _resolve_arguments(self, target: str) -> List[str]:
         """Resolve command arguments for the scanner.
