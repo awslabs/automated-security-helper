@@ -48,6 +48,13 @@ REPORT_PATH="${_ASH_OUTPUT_DIR}/work/py_report_result.txt"
 rm ${REPORT_PATH} 2> /dev/null
 touch ${REPORT_PATH}
 
+# Scan for secrets with detect-secrets
+cd ${_ASH_SOURCE_DIR}
+
+echo ">>>>>> begin detect-secrets scan result >>>>>>" >> ${REPORT_PATH}
+python3 ${_ASH_UTILS_LOCATION}/secrets-scan.py --source ${_ASH_SOURCE_DIR} >> ${REPORT_PATH} 2>&1
+echo "<<<<<< end detect-secrets scan result <<<<<<" >> ${REPORT_PATH}
+
 # Convert any Jupyter notebook files to python
 echo ">>>>>> begin identifyipynb output for Jupyter notebook conversion >>>>>>" >> ${REPORT_PATH}
 bash -C ${_ASH_UTILS_LOCATION}/identifyipynb.sh >>${REPORT_PATH} 2>&1
