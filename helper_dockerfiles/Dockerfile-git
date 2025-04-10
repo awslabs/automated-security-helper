@@ -6,11 +6,6 @@ RUN apt-get update && \
     apt-get install -y git tree && \
     apt-get upgrade -y
 
-# Clone git-secrets directory
-RUN git clone https://github.com/awslabs/git-secrets.git && \
-    cd git-secrets && \
-    make install
-
 #
 # Make sure the default dirs are initialized
 #
