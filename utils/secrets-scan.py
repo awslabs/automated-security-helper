@@ -4,6 +4,7 @@ from argparse import ArgumentParser
 import os
 import json
 
+# Run detect-secrets on each file to see if they contain secrets. Uses the default settings
 def scan_secrets(
         path, 
         debug: bool = False
@@ -16,6 +17,7 @@ def scan_secrets(
 
     print(json.dumps(secrets.json(), indent=2))
 
+# Create a CLI interface so this script can be called from a bash script
 if __name__ == "__main__":
     parser = ArgumentParser(description="A tool to scan for secrets using the detect-secrets python module.")
     parser.add_argument("--source", help="path to scan", default=os.getcwd(), type=str)
