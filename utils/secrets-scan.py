@@ -1,20 +1,21 @@
-import detect_secrets
+from detect_secrets import SecretsCollection, settings
 from argparse import ArgumentParser
 import os
 import json
 
-# Run detect-secrets on each file to see if they contain secrets. Uses the default settings
+# Run detect-secrets on each file to see if they contain secrets
 def scan_secrets(
         path: str,
-        baseline: str,
+        baseline: str = None,
         debug: bool = False
 ):
-    secrets = detect_secrets.SecretsCollection()
+    secrets = SecretsCollection()
     for item in os.walk(path):
         for file in item[2]:
-            with detect_secrets.default_settings():
+            # Use settings from a baseline if it is provided, otherwise use the default settings
+            with settings.configure_settings_from_baseline(filename=baseline) if baseline else settings.default_settings():
                 secrets.scan_files(os.path.join(item[0], file))
-                
+
     # Prints out scan results. Discovered secret values are hashed to avoid exposing them
     print(json.dumps(secrets.json(), indent=2))
 
@@ -25,4 +26,4 @@ if __name__ == "__main__":
     parser.add_argument("--baseline", help="path to baseline file", default=None, type=str)
     args = parser.parse_args()
 
-    scan_secrets(path=args.source)
+    scan_secrets(path=args.source, baseline=args.baseline)
