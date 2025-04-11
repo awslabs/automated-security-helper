@@ -51,8 +51,15 @@ touch ${REPORT_PATH}
 # Scan for secrets with detect-secrets
 cd ${_ASH_SOURCE_DIR}
 
+# Pass the baseline file to detect-secrets if there is one
+if [ -f "${_ASH_SOURCE_DIR}/.secrets.baseline" ]; then
+  SECRET_ARGS="--baseline ${_ASH_SOURCE_DIR}/.secrets.baseline"
+else
+  SECRET_ARGS=""
+fi
+
 echo ">>>>>> begin detect-secrets scan result >>>>>>" >> ${REPORT_PATH}
-python3 ${_ASH_UTILS_LOCATION}/secrets-scan.py --source ${_ASH_SOURCE_DIR} >> ${REPORT_PATH} 2>&1
+python3 ${_ASH_UTILS_LOCATION}/secrets-scan.py --source ${_ASH_SOURCE_DIR} ${SECRET_ARGS} >> ${REPORT_PATH} 2>&1
 echo "<<<<<< end detect-secrets scan result <<<<<<" >> ${REPORT_PATH}
 
 # Convert any Jupyter notebook files to python
