@@ -3,11 +3,19 @@
 from importlib.metadata import version
 import json
 from datetime import datetime
-import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from automated_security_helper.models.core import Location, Scanner
-from automated_security_helper.models.data_interchange import ExportFormat
+from typing import Annotated, Any, Dict, List, Literal
+
+from pydantic import Field
+from automated_security_helper.models.core import (
+    SCANNER_TYPES,
+    BaseScannerOptions,
+    Location,
+    ScanStatistics,
+    Scanner,
+    ScannerBaseConfig,
+)
+from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.models.iac_scan import (
     IaCScanReport,
     IaCVulnerability,
@@ -16,15 +24,28 @@ from automated_security_helper.models.iac_scan import (
 from automated_security_helper.models.scanner_plugin import (
     ScannerPlugin,
 )
-from automated_security_helper.exceptions import ScannerError
-from automated_security_helper.config.config import ScannerPluginConfig
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import ScannerPluginConfig
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisReport,
-    ScanStatistics,
 )
 
 
-class CheckovScanner(ScannerPlugin):
+class CheckovScannerConfigOptions(BaseScannerOptions):
+    pass
+
+
+class CheckovScannerConfig(ScannerBaseConfig):
+    """Checkov SAST scanner configuration."""
+
+    name: Literal["checkov"] = "checkov"
+    type: SCANNER_TYPES = "IAC"
+    options: Annotated[
+        CheckovScannerConfigOptions, Field(description="Configure Checkov scanner")
+    ] = CheckovScannerConfigOptions()
+
+
+class CheckovScanner(ScannerPlugin, CheckovScannerConfig):
     """CheckovScanner implements IaC scanning using Checkov."""
 
     _default_config = ScannerPluginConfig(
@@ -42,27 +63,16 @@ class CheckovScanner(ScannerPlugin):
         enabled=True,
         output_format="json",
     )
-    _output_format = ExportFormat.JSON
+    _output_format: ExportFormat = ExportFormat.JSON
+    tool_version: str = version("checkov")
 
-    def __init__(
+    def configure(
         self,
-        source_dir: Path,
-        output_dir: Path,
-        logger: Optional[logging.Logger] = logging.Logger(__name__),
+        config: ScannerPluginConfig | None = None,
+        options: CheckovScannerConfigOptions | None = None,
     ) -> None:
-        """Initialize the scanner.
-
-        Args:
-            source_dir: Source directory to scan
-            output_dir: Output directory for results
-            logger: Optional logger instance
-        """
-        super().__init__(source_dir=source_dir, output_dir=output_dir, logger=logger)
-        self._output_format = "json"
-
-    def configure(self, config: ScannerPluginConfig = None) -> None:
         """Configure the scanner with provided settings."""
-        super().configure(config)
+        super().configure(config=config, options=options)
 
     def _create_finding_from_check(
         self, result: Dict[str, Any], check_type: CheckResultType
@@ -114,8 +124,22 @@ class CheckovScanner(ScannerPlugin):
             },
         )
 
+    def validate(self) -> bool:
+        """Validate the scanner configuration and requirements.
+
+        Returns:
+            True if validation passes, False otherwise
+
+        Raises:
+            ScannerError: If validation fails
+        """
+        # Checkov is a dependency this Python module, if the Python import got
+        # this far then we know we're in a valid runtime for this scanner.
+        return True
+
     def scan(
-        self, target: str, options: Optional[Dict[str, Any]] = None
+        self,
+        target: Path,
     ) -> StaticAnalysisReport:
         """Execute Checkov scan and return results.
 
@@ -129,7 +153,7 @@ class CheckovScanner(ScannerPlugin):
             ScannerError: If the scan fails or results cannot be parsed
         """
         try:
-            self._pre_scan(target, options)
+            self._pre_scan(target, self.options)
         except ScannerError as exc:
             raise exc
 

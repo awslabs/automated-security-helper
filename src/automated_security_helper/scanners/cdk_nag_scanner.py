@@ -1,27 +1,29 @@
 """Module containing the CDK Nag security scanner implementation."""
 
 from importlib.metadata import version
-import logging
 from datetime import datetime, timezone
-import re
-from typing import Dict, Any, List, Optional
-import csv
+from typing import Annotated, Literal
 from pathlib import Path
 
-from automated_security_helper.exceptions import ScannerError
-from automated_security_helper.models.core import Location, Scanner
+from pydantic import BaseModel, ConfigDict, Field
+
+from automated_security_helper.models.core import BaseScannerOptions, ExportFormat
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import (
+    SCANNER_TYPES,
+    Scanner,
+    ScannerBaseConfig,
+)
 from automated_security_helper.models.data_interchange import (
-    ExportFormat,
     ReportMetadata,
 )
 from automated_security_helper.models.iac_scan import (
     IaCScanReport,
-    IaCVulnerability,
 )
 from automated_security_helper.models.scanner_plugin import (
     ScannerPlugin,
 )
-from automated_security_helper.config.config import ScannerPluginConfig
+from automated_security_helper.models.core import ScannerPluginConfig
 from automated_security_helper.utils.cdk_nag_wrapper import (
     run_cdk_nag_against_cfn_template,
 )
@@ -29,7 +31,53 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class CDKNagScanner(ScannerPlugin):
+class CdkNagPacks(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    AwsSolutionsChecks: Annotated[
+        bool,
+        Field(description="Runs the AwsSolutionsChecks NagPack included with CDK Nag."),
+    ] = True
+    HIPAASecurityChecks: Annotated[
+        bool,
+        Field(
+            description="Runs the HIPAASecurityChecks NagPack included with CDK Nag."
+        ),
+    ] = False
+    NIST80053R4Checks: Annotated[
+        bool,
+        Field(description="Runs the NIST80053R4Checks NagPack included with CDK Nag."),
+    ] = False
+    NIST80053R5Checks: Annotated[
+        bool,
+        Field(description="Runs the NIST80053R5Checks NagPack included with CDK Nag."),
+    ] = False
+    PCIDSS321Checks: Annotated[
+        bool,
+        Field(description="Runs the PCIDSS321Checks NagPack included with CDK Nag."),
+    ] = False
+
+
+class CdkNagScannerConfigOptions(BaseScannerOptions):
+    """CDK Nag IAC SAST scanner options."""
+
+    nag_packs: Annotated[
+        CdkNagPacks,
+        Field(
+            description="CDK Nag packs to enable",
+        ),
+    ] = CdkNagPacks()
+
+
+class CdkNagScannerConfig(ScannerBaseConfig):
+    """CDK Nag IAC SAST scanner configuration."""
+
+    name: Literal["cdknag"] = "cdknag"
+    type: SCANNER_TYPES = "IAC"
+    options: CdkNagScannerConfigOptions = CdkNagScannerConfigOptions()
+
+
+class CDKNagScanner(ScannerPlugin, CdkNagScannerConfig):
     """CDK Nag security scanner implementation."""
 
     _default_config = ScannerPluginConfig(
@@ -48,20 +96,13 @@ class CDKNagScanner(ScannerPlugin):
         output_format=ExportFormat.CSV,
     )
 
-    def __init__(
-        self,
-        source_dir: Path,
-        output_dir: Path,
-        logger: Optional[logging.Logger] = logging.Logger(__name__),
-    ) -> None:
-        super().__init__(source_dir=source_dir, output_dir=output_dir, logger=logger)
-
     def configure(
         self,
-        config: ScannerPluginConfig = None,
+        config: ScannerPluginConfig | None = None,
+        options: CdkNagScannerConfigOptions | None = None,
     ) -> None:
         """Configure the scanner with provided settings."""
-        super().configure(config)
+        super().configure(config=config, options=options)
 
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -76,9 +117,7 @@ class CDKNagScanner(ScannerPlugin):
         # this far then we know we're in a valid runtime for this scanner.
         return True
 
-    def scan(
-        self, target: str, options: Optional[Dict[str, Any]] = None
-    ) -> IaCScanReport:
+    def scan(self, target: Path) -> IaCScanReport:
         """Scan the target and return findings.
 
         Args:
@@ -91,7 +130,7 @@ class CDKNagScanner(ScannerPlugin):
             ScannerError: If scanning fails
         """
         try:
-            self._pre_scan(target, options)
+            self._pre_scan(target, self.options)
         except ScannerError as exc:
             raise exc
         target_path = Path(target)
@@ -134,14 +173,13 @@ class CDKNagScanner(ScannerPlugin):
                 outdir = self.output_dir.joinpath("scanners").joinpath("cdknag")
 
                 # Run CDK synthesis for this file
+                self.options: CdkNagScannerConfigOptions
                 nag_result = run_cdk_nag_against_cfn_template(
                     template_path=cfn_file,
                     nag_packs=[
-                        "AwsSolutionsChecks",
-                        # "HIPAASecurityChecks",
-                        # "NIST80053R4Checks",
-                        # "NIST80053R5Checks",
-                        # "PCIDSS321Checks",
+                        item
+                        for item in self.options.nag_packs.model_dump().keys()
+                        if self.options.nag_packs.model_dump()[item]
                     ],
                     outdir=outdir,
                 )
@@ -150,36 +188,13 @@ class CDKNagScanner(ScannerPlugin):
                     failed_files.append(cfn_file)
                     continue
 
-                # Add findings from this file
-                # file_findings = self._parse_findings()
                 for pack_name, findings in nag_result.items():
                     ASH_LOGGER.debug(f"Found {len(findings)} findings in {pack_name}")
                     all_findings.extend(findings)
-            except Exception as e:
-                failed_files.append((cfn_file, str(e)))
 
-        # If any scans failed, include in report
-        # if failed_files:
-        #     for f in failed_files:
-        #         all_findings.append(
-        #             IaCVulnerability(
-        #                 id=re.sub(pattern=r"\W+", repl="-", string=f[0].as_posix()),
-        #                 severity="CRITICAL",
-        #                 scanner=Scanner(
-        #                     name="cdk-nag",
-        #                     type="IAC",
-        #                     rule_id="CDK_NAG_SCAN_ERROR",
-        #                 ),
-        #                 resource_name=f[0].as_posix(),
-        #                 rule_id="CDK_NAG_SCAN_ERROR",
-        #                 title="Scan failures occurred",
-        #                 level="ERROR",
-        #                 description=f"Failed to scan file {f[0]}: {f[1]}",
-        #                 location=Location(
-        #                     file_path=f[0].as_posix(),
-        #                 ),
-        #             )
-        #         )
+            except Exception as e:
+                ASH_LOGGER.warning(f"Error scanning {cfn_file}: {e}")
+                failed_files.append((cfn_file, str(e)))
 
         return IaCScanReport(
             name="CDK Nag",
@@ -202,58 +217,3 @@ class CDKNagScanner(ScannerPlugin):
                 tool_name="cdk-nag",
             ),
         )
-
-    def _parse_findings(self, specific_csv: str = None) -> List[IaCVulnerability]:
-        """Parse CDK nag findings from output CSV files.
-
-        Returns:
-            List of IaC findings
-        """
-        findings = []
-        if specific_csv:
-            files = [specific_csv]
-        else:
-            files = self.work_dir.glob("*NagReport.csv")
-        for csv_file in files:
-            with open(csv_file, "r") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    finding_id = re.sub(
-                        pattern=r"\W+",
-                        repl="-",
-                        string=row.get("Rule ID", "UnknownRule"),
-                        flags=re.IGNORECASE,
-                    )
-                    finding = IaCVulnerability(
-                        id=finding_id,
-                        title=row.get("Rule ID", "Unknown Rule"),
-                        description=row.get("Rule Info", ""),
-                        resource_id=row.get("Resource ID", ""),
-                        rule_id=row.get("Rule ID", ""),
-                        resource_name=row.get("Resource ID", "NA").split("/")[-1],
-                        compliance_frameworks=[
-                            "CDKNag.AwsSolutionsChecks",
-                        ],
-                        location=Location(
-                            file_path=row.get("Resource ID", csv_file),
-                        ),
-                        severity=(
-                            "CRITICAL"
-                            if (
-                                row.get("Compliance", "Non-Compliant")
-                                == "Non-Compliant"
-                                and row.get("Rule Level", "Error") == "Error"
-                            )
-                            else (
-                                "MEDIUM"
-                                if (
-                                    row.get("Compliance", "Non-Compliant")
-                                    == "Non-Compliant"
-                                    and row.get("Rule Level", "Error") != "Error"
-                                )
-                                else "INFO"
-                            )
-                        ),
-                    )
-                    findings.append(finding)
-        return findings

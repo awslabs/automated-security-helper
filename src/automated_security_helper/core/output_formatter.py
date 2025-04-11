@@ -8,7 +8,7 @@ This module contains the OutputFormatter class and related formatters for:
 
 import logging
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.data_interchange import ExportFormat
+from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.reporters import (
     ASFFReporter,
     CSVReporter,

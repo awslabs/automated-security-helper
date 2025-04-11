@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Type, Any, Union
+from typing import Dict, List, Optional, Any
 
 from automated_security_helper.models.scan_results import ScanResultsContainer
 from automated_security_helper.config.config import (
@@ -19,12 +19,12 @@ from automated_security_helper.config.config import (
 )
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.json_serializer import ASHARPModelSerializer
-from automated_security_helper.scanner_factory import ScannerFactory
+from automated_security_helper.core.scanner_factory import ScannerFactory
 from automated_security_helper.models.scanner_plugin import ScannerPlugin
-from automated_security_helper.config.scanner_types import (
+from automated_security_helper.models.core import (
     ScannerBaseConfig,
 )
-from automated_security_helper.utils.log import ASH_LOGGER as logger
+from automated_security_helper.utils.log import ASH_LOGGER as logger, get_logger
 
 
 class ExecutionStrategy(Enum):
@@ -59,9 +59,9 @@ class ScanExecutionEngine:
         # at runtime for a more focused scan (e.g. during finding remediation where
         # there is only a single scanner failing, isolating scans to just that scanner will allow quicker retesting until passing and a full scan can be )
         enabled_scanners: Optional[List[str]] = None,
-        strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL,
-        config: ASHConfig = None,
-        logger: logging.Logger = logging.Logger(name=__name__),
+        strategy: Optional[ExecutionStrategy] = ExecutionStrategy.PARALLEL,
+        config: Optional[ASHConfig] = None,
+        logger: Optional[logging.Logger] = get_logger(),
     ):
         """Initialize the execution engine.
 
@@ -75,13 +75,13 @@ class ScanExecutionEngine:
         """
         # Set up logging and initial state
         self.logger = logger
+        self._config = config
         self._scanners = {}
         self._scan_results = {}
         self._enabled_scanners = enabled_scanners  # None means all enabled
         self.logger.info("Initializing ScanExecutionEngine")
 
         # Initialize basic configuration
-        self._config = None
         self._scan_results = {}
         self._strategy = strategy
         self._initialized = False  # Track initialization state
@@ -92,9 +92,9 @@ class ScanExecutionEngine:
         }
 
         # Convert and set up paths
+        self.source_dir = Path(source_dir) if source_dir else None
         try:
             # Convert and validate source directory
-            self.source_dir = Path(source_dir) if source_dir else None
 
             # Convert and validate output directory
             if output_dir:
@@ -121,18 +121,21 @@ class ScanExecutionEngine:
         self._max_workers = min(4, multiprocessing.cpu_count())
 
         # Initialize scanner components
-        self._scanner_factory = ScannerFactory()
         self._scanners = {}  # Maps scanner names to factory functions
         self._initialized = False  # Track initialization state
+        self._scanner_factory = ScannerFactory(
+            config=config,
+            logger=logger,
+        )
 
-        # Initialize all scanners
-        self._register_default_scanners()
+        # # Initialize all scanners
+        # self._register_default_scanners()
 
-        # Enable all scanners by default if no specific ones requested
-        if not self._enabled_scanners:
-            self._enabled_scanners = [
-                k.lower().strip() for k in self._scanner_factory._scanners.keys()
-            ]
+        # # Enable all scanners by default if no specific ones requested
+        # if not self._enabled_scanners:
+        #     self._enabled_scanners = [
+        #         k.lower().strip() for k in self._scanner_factory._scanners.keys()
+        #     ]
 
         # Log registration status
         # Log scanner registration status
@@ -144,269 +147,119 @@ class ScanExecutionEngine:
         # Mark initialization as complete
         self._initialized = True
 
-    def _register_default_scanners(self) -> None:
-        """Register all default scanners from the factory and enable them.
+    # def _register_default_scanners(self) -> None:
+    #     """Register all default scanners from the factory and enable them.
 
-        This method:
-        1. Initializes enabled_scanners set if needed
-        2. Gets all available scanners from factory
-        3. Registers each scanner with force=True to enable it
-        4. Logs registration status for debugging
+    #     This method:
+    #     1. Initializes enabled_scanners set if needed
+    #     2. Gets all available scanners from factory
+    #     3. Registers each scanner with force=True to enable it
+    #     4. Logs registration status for debugging
 
-        By default, all registered scanners are enabled unless explicitly disabled via config.
-        """
-        self.logger.debug("Registering default scanners from factory")
-        self.logger.info("Registering default scanners")
+    #     By default, all registered scanners are enabled unless explicitly disabled via config.
+    #     """
+    #     self.logger.debug("Registering default scanners from factory")
+    #     self.logger.info("Registering default scanners")
 
-        # Initialize enabled scanners set if needed
-        if self._enabled_scanners is None:
-            self._enabled_scanners = set()
-            self.logger.debug("Initialized enabled scanners set")
+    #     # Initialize enabled scanners set if needed
+    #     if self._enabled_scanners is None:
+    #         self._enabled_scanners = set()
+    #         self.logger.debug("Initialized enabled scanners set")
 
-        # Initialize scanners dict if needed
-        if not self._scanners:
-            self._scanners = {}
+    #     # Initialize scanners dict if needed
+    #     if not self._scanners:
+    #         self._scanners = {}
 
-        # First register all scanners in factory
-        self._scanner_factory._register_default_scanners()
+    #     # First register all scanners in factory
+    #     self._scanner_factory._register_default_scanners()
 
-        # Normalize enabled scanner names if provided
-        if self._enabled_scanners:
-            enabled = set()
-            for name in self._enabled_scanners:
-                normalized = name.lower().strip()
-                if "scanner" in normalized.lower():
-                    normalized = normalized.split("scanner")[0].strip()
-                enabled.add(normalized)
-            self._enabled_scanners = enabled
+    #     # Normalize enabled scanner names if provided
+    #     if self._enabled_scanners:
+    #         enabled = set()
+    #         for name in self._enabled_scanners:
+    #             normalized = name.lower().strip()
+    #             if "scanner" in normalized.lower():
+    #                 normalized = normalized.split("scanner")[0].strip()
+    #             enabled.add(normalized)
+    #         self._enabled_scanners = enabled
 
-        # Get initial set of scanners from factory
-        registered = set()
-        all_scanners = {}
+    #     # Get initial set of scanners from factory
+    #     registered = set()
+    #     all_scanners = {}
 
-        # Ensure factory has latest scanners registered
-        self._scanner_factory._register_default_scanners()
+    #     # Ensure factory has latest scanners registered
+    #     self._scanner_factory._register_default_scanners()
 
-        # Collect scanners from factory first
-        for name, scanner in self._scanner_factory._scanners.items():
-            normalized = name.lower().strip()
-            all_scanners[normalized] = scanner
-            # Also add base name if it's a scanner suffix
-            if normalized.endswith("scanner"):
-                base = normalized[:-7].strip()
-                if base and base not in all_scanners:
-                    all_scanners[base] = scanner
+    #     # Collect scanners from factory first
+    #     for name, scanner in self._scanner_factory._scanners.items():
+    #         normalized = name.lower().strip()
+    #         all_scanners[normalized] = scanner
+    #         # Also add base name if it's a scanner suffix
+    #         if normalized.endswith("scanner"):
+    #             base = normalized[:-7].strip()
+    #             if base and base not in all_scanners:
+    #                 all_scanners[base] = scanner
 
-        # Add any missing default scanners
-        for scanner_class in self._scanner_factory.default_scanners:
-            if not hasattr(scanner_class, "_default_config"):
-                self.logger.warning(
-                    f"Scanner {scanner_class.__name__} missing _default_config"
-                )
-                continue
+    #     # Add any missing default scanners
+    #     for scanner_class in self._scanner_factory.default_scanners:
+    #         if not hasattr(scanner_class, "_default_config"):
+    #             self.logger.warning(
+    #                 f"Scanner {scanner_class} missing _default_config (engine)"
+    #             )
+    #             continue
 
-            config = scanner_class._default_config
-            if not hasattr(config, "name") or not config.name:
-                self.logger.warning(
-                    f"Scanner {scanner_class.__name__} missing name in config"
-                )
-                continue
+    #         config = scanner_class._default_config
+    #         if not hasattr(config, "name") or not config.name:
+    #             self.logger.warning(
+    #                 f"Scanner {scanner_class.__name__} missing name in config"
+    #             )
+    #             continue
 
-            scanner_name = config.name.lower().strip()
-            if not scanner_name:
-                continue
+    #         scanner_name = config.name.lower().strip()
+    #         if not scanner_name:
+    #             continue
 
-            if scanner_name not in all_scanners:
-                all_scanners[scanner_name] = scanner_class
+    #         if scanner_name not in all_scanners:
+    #             all_scanners[scanner_name] = scanner_class
 
-            # Also add base name variant
-            if scanner_name.endswith("scanner"):
-                base_name = scanner_name[:-7].strip()
-                if base_name and base_name not in all_scanners:
-                    all_scanners[base_name] = scanner_class
+    #         # Also add base name variant
+    #         if scanner_name.endswith("scanner"):
+    #             base_name = scanner_name[:-7].strip()
+    #             if base_name and base_name not in all_scanners:
+    #                 all_scanners[base_name] = scanner_class
 
-        # Register all scanners - filtering happens at usage time
-        for name, scanner_class in all_scanners.items():
-            try:
-                # Force registration since this is initial setup
-                self._scanners[name] = scanner_class
-                registered.add(name)
+    #     # Register all scanners - filtering happens at usage time
+    #     for name, scanner_class in all_scanners.items():
+    #         try:
+    #             # Force registration since this is initial setup
+    #             self._scanners[name] = scanner_class
+    #             registered.add(name)
 
-                # Register base name variant
-                if name.endswith("scanner"):
-                    base = name[:-7].strip()
-                    if base and base not in registered:
-                        # Also force register base name variant
-                        self._scanners[base] = scanner_class
-                        registered.add(base)
-            except Exception as e:
-                self.logger.warning(f"Failed to register {name}: {str(e)}")
+    #             # Register base name variant
+    #             if name.endswith("scanner"):
+    #                 base = name[:-7].strip()
+    #                 if base and base not in registered:
+    #                     # Also force register base name variant
+    #                     self._scanners[base] = scanner_class
+    #                     registered.add(base)
+    #         except Exception as e:
+    #             self.logger.warning(f"Failed to register {name}: {str(e)}")
 
-        # Log the registered scanners
-        registered_names = ", ".join(sorted(registered))
-        self.logger.info(f"Registered scanners: {registered_names}")
+    #     # Log the registered scanners
+    #     registered_names = ", ".join(sorted(registered))
+    #     self.logger.info(f"Registered scanners: {registered_names}")
 
-        # Log placeholders separately
-        placeholders = [
-            name
-            for name, factory in self._scanners.items()
-            if factory is None or not callable(factory)
-        ]
-        if placeholders:
-            placeholder_names = ", ".join(sorted(placeholders))
-            self.logger.info(
-                f"Placeholder scanners (not implemented): {placeholder_names}"
-            )
-
-    def register_scanner(
-        self,
-        name: str,
-        scanner_factory: Optional[
-            Union[Type[ScannerPlugin], Callable[..., ScannerPlugin]]
-        ],
-        force: bool = True,  # Default to force=True to simplify registration
-    ) -> None:
-        """Register a scanner with the execution engine.
-
-        Args:
-            name: Scanner name (will be normalized)
-            scanner_factory: Scanner class or factory function for creating scanner instances, or None for placeholder registration
-            force: If True, register scanner even if not in enabled list
-        """
-        # Normalize scanner name for consistent lookup
-        scanner_name = name.lower().strip()
-
-        self.logger.debug(f"Attempting to register scanner: {scanner_name}")
-
-        # If already registered and force=True, just ensure it's enabled
-        if scanner_name in self._scanners:
-            self.logger.debug(f"Scanner {scanner_name} already registered")
-            if force:
-                self._enabled_scanners = self._enabled_scanners or set()
-                self._enabled_scanners.add(scanner_name)
-                if scanner_name.endswith("scanner"):
-                    base_name = scanner_name[:-7].strip()
-                    if base_name:
-                        self._enabled_scanners.add(base_name)
-                self.logger.debug(f"Force enabled existing scanner: {scanner_name}")
-            return
-
-        # Default behavior is to enable scanners:
-        # 1. On initial registration
-        # 2. When forced enabled
-        # 3. When no explicit enabled list exists
-        # This ensures default scanners and explicitly registered ones work
-        if self._enabled_scanners is None:
-            self._enabled_scanners = set()
-
-        # Add to enabled list unless explicitly disabled via config
-        if force or not self._enabled_scanners:
-            self._enabled_scanners.add(scanner_name)
-            if scanner_name.endswith("scanner"):
-                base_name = scanner_name[:-7].strip()
-                if base_name:
-                    self._enabled_scanners.add(base_name)
-            self.logger.debug(f"Enabled scanner: {scanner_name}")
-
-        self.logger.debug(f"Registering scanner: {scanner_name}")
-
-        # Handle scanner registration, enabling by default unless explicitly disabled
-        if scanner_factory is None:
-            # For placeholder registration
-            if scanner_name not in self._scanners:
-                # Register empty placeholder
-                self._scanners[scanner_name] = None
-                self.logger.debug(f"Registered placeholder scanner: {scanner_name}")
-        else:
-            # Register actual scanner implementation
-            if scanner_name not in self._scanners:
-                # Create factory function to handle scanner instance creation
-                self.logger.debug(
-                    f"Creating factory function for scanner: {scanner_name}"
-                )
-            # Always register actual implementations
-            self._scanners[name] = scanner_factory
-
-        # Process class-based scanner factory
-        if isinstance(scanner_factory, type):
-            # Allow None factory for placeholder registration
-            if scanner_factory is None:
-                self._scanners[name] = None
-                return
-
-            scanner_class = scanner_factory
-
-            def factory_fn(source_dir=None, output_dir=None, logger=None):
-                if scanner_factory is None:
-                    raise NotImplementedError(
-                        f"Scanner {name} is registered but not implemented"
-                    )
-                if source_dir is not None and not isinstance(source_dir, Path):
-                    source_dir = Path(source_dir)
-                if output_dir is not None and not isinstance(output_dir, Path):
-                    output_dir = Path(output_dir)
-                # Ensure paths are Path objects
-                if isinstance(source_dir, str):
-                    source_dir = Path(source_dir)
-                if isinstance(output_dir, str):
-                    output_dir = Path(output_dir)
-                # Use engine paths if none provided
-                source_dir = source_dir if source_dir is not None else self.source_dir
-                output_dir = output_dir if output_dir is not None else self.output_dir
-                if source_dir is None or output_dir is None:
-                    raise ValueError("source_dir and output_dir are required")
-
-                # Always force paths to be Path objects
-                if isinstance(source_dir, str):
-                    source_dir = Path(source_dir)
-                if isinstance(output_dir, str):
-                    output_dir = Path(output_dir)
-
-                # Ensure we always have minimum required paths
-                if not source_dir:
-                    source_dir = self.source_dir or Path(".")
-                if not output_dir:
-                    output_dir = self.output_dir or Path("output")
-
-                # Always use Path objects
-                if isinstance(source_dir, str):
-                    source_dir = Path(source_dir)
-                if isinstance(output_dir, str):
-                    output_dir = Path(output_dir)
-
-                try:
-                    scanner = scanner_class(
-                        source_dir=source_dir or Path("."),
-                        output_dir=output_dir or Path("output"),
-                        logger=logger or self.logger,
-                    )
-                    return scanner
-                except Exception as e:
-                    self.logger.error(f"Failed to create scanner: {str(e)}")
-                    raise
-
-        else:
-            factory_fn = scanner_factory
-            scanner_instance = factory_fn()
-            scanner_class = type(scanner_instance)
-
-        # Initialize enabled scanners list if not already done
-        if not hasattr(self, "_enabled_scanners"):
-            self._enabled_scanners = []
-
-        # Enable scanner if forced or no enabled list exists
-        if force or not self._enabled_scanners:
-            if scanner_name not in self._enabled_scanners:
-                self._enabled_scanners.append(scanner_name)
-
-        # Register scanner with both factory and store
-        try:
-            # Always update scanner registration to ensure latest version
-            self._scanners[scanner_name] = factory_fn
-            self._scanner_factory.register_scanner(scanner_name, scanner_class)
-        except Exception as e:
-            self.logger.warning(f"Failed to register scanner {scanner_name}: {str(e)}")
-            raise
+    #     # Log placeholders separately
+    #     placeholders = [
+    #         name
+    #         for name, factory in self._scanners.items()
+    #         if factory is None or not callable(factory)
+    #     ]
+    #     if placeholders:
+    #         placeholder_names = ", ".join(sorted(placeholders))
+    #         self.logger.info(
+    #             f"Placeholder scanners (not implemented): {placeholder_names}"
+    #         )
 
     def get_scanner(
         self, scanner_name: str, check_enabled: bool = True
@@ -428,108 +281,97 @@ class ScanExecutionEngine:
             Scanner instance configured with current engine paths
 
         Raises:
-            ValueError: If scanner is not found or not enabled
-            NotImplementedError: If scanner is registered as placeholder but not implemented
+            ValueError: If scanner does not exist or is not enabled
         """
-        # Normalize scanner name and initialize if needed
+        # Normalize scanner name
         lookup_name = scanner_name.lower().strip()
         if not lookup_name:
-            raise ValueError("Scanner name cannot be empty")
+            self.logger.warning("Scanner name cannot be empty")
 
-        self.logger.debug(
-            f"Looking up scanner: {lookup_name} (check_enabled={check_enabled})"
-        )
-
-        # Auto-initialize and register default scanners if needed
+        # Ensure initialized and verify enabled status
         if not self._initialized:
             self.ensure_initialized()
 
-        # First verify scanner exists
-        if lookup_name not in self._scanners:
-            self.logger.warning(
-                f"Scanner {lookup_name} not found in registered scanners"
+        if check_enabled and lookup_name not in (self._enabled_scanners or set()):
+            self.logger.warning(f"Scanner {lookup_name} is not enabled")
+
+        # Create scanner using factory
+        try:
+            scanner = self._scanner_factory.create_scanner(
+                scanner_name=lookup_name,
+                source_dir=self.source_dir,
+                output_dir=self.output_dir,
+                logger=self.logger,
             )
-            raise ValueError(f"Scanner {lookup_name} not registered")
+            return scanner
+        except ValueError as e:
+            raise ValueError(f"Scanner {lookup_name} could not be created: {str(e)}")
 
-        # Then check if scanner is enabled
-        if check_enabled and self._enabled_scanners is not None:
-            base_name = (
-                lookup_name[:-7].strip() if lookup_name.endswith("scanner") else ""
-            )
-            names_to_check = {lookup_name}
-            if base_name:
-                names_to_check.add(base_name)
-            if not any(name in self._enabled_scanners for name in names_to_check):
-                self.logger.warning(
-                    f"Scanner {lookup_name} not enabled (enabled scanners: {self._enabled_scanners})"
-                )
-                raise ValueError(f"Scanner {lookup_name} not enabled")
+        #     # Scanner is considered enabled if:
+        #     # 1. Empty enabled list and scanner is registered
+        #     # 2. Non-empty enabled list and scanner or its base name is in it
+        #     if len(self._enabled_scanners) == 0:
+        #         enabled = lookup_name in self._scanners or (
+        #             base_name and base_name in self._scanners
+        #         )
+        #     else:
+        #         enabled = lookup_name in self._enabled_scanners or (
+        #             base_name and base_name in self._enabled_scanners
+        #         )
 
-            # Scanner is considered enabled if:
-            # 1. Empty enabled list and scanner is registered
-            # 2. Non-empty enabled list and scanner or its base name is in it
-            if len(self._enabled_scanners) == 0:
-                enabled = lookup_name in self._scanners or (
-                    base_name and base_name in self._scanners
-                )
-            else:
-                enabled = lookup_name in self._enabled_scanners or (
-                    base_name and base_name in self._enabled_scanners
-                )
+        #     if not enabled:
+        #         msg = (
+        #             "No scanners enabled"
+        #             if len(self._enabled_scanners) == 0
+        #             else f"Scanner {scanner_name} not enabled"
+        #         )
+        #         self.logger.warning(msg)
+        #         # raise ValueError(msg)
 
-            if not enabled:
-                msg = (
-                    "No scanners enabled"
-                    if len(self._enabled_scanners) == 0
-                    else f"Scanner {scanner_name} not enabled"
-                )
-                self.logger.warning(msg)
-                raise ValueError(msg)
+        # # Prepare name variations to try
+        # names_to_try = [lookup_name]
 
-        # Prepare name variations to try
-        names_to_try = [lookup_name]
+        # # Add base name without 'scanner' suffix to try
+        # if lookup_name.endswith("scanner"):
+        #     base_name = lookup_name[:-7].strip()
+        #     if base_name:
+        #         names_to_try.append(base_name)
 
-        # Add base name without 'scanner' suffix to try
-        if lookup_name.endswith("scanner"):
-            base_name = lookup_name[:-7].strip()
-            if base_name:
-                names_to_try.append(base_name)
+        # # Try each possible name
+        # for name in names_to_try:
+        #     # Check registered scanners
+        #     if name in self._scanners:
+        #         scanner_fn = self._scanners[name]
+        #         try:
+        #             scanner = scanner_fn(
+        #                 source_dir=self.source_dir,
+        #                 output_dir=self.output_dir,
+        #                 logger=self.logger,
+        #             )
+        #             return scanner
+        #         except (TypeError, ValueError):
+        #             # If that fails, try without paths
+        #             return scanner_fn()
 
-        # Try each possible name
-        for name in names_to_try:
-            # Check registered scanners
-            if name in self._scanners:
-                scanner_fn = self._scanners[name]
-                try:
-                    scanner = scanner_fn(
-                        source_dir=self.source_dir,
-                        output_dir=self.output_dir,
-                        logger=self.logger,
-                    )
-                    return scanner
-                except (TypeError, ValueError):
-                    # If that fails, try without paths
-                    return scanner_fn()
+        #     # Fall back to factory if not already registered
+        # for fallback_name in names_to_try:
+        #     if fallback_name in self._scanner_factory._scanners:
+        #         scanner_class = self._scanner_factory._scanners[fallback_name]
+        #         try:
+        #             self.register_scanner(fallback_name, scanner_class)
+        #             scanner_fn = self._scanners[fallback_name]
+        #             return scanner_fn(
+        #                 source_dir=self.source_dir,
+        #                 output_dir=self.output_dir,
+        #                 logger=self.logger,
+        #             )
+        #         except Exception as e:
+        #             self.logger.warning(
+        #                 f"Failed to register scanner {fallback_name} from factory: {str(e)}"
+        #             )
+        #             continue
 
-            # Fall back to factory if not already registered
-        for fallback_name in names_to_try:
-            if fallback_name in self._scanner_factory._scanners:
-                scanner_class = self._scanner_factory._scanners[fallback_name]
-                try:
-                    self.register_scanner(fallback_name, scanner_class)
-                    scanner_fn = self._scanners[fallback_name]
-                    return scanner_fn(
-                        source_dir=self.source_dir,
-                        output_dir=self.output_dir,
-                        logger=self.logger,
-                    )
-                except Exception as e:
-                    self.logger.warning(
-                        f"Failed to register scanner {fallback_name} from factory: {str(e)}"
-                    )
-                    continue
-
-        raise ValueError(f"Scanner '{scanner_name}' not registered")
+        # raise ValueError(f"Scanner '{scanner_name}' not registered")
 
     def ensure_initialized(self, config: Optional[ASHConfig] = None) -> None:
         """Ensure scanner factory and scanners are properly initialized.
@@ -549,76 +391,76 @@ class ScanExecutionEngine:
             self._config = config
             self._enabled_scanners = None  # Default to all enabled
 
-            # Process scanners in order:
-            # 1. Register factory defaults (with force=True)
-            # 2. Process config overrides if present
-            self._register_default_scanners()  # This registers with force=True
+            # # Process scanners in order:
+            # # 1. Register factory defaults (with force=True)
+            # # 2. Process config overrides if present
+            # # self._register_default_scanners()  # This registers with force=True
 
-            # Process config if provided to override default scanner settings
-            if config and hasattr(config, "sast") and hasattr(config.sast, "scanners"):
-                # Switch to explicit enable list and process scanner configs
-                self._enabled_scanners = set()
-                for scanner in vars(config.sast.scanners).values():
-                    if not hasattr(scanner, "name"):
-                        continue
+            # # Process config if provided to override default scanner settings
+            # if config and hasattr(config, "sast") and hasattr(config.sast, "scanners"):
+            #     # Switch to explicit enable list and process scanner configs
+            #     self._enabled_scanners = set()
+            #     for scanner in vars(config.sast.scanners).values():
+            #         if not hasattr(scanner, "name"):
+            #             continue
 
-                    name = scanner.name.lower().strip()
-                    enabled = getattr(scanner, "enabled", False)
-                    self.logger.debug(
-                        f"Processing scanner config: {name} (enabled={enabled})"
-                    )
+            #         name = scanner.name.lower().strip()
+            #         enabled = getattr(scanner, "enabled", False)
+            #         self.logger.debug(
+            #             f"Processing scanner config: {name} (enabled={enabled})"
+            #         )
 
-                    # Ensure scanner is registered
-                    if name not in self._scanners and self._scanner_factory:
-                        try:
-                            scanner_class = self._scanner_factory.get_scanner_class(
-                                name
-                            )
-                            if scanner_class:
-                                self.register_scanner(name, scanner_class, force=True)
-                        except Exception as e:
-                            self.logger.warning(
-                                f"Failed to get scanner class for {name}: {e}"
-                            )
+            #         # Ensure scanner is registered
+            #         if name not in self._scanners and self._scanner_factory:
+            #             try:
+            #                 scanner_class = self._scanner_factory.get_scanner_class(
+            #                     name
+            #                 )
+            #                 if scanner_class:
+            #                     self.register_scanner(name, scanner_class, force=True)
+            #             except Exception as e:
+            #                 self.logger.warning(
+            #                     f"Failed to get scanner class for {name}: {e}"
+            #                 )
 
-                    # Enable scanner if configured
-                    if enabled:
-                        self._enabled_scanners.add(name)
-                        # Also enable base name without 'scanner' suffix
-                        if name.endswith("scanner"):
-                            base = name[:-7].strip()
-                            if base:
-                                self._enabled_scanners.add(base)
+            #         # Enable scanner if configured
+            #         if enabled:
+            #             self._enabled_scanners.add(name)
+            #             # Also enable base name without 'scanner' suffix
+            #             if name.endswith("scanner"):
+            #                 base = name[:-7].strip()
+            #                 if base:
+            #                     self._enabled_scanners.add(base)
 
-            # If no explicit configuration, enable all registered scanners
-            if not self._enabled_scanners:
-                self.logger.debug(
-                    "No explicit scanner configuration - enabling all registered scanners"
-                )
-                self._enabled_scanners = set()
-                for scanner in vars(config.sast.scanners).values():
-                    if hasattr(scanner, "name"):
-                        name = scanner.name.lower().strip()
+            # # If no explicit configuration, enable all registered scanners
+            # if not self._enabled_scanners:
+            #     self.logger.debug(
+            #         "No explicit scanner configuration - enabling all registered scanners"
+            #     )
+            #     self._enabled_scanners = set()
+            #     for scanner in vars(config.sast.scanners).values():
+            #         if hasattr(scanner, "name"):
+            #             name = scanner.name.lower().strip()
 
-                        # Register scanner (as placeholder if not implemented)
-                        self.register_scanner(name, None, force=True)
+            #             # Register scanner (as placeholder if not implemented)
+            #             self.register_scanner(name, None, force=True)
 
-                        # Also handle base name variant
-                        base_name = (
-                            name[:-7].strip() if name.endswith("scanner") else ""
-                        )
-                        if base_name:
-                            self.register_scanner(base_name, None, force=True)
+            #             # Also handle base name variant
+            #             base_name = (
+            #                 name[:-7].strip() if name.endswith("scanner") else ""
+            #             )
+            #             if base_name:
+            #                 self.register_scanner(base_name, None, force=True)
 
-                        # Track enabled scanners
-                        if getattr(scanner, "enabled", False):
-                            self._enabled_scanners.add(name)
-                            if base_name:
-                                self._enabled_scanners.add(base_name)
+            #             # Track enabled scanners
+            #             if getattr(scanner, "enabled", False):
+            #                 self._enabled_scanners.add(name)
+            #                 if base_name:
+            #                     self._enabled_scanners.add(base_name)
 
-            # If no scanners were explicitly enabled, enable all registered ones
-            if self._enabled_scanners is None:
-                self._enabled_scanners = list(sorted(self._scanners.keys()))
+            # # If no scanners were explicitly enabled, enable all registered ones
+            # if self._enabled_scanners is None:
+            #     self._enabled_scanners = list(sorted(self._scanners.keys()))
 
             # Mark initialization complete
             self._initialized = True
@@ -684,7 +526,7 @@ class ScanExecutionEngine:
             self._progress = ScanProgress(len(enabled_scanners))
 
             # Execute scanners based on mode
-            if self._mode == ExecutionStrategy.PARALLEL:
+            if self._strategy == ExecutionStrategy.PARALLEL:
                 self._execute_parallel(ash_model)
             else:
                 self._execute_sequential(ash_model)
@@ -699,10 +541,10 @@ class ScanExecutionEngine:
                 results_file = output_path / "ash_aggregated_results.txt"
                 if not results_file.exists():
                     with open(results_file, "w") as f:
-                        json.dump(self._scan_results, f, indent=2, default=str)
+                        json.dump(ash_model.model_dump(), f, indent=2, default=str)
 
             self._scan_results["asharp_model"] = ash_model
-            return self._scan_results
+            return ash_model
 
         except Exception as e:
             self.logger.error(f"Execution failed: {str(e)}")
@@ -1006,16 +848,22 @@ class ScanExecutionEngine:
         return self._progress
 
     def _get_all_scanners(self) -> Dict[str, Any]:
-        """Get all enabled scanners from SAST and SBOM configurations.
+        """Get all enabled scanners from available scanners that are enabled.
 
         Returns:
             Dict[str, Any]: Dictionary of scanner name to scanner config mappings.
         """
         all_scanners = {}
-        if not self._config:
+        if not self._initialized:
             return all_scanners
 
-        # Get SAST scanners
+        # Get all available scanners that are enabled
+        available = self._scanner_factory.available_scanners()
+        for scanner_name in available:
+            if scanner_name in (self._enabled_scanners or set()):
+                all_scanners[scanner_name] = None
+
+        # Add SAST scanners if configured
         if hasattr(self._config, "sast") and hasattr(self._config.sast, "scanners"):
             for (
                 scanner_name

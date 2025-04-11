@@ -1,10 +1,11 @@
 """Unit tests for output formatter module."""
 
+from importlib.metadata import version
 import json
 import pytest
-from automated_security_helper.models.core import Location
+from automated_security_helper.models.core import Location, Scanner
 from automated_security_helper.models.iac_scan import IaCVulnerability
-from automated_security_helper.output_formatter import (
+from automated_security_helper.core.output_formatter import (
     OutputFormatter,
     JSONReporter,
     HTMLReporter,
@@ -16,6 +17,13 @@ from automated_security_helper.models.asharp_model import ASHARPModel
 @pytest.fixture
 def sample_ash_model():
     model = ASHARPModel(
+        scanners_used=[
+            Scanner(name="bandit", version=version("bandit")),
+            Scanner(name="cdk_nag", version=version("cdk_nag")),
+            Scanner(name="checkov", version=version("checkov")),
+            Scanner(name="jupyterlab", version=version("jupyterlab")),
+            Scanner(name="nbconvert", version=version("nbconvert")),
+        ],
         findings=[
             IaCVulnerability(
                 id="finding-1",
@@ -28,7 +36,7 @@ def sample_ash_model():
                 ),
                 resource_name="LambdaFunction1",
                 rule_id="AwsSolutionsChecks/finding-1",
-                status="open",
+                status="OPEN",
             )
         ],
         metadata={"scanner": "test_scanner", "timestamp": "2023-01-01T00:00:00Z"},

@@ -6,49 +6,16 @@ from typing import (
 from pydantic import BaseModel, ConfigDict, Field
 
 from automated_security_helper.models.core import SCANNER_TYPES
+from automated_security_helper.models.core import ScannerBaseConfig
+from automated_security_helper.models.core import BaseScannerOptions
 
 T = TypeVar("T", bound="ScannerBaseConfig")
-
-
-class BaseScannerOptions(BaseModel):
-    """Base class for scanner options."""
-
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
 
 class BasePluginOptions(BaseModel):
     """Base class for plugin options."""
 
     enabled: bool = True
-
-
-class ScannerBaseConfig(BaseModel):
-    """Base configuration model with common settings."""
-
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        arbitrary_types_allowed=True,
-        extra="allow",
-    )
-
-    name: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-            pattern=r"^[a-zA-Z][\w-]+$",
-        ),
-    ] = None
-    enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
-        True
-    )
-    type: Annotated[
-        SCANNER_TYPES,
-        Field(description=f"Type of scanner. Valid options include: {SCANNER_TYPES}"),
-    ] = "UNKNOWN"
-    options: Annotated[BaseScannerOptions, Field(description="Scanner options")] = (
-        BaseScannerOptions()
-    )
 
 
 class CustomScannerConfig(ScannerBaseConfig):
@@ -64,85 +31,6 @@ class CustomScannerConfig(ScannerBaseConfig):
     type: SCANNER_TYPES = "CUSTOM"
     options: Annotated[
         BaseScannerOptions, Field(description="Configure custom scanner")
-    ] = BaseScannerOptions()
-
-
-class BanditScannerConfig(ScannerBaseConfig):
-    """Bandit SAST scanner configuration."""
-
-    name: Literal["bandit"] = "bandit"
-    type: SCANNER_TYPES = "SAST"
-    options: Annotated[
-        BaseScannerOptions, Field(description="Configure Bandit scanner")
-    ] = BaseScannerOptions()
-
-
-class JupyterNotebookScannerConfig(ScannerBaseConfig):
-    """Jupyter Notebook (.ipynb) SAST scanner configuration."""
-
-    name: Literal["jupyter"] = "jupyter"
-    type: SCANNER_TYPES = "SAST"
-    options: Annotated[
-        BaseScannerOptions, Field(description="Configure Jupyter Notebook scanner")
-    ] = BaseScannerOptions()
-
-
-class CdkNagPacks(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    AwsSolutionsChecks: Annotated[
-        bool,
-        Field(description="Runs the AwsSolutionsChecks NagPack included with CDK Nag."),
-    ] = True
-    HIPAASecurityChecks: Annotated[
-        bool,
-        Field(
-            description="Runs the HIPAASecurityChecks NagPack included with CDK Nag."
-        ),
-    ] = False
-    NIST80053R4Checks: Annotated[
-        bool,
-        Field(description="Runs the NIST80053R4Checks NagPack included with CDK Nag."),
-    ] = False
-    NIST80053R5Checks: Annotated[
-        bool,
-        Field(description="Runs the NIST80053R5Checks NagPack included with CDK Nag."),
-    ] = False
-    PCIDSS321Checks: Annotated[
-        bool,
-        Field(description="Runs the PCIDSS321Checks NagPack included with CDK Nag."),
-    ] = False
-
-
-class CdkNagScannerConfigOptions(BaseScannerOptions):
-    """CDK Nag IAC SAST scanner options."""
-
-    nag_packs: Annotated[
-        CdkNagPacks,
-        Field(
-            description="CDK Nag packs to enable",
-        ),
-    ] = CdkNagPacks()
-
-
-class CdkNagScannerConfig(ScannerBaseConfig):
-    """CDK Nag IAC SAST scanner configuration."""
-
-    name: Literal["cdknag"] = "cdknag"
-    type: SCANNER_TYPES = "IAC"
-    options: Annotated[
-        CdkNagScannerConfigOptions, Field(description="Configure CDK Nag scanner")
-    ] = CdkNagScannerConfigOptions()
-
-
-class CfnNagScannerConfig(ScannerBaseConfig):
-    """CFN Nag IAC SAST scanner configuration."""
-
-    name: Literal["cfnnag"] = "cfnnag"
-    type: SCANNER_TYPES = "IAC"
-    options: Annotated[
-        BaseScannerOptions,
-        Field(description="Enable CFN Nag IAC scanner"),
     ] = BaseScannerOptions()
 
 
@@ -207,4 +95,15 @@ class SyftScannerConfig(ScannerBaseConfig):
     type: SCANNER_TYPES = "SBOM"
     options: Annotated[
         BaseScannerOptions, Field(description="Configure Syft scanner")
+    ] = BaseScannerOptions()
+
+
+class CfnNagScannerConfig(ScannerBaseConfig):
+    """CFN Nag IAC SAST scanner configuration."""
+
+    name: Literal["cfnnag"] = "cfnnag"
+    type: SCANNER_TYPES = "IAC"
+    options: Annotated[
+        BaseScannerOptions,
+        Field(description="Enable CFN Nag IAC scanner"),
     ] = BaseScannerOptions()

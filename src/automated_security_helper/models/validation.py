@@ -4,7 +4,8 @@ from typing import Any, Dict, List, Optional, Type, Union
 
 from pydantic import BaseModel, ValidationError
 
-from automated_security_helper.config.config import ParserConfig, ScannerPluginConfig
+from automated_security_helper.models.core import ParserConfig
+from automated_security_helper.models.core import ScannerPluginConfig
 
 
 class ConfigurationValidator:
@@ -22,6 +23,42 @@ class ConfigurationValidator:
         if scanner_type == "STATIC":
             return "SAST"
         return scanner_type
+
+    VALID_OUTPUT_FORMATS = [
+        "json",
+        "text",
+        "html",
+        "csv",
+        "yaml",
+        "junitxml",
+        "sarif",
+        "asff",
+        "cyclonedx",
+        "spdx",
+    ]
+
+    @staticmethod
+    def _validate_output_formats(formats: List[str]) -> tuple[bool, Optional[str]]:
+        """Validate output format list.
+
+        Args:
+            formats: List of output format strings to validate
+
+        Returns:
+            Tuple of (is_valid: bool, error_message: Optional[str])
+        """
+        if not isinstance(formats, list):
+            return False, f"Expected list of formats, got {type(formats).__name__}"
+
+        invalid_formats = [
+            fmt
+            for fmt in formats
+            if fmt not in ConfigurationValidator.VALID_OUTPUT_FORMATS
+        ]
+        if invalid_formats:
+            return False, f"Invalid output formats: {invalid_formats}"
+
+        return True, None
 
     @staticmethod
     def _is_valid_scanner_type(scanner_type: str) -> bool:
@@ -64,6 +101,25 @@ class ConfigurationValidator:
             )
 
         return True, None, scanner_type
+
+    @staticmethod
+    def validate_output_config(config: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+        """Validate output configuration.
+
+        Args:
+            config: Output configuration dictionary to validate
+
+        Returns:
+            Tuple of (is_valid: bool, error_message: Optional[str])
+        """
+        if not isinstance(config, dict):
+            return False, f"Expected dict, got {type(config).__name__}"
+
+        formats = config.get("formats", ["json"])
+        if not formats:
+            return True, None  # Empty list will use default json
+
+        return ConfigurationValidator._validate_output_formats(formats)
 
     @staticmethod
     def validate_config(

@@ -4,7 +4,7 @@ import pytest
 from datetime import datetime, timezone
 from automated_security_helper.models.core import Location, Scanner, BaseFinding
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.data_interchange import ExportFormat
+from automated_security_helper.models.core import ExportFormat
 
 
 @pytest.fixture

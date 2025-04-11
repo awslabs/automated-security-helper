@@ -2,23 +2,28 @@
 
 from importlib.metadata import version
 import json
-from datetime import datetime, timezone
-import logging
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
-from automated_security_helper.models.core import Location
-from automated_security_helper.models.data_interchange import (
+from typing import Annotated, Any, Dict, Literal, Optional
+
+from pydantic import Field
+from automated_security_helper.models.core import BaseScannerOptions, ScanStatistics
+from automated_security_helper.models.core import (
+    SCANNER_TYPES,
+    Location,
+    ScannerBaseConfig,
+)
+from automated_security_helper.models.core import (
     ExportFormat,
-    ScanStatistics,
 )
 from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
 )
-from automated_security_helper.exceptions import ScannerError
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.scanner_plugin import (
     ScannerPlugin,
 )
-from automated_security_helper.config.config import (
+from automated_security_helper.models.core import (
     ScannerPluginConfig,
 )
 from automated_security_helper.models.static_analysis import (
@@ -26,7 +31,21 @@ from automated_security_helper.models.static_analysis import (
 )
 
 
-class BanditScanner(ScannerPlugin):
+class BanditScannerConfigOptions(BaseScannerOptions):
+    pass
+
+
+class BanditScannerConfig(ScannerBaseConfig):
+    """Bandit SAST scanner configuration."""
+
+    name: Literal["bandit"] = "bandit"
+    type: SCANNER_TYPES = "SAST"
+    options: Annotated[
+        BanditScannerConfigOptions, Field(description="Configure Bandit scanner")
+    ] = BanditScannerConfigOptions()
+
+
+class BanditScanner(ScannerPlugin, BanditScannerConfig):
     """Implementation of a Python security scanner using Bandit.
 
     This scanner uses Bandit to perform static security analysis of Python code
@@ -42,32 +61,23 @@ class BanditScanner(ScannerPlugin):
         scan_path_arg="-r",
         scan_path_arg_position="after_args",
         format_arg="-f",
-        format_arg_value="json",
+        format_arg_value="sarif",
         format_arg_position="before_args",
         invocation_mode="directory",
         get_tool_version_command=["bandit", "--version"],
         output_stream="file",
         enabled=True,
-        output_format="json",
+        output_format=ExportFormat.SARIF,
     )
-    _output_format = ExportFormat.JSON
-    tool_version = version("bandit")
-
-    def __init__(
-        self,
-        source_dir: Path,
-        output_dir: Path,
-        logger: Optional[logging.Logger] = logging.Logger(__name__),
-    ) -> None:
-        super().__init__(source_dir=source_dir, output_dir=output_dir, logger=logger)
+    tool_version: str = version("bandit")
 
     def configure(
         self,
-        config: ScannerPluginConfig = None,
+        config: ScannerPluginConfig | None = None,
+        options: BanditScannerConfigOptions | None = None,
     ) -> None:
         """Configure the scanner with provided settings."""
-        # Allow output format override through config
-        super().configure(config)
+        super().configure(config=config, options=options)
 
     def validate(self) -> bool:
         """Verify scanner configuration and requirements."""
@@ -75,7 +85,9 @@ class BanditScanner(ScannerPlugin):
         return self._is_valid
 
     def scan(
-        self, target: str, options: Optional[Dict[str, Any]] = None
+        self,
+        target: Path,
+        options: Optional[Dict[str, Any]] = {},
     ) -> StaticAnalysisReport:
         """Execute Bandit scan and return results.
 
@@ -88,6 +100,7 @@ class BanditScanner(ScannerPlugin):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        # self._pre_scan() validates the target and options
         try:
             self._pre_scan(target, options)
         except ScannerError as exc:
@@ -120,9 +133,9 @@ class BanditScanner(ScannerPlugin):
 
         # Add config-specific args if provided
         if self._config:
-            if "confidence" in self._config:
+            if "confidence" in self.options:
                 self._config.args.extend(["-l", self._config["confidence"]])
-            if "severity" in self._config:
+            if "severity" in self.options:
                 self._config.args.extend(["-i", self._config["severity"]])
 
         try:
@@ -199,6 +212,5 @@ class BanditScanner(ScannerPlugin):
             project_name=self.name,
             findings=findings,
             statistics=stats,
-            scan_timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             scan_config=self._config,
         )

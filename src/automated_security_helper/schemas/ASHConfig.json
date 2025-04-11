@@ -17,7 +17,7 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
+          "$ref": "#/$defs/BanditScannerConfigOptions",
           "default": {},
           "description": "Configure Bandit scanner"
         },
@@ -39,6 +39,12 @@
         }
       },
       "title": "BanditScannerConfig",
+      "type": "object"
+    },
+    "BanditScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "BanditScannerConfigOptions",
       "type": "object"
     },
     "BaseScannerOptions": {
@@ -150,8 +156,7 @@
               "NIST80053R5Checks": false,
               "PCIDSS321Checks": false
             }
-          },
-          "description": "Configure CDK Nag scanner"
+          }
         },
         "type": {
           "default": "IAC",
@@ -448,47 +453,6 @@
       "title": "GrypeScannerConfig",
       "type": "object"
     },
-    "JupyterNotebookScannerConfig": {
-      "additionalProperties": true,
-      "description": "Jupyter Notebook (.ipynb) SAST scanner configuration.",
-      "properties": {
-        "enabled": {
-          "default": true,
-          "description": "Whether the component is enabled",
-          "title": "Enabled",
-          "type": "boolean"
-        },
-        "name": {
-          "const": "jupyter",
-          "default": "jupyter",
-          "title": "Name",
-          "type": "string"
-        },
-        "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
-          "default": {},
-          "description": "Configure Jupyter Notebook scanner"
-        },
-        "type": {
-          "default": "SAST",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "title": "JupyterNotebookScannerConfig",
-      "type": "object"
-    },
     "NpmAuditScannerConfig": {
       "additionalProperties": true,
       "description": "JS/TS Dependency scanner configuration.",
@@ -530,346 +494,63 @@
       "title": "NpmAuditScannerConfig",
       "type": "object"
     },
-    "SASTScannerConfig": {
-      "additionalProperties": true,
-      "description": "Configuration model for SAST scanners.",
+    "OutputConfig": {
+      "description": "Configuration model for output formats.",
       "properties": {
-        "output_formats": {
-          "default": [
-            "text",
-            "json",
-            "junitxml",
-            "html"
-          ],
-          "description": "Format for SAST scan results output",
+        "formats": {
+          "description": "List of output formats to generate",
           "items": {
-            "$ref": "#/$defs/ExportFormat"
-          },
-          "title": "Output Formats",
-          "type": "array"
-        },
-        "scanners": {
-          "$ref": "#/$defs/SASTScannerListConfig",
-          "default": {
-            "bandit": {
-              "enabled": true,
-              "name": "bandit",
-              "options": {},
-              "type": "SAST"
-            },
-            "cdknag": {
-              "enabled": true,
-              "name": "cdknag",
-              "options": {
-                "nag_packs": {
-                  "AwsSolutionsChecks": true,
-                  "HIPAASecurityChecks": false,
-                  "NIST80053R4Checks": false,
-                  "NIST80053R5Checks": false,
-                  "PCIDSS321Checks": false
-                }
-              },
-              "type": "IAC"
-            },
-            "cfnnag": {
-              "enabled": true,
-              "name": "cfnnag",
-              "options": {},
-              "type": "IAC"
-            },
-            "checkov": {
-              "enabled": true,
-              "name": "checkov",
-              "options": {},
-              "type": "IAC"
-            },
-            "gitsecrets": {
-              "enabled": true,
-              "name": "gitsecrets",
-              "options": {},
-              "type": "SECRETS"
-            },
-            "grype": {
-              "enabled": true,
-              "name": "grype",
-              "options": {},
-              "type": "SAST"
-            },
-            "jupyter": {
-              "enabled": true,
-              "name": "jupyter",
-              "options": {},
-              "type": "SAST"
-            },
-            "npmaudit": {
-              "enabled": true,
-              "name": "npmaudit",
-              "options": {},
-              "type": "DEPENDENCY"
-            },
-            "semgrep": {
-              "enabled": true,
-              "name": "semgrep",
-              "options": {},
-              "type": "SAST"
-            }
-          },
-          "description": "SAST scanners to enable and their corresponding configurations."
-        }
-      },
-      "title": "SASTScannerConfig",
-      "type": "object"
-    },
-    "SASTScannerListConfig": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/CustomScannerConfig"
-          },
-          {
-            "type": "boolean"
-          }
-        ]
-      },
-      "properties": {
-        "bandit": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/BanditScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "name": "bandit",
-            "options": {},
-            "type": "SAST"
-          },
-          "title": "Bandit"
-        },
-        "cdknag": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CdkNagScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "name": "cdknag",
-            "options": {
-              "nag_packs": {
-                "AwsSolutionsChecks": true,
-                "HIPAASecurityChecks": false,
-                "NIST80053R4Checks": false,
-                "NIST80053R5Checks": false,
-                "PCIDSS321Checks": false
-              }
-            },
-            "type": "IAC"
-          },
-          "title": "Cdknag"
-        },
-        "cfnnag": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CfnNagScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "name": "cfnnag",
-            "options": {},
-            "type": "IAC"
-          },
-          "title": "Cfnnag"
-        },
-        "checkov": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CheckovScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "name": "checkov",
-            "options": {},
-            "type": "IAC"
-          },
-          "title": "Checkov"
-        },
-        "gitsecrets": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/GitSecretsScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "name": "gitsecrets",
-            "options": {},
-            "type": "SECRETS"
-          },
-          "title": "Gitsecrets"
-        },
-        "grype": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/GrypeScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "name": "grype",
-            "options": {},
-            "type": "SAST"
-          },
-          "title": "Grype"
-        },
-        "jupyter": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/JupyterNotebookScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "name": "jupyter",
-            "options": {},
-            "type": "SAST"
-          },
-          "title": "Jupyter"
-        },
-        "npmaudit": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/NpmAuditScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "name": "npmaudit",
-            "options": {},
-            "type": "DEPENDENCY"
-          },
-          "title": "Npmaudit"
-        },
-        "semgrep": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SemgrepScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "name": "semgrep",
-            "options": {},
-            "type": "SAST"
-          },
-          "title": "Semgrep"
-        }
-      },
-      "title": "SASTScannerListConfig",
-      "type": "object"
-    },
-    "SBOMScannerConfig": {
-      "additionalProperties": true,
-      "description": "Configuration model for SBOM scanners.",
-      "properties": {
-        "output_formats": {
-          "default": [
-            "json",
-            "html",
-            "cyclonedx"
-          ],
-          "description": "Format for SBOM scan results output",
-          "items": {
-            "enum": [
-              "text",
-              "yaml",
-              "json",
-              "junitxml",
-              "html",
-              "cyclonedx",
-              "spdx"
-            ],
             "type": "string"
           },
-          "title": "Output Formats",
+          "title": "Formats",
           "type": "array"
-        },
-        "scanners": {
-          "$ref": "#/$defs/SBOMScannerListConfig",
-          "default": {
-            "syft": {
-              "enabled": true,
-              "name": "syft",
-              "options": {},
-              "type": "SBOM"
-            }
-          },
-          "description": "SBOM scanners to enable and their corresponding configurations."
         }
       },
-      "title": "SBOMScannerConfig",
+      "title": "OutputConfig",
       "type": "object"
     },
-    "SBOMScannerListConfig": {
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/CustomScannerConfig"
-          },
-          {
-            "type": "boolean"
-          }
-        ]
-      },
+    "ScannerBaseConfig": {
+      "additionalProperties": true,
+      "description": "Base converter configuration model with common settings.",
       "properties": {
-        "syft": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SyftScannerConfig"
-            },
-            {
-              "type": "boolean"
-            }
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "default": null,
+          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z][\\w-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/BaseScannerOptions",
+          "default": {},
+          "description": "Scanner options"
+        },
+        "type": {
+          "default": "UNKNOWN",
+          "description": "Type of scanner. Valid options include: typing.Literal['CONTAINER', 'DAST', 'DEPENDENCY', 'IAC', 'SAST', 'SBOM', 'SECRETS', 'UNKNOWN', 'CUSTOM']",
+          "enum": [
+            "CONTAINER",
+            "DAST",
+            "DEPENDENCY",
+            "IAC",
+            "SAST",
+            "SBOM",
+            "SECRETS",
+            "UNKNOWN",
+            "CUSTOM"
           ],
-          "default": {
-            "enabled": true,
-            "name": "syft",
-            "options": {},
-            "type": "SBOM"
-          },
-          "title": "Syft"
+          "title": "Type",
+          "type": "string"
         }
       },
-      "title": "SBOMScannerListConfig",
+      "title": "ScannerBaseConfig",
       "type": "object"
     },
     "ScannerPluginConfig": {
@@ -1186,6 +867,18 @@
       },
       "description": "Build-time configuration settings"
     },
+    "converters": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "default": {
+        "archive": true,
+        "jupyter": true
+      },
+      "description": "The map of converters and a boolean value indicating whether they should be enabled or disabled",
+      "title": "Converters",
+      "type": "object"
+    },
     "fail_on_findings": {
       "default": true,
       "description": "Whether to exit with non-zero code if findings are detected",
@@ -1208,6 +901,15 @@
       "title": "Max Concurrent Scanners",
       "type": "integer"
     },
+    "output": {
+      "$ref": "#/$defs/OutputConfig",
+      "default": {
+        "formats": [
+          "json"
+        ]
+      },
+      "description": "Output configuration settings"
+    },
     "output_dir": {
       "default": "ash_output",
       "description": "Directory to store scan outputs",
@@ -1219,101 +921,6 @@
       "title": "Project Name",
       "type": "string"
     },
-    "sast": {
-      "$ref": "#/$defs/SASTScannerConfig",
-      "default": {
-        "output_formats": [
-          "text",
-          "json",
-          "junitxml",
-          "html"
-        ],
-        "scanners": {
-          "bandit": {
-            "enabled": true,
-            "name": "bandit",
-            "options": {},
-            "type": "SAST"
-          },
-          "cdknag": {
-            "enabled": true,
-            "name": "cdknag",
-            "options": {
-              "nag_packs": {
-                "AwsSolutionsChecks": true,
-                "HIPAASecurityChecks": false,
-                "NIST80053R4Checks": false,
-                "NIST80053R5Checks": false,
-                "PCIDSS321Checks": false
-              }
-            },
-            "type": "IAC"
-          },
-          "cfnnag": {
-            "enabled": true,
-            "name": "cfnnag",
-            "options": {},
-            "type": "IAC"
-          },
-          "checkov": {
-            "enabled": true,
-            "name": "checkov",
-            "options": {},
-            "type": "IAC"
-          },
-          "gitsecrets": {
-            "enabled": true,
-            "name": "gitsecrets",
-            "options": {},
-            "type": "SECRETS"
-          },
-          "grype": {
-            "enabled": true,
-            "name": "grype",
-            "options": {},
-            "type": "SAST"
-          },
-          "jupyter": {
-            "enabled": true,
-            "name": "jupyter",
-            "options": {},
-            "type": "SAST"
-          },
-          "npmaudit": {
-            "enabled": true,
-            "name": "npmaudit",
-            "options": {},
-            "type": "DEPENDENCY"
-          },
-          "semgrep": {
-            "enabled": true,
-            "name": "semgrep",
-            "options": {},
-            "type": "SAST"
-          }
-        }
-      },
-      "description": "SAST scanner configuration"
-    },
-    "sbom": {
-      "$ref": "#/$defs/SBOMScannerConfig",
-      "default": {
-        "output_formats": [
-          "json",
-          "html",
-          "cyclonedx"
-        ],
-        "scanners": {
-          "syft": {
-            "enabled": true,
-            "name": "syft",
-            "options": {},
-            "type": "SBOM"
-          }
-        }
-      },
-      "description": "SBOM scanner configuration"
-    },
     "scan_paths": {
       "default": [
         "."
@@ -1323,6 +930,112 @@
         "type": "string"
       },
       "title": "Scan Paths",
+      "type": "array"
+    },
+    "scanners": {
+      "default": [
+        {
+          "enabled": true,
+          "name": "bandit",
+          "options": {},
+          "type": "SAST"
+        },
+        {
+          "enabled": true,
+          "name": "cdknag",
+          "options": {
+            "nag_packs": {
+              "AwsSolutionsChecks": true,
+              "HIPAASecurityChecks": false,
+              "NIST80053R4Checks": false,
+              "NIST80053R5Checks": false,
+              "PCIDSS321Checks": false
+            }
+          },
+          "type": "IAC"
+        },
+        {
+          "enabled": true,
+          "name": "cfnnag",
+          "options": {},
+          "type": "IAC"
+        },
+        {
+          "enabled": true,
+          "name": "checkov",
+          "options": {},
+          "type": "IAC"
+        },
+        {
+          "enabled": true,
+          "name": "gitsecrets",
+          "options": {},
+          "type": "SECRETS"
+        },
+        {
+          "enabled": true,
+          "name": "grype",
+          "options": {},
+          "type": "SAST"
+        },
+        {
+          "enabled": true,
+          "name": "npmaudit",
+          "options": {},
+          "type": "DEPENDENCY"
+        },
+        {
+          "enabled": true,
+          "name": "semgrep",
+          "options": {},
+          "type": "SAST"
+        },
+        {
+          "enabled": true,
+          "name": "syft",
+          "options": {},
+          "type": "SBOM"
+        }
+      ],
+      "description": "Scanner configurations by type",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ScannerBaseConfig"
+          },
+          {
+            "$ref": "#/$defs/CustomScannerConfig"
+          },
+          {
+            "$ref": "#/$defs/BanditScannerConfig"
+          },
+          {
+            "$ref": "#/$defs/CdkNagScannerConfig"
+          },
+          {
+            "$ref": "#/$defs/CfnNagScannerConfig"
+          },
+          {
+            "$ref": "#/$defs/CheckovScannerConfig"
+          },
+          {
+            "$ref": "#/$defs/GitSecretsScannerConfig"
+          },
+          {
+            "$ref": "#/$defs/GrypeScannerConfig"
+          },
+          {
+            "$ref": "#/$defs/NpmAuditScannerConfig"
+          },
+          {
+            "$ref": "#/$defs/SemgrepScannerConfig"
+          },
+          {
+            "$ref": "#/$defs/SyftScannerConfig"
+          }
+        ]
+      },
+      "title": "Scanners",
       "type": "array"
     },
     "severity_threshold": {

@@ -3,11 +3,15 @@
 
 """Package models for Automated Security Helper (ASH)."""
 
-from automated_security_helper.models.core import BaseFinding, Scanner, Location
+from automated_security_helper.models.core import (
+    BaseFinding,
+    ExportFormat,
+    Scanner,
+    Location,
+)
 from automated_security_helper.models.data_interchange import (
     SecurityReport,
     ReportMetadata,
-    ExportFormat,
 )
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.security_vulnerability import (

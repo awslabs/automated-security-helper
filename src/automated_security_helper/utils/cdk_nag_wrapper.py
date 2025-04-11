@@ -24,16 +24,8 @@ from aws_cdk import (
     Aspects,
     Stack,
 )
-from aws_cdk.assertions import (
-    Match,
-    Annotations,
-)
 from aws_cdk.cloudformation_include import (
     CfnInclude,
-)
-from aws_cdk.cx_api import (
-    SynthesisMessage,
-    SynthesisMessageLevel,
 )
 
 from constructs import Construct
@@ -123,6 +115,8 @@ def run_cdk_nag_against_cfn_template(
         "AwsSolutionsChecks",
     ],
     outdir: Path = None,
+    include_compliant_checks: bool = True,
+    stack_name: str = "ASHCDKNagScanner",
 ) -> Dict[str, List[IaCVulnerability]] | None:
     results: Dict[str, List[dict]] = {}
 
@@ -165,31 +159,9 @@ def run_cdk_nag_against_cfn_template(
     )
 
     nag_pack_lookup = get_nag_packs()
-    # nag_pack_lookup = {
-    #     "AwsSolutionsChecks": {
-    #         "pack": cdk_nag.AwsSolutionsChecks(),
-    #         "packName": "AwsSolutions",
-    #     },
-    #     "HIPAASecurityChecks": {
-    #         "pack": cdk_nag.HIPAASecurityChecks(),
-    #         "packName": "HIPAA.Security",
-    #     },
-    #     "NIST80053R4Checks": {
-    #         "pack": cdk_nag.NIST80053R4Checks(),
-    #         "packName": "NIST.800.53.R4",
-    #     },
-    #     "NIST80053R5Checks": {
-    #         "pack": cdk_nag.NIST80053R5Checks(),
-    #         "packName": "NIST.800.53.R5",
-    #     },
-    #     "PCIDSS321Checks": {
-    #         "pack": cdk_nag.PCIDSS321Checks(),
-    #         "packName": "PCI.DSS.321",
-    #     },
-    # }
     stack = WrapperStack(
         app,
-        "ASHCDKNagScanner",
+        stack_name,
         template_path=template_path,
     )
 
@@ -208,65 +180,86 @@ def run_cdk_nag_against_cfn_template(
 
     app.synth()
     outdir = app.outdir
-    ASH_LOGGER.debug(f"outdir: {outdir}")
+    ASH_LOGGER.debug(f"app.outdir: {outdir}")
 
     # cfn_inc: CfnInclude = item in stack.node.children[0]
     included = [item for item in stack.node.children if isinstance(item, CfnInclude)]
     ASH_LOGGER.debug(json.dumps(included, default=str, indent=2))
 
     results: Dict[str, List[IaCVulnerability]] = {}
+    cdk_nag_report_lines: Dict[str, List[cdk_nag.NagReportLine]] = {}
 
-    item: SynthesisMessage
-    for pack in nag_packs:
-        results[pack] = []
-        pack_type: type[cdk_nag.NagPack] = nag_pack_lookup[pack]["packType"]
-        pack_name = pack_type().read_pack_name
-        ASH_LOGGER.debug(f"\n===  Pack '{pack_name}' Annotations  ===")
-        cdk_nag_annotations = [
-            *(
-                Annotations.from_stack(stack).find_info(
-                    "*",
-                    Match.string_like_regexp(rf"{re.escape(pack_name)}-.*"),
-                )
-            ),
-            *(
-                Annotations.from_stack(stack).find_warning(
-                    "*",
-                    Match.string_like_regexp(rf"{re.escape(pack_name)}-.*"),
-                )
-            ),
-            *(
-                Annotations.from_stack(stack).find_error(
-                    "*",
-                    Match.string_like_regexp(rf"{re.escape(pack_name)}-.*"),
-                )
-            ),
-        ]
-        ASH_LOGGER.debug(f"Pack '{pack}' annotations: {len(cdk_nag_annotations)}")
-        ASH_LOGGER.debug(
-            f"Pack '{pack}' annotations: {json.dumps(cdk_nag_annotations, default=str, indent=2)}"
+    # enumerate files under app.outdir ending in *-NagReport.json
+    for file in Path(outdir).glob("*-NagReport.json"):
+        ASH_LOGGER.debug(f"Processing NagReport file: {file}")
+        nag_dict = None
+        pack_name = re.sub(
+            pattern=rf"-{re.escape(stack_name)}-NagReport\.json",
+            repl="",
+            string=file.name,
         )
-        for item in cdk_nag_annotations:
-            finding_ids: re.Match[str] | None = re.search(
-                rf"({re.escape(pack_name)}-\w+):", item.entry.data
-            )
-            if finding_ids is not None:
-                finding_id = finding_ids.group(1)
+        if pack_name not in cdk_nag_report_lines:
+            cdk_nag_report_lines[pack_name] = []
 
-            resource_log_id = item.id.split("/")[-1]
+        with open(file, "r") as f:
+            nag_dict: dict = json.load(f)
+        if nag_dict is None:
+            ASH_LOGGER.debug(f"Could not load file as dict: {file}")
+            continue
+        try:
+            nag_report = cdk_nag.NagReportSchema(
+                **nag_dict,
+            )
+            cdk_nag_report_lines[pack_name].extend(nag_report.lines)
+            ASH_LOGGER.debug(f"Loaded NagReport file: {file}")
+            ASH_LOGGER.debug(f"Pack '{pack_name}' lines added: {len(nag_report.lines)}")
+        except Exception as exc:
+            ASH_LOGGER.warning(
+                f"Could not parse loaded JSON dict as NagReport: {file}. Exception: {exc}"
+            )
+
+    for pack_name, report_lines in cdk_nag_report_lines.items():
+        if pack_name not in results:
+            results[pack_name] = []
+        line: cdk_nag.NagReportLine
+        for line in report_lines:
+            line = cdk_nag.NagReportLine(
+                rule_id=line["ruleId"],
+                resource_id=line["resourceId"],
+                compliance=line["compliance"],
+                exception_reason=line["exceptionReason"],
+                rule_level=line["ruleLevel"],
+                rule_info=line["ruleInfo"],
+            )
+            if line.compliance == "Compliant" and not include_compliant_checks:
+                ASH_LOGGER.debug(f"Skipping compliant check: {line.rule_id}")
+                continue
+
+            resource_log_id = line.resource_id.split("/")[-1]
 
             finding = IaCVulnerability(
                 compliance_frameworks=[pack_name],
-                id=f"{item.id}/{finding_id}".lstrip("/"),
-                title=item.id.lstrip("/"),
-                rule_id=finding_id.lstrip("/"),
+                id="/".join([line.resource_id, line.rule_id]),
+                title=line.rule_info,
+                rule_id=line.rule_id,
                 severity=(
                     "CRITICAL"
-                    if item.level == SynthesisMessageLevel.ERROR
+                    if line.compliance == "Non-Compliant" and line.rule_level == "Error"
                     else (
                         "MEDIUM"
-                        if item.level == SynthesisMessageLevel.WARNING
+                        if line.compliance == "Non-Compliant"
+                        and line.rule_level != "Error"
                         else "INFO"
+                    )
+                ),
+                status=(
+                    "OPEN"
+                    if line.compliance == "Non-Compliant" and line.rule_level == "Error"
+                    else (
+                        "RISK_ACCEPTED"
+                        if line.compliance == "Suppressed"
+                        and line.exception_reason != "N/A"
+                        else "INFORMATIONAL"
                     )
                 ),
                 resource_name=resource_log_id,
@@ -275,18 +268,87 @@ def run_cdk_nag_against_cfn_template(
                     for resource_id, item in model.Resources.items()
                     if resource_id == resource_log_id
                 ][0],
-                description=item.entry.data,
+                description=f"{line.rule_info}\n\nException Reason: {line.exception_reason}",
                 location=Location(
                     file_path=Path(template_path).as_posix(),
                 ),
-                raw=dict(
-                    id=item.id,
-                    level=item.level,
-                    entry=json.loads(json.dumps(item.entry.__dict__, default=str)),
-                ),
+                raw=json.loads(json.dumps(line, default=str)),
             )
-            results[pack].append(finding)
-            ASH_LOGGER.debug(f"Finding: {finding.model_dump_json(indent=2)}")
+            results[pack_name].append(finding)
+            # ASH_LOGGER.debug(f"Finding: {finding.model_dump_json(indent=2)}")
+
+    # item: SynthesisMessage
+    # for pack in nag_packs:
+    #     results[pack] = []
+    #     pack_type: type[cdk_nag.NagPack] = nag_pack_lookup[pack]["packType"]
+    #     pack_name = pack_type().read_pack_name
+
+    #     cdk_nag_annotations = []
+    #     # cdk_nag_annotations = [
+    #     #     *(
+    #     #         Annotations.from_stack(stack).find_info(
+    #     #             "*",
+    #     #             Match.string_like_regexp(rf"{re.escape(pack_name)}-.*"),
+    #     #         )
+    #     #     ),
+    #     #     *(
+    #     #         Annotations.from_stack(stack).find_warning(
+    #     #             "*",
+    #     #             Match.string_like_regexp(rf"{re.escape(pack_name)}-.*"),
+    #     #         )
+    #     #     ),
+    #     #     *(
+    #     #         Annotations.from_stack(stack).find_error(
+    #     #             "*",
+    #     #             Match.string_like_regexp(rf"{re.escape(pack_name)}-.*"),
+    #     #         )
+    #     #     ),
+    #     # ]
+    #     # ASH_LOGGER.debug(f"Pack '{pack}' annotations: {len(cdk_nag_annotations)}")
+    #     # ASH_LOGGER.debug(
+    #     #     f"Pack '{pack}' annotations: {json.dumps(cdk_nag_annotations, default=str, indent=2)}"
+    #     # )
+    #     for item in cdk_nag_annotations:
+    #         finding_ids: re.Match[str] | None = re.search(
+    #             rf"({re.escape(pack_name)}-\w+):", item.entry.data
+    #         )
+    #         if finding_ids is not None:
+    #             finding_id = finding_ids.group(1)
+
+    #         resource_log_id = item.id.split("/")[-1]
+
+    #         finding = IaCVulnerability(
+    #             compliance_frameworks=[pack_name],
+    #             id=f"{item.id}/{finding_id}".lstrip("/"),
+    #             title=item.id.lstrip("/"),
+    #             rule_id=finding_id.lstrip("/"),
+    #             severity=(
+    #                 "CRITICAL"
+    #                 if item.level == SynthesisMessageLevel.ERROR
+    #                 else (
+    #                     "MEDIUM"
+    #                     if item.level == SynthesisMessageLevel.WARNING
+    #                     else "INFO"
+    #                 )
+    #             ),
+    #             resource_name=resource_log_id,
+    #             resource_type=[
+    #                 item.Type
+    #                 for resource_id, item in model.Resources.items()
+    #                 if resource_id == resource_log_id
+    #             ][0],
+    #             description=item.entry.data,
+    #             location=Location(
+    #                 file_path=Path(template_path).as_posix(),
+    #             ),
+    #             raw=dict(
+    #                 id=item.id,
+    #                 level=item.level,
+    #                 entry=json.loads(json.dumps(item.entry.__dict__, default=str)),
+    #             ),
+    #         )
+    #         results[pack].append(finding)
+    #         # ASH_LOGGER.debug(f"Finding: {finding.model_dump_json(indent=2)}")
 
     jsonnable_res = {k: [item.model_dump() for item in v] for k, v in results.items()}
 

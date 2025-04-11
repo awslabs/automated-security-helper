@@ -11,28 +11,32 @@ from automated_security_helper.config.config import (
     SASTScannerListConfig,
     SBOMScannerConfig,
     SBOMScannerListConfig,
-    ScannerPluginConfig,
 )
 from automated_security_helper.config.scanner_types import (
-    BanditScannerConfig,
-    CdkNagPacks,
-    CdkNagScannerConfigOptions,
     CfnNagScannerConfig,
     CheckovScannerConfig,
     GitSecretsScannerConfig,
-    JupyterNotebookScannerConfig,
     NpmAuditScannerConfig,
-    BaseScannerOptions,
     SemgrepScannerConfig,
-    CdkNagScannerConfig,
     GrypeScannerConfig,
     SyftScannerConfig,
     CustomScannerConfig,
 )
 
-from automated_security_helper.models.core import Location, Scanner
+from automated_security_helper.models.core import (
+    BaseScannerOptions,
+    Location,
+    Scanner,
+    ScannerPluginConfig,
+)
 from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
+)
+from automated_security_helper.scanners.bandit_scanner import BanditScannerConfig
+from automated_security_helper.scanners.cdk_nag_scanner import (
+    CdkNagPacks,
+    CdkNagScannerConfig,
+    CdkNagScannerConfigOptions,
 )
 
 
@@ -180,7 +184,7 @@ def ash_config() -> ASHConfig:
                     command="trivy",
                     args=["fs", "--format", "sarif"],
                     output_format="sarif",
-                    output_stream="stdio",
+                    output_stream="stdout",
                     get_tool_version_command=[
                         "trivy",
                         "--version",
@@ -197,13 +201,17 @@ def ash_config() -> ASHConfig:
                     command="trivy",
                     args=["fs", "--format", "cyclonedx"],
                     output_format="cyclonedx",
-                    output_stream="stdio",
+                    output_stream="stdout",
                 ),
             ],
         ),
         fail_on_findings=True,
         ignore_paths=["tests/**"],
         output_dir="ash_output",
+        converters={
+            "jupyter": True,
+            # "archive": True,
+        },
         sast=SASTScannerConfig(
             output_formats=["json", "csv", "junitxml", "html"],
             scanners=SASTScannerListConfig(
@@ -225,7 +233,6 @@ def ash_config() -> ASHConfig:
                 gitsecrets=GitSecretsScannerConfig(
                     options=BaseScannerOptions(enabled=True),
                 ),
-                jupyter=JupyterNotebookScannerConfig(),
                 grype=GrypeScannerConfig(),
                 npmaudit=NpmAuditScannerConfig(),
                 semgrep=SemgrepScannerConfig(),

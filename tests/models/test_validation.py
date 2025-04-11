@@ -1,7 +1,8 @@
 """Unit tests for validation module."""
 
+from automated_security_helper.models.core import ScannerPluginConfig
 from automated_security_helper.models.validation import ConfigurationValidator
-from automated_security_helper.config.config import ParserConfig, ScannerPluginConfig
+from automated_security_helper.models.core import ParserConfig
 
 
 def test_validate_config():

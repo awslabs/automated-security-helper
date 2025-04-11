@@ -5,7 +5,7 @@ from typing import Dict, Any
 
 import pytest
 
-from automated_security_helper.execution_engine import ScanExecutionEngine
+from automated_security_helper.core.execution_engine import ScanExecutionEngine
 from automated_security_helper.models.scan_results import ScanResultsContainer
 
 

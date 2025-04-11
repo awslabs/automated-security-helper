@@ -3,9 +3,13 @@
 import pytest
 import json
 from datetime import datetime, timezone
-from automated_security_helper.models.core import Location, Scanner, BaseFinding
-from automated_security_helper.models.data_interchange import (
+from automated_security_helper.models.core import (
     ExportFormat,
+    Location,
+    Scanner,
+    BaseFinding,
+)
+from automated_security_helper.models.data_interchange import (
     DataInterchange,
     ReportMetadata,
     SecurityReport,

@@ -2,13 +2,13 @@
 
 from typing import Dict, List, Any, Optional
 
-from automated_security_helper.config.config import ParserConfig
-from .interfaces import IScannerParser
+from automated_security_helper.models.core import ParserConfig
+from .interfaces import IParser
 from .core import Location
 from .asharp_model import ASHARPModel
 
 
-class ScannerParser(IScannerParser):
+class ScannerParser(IParser):
     """Parser implementation for scanner results."""
 
     def __init__(self):

@@ -2,18 +2,28 @@
 
 import pytest
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
-from automated_security_helper.exceptions import ScannerError
-from automated_security_helper.config.config import ScannerPluginConfig
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import ExportFormat, ScannerPluginConfig
 
 
 def test_bandit_scanner_init(test_source_dir, test_output_dir):
-    """Test BanditScanner initialization."""
+    """Test BanditScanner initialization and configuration."""
+    # Test default initialization
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure()
-    assert scanner._config is None
     scanner.configure(scanner.default_config)
-    assert scanner._config is not None
-    assert scanner._output_format == "json"
+    assert scanner.name == "bandit"
+    assert scanner.type == "SAST"
+    assert scanner.options == {"severity": "high"}
+    assert scanner.validate() is True
+    assert scanner.tool_version is not None
+
+    # Test explicit configuration
+    config = ScannerPluginConfig(
+        name="bandit", type="SAST", command="bandit", enabled=True, output_format="json"
+    )
+    scanner.configure(config)
+    assert scanner._config == config
+    assert scanner.validate() is True
 
 
 def test_bandit_scanner_configure(test_source_dir, test_output_dir):
@@ -24,7 +34,8 @@ def test_bandit_scanner_configure(test_source_dir, test_output_dir):
     assert scanner._config == config
     # We have to force standardization of output format at the scanner level so we
     # know what format to parse from and what data is available for a particular scanner
-    assert scanner._output_format == "json"
+    assert scanner._default_config.output_format == ExportFormat.SARIF
+    assert scanner._config.output_format == ExportFormat.TEXT
 
 
 def test_bandit_scanner_validate(test_source_dir, test_output_dir):
@@ -37,12 +48,22 @@ def test_bandit_scanner_validate(test_source_dir, test_output_dir):
 
 
 def test_bandit_scanner_scan_json(mocker, test_source_dir, test_output_dir):
-    """Test scanning with JSON output."""
-
+    """Test scanning with JSON output format."""
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(scanner.default_config)
+    scanner.configure(
+        ScannerPluginConfig(
+            name="bandit",
+            type="SAST",
+            command="bandit",
+            enabled=True,
+            output_format="json",
+        )
+    )
 
-    # Mock subprocess execution
+    # Mock scanning methods
+    mocker.patch.object(scanner, "_pre_scan")
+    mock_parse = mocker.patch.object(scanner, "_parse_outputs")
+    mock_parse.return_value = {"findings": [], "metadata": {}}
     mock_run = mocker.patch.object(scanner, "_run_subprocess")
     mock_parse_outputs = mocker.patch.object(scanner, "_parse_outputs")
     mock_output = mocker.patch.object(scanner, "_output")
@@ -74,18 +95,20 @@ def test_bandit_scanner_scan_with_config(mocker, test_source_dir, test_output_di
     mock_parse_outputs.assert_called_once()
 
 
-def test_bandit_scanner_scan_error(mocker, test_source_dir, test_output_dir):
-    """Test error handling during scan."""
+def test_bandit_scanner_errors(mocker, test_source_dir, test_output_dir):
+    """Test scanner error handling."""
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
 
-    # Mock subprocess failure
+    # Test target validation
+    with pytest.raises(ScannerError) as exc:
+        scanner.scan(None)
+    assert "No target specified" in str(exc.value)
+
+    # Test command execution failure
+    mocker.patch.object(scanner, "_pre_scan")  # Mock pre-scan to avoid validation
     mock_run = mocker.patch.object(scanner, "_run_subprocess")
     mock_run.side_effect = Exception("Command failed")
-    mock_errors = mocker.patch.object(scanner, "_errors")
-    mock_errors.return_value = ["Error: Invalid path"]
 
     with pytest.raises(ScannerError) as exc:
-        scanner.scan("/test/path")
-
-    assert " " in str(exc.value)
-    assert "Bandit scan failed: Command failed" in str(exc.value)
+        scanner.scan(str(test_source_dir))
+    assert "Command failed" in str(exc.value)

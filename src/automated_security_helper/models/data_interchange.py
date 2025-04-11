@@ -5,26 +5,14 @@
 
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Union, Annotated
-from enum import Enum
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
-from automated_security_helper.models.core import BaseFinding, Scanner
-
-
-class ExportFormat(str, Enum):
-    """Supported export formats."""
-
-    TEXT = "text"
-    JSON = "json"
-    YAML = "yaml"
-    CSV = "csv"
-    HTML = "html"
-    DICT = "dict"
-    JUNITXML = "junitxml"
-    SARIF = "sarif"
-    ASFF = "asff"
-    CYCLONEDX = "cyclonedx"
-    SPDX = "spdx"
+from automated_security_helper.models.core import (
+    BaseFinding,
+    ExportFormat,
+    ScanStatistics,
+    Scanner,
+)
 
 
 class DataInterchange(BaseModel):
@@ -144,24 +132,6 @@ class ReportMetadata(BaseModel):
             self.report_id = (
                 f"ASH-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
             )
-
-
-class ScanStatistics(BaseModel):
-    """Statistics for static analysis scan results."""
-
-    files_scanned: Annotated[
-        int, Field(description="Total number of files scanned")
-    ] = 0
-    lines_of_code: Annotated[
-        int, Field(description="Total number of lines of code")
-    ] = 0
-    total_findings: Annotated[int, Field(description="Total number of findings")] = 0
-    findings_by_type: Annotated[
-        dict, Field(description="Count of findings by severity level")
-    ] = {}
-    scan_duration_seconds: Annotated[
-        float, Field(description="Duration of scan in seconds")
-    ] = 0.0
 
 
 class SecurityReport(DataInterchange):

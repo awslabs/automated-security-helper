@@ -30,7 +30,7 @@ packages = [
 
 [tool.poetry.scripts]
 asharp = 'asharp.asharp:main'
-ashv3 = "automated_security_helper.orchestrator:main"
+ashv3 = "automated_security_helper.cli:app"
 schemagen = 'automated_security_helper.schemas.generate_schemas:main'
 get-scan-set = 'automated_security_helper.utils.get_scan_set:main'
 
@@ -50,6 +50,7 @@ aws-cdk-lib = "^2.188.0"
 constructs = "^10.4.2"
 cdk-nag = "^2.35.64"
 cfn-flip = "^1.3.0"
+typer = "^0.15.2"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.2"

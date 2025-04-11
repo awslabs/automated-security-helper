@@ -8,8 +8,6 @@ def get_logger(name: str = "ash", level: Any = None):
     if level is not None:
         logger.setLevel(level)
         logger.debug("Logger level set to: %s", level)
-    else:
-        logger.debug("Using existing logger level: %s", logger.level)
 
     formatter = logging.Formatter(
         fmt="%(asctime)s - %(levelname)s - %(module)s - %(message)s"

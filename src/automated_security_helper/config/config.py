@@ -1,181 +1,22 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Annotated, Any, Callable, List, Dict, Literal
-from automated_security_helper.models.data_interchange import ExportFormat
+from pathlib import Path
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, List, Dict, Literal
+
+import yaml
+from automated_security_helper.models.core import ScannerBaseConfig, ScannerPluginConfig
+from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.config.scanner_types import (
-    BanditScannerConfig,
-    ScannerBaseConfig,
     CfnNagScannerConfig,
     CheckovScannerConfig,
     CustomScannerConfig,
     GitSecretsScannerConfig,
-    JupyterNotebookScannerConfig,
     NpmAuditScannerConfig,
     SemgrepScannerConfig,
-    CdkNagScannerConfig,
     GrypeScannerConfig,
     SyftScannerConfig,
 )
-
-
-class FileInvocationConfig(BaseModel):
-    """Configuration for file scanning."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    include: Annotated[
-        List[str],
-        Field(
-            description="List of file patterns to include. Defaults to an empty list, which includes all files.",
-            examples=[
-                "**/*",
-            ],
-        ),
-    ] = []
-    exclude: Annotated[
-        List[str],
-        Field(
-            description="List of file patterns to exclude. Defaults to an empty list, which excludes no files.",
-            examples=[
-                "tests/",
-            ],
-        ),
-    ] = []
-
-
-class ScannerPluginConfig(ScannerBaseConfig):
-    """Configuration model for scanner plugins."""
-
-    command: Annotated[
-        str,
-        Field(
-            description="The command to invoke the scanner, typically the binary or path to a script"
-        ),
-    ] = None
-    args: Annotated[
-        List[str],
-        Field(
-            description="List of arguments to pass to the scanner command. Defaults to an empty list."
-        ),
-    ] = []
-    invocation_mode: Annotated[
-        Literal["directory", "file"],
-        Field(
-            description="Whether to run the scanner on a directory or a file. Defaults to 'directory' to scan the entire directory. If set to 'file', uses the file_config values to identify the files to scan and scan each one individually."
-        ),
-    ] = "directory"
-    file_config: Annotated[
-        FileInvocationConfig,
-        Field(
-            description="Configuration for file scanning. Required if invocation_mode is 'file'."
-        ),
-    ] = FileInvocationConfig()
-    output_format: Annotated[
-        ExportFormat | None,
-        Field(description="Expected output format from the scanner itself."),
-    ] = None
-    scan_path_arg_position: Annotated[
-        Literal["before_args", "after_args"],
-        Field(
-            description="Whether to place the scan path argument before or after the scanner command args. Defaults to 'after_args'."
-        ),
-    ] = "after_args"
-    scan_path_arg: Annotated[
-        str | None,
-        Field(
-            description="Argument to pass the scan path to when invoking the scanner command. Defaults to not including an arg for the scan path value, which results in the path being passed to the scanner as a positional argument at the scan_path_arg_position specified. If the ",
-            examples=[
-                "-f",
-                "--file",
-                "-p",
-                "--path",
-            ],
-        ),
-    ] = None
-    format_arg_position: Annotated[
-        Literal["before_args", "after_args"],
-        Field(
-            description="Whether to place the format argument before or after the scanner command args. Defaults to 'before_args'."
-        ),
-    ] = "before_args"
-    format_arg: Annotated[
-        str | None,
-        Field(
-            description="Argument to pass the format option to when invoking the scanner command. Defaults to not including an arg for the format value, which results in the format option being passed to the scanner as a positional argument at the format_arg_position specified. If a value is provided, the value will be passed into the runtime args prior to the format option.",
-            examples=[
-                "--format",
-                "-f",
-                "--output-format",
-            ],
-        ),
-    ] = None
-    format_arg_value: Annotated[
-        str | None,
-        Field(
-            description="Value to pass to the format argument when invoking the scanner command. Defaults to 'json', but typically is explicitly set in ScannerPlugin implementations as a frozen property.",
-            examples=[
-                "json",
-                "sarif",
-                "cyclonedx",
-            ],
-        ),
-    ] = "json"
-    output_arg: Annotated[
-        str | None,
-        Field(
-            description="Argument to pass the output option to when invoking the scanner command. Defaults to not including an arg for the output value, which results in the output option being passed to the scanner as a positional argument at the format_arg_position specified. If a value is provided, the value will be passed into the runtime args prior to the output option.",
-            examples=[
-                "--output",
-                "-o",
-                "--outfile",
-            ],
-        ),
-    ] = None
-    output_arg_position: Annotated[
-        Literal["before_args", "after_args"],
-        Field(
-            description="Whether to place the output argument before or after the scanner command args. Defaults to 'before_args'."
-        ),
-    ] = "before_args"
-    get_tool_version_command: Annotated[
-        List[str] | Callable[[], str] | None,
-        Field(description="Command to run that should return the scanner version"),
-    ] = None
-    output_stream: Annotated[
-        Literal["stdout", "stderr", "file"],
-        Field(
-            description="Where to read scanner output from. Can be 'stdout', 'stderr' or 'file'. Defaults to 'stdout' to capture the output of the scanner directly."
-        ),
-    ] = "stdout"
-
-    @field_validator("get_tool_version_command", check_fields=False)
-    @classmethod
-    def resolve_tool_version(
-        cls, get_tool_version_command: List[str] | Callable[[], str]
-    ) -> List[str] | str:
-        if callable(get_tool_version_command):
-            return get_tool_version_command()
-        else:
-            return get_tool_version_command
-
-    @field_validator("type", mode="before")
-    @classmethod
-    def normalize_scanner_type(cls, scanner_type: Any) -> str:
-        """Normalize scanner type value before validation."""
-        # Type checking
-        if not isinstance(scanner_type, str):
-            raise ValueError(f"Scanner type must be string, got {type(scanner_type)}")
-
-        # Convert/normalize value
-        scanner_type = str(scanner_type).strip().upper()
-        if scanner_type == "STATIC":
-            scanner_type = "SAST"
-
-        return scanner_type
-
-    def model_post_init(self, context):
-        super().model_post_init(context)
-        if not hasattr(self, "name"):
-            self.name = self.command
+from automated_security_helper.scanners.bandit_scanner import BanditScannerConfig
+from automated_security_helper.scanners.cdk_nag_scanner import CdkNagScannerConfig
 
 
 class BuildConfig(BaseModel):
@@ -240,31 +81,6 @@ class ScannerTypeConfig(BaseModel):
 #     ]
 
 
-class ParserConfig(ScannerBaseConfig):
-    """Configuration model for scanner result parsers."""
-
-    output_format: Annotated[
-        str,
-        Field(description="Expected output format from the scanner"),
-    ]
-    finding_key: Annotated[
-        str,
-        Field(description="Key used to identify individual findings in the output"),
-    ] = "findings"
-    severity_mapping: Annotated[
-        Dict[str, str],
-        Field(
-            description="Mapping of scanner-specific severity levels to standardized levels"
-        ),
-    ] = {}
-    location_mapping: Annotated[
-        Dict[str, str],
-        Field(
-            description="Mapping of scanner-specific location fields to standardized fields"
-        ),
-    ] = {}
-
-
 class ScannerClassConfig(BaseModel):
     """Configuration model for scanner classes."""
 
@@ -277,9 +93,6 @@ class ScannerListConfig(ScannerClassConfig):
 
 class SASTScannerListConfig(ScannerListConfig):
     bandit: Annotated[BanditScannerConfig | bool, Field()] = BanditScannerConfig()
-    jupyter: Annotated[JupyterNotebookScannerConfig | bool, Field()] = (
-        JupyterNotebookScannerConfig()
-    )
     cdknag: Annotated[CdkNagScannerConfig | bool, Field()] = CdkNagScannerConfig()
     cfnnag: Annotated[CfnNagScannerConfig | bool, Field()] = CfnNagScannerConfig()
     checkov: Annotated[CheckovScannerConfig | bool, Field()] = CheckovScannerConfig()
@@ -348,6 +161,45 @@ class SBOMScannerConfig(ScannerClassConfig):
     ] = SBOMScannerListConfig()
 
 
+class OutputConfig(BaseModel):
+    """Configuration model for output formats."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        arbitrary_types_allowed=True,
+    )
+
+    formats: Annotated[
+        List[str],
+        Field(
+            description="List of output formats to generate",
+            default_factory=lambda: ["json"],
+        ),
+    ]
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self.validate_formats()
+
+    def validate_formats(self):
+        """Validate output formats."""
+        valid_formats = [
+            "json",
+            "text",
+            "html",
+            "csv",
+            "yaml",
+            "junitxml",
+            "sarif",
+            "asff",
+            "cyclonedx",
+            "spdx",
+        ]
+        invalid_formats = [fmt for fmt in self.formats if fmt not in valid_formats]
+        if invalid_formats:
+            raise ValueError(f"Invalid output formats: {invalid_formats}")
+
+
 class ASHConfig(BaseModel):
     """Main configuration model for Automated Security Helper."""
 
@@ -366,16 +218,51 @@ class ASHConfig(BaseModel):
         Field(description="Build-time configuration settings"),
     ] = BuildConfig()
 
-    # Scanner type configurations
-    sast: Annotated[
-        SASTScannerConfig,
-        Field(description="SAST scanner configuration"),
-    ] = SASTScannerConfig()
+    # Output configuration
+    output: Annotated[
+        OutputConfig,
+        Field(description="Output configuration settings"),
+    ] = OutputConfig()
 
-    sbom: Annotated[
-        SBOMScannerConfig,
-        Field(description="SBOM scanner configuration"),
-    ] = SBOMScannerConfig()
+    converters: Annotated[
+        Dict[str, bool],
+        Field(
+            description="The map of converters and a boolean value indicating whether they should be enabled or disabled"
+        ),
+    ] = {
+        "jupyter": True,
+        "archive": True,
+    }
+
+    scanners: Annotated[
+        List[
+            # Base/custom/generic types
+            ScannerBaseConfig
+            | CustomScannerConfig
+            |
+            # Known scanner types
+            BanditScannerConfig
+            | CdkNagScannerConfig
+            | CfnNagScannerConfig
+            | CheckovScannerConfig
+            | GitSecretsScannerConfig
+            | GrypeScannerConfig
+            | NpmAuditScannerConfig
+            | SemgrepScannerConfig
+            | SyftScannerConfig
+        ],
+        Field(description="Scanner configurations by type"),
+    ] = [
+        BanditScannerConfig(),
+        CdkNagScannerConfig(),
+        CfnNagScannerConfig(),
+        CheckovScannerConfig(),
+        GitSecretsScannerConfig(),
+        GrypeScannerConfig(),
+        NpmAuditScannerConfig(),
+        SemgrepScannerConfig(),
+        SyftScannerConfig(),
+    ]
 
     # General scan settings
     fail_on_findings: Annotated[
@@ -404,3 +291,26 @@ class ASHConfig(BaseModel):
     max_concurrent_scanners: Annotated[
         int, Field(description="Maximum number of scanners to run concurrently", ge=1)
     ] = 4
+
+    @classmethod
+    def from_file(cls, config_path: Path) -> "ASHConfig":
+        """Load configuration from a file."""
+        with open(config_path, "r") as f:
+            # Using `yaml.safe_load()` as it handles both JSON and YAML data the same.
+            config_data = yaml.safe_load(f)
+        return cls(**config_data)
+
+    def save(self, config_path: Path):
+        """Save configuration to a file."""
+        with open(config_path, "w") as f:
+            yaml.safe_dump(self.model_dump(), f, indent=2)
+
+    def get_scanners(self) -> Dict[str, ScannerPluginConfig]:
+        """Get a dictionary of scanners and their corresponding configurations."""
+        scanner_configs: Dict[str, ScannerPluginConfig] = {
+            scanner.name: scanner for scanner in self.build.custom_scanners
+        }
+        for scanner in self.scanners:
+            scanner_configs[scanner.name] = scanner
+
+        return scanner_configs

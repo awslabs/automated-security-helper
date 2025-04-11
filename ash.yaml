@@ -12,34 +12,32 @@ build:
       - wget https://github.com/aquasecurity/trivy/releases/download/v0.61.0/trivy_0.61.0_Linux-64bit.deb
       - dpkg -i trivy_0.61.0_Linux-64bit.deb
   custom_scanners:
-    sast:
-      - name: trivy-sast
-        command: trivy
-        args: ["fs"]
-        output_format: sarif
-        output_stream: stdout
-        format_arg: '--format'
-        format_arg_value: sarif
-        format_arg_position: after_args
-        get_tool_version_command:
-          - trivy
-          - '--version'
-        scan_path_arg_position: after_args
-        type: SAST
-    sbom:
-      - name: trivy-sbom
-        command: trivy
-        args: ["fs"]
-        output_format: cyclonedx
-        output_stream: stdout
-        format_arg: '--format'
-        format_arg_value: cyclonedx
-        format_arg_position: after_args
-        get_tool_version_command:
-          - trivy
-          - '--version'
-        scan_path_arg_position: after_args
-        type: SBOM
+    - name: trivy-sast
+      command: trivy
+      args: ["fs"]
+      output_format: sarif
+      output_stream: stdout
+      format_arg: '--format'
+      format_arg_value: sarif
+      format_arg_position: after_args
+      get_tool_version_command:
+        - trivy
+        - '--version'
+      scan_path_arg_position: after_args
+      type: SAST
+    - name: trivy-sbom
+      command: trivy
+      args: ["fs"]
+      output_format: cyclonedx
+      output_stream: stdout
+      format_arg: '--format'
+      format_arg_value: cyclonedx
+      format_arg_position: after_args
+      get_tool_version_command:
+        - trivy
+        - '--version'
+      scan_path_arg_position: after_args
+      type: SBOM
 # General scan settings
 fail_on_findings: true
 ignore_paths:
@@ -60,7 +58,7 @@ sast:
       options:
         nag_packs:
           AwsSolutionsChecks: true
-          HIPAASecurityChecks: false
+          HIPAASecurityChecks: true
           NIST80053R4Checks: false
           NIST80053R5Checks: false
           PCIDSS321Checks: false
@@ -71,7 +69,7 @@ sast:
     npmaudit: true
     semgrep: true
     # Custom scanner provided by plugin at build time, referencable by key
-    trivysast:
+    trivy-sast:
       name: trivy-sast
       type: SAST
       enabled: true
@@ -83,7 +81,7 @@ sbom:
   scanners:
     syft: true
     # Custom scanner provided by plugin at build time, referencable by key
-    trivysbom:
+    trivy-sbom:
       name: trivy-sbom
       type: SBOM
       enabled: true

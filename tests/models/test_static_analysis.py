@@ -2,9 +2,9 @@
 
 import pytest
 from datetime import datetime, timezone
-from automated_security_helper.config.config import ScannerBaseConfig
+from automated_security_helper.models.core import ScannerBaseConfig
 from automated_security_helper.models.core import Location, Scanner
-from automated_security_helper.models.data_interchange import ScanStatistics
+from automated_security_helper.models.core import ScanStatistics
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisFinding,
     StaticAnalysisReport,

@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from automated_security_helper.config.default_config import DEFAULT_ASH_CONFIG
-from automated_security_helper.orchestrator import ASHScanOrchestrator
+from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
 
 @pytest.fixture

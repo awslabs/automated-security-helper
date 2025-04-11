@@ -3,7 +3,7 @@
 import logging
 from typing import Dict, Optional, Type
 
-from automated_security_helper.execution_engine import (
+from automated_security_helper.core.execution_engine import (
     ExecutionStrategy,
     ScanExecutionEngine,
 )
@@ -16,7 +16,7 @@ from automated_security_helper.config.config import (
     SBOMScannerConfig,
     SBOMScannerListConfig,
 )
-from automated_security_helper.models.data_interchange import ExportFormat
+from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 
 from tests.conftest import TEST_OUTPUT_DIR, TEST_SOURCE_DIR

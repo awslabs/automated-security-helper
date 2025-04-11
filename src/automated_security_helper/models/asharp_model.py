@@ -41,8 +41,8 @@ class ASHARPModel(SecurityReport):
 
     name: str = Field(default="ASHARP Report", description="Name of the report")
     description: str = Field(
-        default="AWS Security Hub Aggregated Report",
-        description="Description of the report",
+        default="Automated Security Helper Aggregated Report",
+        description="The description of the generated report.",
     )
     metadata: ReportMetadata = Field(
         default_factory=lambda: ReportMetadata(
@@ -50,7 +50,7 @@ class ASHARPModel(SecurityReport):
             project_name="ASHARP",
             tool_name="ASHARP",
             tool_version="1.0.0",
-            description="AWS Security Hub Aggregated Report Post-processor",
+            description="Automated Security Helper Aggregated Report Post-processor",
         )
     )
     findings: List[BaseFinding] = Field(

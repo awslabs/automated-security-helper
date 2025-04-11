@@ -1,18 +1,18 @@
 """Unit tests for abstract scanner module."""
 
-from pathlib import Path
-from typing import Any, Dict, Optional
+from importlib.metadata import version
+from typing import Any, Dict, Literal, Optional
 
 import pytest
 
-from automated_security_helper.config.config import ScannerPluginConfig
+from automated_security_helper.models.core import ScannerPluginConfig
 
 import logging
 
 from automated_security_helper.models.scanner_plugin import (
     ScannerPlugin,
 )
-from automated_security_helper.exceptions import ScannerError
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.log import get_logger
 from tests.conftest import TEST_SOURCE_DIR, TEST_OUTPUT_DIR
 
@@ -20,22 +20,21 @@ from tests.conftest import TEST_SOURCE_DIR, TEST_OUTPUT_DIR
 class ConcreteScanner(ScannerPlugin):
     """Concrete implementation of Scanner for testing."""
 
-    def __init__(self, source_dir: Path = None, output_dir: Path = None):
-        logger = get_logger("test_logger", level=logging.DEBUG)
-        source_dir = source_dir if source_dir else TEST_SOURCE_DIR
-        output_dir = output_dir if output_dir else TEST_OUTPUT_DIR
-        super().__init__(source_dir, output_dir, logger)
+    name: Literal["concrete"] = "concrete"
+    enabled: bool = True
+    tool_version: str = version("automated_security_helper")
 
-    @property
-    def default_config(self):
-        """Get default scanner configuration."""
-        return ScannerPluginConfig(
-            name="test_scanner",
-            type="CUSTOM",
-            command="test_command",
-            source_dir=self.source_dir,
-            output_dir=self.output_dir,
-        )
+    _default_config = ScannerPluginConfig(
+        name="test_scanner",
+        type="CUSTOM",
+        command="test_command",
+    )
+
+    def model_post_init(self, context):
+        self.source_dir = TEST_SOURCE_DIR
+        self.output_dir = TEST_OUTPUT_DIR
+        self.logger = get_logger("test_logger", level=logging.DEBUG)
+        return super().model_post_init(context)
 
     def validate(self):
         return True
@@ -203,14 +202,17 @@ def test_scanner_with_custom_config(test_source_dir, test_output_dir):
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
     config = ScannerPluginConfig(
         name="custom_scanner",
-        type="CUSTOM",
+        type="IAC",
         options={"level": "high", "include": ["*.py"], "exclude": ["test/*"]},
         source_dir=test_source_dir,
         output_dir=test_output_dir,
     )
     scanner.configure(config)
-    assert scanner.name == "custom_scanner"
-    assert scanner.type == "CUSTOM"
+    assert scanner._config.name == "custom_scanner"
+    assert scanner.name == "concrete"
+    assert scanner._config.type is not None
+    assert scanner._config.type == "IAC"
+    assert scanner._default_config.type == "CUSTOM"
     assert scanner.options == {
         "severity": "high",
         "threshold": 5,
@@ -225,6 +227,8 @@ def test_scanner_validate_config():
     """Test scanner configuration validation."""
     config = {"name": "invalid", "command": "pwd"}
     scanner = ConcreteScanner()
+    scanner._default_config.name = "invalid"
+    scanner._default_config = "pwd"
     scanner.configure(config)
     assert scanner.name == "invalid"
     assert scanner.config.command == "pwd"

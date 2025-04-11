@@ -1,412 +1,218 @@
 """Module containing the ScannerPlugin base class."""
 
-from abc import abstractmethod
 import logging
-from pathlib import Path
-from queue import SimpleQueue
+import queue
 import shutil
-from threading import Thread
-from typing import Any, Dict, List, Optional
 import subprocess
+import threading
+from abc import abstractmethod
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from typing_extensions import Self
 
-from automated_security_helper.config.config import ScannerPluginConfig
-from automated_security_helper.models.core import BaseFinding
-from automated_security_helper.models.data_interchange import (
-    ExportFormat,
-    SecurityReport,
-)
-from automated_security_helper.exceptions import ScannerError
+from pydantic import BaseModel, model_validator
+
+from automated_security_helper.models.core import BaseScannerOptions
+from automated_security_helper.models.data_interchange import SecurityReport
 from automated_security_helper.models.interfaces import IScanner
 
 
-class ScannerPlugin(IScanner):
-    """Abstract base class for ASH scanner plugins."""
+class ScannerPluginConfig(BaseModel):
+    """Base configuration class for scanner plugins."""
 
-    source_dir: Path
-    output_dir: Path
-    work_dir: Path
-    results_dir: Path
-    tool_version: str | None = None
+    name: str = "base-scanner"
+    description: str = "Base scanner configuration."
+    enabled: bool = True
+    options: Dict[str, Any] = {}
+    check_for_updates: bool = False
 
-    logger: logging.Logger = logging.Logger(__name__)
 
-    _name: str = "<unknown>"
-    _type: str = ""
-    _is_valid: bool = False
+class ScannerPlugin(IScanner, BaseModel):
+    """Base class for all scanner plugins."""
+
+    _default_config: Optional[ScannerPluginConfig] = None
+    _config: Optional[ScannerPluginConfig] = None
     _output: List[str] = []
-    _output_format: ExportFormat = ExportFormat.TEXT
     _errors: List[str] = []
-    _options: Dict[str, Any] = {}
-    _config: ScannerPluginConfig | None = None
-    _default_config: ScannerPluginConfig | None = None
-    _protected_config_properties: List[str] = ["name", "type", "options"]
+    _work_path: Path | None = None
+    _args: List[str] = []
 
-    def __init__(
-        self,
-        source_dir: Optional[Path] = None,
-        output_dir: Optional[Path] = None,
-        logger: Optional[logging.Logger] = None,
-        config: Optional[ScannerPluginConfig] = None,
-    ) -> None:
-        """Initialize scanner plugin.
+    # Required fields that should be set in child classes
+    source_dir: Path | None = None
+    output_dir: Path | None = None
+    findings: List[Any] = []
+    enabled: bool = True
+    options: BaseScannerOptions = BaseScannerOptions()
+    work_dir: Path | None = None
+    results_dir: Path | None = None
+    results_file: Path | None = None
+    tool_version: str = "0.0.0"
+    logger: Any = None
 
-        Note: config parameter takes precedence over default_config().
-        If no config is provided, default_config() will be called.
-        """
-        """Initialize the scanner.
-
-        Args:
-            source_dir: Source directory to scan
-            output_dir: Output directory for results
-            logger: Optional logger instance
-            config: Optional scanner configuration
-        """
-        # Convert paths to Path objects if they're strings
-        if source_dir and not isinstance(source_dir, Path):
-            source_dir = Path(source_dir)
-        if output_dir and not isinstance(output_dir, Path):
-            output_dir = Path(output_dir)
-
+    @model_validator(mode="after")
+    def setup_paths(self) -> Self:
+        """Set up default paths and initialize plugin configuration."""
         # Use default paths if none provided
-        if not source_dir:
-            source_dir = Path(".")
-        if not output_dir:
-            output_dir = Path("output")
-        self.source_dir = source_dir
-        self.output_dir = output_dir
-        self.work_dir = self.output_dir.joinpath("work")
-        self.logger = logger if logger else logging.getLogger(__name__)
-        # Use provided config, otherwise try to get default config
-        self._config = config if config is not None else self.default_config
+        if self.source_dir is None:
+            self.source_dir = Path(".")
+        if self.output_dir is None:
+            self.output_dir = Path("output")
 
-        # Set up results directory using scanner name from config
+        # Ensure paths are Path objects
+        self.source_dir = Path(str(self.source_dir))
+        self.output_dir = Path(str(self.output_dir))
+        self.work_dir = self.output_dir.joinpath("work")
+
+        # Set up scanner name
+        if self._config is None:
+            self._config = self._default_config
         scanner_name = (
             getattr(self._config, "name", "unknown") if self._config else "unknown"
         )
+        self.logger = logging.getLogger(f"ash.scanners.{scanner_name}")
+
         self.results_dir = self.output_dir.joinpath("scanners").joinpath(scanner_name)
-        output_name = f"{self._config.name if self._config else 'unknown'}_output.json"
-        self.results_file = self.results_dir.joinpath(output_name).as_posix()
         if self.results_dir.exists():
             shutil.rmtree(self.results_dir)
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
+        return self
+
     def _set_config(self, config: ScannerPluginConfig = None) -> None:
         """Set scanner configuration."""
-        self._config = config
-
-    @property
-    def name(self) -> str:
-        """Get scanner name from config."""
-        if self._config and hasattr(self._config, "name"):
-            return self._config.name
-        return self._name
-
-    @property
-    def type(self) -> str:
-        """Get the scanner type."""
-        return self._type
+        self._config = config or self._default_config
 
     @property
     def config(self) -> Optional[ScannerPluginConfig]:
-        """Get the scanner configuration."""
+        """Get scanner configuration."""
         return self._config
 
     @property
-    def default_config(self) -> ScannerPluginConfig:
-        """Get the scanner default configuration."""
+    def default_config(self) -> Optional[ScannerPluginConfig]:
+        """Get default scanner configuration."""
         return self._default_config
 
     @property
-    def options(self) -> Dict[str, Any]:
-        """Get the scanner options."""
-        return self._options
-
-    @property
     def output(self) -> List[str]:
-        """Get the scanner output."""
+        """Get scanner output."""
         return self._output
 
     @property
     def output_format(self) -> List[str]:
-        """Get the scanner output format."""
-        return self._output_format
+        """Get output format."""
+        return []
 
     @property
     def errors(self) -> List[str]:
-        """Get the scanner errors."""
+        """Get scanner errors."""
         return self._errors
 
-    def configure(self, config: ScannerPluginConfig | None = None):
-        """Configure the scanner with the provided config, doing a deep merge if config already exists.
-
-        Args:
-            config: Scanner configuration as ScannerPluginConfig object or dict
-        """
-        # Return if no new config and no existing config
-        if config is None and (
-            self._config is None or len(self._config.command.__str__()) == 0
-        ):
-            raise ScannerError(
-                "No configuration provided for this scanner, unable to run scanner"
-            )
-
-        # Convert dict config to ScannerPluginConfig
-        if isinstance(config, dict) and "name" in config:
-            config = ScannerPluginConfig(**config)
-
-        # If we have a new config object
-        if isinstance(config, ScannerPluginConfig):
-            if self._config is None:
-                # No existing config, just set directly
-                self._name = config.name
-                self._type = config.type
-                if hasattr(config, "options"):
-                    self._options.update(config.options)
-                self._config = config
-            else:
-                # Merge with existing config
-                self._name = config.name or self._name
-                self._type = config.type
-                if hasattr(config, "options"):
-                    self._options.update(config.options)
-
-            # Deep merge other attributes from new config into existing
-            # Prevent overridding of protected configuration values.
-            for attr, value in vars(config).items():
-                if (
-                    value is not None
-                    and f"{value}" != ""
-                    and attr not in self._protected_config_properties
-                ):
-                    setattr(self._config, attr, value)
-
-        if config is None and (
-            self._config is None or len(self._config.command.__str__()) == 0
-        ):
-            raise ScannerError(
-                "No configuration provided for this scanner, unable to run scanner"
-            )
-
-        if isinstance(config, dict) and "name" in config:
-            config = ScannerPluginConfig(**config)
-        if isinstance(config, ScannerPluginConfig):
-            self._name = config.name
-            self._type = config.type
-            if hasattr(config, "options"):
-                self._options.update(config.options)
-
-        self._config = config
-
-    def validate(self) -> bool:
-        """Verify scanner configuration and requirements."""
-        exists = shutil.which(self.config.command) is not None
-        if self._default_config.get_tool_version_command:
-            self.tool_version = self._run_subprocess(
-                self._default_config.get_tool_version_command
-            )
-        self._is_valid = (
-            exists and self._config is not None and self.tool_version is not None
-        )
-        return self._is_valid
+    def configure(
+        self,
+        config: ScannerPluginConfig | None = None,
+        options: BaseScannerOptions | None = None,
+    ):
+        """Configure scanner."""
+        self._set_config(config)
+        if options:
+            self.options = options
 
     @abstractmethod
-    def scan(
-        self, target: str, options: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """Execute the security scan.
-
-        Args:
-            target: The target to scan (file, directory, etc.)
-            options: Optional dictionary of scan options specific to the scanner
+    def validate(self) -> bool:
+        """Validate scanner configuration.
 
         Returns:
-            Dict[str, Any]: Raw scan results with findings and metadata
+            bool: True if validation passes
+        """
+
+    @abstractmethod
+    def scan(self, *args, **kwargs) -> SecurityReport:
+        """Execute scanner against a target.
+
+        Args:
+            *args: Variable length argument list
+            **kwargs: Arbitrary keyword arguments
+
+        Returns:
+            SecurityReport: Full scan results
 
         Raises:
-            ScannerError: If there is an error during scanning
+            ScannerError: if scanning failed for any reason
         """
-        # Pre-scan setup and validation
-        self._pre_scan(target, options)
-
-        # Build and execute scan command
-        command = self._resolve_arguments(target)
-        if options:
-            command.extend(self._build_option_args(options))
-
-        try:
-            output = self._run_subprocess(command)
-            if self.parser:
-                parsed_results = self.parser.parse(output)
-            else:
-                parsed_results = output
-
-            return {
-                "findings": parsed_results.get("findings", []),
-                "metadata": {
-                    "scanner_name": self.name,
-                    "scanner_version": self.tool_version,
-                    "scan_type": self.type,
-                    **parsed_results.get("metadata", {}),
-                },
-            }
-        except Exception as e:
-            raise ScannerError(f"Error during scan execution: {str(e)}")
 
     def _build_security_report(self, scan_results: Any) -> SecurityReport:
-        """Convert scan results into a SecurityReport."""
+        """Build security report from scan results.
 
-        report = SecurityReport(
-            name=self.name,
-            scanner_version=self.version,
-            metadata={"scan_type": self.type},
-        )
+        Args:
+            scan_results: Raw scan results to process
 
-        # Handle both parsed and raw results
-        results_list = (
-            scan_results if isinstance(scan_results, list) else [scan_results]
-        )
-
-        for result in results_list:
-            if isinstance(result, dict):
-                finding = BaseFinding(
-                    **result,
-                )
-                report.add_finding(finding)
-
+        Returns:
+            SecurityReport: Processed scan results
+        """
+        report = SecurityReport()
+        report.scanner_type = self.type
         return report
 
     def _resolve_arguments(self, target: str) -> List[str]:
-        """Resolve command arguments for the scanner.
+        """Resolve any configured options into command line arguments.
 
         Args:
-            target: The target to scan
+            target: Target to scan
 
         Returns:
-            List of command arguments
+            List[str]: Arguments to pass to scanner
         """
-        if not target:
-            raise ScannerError("No target specified")
-        if not self._config:
-            raise ScannerError("Scanner configuration not set")
-        if not self._config.command:
-            raise ScannerError("No command specified")
+        return self._args
 
-        path_arg = [
-            item
-            for item in [
-                self._config.scan_path_arg,
-                target,
-            ]
-            if item
-        ]
-        output_arg = [
-            item
-            for item in [
-                self._config.output_arg,
-                self.results_file,
-            ]
-            if item
-        ]
-        format_arg = [
-            item
-            for item in [
-                self._config.format_arg,
-                self._config.format_arg_value,
-            ]
-            if item
-        ]
-
-        args = [
-            item
-            for item in [
-                self._config.command,
-                *(
-                    format_arg
-                    if self._config.format_arg_position == "before_args"
-                    else []
-                ),
-                *(
-                    output_arg
-                    if self._config.output_arg_position == "before_args"
-                    else []
-                ),
-                *(
-                    path_arg
-                    if self._config.scan_path_arg_position == "before_args"
-                    else []
-                ),
-                *self._config.args,
-                *(
-                    format_arg
-                    if self._config.format_arg_position == "after_args"
-                    else []
-                ),
-                *(
-                    output_arg
-                    if self._config.output_arg_position == "after_args"
-                    else []
-                ),
-                *(
-                    path_arg
-                    if self._config.scan_path_arg_position == "after_args"
-                    else []
-                ),
-            ]
-            if item
-        ]
-        return args
-
-    def _pre_scan(self, target: str, options: Optional[Dict[str, Any]] = None) -> None:
-        """Validates that `target` is a valid path and sets options.
+    def _pre_scan(self, target: Path, options: Optional[Dict[str, Any]] = None) -> None:
+        """Perform pre-scan setup.
 
         Args:
-            target: The target directory or file to scan.
-            options: A dictionary of arbitrary options to attach to the scanner.
-
-        Raises:
-            ScannerError: If there is an error during scanning
+            target: Target to scan
+            options: Optional scanner-specific options
         """
-        if not target:
-            raise ScannerError("No target specified")
         if options:
-            self._options.update(options)
+            self.options.update(options)
 
-    def _consume_output(self, p, q):
-        line_count = 0
-        while p.poll() is None:
-            line = p.stdout.readline()
-            q.put(line)
-            line_count += 1
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        if self.results_dir:
+            self.results_dir.mkdir(parents=True, exist_ok=True)
+
+    def _consume_output(self, p: subprocess.Popen, q: queue.Queue) -> None:
+        """Consume subprocess output and put it in a queue."""
+        for line in iter(p.stdout.readline, b""):
+            q.put(line.decode("utf-8").rstrip())
 
     def _run_subprocess(self, command: List[str]) -> None:
         """Run a subprocess with the given command.
 
         Args:
-            command: Command to execute as list of strings
+            command: Command to run
 
         Raises:
-            ScannerError: If subprocess execution fails
+            ScannerError: If process errors
         """
+        q = queue.Queue()
+        with subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+            universal_newlines=False,
+            encoding=None,
+        ) as p:
+            t = threading.Thread(target=self._consume_output, args=(p, q))
+            t.daemon = True
+            t.start()
 
-        try:
-            program_output = []
-            line_count = 0
-            with subprocess.Popen(
-                command, stdout=subprocess.PIPE, bufsize=1, universal_newlines=True
-            ) as process:
-                queue = SimpleQueue()
-                t = Thread(target=self._consume_output, args=(process, queue))
-                t.start()
-                t.join()
-                process.terminate()
-                while not queue.empty():
-                    program_output.append(queue.get())
-                    line_count += 1
-                self._output = program_output
-                return self._output
-        except subprocess.CalledProcessError as e:
-            raise ScannerError(f"Scanner {self._name} failed: {e.stderr}") from e
-        except Exception as e:
-            raise ScannerError(
-                f"Exception running scanner {self._name}: {str(e)}"
-            ) from e
+            output = []
+            while True:
+                try:
+                    line = q.get_nowait()
+                    output.append(line)
+                    self.logger.debug(line)
+                except queue.Empty:
+                    if not t.is_alive() and q.empty():
+                        break
+
+            t.join()

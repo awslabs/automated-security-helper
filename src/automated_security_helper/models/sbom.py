@@ -5,7 +5,9 @@ from __future__ import annotations
 import datetime
 from typing import Any, List, Optional, Dict, Union
 from typing_extensions import Annotated
-from .data_interchange import DataInterchange, ExportFormat
+
+from .core import ExportFormat
+from .data_interchange import DataInterchange
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 

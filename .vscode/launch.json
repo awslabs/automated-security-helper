@@ -2,21 +2,19 @@
   "configurations": [
     {
       "args": [
-        "--source",
+        "--source-dir",
         "${workspaceFolder}",
-        "--output",
+        "--output-dir",
         "${workspaceFolder}/ash_output",
         "--verbose",
         "--config",
         "${workspaceFolder}/ash.yaml",
         "--strategy",
-        "parallel",
-        "--scanners",
-        "cdknag"
+        "parallel"
       ],
       "console": "integratedTerminal",
-      "name": "ASH: Test Orchestrator",
-      "program": "./src/automated_security_helper/orchestrator.py",
+      "name": "ASH: Test CLI",
+      "program": "${workspaceFolder}/src/automated_security_helper/cli.py",
       "request": "launch",
       "type": "debugpy"
     },
