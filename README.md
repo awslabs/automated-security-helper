@@ -38,7 +38,7 @@ The security helper supports the following vectors:
     * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Python code.
     * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Python code.
     * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Python code.
-    * **[detect-secrets](https://github.com/Yelp/detect-secrets/tree/master)** - find and classify secrets in files
+    * **[detect-secrets](https://github.com/Yelp/detect-secrets/tree/master)** - find and classify secrets in files.
   * Jupyter Notebook
     * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts Jupyter Notebook (ipynb) files into Python executables. Code scan with Bandit.
   * JavaScript; NodeJS
