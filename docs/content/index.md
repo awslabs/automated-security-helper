@@ -26,20 +26,19 @@ by providing a fast and easy tool to conduct  preliminary security check as earl
 
 - It is not a replacement of a human review nor standards enforced by your team/customer.
 - It uses light, open source tools to maintain its flexibility and ability to run from anywhere.
-- ASH is cloning and running different open-source tools, such as: git-secrets, bandit, Semgrep, Grype, Syft, nbconvert, npm-audit, checkov, cdk-nag and cfn-nag. Please review the tools [LICENSE](license) before usage.
+- ASH is cloning and running different open-source tools, such as: detect-secrets, bandit, Semgrep, Grype, Syft, nbconvert, npm-audit, checkov, cdk-nag and cfn-nag. Please review the tools [LICENSE](license) before usage.
 
 ## Supported frameworks
 
 The security helper supports the following vectors:
 
 * Code
-  * Git
-    * **[git-secrets](https://github.com/awslabs/git-secrets)** - Find api keys, passwords, AWS keys in the code
   * Python
     * **[bandit](https://github.com/PyCQA/bandit)** - finds common security issues in Python code.
     * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Python code.
     * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Python code.
     * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Python code.
+    * **[detect-secrets](https://github.com/Yelp/detect-secrets/tree/master)** - find and classify secrets in files.
   * Jupyter Notebook
     * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts Jupyter Notebook (ipynb) files into Python executables. Code scan with Bandit.
   * JavaScript; NodeJS
