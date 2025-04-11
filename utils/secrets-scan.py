@@ -1,11 +1,7 @@
-from detect_secrets import SecretsCollection
 import detect_secrets
-from detect_secrets.settings import default_settings
 from argparse import ArgumentParser
 import os
 import json
-
-import detect_secrets.settings
 
 # Run detect-secrets on each file to see if they contain secrets. Uses the default settings
 def scan_secrets(
@@ -13,12 +9,12 @@ def scan_secrets(
         baseline: str,
         debug: bool = False
 ):
-    secrets = SecretsCollection()
+    secrets = detect_secrets.SecretsCollection()
     for item in os.walk(path):
         for file in item[2]:
-            with default_settings():
-
+            with detect_secrets.default_settings():
                 secrets.scan_files(os.path.join(item[0], file))
+                
     # Prints out scan results. Discovered secret values are hashed to avoid exposing them
     print(json.dumps(secrets.json(), indent=2))
 
