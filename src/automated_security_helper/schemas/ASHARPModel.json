@@ -1356,111 +1356,6 @@
       "title": "Attestation",
       "type": "object"
     },
-    "BaseFinding": {
-      "additionalProperties": true,
-      "description": "Base model for all security findings.",
-      "properties": {
-        "created_at": {
-          "default": null,
-          "description": "When the finding was first detected (in UTC)",
-          "title": "Created At",
-          "type": "string"
-        },
-        "description": {
-          "default": null,
-          "description": "Detailed description of the finding",
-          "title": "Description",
-          "type": "string"
-        },
-        "id": {
-          "description": "Unique identifier for the finding",
-          "minLength": 1,
-          "pattern": "^[A-Za-z][\\/\\.\\w-]+$",
-          "title": "Id",
-          "type": "string"
-        },
-        "link": {
-          "default": null,
-          "description": "Link to more information about the finding",
-          "title": "Link",
-          "type": "string"
-        },
-        "location": {
-          "$ref": "#/$defs/automated_security_helper__models__core__Location",
-          "description": "Location information for the finding"
-        },
-        "metadata": {
-          "additionalProperties": true,
-          "default": {},
-          "description": "Additional scanner-specific metadata",
-          "title": "Metadata",
-          "type": "object"
-        },
-        "raw": {
-          "default": null,
-          "description": "Raw result from the scanner",
-          "title": "Raw"
-        },
-        "remediation": {
-          "default": null,
-          "description": "Guidance for fixing the finding",
-          "title": "Remediation",
-          "type": "string"
-        },
-        "severity": {
-          "description": "Severity level of the finding",
-          "enum": [
-            "CRITICAL",
-            "HIGH",
-            "MEDIUM",
-            "LOW",
-            "INFO"
-          ],
-          "title": "Severity",
-          "type": "string"
-        },
-        "status": {
-          "default": "OPEN",
-          "description": "Current status of the finding",
-          "enum": [
-            "OPEN",
-            "CLOSED",
-            "IN_PROGRESS",
-            "FALSE_POSITIVE",
-            "RISK_ACCEPTED",
-            "INFORMATIONAL"
-          ],
-          "title": "Status",
-          "type": "string"
-        },
-        "timestamp": {
-          "default": null,
-          "description": "When the finding was created",
-          "title": "Timestamp",
-          "type": "string"
-        },
-        "title": {
-          "description": "Title or name of the finding",
-          "minLength": 1,
-          "title": "Title",
-          "type": "string"
-        },
-        "updated_at": {
-          "default": null,
-          "description": "When the finding was last updated (in UTC)",
-          "title": "Updated At",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "title",
-        "severity",
-        "location"
-      ],
-      "title": "BaseFinding",
-      "type": "object"
-    },
     "BaselineState": {
       "enum": [
         "new",
@@ -7625,6 +7520,114 @@
       "title": "LocaleType",
       "type": "string"
     },
+    "Location": {
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Region"
+              },
+              "minItems": 0,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "A set of regions relevant to the location.",
+          "title": "Annotations"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "minimum": -1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": -1,
+          "description": "Value that distinguishes this location from all other locations within a single result object.",
+          "title": "Id"
+        },
+        "logicalLocations": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LogicalLocation"
+              },
+              "minItems": 0,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "The logical locations associated with the result.",
+          "title": "Logicallocations"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Message"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A message relevant to the location."
+        },
+        "physicalLocation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PhysicalLocation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Identifies the artifact and region."
+        },
+        "properties": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PropertyBag"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Key/value pairs that provide additional information about the location."
+        },
+        "relationships": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LocationRelationship"
+              },
+              "minItems": 0,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "An array of objects that describe relationships between this location and others.",
+          "title": "Relationships"
+        }
+      },
+      "title": "Location",
+      "type": "object"
+    },
     "LocationRelationship": {
       "additionalProperties": false,
       "properties": {
@@ -8498,7 +8501,7 @@
         "location": {
           "anyOf": [
             {
-              "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__Location"
+              "$ref": "#/$defs/Location"
             },
             {
               "type": "null"
@@ -8609,7 +8612,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__Location"
+                "$ref": "#/$defs/Location"
               },
               "minItems": 0,
               "type": "array"
@@ -11795,7 +11798,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__Location"
+                "$ref": "#/$defs/Location"
               },
               "minItems": 0,
               "type": "array"
@@ -11885,7 +11888,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__Location"
+                "$ref": "#/$defs/Location"
               },
               "minItems": 0,
               "type": "array"
@@ -12773,53 +12776,6 @@
       "title": "SarifReport",
       "type": "object"
     },
-    "Scanner": {
-      "additionalProperties": true,
-      "description": "Represents metadata about the security scanner.",
-      "properties": {
-        "description": {
-          "default": null,
-          "description": "Description of the scanner",
-          "title": "Description",
-          "type": "string"
-        },
-        "name": {
-          "description": "Name of the scanner",
-          "minLength": 1,
-          "pattern": "^[a-zA-Z][\\w-]*$",
-          "title": "Name",
-          "type": "string"
-        },
-        "type": {
-          "default": "SAST",
-          "description": "Type of scanner (e.g., SAST, DAST, SBOM)",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
-        },
-        "version": {
-          "default": "1.0.0",
-          "description": "Version of the scanner",
-          "title": "Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "title": "Scanner",
-      "type": "object"
-    },
     "Scope": {
       "enum": [
         "required",
@@ -13653,7 +13609,7 @@
         "location": {
           "anyOf": [
             {
-              "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__Location"
+              "$ref": "#/$defs/Location"
             },
             {
               "type": "null"
@@ -13956,7 +13912,7 @@
         "location": {
           "anyOf": [
             {
-              "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__Location"
+              "$ref": "#/$defs/Location"
             },
             {
               "type": "null"
@@ -14559,7 +14515,7 @@
         "location": {
           "anyOf": [
             {
-              "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__Location"
+              "$ref": "#/$defs/Location"
             },
             {
               "type": "null"
@@ -16954,60 +16910,6 @@
       "title": "Workspace",
       "type": "object"
     },
-    "automated_security_helper__models__core__Location": {
-      "description": "Represents the location of a finding in the codebase.",
-      "properties": {
-        "end_line": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Ending line number of the finding",
-          "title": "End Line"
-        },
-        "file_path": {
-          "description": "Path to the file containing the finding",
-          "title": "File Path",
-          "type": "string"
-        },
-        "snippet": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Code snippet related to the finding",
-          "title": "Snippet"
-        },
-        "start_line": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Starting line number of the finding",
-          "title": "Start Line"
-        }
-      },
-      "required": [
-        "file_path"
-      ],
-      "title": "Location",
-      "type": "object"
-    },
     "automated_security_helper__schemas__cyclonedx_bom_1_6_schema__Attachment": {
       "additionalProperties": false,
       "properties": {
@@ -17307,114 +17209,6 @@
       "title": "Level",
       "type": "string"
     },
-    "automated_security_helper__schemas__sarif_schema_model__Location": {
-      "additionalProperties": false,
-      "properties": {
-        "annotations": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/Region"
-              },
-              "minItems": 0,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": [],
-          "description": "A set of regions relevant to the location.",
-          "title": "Annotations"
-        },
-        "id": {
-          "anyOf": [
-            {
-              "minimum": -1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": -1,
-          "description": "Value that distinguishes this location from all other locations within a single result object.",
-          "title": "Id"
-        },
-        "logicalLocations": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/LogicalLocation"
-              },
-              "minItems": 0,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": [],
-          "description": "The logical locations associated with the result.",
-          "title": "Logicallocations"
-        },
-        "message": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Message"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A message relevant to the location."
-        },
-        "physicalLocation": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PhysicalLocation"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Identifies the artifact and region."
-        },
-        "properties": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PropertyBag"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Key/value pairs that provide additional information about the location."
-        },
-        "relationships": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/LocationRelationship"
-              },
-              "minItems": 0,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": [],
-          "description": "An array of objects that describe relationships between this location and others.",
-          "title": "Relationships"
-        }
-      },
-      "title": "Location",
-      "type": "object"
-    },
     "automated_security_helper__schemas__sarif_schema_model__State": {
       "enum": [
         "accepted",
@@ -17489,19 +17283,42 @@
       "description": "The full ASH configuration used during this scan.",
       "title": "Ash Config"
     },
+    "cyclonedx": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CycloneDXReport"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": {
+        "$schema": null,
+        "annotations": null,
+        "bomFormat": "CycloneDX",
+        "components": null,
+        "compositions": null,
+        "declarations": null,
+        "definitions": null,
+        "dependencies": null,
+        "externalReferences": null,
+        "formulation": null,
+        "metadata": null,
+        "properties": null,
+        "serialNumber": null,
+        "services": null,
+        "signature": null,
+        "specVersion": "1.6",
+        "version": 1,
+        "vulnerabilities": null
+      },
+      "description": "The CycloneDXReport formatted SBOM report"
+    },
     "description": {
       "default": "Automated Security Helper - Aggregated Report",
       "description": "The description of the generated report.",
       "title": "Description",
       "type": "string"
-    },
-    "findings": {
-      "description": "List of security findings from all scanners",
-      "items": {
-        "$ref": "#/$defs/BaseFinding"
-      },
-      "title": "Findings",
-      "type": "array"
     },
     "metadata": {
       "$ref": "#/$defs/ReportMetadata"
@@ -17603,46 +17420,6 @@
         "version": "2.1.0"
       },
       "description": "The SARIF formatted vulnerability report"
-    },
-    "sbom": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/CycloneDXReport"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": {
-        "$schema": null,
-        "annotations": null,
-        "bomFormat": "CycloneDX",
-        "components": null,
-        "compositions": null,
-        "declarations": null,
-        "definitions": null,
-        "dependencies": null,
-        "externalReferences": null,
-        "formulation": null,
-        "metadata": null,
-        "properties": null,
-        "serialNumber": null,
-        "services": null,
-        "signature": null,
-        "specVersion": "1.6",
-        "version": 1,
-        "vulnerabilities": null
-      },
-      "description": "The CycloneDXReport formatted SBOM report"
-    },
-    "scanners_used": {
-      "default": [],
-      "description": "List of scanners used in this report",
-      "items": {
-        "$ref": "#/$defs/Scanner"
-      },
-      "title": "Scanners Used",
-      "type": "array"
     }
   },
   "title": "ASHARPModel",

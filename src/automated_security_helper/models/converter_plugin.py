@@ -47,7 +47,7 @@ class ConverterPlugin(BaseModel):
         if self.source_dir is None:
             self.source_dir = Path(".")
         if self.output_dir is None:
-            self.output_dir = Path("output")
+            self.output_dir = self.source_dir.joinpath("ash_output")
 
         # Ensure paths are Path objects
         self.source_dir = Path(str(self.source_dir))

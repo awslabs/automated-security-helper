@@ -1,6 +1,6 @@
 """Unit tests for scan results container."""
 
-from automated_security_helper.models.scan_results import ScanResultsContainer
+from automated_security_helper.models.scan_results_container import ScanResultsContainer
 
 
 def test_scan_results_container_initialization():

@@ -18,8 +18,6 @@ from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
     SecurityVulnerabilityReport,
 )
-from automated_security_helper.models.iac_scan import IaCVulnerability, IaCScanReport
-from automated_security_helper.models.sbom import SBOMPackage
 
 __all__ = [
     "BaseFinding",
@@ -31,7 +29,4 @@ __all__ = [
     "ReportMetadata",
     "ExportFormat",
     "ASHARPModel",
-    "IaCVulnerability",
-    "IaCScanReport",
-    "SBOMPackage",
 ]

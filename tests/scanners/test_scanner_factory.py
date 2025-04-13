@@ -30,9 +30,9 @@ def test_scanner_factory_initialization():
     assert scanners["cdknag"] == CdkNagScanner
 
 
-def test_scanner_factory_registration():
+def test_scanner_factory_registration(ash_config):
     """Test scanner registration functionality."""
-    factory = ScannerFactory()
+    factory = ScannerFactory(config=ash_config)
     factory._scanners = {}  # Start fresh
 
     # Register a new scanner
@@ -48,9 +48,9 @@ def test_scanner_factory_registration():
     assert "test" in scanners
 
 
-def test_scanner_factory_multiple_registrations():
+def test_scanner_factory_multiple_registrations(ash_config):
     """Test handling of duplicate scanner registrations."""
-    factory = ScannerFactory()
+    factory = ScannerFactory(config=ash_config)
 
     # Clear existing scanners
     factory._scanners = {}
@@ -68,9 +68,9 @@ def test_scanner_factory_multiple_registrations():
     assert factory.get_scanner_class("test") == BanditScanner
 
 
-def test_create_bandit_scanner(test_source_dir, test_output_dir):
+def test_create_bandit_scanner(ash_config, test_source_dir, test_output_dir):
     """Test creation of Bandit scanner instance."""
-    factory = ScannerFactory()
+    factory = ScannerFactory(config=ash_config)
 
     # Test with ScannerConfig
     config = ScannerPlugin(
@@ -101,9 +101,9 @@ def test_create_bandit_scanner(test_source_dir, test_output_dir):
     assert scanner.type == "SAST"
 
 
-def test_create_cdk_nag_scanner(test_source_dir, test_output_dir):
+def test_create_cdk_nag_scanner(ash_config, test_source_dir, test_output_dir):
     """Test creation of CDK Nag scanner instance."""
-    factory = ScannerFactory()
+    factory = ScannerFactory(config=ash_config)
 
     # Test with ScannerConfig
     config = ScannerPlugin(
@@ -134,9 +134,9 @@ def test_create_cdk_nag_scanner(test_source_dir, test_output_dir):
     assert scanner.type == "IAC"
 
 
-def test_create_invalid_scanner(test_source_dir, test_output_dir):
+def test_create_invalid_scanner(ash_config, test_source_dir, test_output_dir):
     """Test creating scanner with invalid configuration."""
-    factory = ScannerFactory()
+    factory = ScannerFactory(config=ash_config)
 
     # Test non-existent scanner
     config = ScannerPlugin(name="invalid", type="UNKNOWN")
@@ -144,9 +144,11 @@ def test_create_invalid_scanner(test_source_dir, test_output_dir):
         factory.create_scanner(config.name, config, test_source_dir, test_output_dir)
 
 
-def test_scanner_factory_config_validation(test_source_dir, test_output_dir):
+def test_scanner_factory_config_validation(
+    ash_config, test_source_dir, test_output_dir
+):
     """Test scanner configuration validation."""
-    factory = ScannerFactory()
+    factory = ScannerFactory(config=ash_config)
 
     # Test with missing name in dict config
     with pytest.raises(ValueError, match="Unable to determine scanner class"):
@@ -157,9 +159,9 @@ def test_scanner_factory_config_validation(test_source_dir, test_output_dir):
         factory.create_scanner("test", None, test_source_dir, test_output_dir)
 
 
-def test_scanner_factory_type_lookup():
+def test_scanner_factory_type_lookup(ash_config):
     """Test lookup of scanner classes by name."""
-    factory = ScannerFactory()
+    factory = ScannerFactory(config=ash_config)
 
     # Test valid lookups
     assert factory.get_scanner_class("bandit") == BanditScanner
@@ -170,9 +172,9 @@ def test_scanner_factory_type_lookup():
         factory.get_scanner_class("invalid")
 
 
-def test_scanner_factory_default_scanners(test_source_dir, test_output_dir):
+def test_scanner_factory_default_scanners(ash_config, test_source_dir, test_output_dir):
     """Test that default scanners are properly registered and can be created."""
-    factory = ScannerFactory()
+    factory = ScannerFactory(config=ash_config)
 
     # Check available scanners from scanners namespace
     scanners = factory.available_scanners()
@@ -185,7 +187,7 @@ def test_scanner_factory_default_scanners(test_source_dir, test_output_dir):
         config = ScannerPlugin(name=name, type="SAST")
         scanner = factory.create_scanner(name, config, test_source_dir, test_output_dir)
         assert isinstance(scanner, scanner_class)
-        assert scanner.name == name
+        assert scanner.config.name == name
 
 
 def test_scanner_factory_buildtime_scanners(

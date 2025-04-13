@@ -26,22 +26,16 @@ def test_execute_scan_with_config(test_source_dir: Path, test_output_dir: Path):
     """Test executing scan with configuration file."""
     # Create minimal config that gets transformed to ASHConfig
     try:
-        with open(test_source_dir.joinpath("ash.yaml"), "w") as f:
-            config_to_dump: dict = json.loads(get_default_config().model_dump_json())
-            with open(f.name, "w") as f:
-                yaml.safe_dump(config_to_dump, f)
-
         orchestrator = ASHScanOrchestrator(
             source_dir=test_source_dir.as_posix(),
             output_dir=test_output_dir.as_posix(),
-            config_path=f.name,
+            config_path=get_default_config(),
         )
         result = orchestrator.execute_scan()
         assert isinstance(result, dict)
         assert "scanners" in result
     finally:
         pass
-        os.unlink(f.name)
 
 
 def test_execute_scan_no_config(test_source_dir: Path, test_output_dir: Path):

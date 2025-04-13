@@ -11,7 +11,7 @@ from importlib.metadata import version
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Dict
+from typing import Annotated, Any
 
 from pydantic import Field
 from automated_security_helper.base.options import BaseScannerOptions
@@ -20,10 +20,6 @@ from automated_security_helper.base.scanner import ScannerBaseConfig
 from automated_security_helper.base.types import ToolArgs
 from automated_security_helper.models.core import (
     Location,
-)
-from automated_security_helper.models.iac_scan import (
-    IaCVulnerability,
-    CheckResultType,
 )
 from automated_security_helper.base.scanner_plugin import (
     ScannerPlugin,
@@ -75,56 +71,6 @@ class CustomScanner(ScannerPlugin[CustomScannerConfig]):
         self.tool_version = version("checkov")
         self.args = ToolArgs()
         super().model_post_init(context)
-
-    def _create_finding_from_check(
-        self, result: Dict[str, Any], check_type: CheckResultType
-    ) -> IaCVulnerability:
-        """Create an IaCVulnerability from a check result."""
-        finding_id = "/".join(
-            [
-                item
-                for item in [
-                    result.get("check_id", None),
-                    result.get("repo_file_path", None),
-                    result.get("resource", None),
-                    result.get("resource_address", None),
-                ]
-                if item
-            ]
-        )
-
-        # Extract location information from the result
-        file_path = result.get("file_path", "")
-        file_line_range = result.get("file_line_range", [0, 0])
-        location = Location(
-            path=file_path,
-            start_line=file_line_range[0] if file_line_range else 0,
-            end_line=file_line_range[1] if file_line_range else 0,
-        )
-
-        return IaCVulnerability(
-            id=finding_id,
-            title=result.get("check_name", "Unknown Check"),
-            description=result.get("check_name", ""),
-            location=location,
-            resource_name=result.get("resource", ""),
-            resource_type=(
-                result.get("resource", "").split(".")[0]
-                if result.get("resource", "")
-                else None
-            ),
-            rule_id=result.get("check_id", ""),
-            check_result_type=check_type,
-            violation_details={
-                "check_class": result.get("check_class", ""),
-                "guideline": result.get("guideline", ""),
-                "evaluated_keys": result.get("check_result", {}).get(
-                    "evaluated_keys", []
-                ),
-                "result_details": result.get("check_result", {}).get("result", ""),
-                "bc_category": result.get("bc_category", ""),
-            },
-        )
 
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.

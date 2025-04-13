@@ -12,7 +12,7 @@ from automated_security_helper.schemas.data_interchange import (
     ReportMetadata,
 )
 from typing import Annotated, List, Dict, Any, Union
-from automated_security_helper.models.core import BaseFinding, ExportFormat, Scanner
+from automated_security_helper.models.core import ExportFormat, Scanner
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Run,
@@ -26,10 +26,10 @@ from automated_security_helper.utils.log import ASH_LOGGER
 __all__ = ["ASHARPModel"]
 
 
-from automated_security_helper.models.aggregation import (
-    FindingAggregator,
-    TrendAnalyzer,
-)
+# from automated_security_helper.models.aggregation import (
+#     FindingAggregator,
+#     TrendAnalyzer,
+# )
 
 
 class ASHARPModel(BaseModel):
@@ -82,7 +82,7 @@ class ASHARPModel(BaseModel):
             )
         ],
     )
-    sbom: Annotated[
+    cyclonedx: Annotated[
         CycloneDXReport | None,
         Field(description="The CycloneDXReport formatted SBOM report"),
     ] = CycloneDXReport()
@@ -92,16 +92,6 @@ class ASHARPModel(BaseModel):
             description="Dictionary of additional reports where the keys are the scanner name and the values are the outputs of the scanner."
         ),
     ] = {}
-    scanners_used: Annotated[
-        List[Scanner], Field(description="List of scanners used in this report")
-    ] = []
-    findings: Annotated[
-        List[BaseFinding],
-        Field(
-            description="List of security findings from all scanners",
-            default_factory=list,
-        ),
-    ] = []
 
     @field_validator("ash_config")
     def validate_ash_config(cls, v: any):
@@ -115,74 +105,74 @@ class ASHARPModel(BaseModel):
 
     def model_post_init(self, context):
         """Initialize aggregator and trend analyzer with current findings."""
-        self._aggregator = FindingAggregator()
-        self._trend_analyzer = TrendAnalyzer()
-        for finding in self.findings:
-            self._aggregator.add_finding(finding)
+        # self._aggregator = FindingAggregator()
+        # self._trend_analyzer = TrendAnalyzer()
+        # for finding in self.findings:
+        #     self._aggregator.add_finding(finding)
         return super().model_post_init(context)
 
-    def add_finding(self, finding: BaseFinding) -> None:
-        """Add a new finding to both the findings list and aggregator."""
-        self.findings.append(finding)
-        self._aggregator.add_finding(finding)
+    # def add_finding(self, finding: BaseFinding) -> None:
+    #     """Add a new finding to both the findings list and aggregator."""
+    #     self.findings.append(finding)
+    #     self._aggregator.add_finding(finding)
 
-    def deduplicate_findings(self) -> List[BaseFinding]:
-        """Remove duplicate findings based on key attributes."""
-        deduped = self._aggregator.deduplicate()
-        self.findings = deduped
-        return deduped
+    # def deduplicate_findings(self) -> List[BaseFinding]:
+    #     """Remove duplicate findings based on key attributes."""
+    #     deduped = self._aggregator.deduplicate()
+    #     self.findings = deduped
+    #     return deduped
 
-    def group_findings_by_type(self) -> Dict[str, List[BaseFinding]]:
-        """Group findings by their scanner rule ID."""
-        return self._aggregator.group_by_type()
+    # def group_findings_by_type(self) -> Dict[str, List[BaseFinding]]:
+    #     """Group findings by their scanner rule ID."""
+    #     return self._aggregator.group_by_type()
 
-    def group_findings_by_severity(self) -> Dict[str, List[BaseFinding]]:
-        """Group findings by their severity level."""
-        return self._aggregator.group_by_severity()
+    # def group_findings_by_severity(self) -> Dict[str, List[BaseFinding]]:
+    #     """Group findings by their severity level."""
+    #     return self._aggregator.group_by_severity()
 
-    def add_scan_findings(self, scan_time: datetime):
-        """Add current findings to trend analysis."""
-        self._trend_analyzer.add_scan_findings(scan_time, self.findings)
+    # def add_scan_findings(self, scan_time: datetime):
+    #     """Add current findings to trend analysis."""
+    #     self._trend_analyzer.add_scan_findings(scan_time, self.findings)
 
-    def get_finding_counts_over_time(self) -> Dict[datetime, int]:
-        """Get the count of findings at each scan time."""
-        return self._trend_analyzer.get_finding_counts_over_time()
+    # def get_finding_counts_over_time(self) -> Dict[datetime, int]:
+    #     """Get the count of findings at each scan time."""
+    #     return self._trend_analyzer.get_finding_counts_over_time()
 
-    def get_severity_trends(self) -> Dict[str, Dict[datetime, int]]:
-        """Get finding counts by severity over time."""
-        return self._trend_analyzer.get_severity_trends()
+    # def get_severity_trends(self) -> Dict[str, Dict[datetime, int]]:
+    #     """Get finding counts by severity over time."""
+    #     return self._trend_analyzer.get_severity_trends()
 
-    def get_new_findings(
-        self, previous_scan: datetime, current_scan: datetime
-    ) -> List[BaseFinding]:
-        """Get findings that appeared in current scan but not in previous scan."""
-        return self._trend_analyzer.get_new_findings(previous_scan, current_scan)
+    # def get_new_findings(
+    #     self, previous_scan: datetime, current_scan: datetime
+    # ) -> List[BaseFinding]:
+    #     """Get findings that appeared in current scan but not in previous scan."""
+    #     return self._trend_analyzer.get_new_findings(previous_scan, current_scan)
 
-    def get_resolved_findings(
-        self, previous_scan: datetime, current_scan: datetime
-    ) -> List[BaseFinding]:
-        """Get findings that were in previous scan but not in current scan."""
-        return self._trend_analyzer.get_resolved_findings(previous_scan, current_scan)
+    # def get_resolved_findings(
+    #     self, previous_scan: datetime, current_scan: datetime
+    # ) -> List[BaseFinding]:
+    #     """Get findings that were in previous scan but not in current scan."""
+    #     return self._trend_analyzer.get_resolved_findings(previous_scan, current_scan)
 
-    def _convert_to_scanner(self, scanner_dict: Dict[str, str]) -> Scanner:
-        """Convert a scanner dictionary to Scanner object."""
-        # Ensure required fields with defaults
-        scanner_dict_copy = scanner_dict.copy()
-        required_fields = {
-            "type": "SAST",
-            "version": "1.0.0",
-            "description": "Security scanner",
-        }
-        for field, default in required_fields.items():
-            if field not in scanner_dict_copy:
-                scanner_dict_copy[field] = default
+    # def _convert_to_scanner(self, scanner_dict: Dict[str, str]) -> Scanner:
+    #     """Convert a scanner dictionary to Scanner object."""
+    #     # Ensure required fields with defaults
+    #     scanner_dict_copy = scanner_dict.copy()
+    #     required_fields = {
+    #         "type": "SAST",
+    #         "version": "1.0.0",
+    #         "description": "Security scanner",
+    #     }
+    #     for field, default in required_fields.items():
+    #         if field not in scanner_dict_copy:
+    #             scanner_dict_copy[field] = default
 
-        return Scanner(
-            name=scanner_dict_copy["name"],
-            version=scanner_dict_copy["version"],
-            type=scanner_dict_copy["type"],
-            description=scanner_dict_copy["description"],
-        )
+    #     return Scanner(
+    #         name=scanner_dict_copy["name"],
+    #         version=scanner_dict_copy["version"],
+    #         type=scanner_dict_copy["type"],
+    #         description=scanner_dict_copy["description"],
+    #     )
 
     @property
     def scanners(self) -> List[Scanner]:
@@ -193,7 +183,7 @@ class ASHARPModel(BaseModel):
                 Returns empty list if no scanners are defined.
         """
         if not hasattr(self, "_scanners"):
-            self._scanners = self.scanners_used if self.scanners_used else []
+            self._scanners = []
         return self._scanners.copy()  # Return copy to prevent modification
 
     @classmethod

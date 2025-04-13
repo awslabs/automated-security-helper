@@ -1,6 +1,7 @@
 """Common test fixtures for ASHARP tests."""
 
 from pathlib import Path
+import shutil
 import sys
 import pytest
 import yaml
@@ -39,8 +40,11 @@ from automated_security_helper.scanners.checkov_scanner import CheckovScannerCon
 
 
 TEST_DIR = Path(__file__).parent.joinpath("pytest-temp")
+if TEST_DIR.exists():
+    shutil.rmtree(TEST_DIR.as_posix())
+TEST_DIR.mkdir(parents=True, exist_ok=True)
 TEST_SOURCE_DIR = TEST_DIR.joinpath("source")
-TEST_OUTPUT_DIR = TEST_DIR.joinpath("output")
+TEST_OUTPUT_DIR = TEST_DIR.joinpath("ash_output")
 
 
 def is_debugging():

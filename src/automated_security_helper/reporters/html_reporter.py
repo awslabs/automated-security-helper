@@ -1,7 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import html
-from typing import Any
+from typing import Any, Dict, List
+
+from automated_security_helper.schemas.sarif_schema_model import Result
 
 
 class HTMLReporter:
@@ -14,10 +16,16 @@ class HTMLReporter:
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
-        findings_by_severity = model.group_findings_by_severity()
-        findings_by_type = model.group_findings_by_type()
+        # Get results from SARIF report
+        results = (
+            model.sarif.runs[0].results if model.sarif and model.sarif.runs else []
+        )
 
-        findings_table = self._format_findings_table(model.findings)
+        # Group results by severity and rule
+        findings_by_severity = self._group_results_by_severity(results)
+        findings_by_type = self._group_results_by_rule(results)
+
+        findings_table = self._format_findings_table(results)
         severity_summary = self._format_severity_summary(findings_by_severity)
         type_summary = self._format_type_summary(findings_by_type)
         metadata_section = self._format_metadata(model.metadata)
@@ -54,10 +62,10 @@ class HTMLReporter:
                     padding: 15px;
                     margin: 10px 0;
                 }}
-                .severity-critical {{ color: #dc3545; }}
-                .severity-high {{ color: #fd7e14; }}
-                .severity-medium {{ color: #ffc107; }}
-                .severity-low {{ color: #28a745; }}
+                .severity-error {{ color: #dc3545; }}
+                .severity-warning {{ color: #fd7e14; }}
+                .severity-note {{ color: #ffc107; }}
+                .severity-none {{ color: #28a745; }}
                 table {{
                     width: 100%;
                     border-collapse: collapse;
@@ -105,6 +113,28 @@ class HTMLReporter:
 
         return template
 
+    def _group_results_by_severity(
+        self, results: List[Result]
+    ) -> Dict[str, List[Result]]:
+        """Group results by their severity level."""
+        severity_groups = {}
+        for result in results:
+            severity = result.level.upper() if result.level else "UNKNOWN"
+            if severity not in severity_groups:
+                severity_groups[severity] = []
+            severity_groups[severity].append(result)
+        return severity_groups
+
+    def _group_results_by_rule(self, results: List[Result]) -> Dict[str, List[Result]]:
+        """Group results by their rule ID."""
+        rule_groups = {}
+        for result in results:
+            rule_id = result.ruleId or "UNKNOWN"
+            if rule_id not in rule_groups:
+                rule_groups[rule_id] = []
+            rule_groups[rule_id].append(result)
+        return rule_groups
+
     def _format_severity_summary(self, findings_by_severity: dict) -> str:
         """Format the severity summary section."""
         summary = "<h3>Findings by Severity</h3><ul>"
@@ -121,7 +151,7 @@ class HTMLReporter:
         summary += "</ul>"
         return summary
 
-    def _format_findings_table(self, findings: list) -> str:
+    def _format_findings_table(self, findings: List[Result]) -> str:
         """Format the findings table."""
         if not findings:
             return "<p>No findings to display.</p>"
@@ -130,29 +160,37 @@ class HTMLReporter:
         <table>
             <tr>
                 <th>Severity</th>
-                <th>Title</th>
-                <th>Description</th>
+                <th>Rule</th>
+                <th>Message</th>
                 <th>Location</th>
-                <th>Rule ID</th>
             </tr>
         """
 
         for finding in findings:
-            finding_data = finding.model_dump()
-            severity_class = f"severity-{finding_data['severity'].lower()}"
-
-            location = finding_data.get("location", {})
-            location_str = (
-                f"{location.get('path', 'N/A')}:{location.get('line', 'N/A')}"
+            severity_class = (
+                f"severity-{finding.level.lower() if finding.level else 'none'}"
             )
+
+            # Get location information
+            location_str = "N/A"
+
+            if finding.locations and finding.locations[0].physicalLocation:
+                phys_loc = finding.locations[0].physicalLocation
+                if (
+                    phys_loc.root.artifactLocation
+                    and phys_loc.root.artifactLocation.uri
+                ):
+                    location = phys_loc.root.artifactLocation.uri
+                    if phys_loc.root.region:
+                        location += f":{phys_loc.root.region.startLine or 'N/A'}"
+                    location_str = location
 
             table += f"""
             <tr>
-                <td class="{severity_class}">{html.escape(finding_data["severity"])}</td>
-                <td>{html.escape(finding_data["title"])}</td>
-                <td>{html.escape(finding_data["description"])}</td>
+                <td class="{severity_class}">{html.escape(finding.level.upper() if finding.level else "NONE")}</td>
+                <td>{html.escape(finding.ruleId or "N/A")}</td>
+                <td>{html.escape(finding.message.root.text if finding.message else "N/A")}</td>
                 <td>{html.escape(location_str)}</td>
-                <td>{html.escape(finding_data["rule_id"])}</td>
             </tr>
             """
 

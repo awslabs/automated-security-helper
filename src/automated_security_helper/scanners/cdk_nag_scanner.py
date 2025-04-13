@@ -10,20 +10,12 @@ from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.base.scanner import ScannerBaseConfig
 from automated_security_helper.base.options import BaseScannerOptions
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.iac_scan import (
-    IaCVulnerability,
-)
 from automated_security_helper.schemas.sarif_schema_model import (
-    ArtifactContent,
     ArtifactLocation,
     Invocation,
     Kind,
     Level,
-    Location,
-    Message,
-    PhysicalLocation,
     PropertyBag,
-    Region,
     Result,
     Run,
     SarifReport,
@@ -189,10 +181,6 @@ class CdkNagScanner(ScannerPlugin[CdkNagScannerConfig]):
         sarif_results: List[Result] = []
         for cfn_file in cfn_files:
             try:
-                cfn_file_rel_path = (
-                    Path(cfn_file).absolute().relative_to(Path.cwd()).as_posix()
-                )
-
                 # Run CDK synthesis for this file
                 config_options: CdkNagScannerConfigOptions = (
                     CdkNagScannerConfigOptions.model_validate(self.config.options)
@@ -217,43 +205,43 @@ class CdkNagScanner(ScannerPlugin[CdkNagScannerConfig]):
 
                 nag_result = nag_result_dict.get("results", None)
 
-                findings: List[IaCVulnerability]
+                findings: List[Result]
                 for pack_name, findings in nag_result.items():
                     ASH_LOGGER.debug(f"Found {len(findings)} findings in {pack_name}")
                     for finding in findings:
-                        sarif_result = Result(
-                            ruleId=finding.rule_id,
-                            level=self._map_severity_to_level(finding.severity),
-                            kind=self._map_status_to_kind(finding.status),
-                            message=Message(text=finding.description),
-                            analysisTarget=ArtifactLocation(
-                                uri=cfn_file_rel_path,
-                            ),
-                            locations=[
-                                Location(
-                                    physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri=finding.location.file_path
-                                        ),
-                                        region=Region(
-                                            startLine=finding.location.start_line,
-                                            endLine=finding.location.end_line,
-                                            snippet=ArtifactContent(
-                                                text=finding.location.snippet
-                                            ),
-                                        ),
-                                    )
-                                )
-                            ],
-                            properties=PropertyBag(
-                                tags=[
-                                    pack_name,
-                                ],
-                                resourceName=finding.resource_name,
-                                resourceType=finding.resource_type,
-                            ),
-                        )
-                        sarif_results.append(sarif_result)
+                        # sarif_result = Result(
+                        #     ruleId=finding.rule_id,
+                        #     level=self._map_severity_to_level(finding.severity),
+                        #     kind=self._map_status_to_kind(finding.status),
+                        #     message=Message(text=finding.description),
+                        #     analysisTarget=ArtifactLocation(
+                        #         uri=cfn_file_rel_path,
+                        #     ),
+                        #     locations=[
+                        #         Location(
+                        #             physicalLocation=PhysicalLocation(
+                        #                 artifactLocation=ArtifactLocation(
+                        #                     uri=finding.location.file_path
+                        #                 ),
+                        #                 region=Region(
+                        #                     startLine=finding.location.start_line,
+                        #                     endLine=finding.location.end_line,
+                        #                     snippet=ArtifactContent(
+                        #                         text=finding.location.snippet
+                        #                     ),
+                        #                 ),
+                        #             )
+                        #         )
+                        #     ],
+                        #     properties=PropertyBag(
+                        #         tags=[
+                        #             pack_name,
+                        #         ],
+                        #         resourceName=finding.resource_name,
+                        #         resourceType=finding.resource_type,
+                        #     ),
+                        # )
+                        sarif_results.append(finding)
 
             except Exception as e:
                 if "could not determine a constructor for the tag" not in str(e):

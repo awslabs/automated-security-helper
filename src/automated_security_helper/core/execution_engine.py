@@ -10,12 +10,12 @@ from rich.progress import Progress
 
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
-from automated_security_helper.models.scan_results import ScanResultsContainer
+from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.config.ash_config import (
     ASHConfig,
 )
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.json_serializer import ASHARPModelSerializer
+from automated_security_helper.models.asharp_serializer import ASHARPModelSerializer
 from automated_security_helper.core.scanner_factory import ScannerFactory
 from automated_security_helper.base.scanner_plugin import ScannerPlugin
 from automated_security_helper.base.scanner import (

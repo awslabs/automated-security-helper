@@ -16,9 +16,6 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.static_analysis import (
-    StaticAnalysisReport,
-)
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
@@ -185,14 +182,14 @@ class CheckovScanner(ScannerPlugin[CheckovScannerConfig]):
         self,
         target: Path,
         config: CheckovScannerConfig | None = None,
-    ) -> StaticAnalysisReport:
+    ) -> SarifReport:
         """Execute Checkov scan and return results.
 
         Args:
             target: Path to scan
 
         Returns:
-            StaticAnalysisReport containing the scan findings and metadata
+            SarifReport containing the scan findings and metadata
 
         Raises:
             ScannerError: If the scan fails or results cannot be parsed

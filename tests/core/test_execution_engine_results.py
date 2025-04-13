@@ -6,7 +6,7 @@ from typing import Dict, Any
 import pytest
 
 from automated_security_helper.core.execution_engine import ScanExecutionEngine
-from automated_security_helper.models.scan_results import ScanResultsContainer
+from automated_security_helper.models.scan_results_container import ScanResultsContainer
 
 
 @pytest.fixture
@@ -32,7 +32,6 @@ def test_execution_engine_wraps_results(
     result = engine._execute_scanner((MockScanner(), None))
 
     assert "container" in result
-    assert isinstance(result["container"], ScanResultsContainer)
-    assert result["container"].findings == mock_scanner_results["findings"]
-    assert result["container"].metadata == mock_scanner_results["metadata"]
-    assert result["container"].raw_results == mock_scanner_results
+    assert isinstance(result, ScanResultsContainer)
+    assert result.metadata == mock_scanner_results["metadata"]
+    assert result.raw_results == mock_scanner_results

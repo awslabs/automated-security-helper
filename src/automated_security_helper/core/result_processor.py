@@ -60,7 +60,7 @@ class ResultProcessor:
         """
         if isinstance(raw_results, str) and raw_results.endswith(".json"):
             # Load existing ASHARPModel from JSON
-            from automated_security_helper.models.json_serializer import (
+            from automated_security_helper.models.asharp_serializer import (
                 ASHARPModelSerializer,
             )
 

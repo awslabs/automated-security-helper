@@ -41,18 +41,12 @@ class MockParser(IResultParser):
 def test_ash_model():
     """Test ASHARPModel initialization and property assignment."""
     model = ASHARPModel()
-    assert isinstance(model.findings, list)
     assert isinstance(model.metadata, ReportMetadata)
-    assert len(model.findings) == 0
     assert len(model.metadata.__dict__.keys()) == 6
 
     # Test property assignment
-    test_findings = [{"id": "TEST"}]
     test_metadata = {"scanner": "test"}
-    model.findings = test_findings
     model.metadata = test_metadata
-    assert len(model.findings) == 1
-    assert model.findings[0]["id"] == "TEST"
     assert model.metadata["scanner"] == "test"
 
 
@@ -69,53 +63,6 @@ def test_get_parser():
     processor = ResultProcessor()
     with pytest.raises(ValueError):
         processor.get_parser("invalid-scanner")
-
-
-def test_process_results():
-    processor = ResultProcessor()
-    processor.register_parser("mock-scanner", MockParser)
-
-    raw_results = """{
-        "findings": [
-            {
-                "id": "TEST-1",
-                "severity": "HIGH",
-                "description": "Test finding",
-                "location": "test.py:10"
-            }
-        ],
-        "metadata": {
-            "scanner": "mock-scanner",
-            "version": "1.0.0"
-        }
-    }"""
-    model = processor.process_results("mock-scanner", raw_results)
-
-    # Verify processed results
-    assert isinstance(model, ASHARPModel)
-    assert len(model.findings) == 1
-    assert model.findings[0]["id"] == "TEST-1"
-    assert model.findings[0]["severity"] == "HIGH"
-
-
-def test_build_ash_model():
-    processor = ResultProcessor()
-    parsed_results = {
-        "findings": [
-            {
-                "id": "TEST-1",
-                "severity": "HIGH",
-                "description": "Test finding",
-                "location": "test.py:10",
-            }
-        ],
-        "metadata": {"scanner": "mock-scanner", "version": "1.0.0"},
-    }
-
-    model = processor._build_ash_model(parsed_results)
-    assert isinstance(model, ASHARPModel)
-    assert len(model.findings) == 1
-    assert model.metadata["scanner"] == "mock-scanner"
 
 
 def test_process_results_invalid_scanner():

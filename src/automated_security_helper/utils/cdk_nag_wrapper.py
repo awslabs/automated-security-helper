@@ -3,6 +3,18 @@
 
 import os
 
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactContent,
+    ArtifactLocation,
+    Kind,
+    Level,
+    Message,
+    PhysicalLocation,
+    PropertyBag,
+    Region,
+    Result,
+)
+
 # noqa
 os.environ["JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION"] = "1"
 # noqa
@@ -13,10 +25,9 @@ import re
 import shutil
 
 from pydantic import BaseModel, ConfigDict, Field
-from cfn_tools import load_yaml
+from cfn_tools import load_yaml, dump_yaml
 
 from automated_security_helper.models.core import Location
-from automated_security_helper.models.iac_scan import IaCVulnerability
 
 import cdk_nag
 import json
@@ -128,7 +139,7 @@ def run_cdk_nag_against_cfn_template(
     outdir: Path = None,
     include_compliant_checks: bool = True,
     stack_name: str = "ASHCDKNagScanner",
-) -> Dict[str, List[IaCVulnerability]] | None:
+) -> Dict[str, List[Result]] | None:
     results: Dict[str, List[dict]] = {}
 
     model = get_model_from_template(template_path)
@@ -197,7 +208,7 @@ def run_cdk_nag_against_cfn_template(
     included = [item for item in stack.node.children if isinstance(item, CfnInclude)]
     ASH_LOGGER.debug(json.dumps(included, default=str, indent=2))
 
-    results: Dict[str, List[IaCVulnerability]] = {}
+    results: Dict[str, List[Result]] = {}
     cdk_nag_report_lines: Dict[str, List[cdk_nag.NagReportLine]] = {}
 
     # enumerate files under app.outdir ending in *-NagReport.json
@@ -248,43 +259,104 @@ def run_cdk_nag_against_cfn_template(
 
             resource_log_id = line.resource_id.split("/")[-1]
 
-            finding = IaCVulnerability(
-                compliance_frameworks=[pack_name],
-                id="/".join([line.resource_id, line.rule_id]),
-                title=line.rule_info,
-                rule_id=line.rule_id,
-                severity=(
-                    "CRITICAL"
+            cfn_file_rel_path = (
+                Path(template_path).absolute().relative_to(Path.cwd()).as_posix()
+            )
+            cfn_resource = [
+                item
+                for resource_id, item in model.Resources.items()
+                if resource_id == resource_log_id
+            ][0]
+            finding = Result(
+                ruleId=line.rule_id,
+                level=(
+                    Level.error
                     if line.compliance == "Non-Compliant" and line.rule_level == "Error"
                     else (
-                        "MEDIUM"
+                        Level.warning
                         if line.compliance == "Non-Compliant"
                         and line.rule_level != "Error"
-                        else "INFO"
+                        else Level.note
                     )
                 ),
-                status=(
-                    "OPEN"
+                kind=(
+                    Kind.fail
                     if line.compliance == "Non-Compliant" and line.rule_level == "Error"
                     else (
-                        "RISK_ACCEPTED"
+                        Kind.review
                         if line.compliance == "Suppressed"
                         and line.exception_reason != "N/A"
-                        else "INFORMATIONAL"
+                        else Kind.informational
                     )
                 ),
-                resource_name=resource_log_id,
-                resource_type=[
-                    item.Type
-                    for resource_id, item in model.Resources.items()
-                    if resource_id == resource_log_id
-                ][0],
-                description=f"{line.rule_info}\n\nException Reason: {line.exception_reason}",
-                location=Location(
-                    file_path=Path(template_path).as_posix(),
+                message=Message(
+                    text=f"{line.rule_info}\n\nException Reason: {line.exception_reason}"
                 ),
-                raw=json.loads(json.dumps(line, default=str)),
+                analysisTarget=ArtifactLocation(
+                    uri=cfn_file_rel_path,
+                ),
+                locations=[
+                    Location(
+                        physicalLocation=PhysicalLocation(
+                            artifactLocation=ArtifactLocation(
+                                uri=line.resource_id,
+                            ),
+                            region=Region(
+                                startLine=1,
+                                endLine=1,
+                                snippet=ArtifactContent(
+                                    text=dump_yaml(cfn_resource.model_dump())
+                                ),
+                            ),
+                        )
+                    )
+                ],
+                properties=PropertyBag(
+                    tags=[
+                        pack_name,
+                    ],
+                    resourceName=resource_log_id,
+                    resourceType=cfn_resource.Type,
+                ),
             )
+
+            # finding = Result(
+            #     compliance_frameworks=[pack_name],
+            #     id="/".join([line.resource_id, line.rule_id]),
+            #     title=line.rule_info,
+            #     rule_id=line.rule_id,
+            #     severity=(
+            #         "CRITICAL"
+            #         if line.compliance == "Non-Compliant" and line.rule_level == "Error"
+            #         else (
+            #             "MEDIUM"
+            #             if line.compliance == "Non-Compliant"
+            #             and line.rule_level != "Error"
+            #             else "INFO"
+            #         )
+            #     ),
+            #     status=(
+            #         "OPEN"
+            #         if line.compliance == "Non-Compliant" and line.rule_level == "Error"
+            #         else (
+            #             "RISK_ACCEPTED"
+            #             if line.compliance == "Suppressed"
+            #             and line.exception_reason != "N/A"
+            #             else "INFORMATIONAL"
+            #         )
+            #     ),
+            #     resource_name=resource_log_id,
+            #     resource_type=[
+            #         item.Type
+            #         for resource_id, item in model.Resources.items()
+            #         if resource_id == resource_log_id
+            #     ][0],
+            #     description=f"{line.rule_info}\n\nException Reason: {line.exception_reason}",
+            #     location=Location(
+            #         file_path=Path(template_path).as_posix(),
+            #     ),
+            #     raw=json.loads(json.dumps(line, default=str)),
+            # )
             results[pack_name].append(finding)
 
     return {"results": results, "outdir": outdir}
