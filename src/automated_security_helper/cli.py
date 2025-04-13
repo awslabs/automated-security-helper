@@ -9,6 +9,8 @@ import json
 import sys
 from pathlib import Path
 
+from automated_security_helper.models.core import ExportFormat
+
 
 app = typer.Typer(
     name="ash",
@@ -22,14 +24,6 @@ app = typer.Typer(
 class Strategy(Enum):
     parallel = "parallel"
     sequential = "sequential"
-
-
-class OutputFormats(Enum):
-    sarif = "sarif"
-    cyclonedx = "cyclonedx"
-    json = "json"
-    html = "html"
-    junitxml = "junitxml"
 
 
 @app.command(
@@ -83,7 +77,7 @@ def scan(
         typer.Option(help="Keep working directory after scan completes"),
     ] = False,
     output_formats: Annotated[
-        List[OutputFormats],
+        List[ExportFormat],
         typer.Option(
             help="The output formats to use",
         ),
@@ -122,6 +116,7 @@ def scan(
             if strategy == Strategy.parallel
             else ExecutionStrategy.SEQUENTIAL,
             no_cleanup=no_cleanup,
+            output_formats=output_formats,
         )
 
         # Execute scan

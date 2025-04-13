@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timezone
+from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from automated_security_helper.config.default_config import get_default_config
@@ -11,7 +12,7 @@ from automated_security_helper.schemas.data_interchange import (
     ReportMetadata,
 )
 from typing import Annotated, List, Dict, Any, Union
-from automated_security_helper.models.core import BaseFinding, Scanner
+from automated_security_helper.models.core import BaseFinding, ExportFormat, Scanner
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Run,
@@ -34,7 +35,11 @@ from automated_security_helper.models.aggregation import (
 class ASHARPModel(BaseModel):
     """Main model class for parsing security scan reports from ASH tooling."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        arbitrary_types_allowed=True,
+        exclude={"_aggregator", "_trend_analyzer", "_scanners"},
+    )
 
     name: str = Field(default="ASH Scan Report", description="Name of the report")
     description: str = Field(
@@ -90,6 +95,13 @@ class ASHARPModel(BaseModel):
     scanners_used: Annotated[
         List[Scanner], Field(description="List of scanners used in this report")
     ] = []
+    findings: Annotated[
+        List[BaseFinding],
+        Field(
+            description="List of security findings from all scanners",
+            default_factory=list,
+        ),
+    ] = []
 
     @field_validator("ash_config")
     def validate_ash_config(cls, v: any):
@@ -102,11 +114,17 @@ class ASHARPModel(BaseModel):
         return get_default_config()
 
     def model_post_init(self, context):
+        """Initialize aggregator and trend analyzer with current findings."""
         self._aggregator = FindingAggregator()
         self._trend_analyzer = TrendAnalyzer()
-        # for finding in self.findings:
-        #     self._aggregator.add_finding(finding)
+        for finding in self.findings:
+            self._aggregator.add_finding(finding)
         return super().model_post_init(context)
+
+    def add_finding(self, finding: BaseFinding) -> None:
+        """Add a new finding to both the findings list and aggregator."""
+        self.findings.append(finding)
+        self._aggregator.add_finding(finding)
 
     def deduplicate_findings(self) -> List[BaseFinding]:
         """Remove duplicate findings based on key attributes."""
@@ -210,6 +228,58 @@ class ASHARPModel(BaseModel):
             self.additional_reports[reporter] = report
         else:
             raise ValueError("Invalid report type")
+
+    def format(
+        self, output_formats: List[ExportFormat], output_dir: Path | None = None
+    ) -> str:
+        """Format ASH model using specified formatter."""
+        from automated_security_helper.reporters.asff_reporter import ASFFReporter
+        from automated_security_helper.reporters.csv_reporter import CSVReporter
+        from automated_security_helper.reporters.cyclonedx_reporter import (
+            CycloneDXReporter,
+        )
+        from automated_security_helper.reporters.html_reporter import HTMLReporter
+        from automated_security_helper.reporters.json_reporter import JSONReporter
+        from automated_security_helper.reporters.junitxml_reporter import (
+            JUnitXMLReporter,
+        )
+        from automated_security_helper.reporters.sarif_reporter import SARIFReporter
+        from automated_security_helper.reporters.spdx_reporter import SPDXReporter
+        from automated_security_helper.reporters.text_reporter import TextReporter
+        from automated_security_helper.reporters.yaml_reporter import YAMLReporter
+
+        formatters = {
+            "asff": {"formatter": ASFFReporter(), "ext": "asff"},
+            "csv": {"formatter": CSVReporter(), "ext": "csv"},
+            "cyclonedx": {"formatter": CycloneDXReporter(), "ext": "cdx.json"},
+            "dict": {"formatter": JSONReporter(), "ext": "json"},
+            "html": {"formatter": HTMLReporter(), "ext": "html"},
+            "json": {"formatter": JSONReporter(), "ext": "json"},
+            "junitxml": {"formatter": JUnitXMLReporter(), "ext": "junit.xml"},
+            "sarif": {"formatter": SARIFReporter(), "ext": "sarif"},
+            "spdx": {"formatter": SPDXReporter(), "ext": "spdx.json"},
+            "text": {"formatter": TextReporter(), "ext": "txt"},
+            "yaml": {"formatter": YAMLReporter(), "ext": "yaml"},
+        }
+        for fmt in output_formats:
+            if f"{fmt.value}" not in formatters:
+                raise ValueError(f"Unsupported output format: {fmt}")
+
+            formatted = formatters[fmt.value]["formatter"].format(self)
+            if formatted is None:
+                ASH_LOGGER.error(
+                    f"Failed to format report with {fmt.value} formatter, returned empty string"
+                )
+            if output_dir is None:
+                return formatted
+            else:
+                output_dir = Path(output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_filename = f"ash.{formatters[fmt.value]['ext']}"
+                output_file = output_dir.joinpath(output_filename)
+                with open(output_file, "w") as f:
+                    ASH_LOGGER.info(f"Writing {fmt.value} report to {output_file}")
+                    f.write(formatted)
 
 
 if __name__ == "__main__":

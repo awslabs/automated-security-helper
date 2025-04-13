@@ -2,16 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 import csv
 from io import StringIO
-
-from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.interfaces import IOutputReporter
+from typing import Any
 
 
-class CSVReporter(IOutputReporter):
+class CSVReporter:
     """Formats results as CSV."""
 
-    def format(self, model: ASHARPModel) -> str:
+    def format(self, model: Any) -> str:
         """Format ASH model as CSV string."""
+        from automated_security_helper.models.asharp_model import ASHARPModel
+
+        if not isinstance(model, ASHARPModel):
+            raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
         output = StringIO()
         writer = csv.writer(output)
 

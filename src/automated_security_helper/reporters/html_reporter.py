@@ -1,16 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import html
-
-from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.interfaces import IOutputReporter
+from typing import Any
 
 
-class HTMLReporter(IOutputReporter):
+class HTMLReporter:
     """Formats results as HTML."""
 
-    def format(self, model: ASHARPModel) -> str:
+    def format(self, model: Any) -> str:
         """Format ASH model as HTML string with comprehensive styling and organization."""
+        from automated_security_helper.models.asharp_model import ASHARPModel
+
+        if not isinstance(model, ASHARPModel):
+            raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
+
         findings_by_severity = model.group_findings_by_severity()
         findings_by_type = model.group_findings_by_type()
 

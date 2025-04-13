@@ -11,10 +11,19 @@ class FindingAggregator:
 
     def __init__(self):
         self.findings: List[BaseFinding] = []
+        self._finding_keys = set()
 
     def add_finding(self, finding: BaseFinding) -> None:
         """Add a finding to be aggregated."""
-        self.findings.append(finding)
+        key = (
+            finding.location.file_path,
+            finding.location.start_line,
+            finding.title,
+            finding.description,
+        )
+        if key not in self._finding_keys:
+            self.findings.append(finding)
+            self._finding_keys.add(key)
 
     def deduplicate(self) -> List[BaseFinding]:
         """Remove duplicate findings based on key attributes.
@@ -61,12 +70,25 @@ class TrendAnalyzer:
 
     def __init__(self):
         self.scan_history: Dict[datetime, List[BaseFinding]] = {}
+        self._finding_keys: Dict[datetime, set] = {}
 
     def add_scan_findings(
         self, scan_time: datetime, findings: List[BaseFinding]
     ) -> None:
         """Add findings from a scan at a specific time."""
-        self.scan_history[scan_time] = findings
+        self.scan_history[scan_time] = []
+        self._finding_keys[scan_time] = set()
+
+        for finding in findings:
+            key = (
+                finding.location.file_path,
+                finding.location.start_line,
+                finding.title,
+                finding.description,
+            )
+            if key not in self._finding_keys[scan_time]:
+                self.scan_history[scan_time].append(finding)
+                self._finding_keys[scan_time].add(key)
 
     def get_finding_counts_over_time(self) -> Dict[datetime, int]:
         """Get the count of findings at each scan time."""

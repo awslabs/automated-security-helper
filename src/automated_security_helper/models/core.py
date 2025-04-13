@@ -75,6 +75,7 @@ class BaseFinding(BaseModel):
         arbitrary_types_allowed=True,
         extra="allow",
         json_encoders={datetime: lambda v: v.isoformat()},
+        exclude={"_raw_data"},
     )
 
     id: Annotated[
@@ -153,7 +154,7 @@ class BaseFinding(BaseModel):
     ] = {}
     raw: Annotated[
         Any,
-        Field(description="Raw result from the scanner"),
+        Field(description="Raw result from the scanner", exclude=True),
     ] = None
 
     @field_validator("severity")
@@ -304,7 +305,7 @@ class ReporterBaseConfig(BaseModel):
     )
 
 
-class ExportFormat(str, Enum):
+class ExportFormat(Enum):
     """Supported export formats."""
 
     TEXT = "text"

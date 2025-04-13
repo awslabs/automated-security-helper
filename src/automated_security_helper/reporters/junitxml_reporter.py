@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from datetime import datetime, timezone
+from typing import Any
 from junitparser import (
     Error,
     JUnitXml,
@@ -9,25 +9,34 @@ from junitparser import (
     TestSuite,
 )
 
-from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.interfaces import IOutputReporter
 import defusedxml
 
+from automated_security_helper.config.ash_config import ASHConfig
 
-class JUnitXMLReporter(IOutputReporter):
+
+class JUnitXMLReporter:
     """Formats results as JUnitXML."""
 
     def __init__(self):
         super().__init__()
         defusedxml.defuse_stdlib()
 
-    def format(self, model: ASHARPModel) -> str:
+    def format(self, model: Any) -> str:
         """Format ASH model in JUnitXML.
 
         Creates a test suite for each finding type, with individual findings as test cases.
         Failed findings are represented as failed tests with appropriate error messages.
         """
+        from automated_security_helper.models.asharp_model import ASHARPModel
+
+        if not isinstance(model, ASHARPModel):
+            raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
+
         report = JUnitXml(name="ASH Scan Report")
+        ash_config: ASHConfig = ASHConfig.model_validate(model.ash_config)
+        test_suite = TestSuite(
+            name="ASH Scan - " + ash_config.project_name,
+        )
 
         # Process SARIF report @ model.sarif
         if model.sarif is not None:
@@ -57,20 +66,16 @@ class JUnitXMLReporter(IOutputReporter):
 
                 # Add additional metadata in system-out
                 metadata = []
-                if hasattr(result, "properties"):
-                    for key, value in result.properties.items():
+                if hasattr(result, "properties") and result.properties is not None:
+                    for key, value in result.properties.model_dump().items():
                         metadata.append(f"{key}: {value}")
                 if metadata:
-                    test_case.stdout = "\n".join(metadata)
+                    test_case.system_out = "\n".join(metadata)
 
                 # Create test suite for this finding type
-                test_suite = TestSuite(
-                    name=result.ruleId,
-                    test_cases=[test_case],
-                    package=model.name,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                )
-                report.add_testsuite(test_suite)
+                test_suite.add_testcase(test_case)
 
+        report.add_testsuite(test_suite)
         # Return the XML string representation of all test suites
-        return report.tostring()
+        report_bytes: bytes = report.tostring()
+        return report_bytes.decode("utf-8")

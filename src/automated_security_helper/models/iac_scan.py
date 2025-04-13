@@ -15,7 +15,7 @@ __all__ = [
 ]
 
 
-class ComplianceFramework(str, Enum):
+class ComplianceFramework(Enum):
     """Standard compliance frameworks."""
 
     CIS = "CIS"
@@ -25,7 +25,7 @@ class ComplianceFramework(str, Enum):
     PCI = "PCI"
 
 
-class CheckResultType(str, Enum):
+class CheckResultType(Enum):
     """Types of check results from IaC scanning."""
 
     FAILED = "failed_checks"

@@ -4,7 +4,6 @@ import pytest
 from datetime import datetime, timezone
 from automated_security_helper.models.core import Location, Scanner, BaseFinding
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.core import ExportFormat
 
 
 @pytest.fixture
@@ -36,11 +35,8 @@ def sample_finding():
 
 def test_asharp_model_creation():
     """Test creation of ASHARPModel."""
-    model = ASHARPModel(
-        name="Test Report", version="1.0.0", description="Test description", findings=[]
-    )
+    model = ASHARPModel(name="Test Report", description="Test description", findings=[])
     assert model.name == "Test Report"
-    assert model.version == "1.0.0"
     assert model.description == "Test description"
     assert len(model.findings) == 0
 
@@ -49,19 +45,25 @@ def test_asharp_model_findings_management(sample_finding):
     """Test findings management functionality."""
     model = ASHARPModel(
         name="Test Report",
-        version="1.0.0",
         description="Test description",
-        findings=[sample_finding],
+        findings=[],
     )
 
+    # Test adding findings
+    model.add_finding(sample_finding)
+    assert len(model.findings) == 1
+    assert model.findings[0] == sample_finding
+
     # Test deduplication
-    model.findings.append(sample_finding)  # Add duplicate
+    model.add_finding(sample_finding)  # Add duplicate
     deduplicated = model.deduplicate_findings()
     assert len(deduplicated) == 1
+    assert len(model.findings) == 1  # Check that model.findings was updated
 
     # Test grouping
     by_type = model.group_findings_by_type()
     assert len(by_type) == 1
+    assert "RULE-001" in by_type
 
     by_severity = model.group_findings_by_severity()
     assert len(by_severity) == 1
@@ -70,7 +72,7 @@ def test_asharp_model_findings_management(sample_finding):
 
 def test_asharp_model_scanner_conversion(sample_scanner_dict):
     """Test scanner conversion functionality."""
-    model = ASHARPModel(name="Test Report", version="1.0.0", description="Test")
+    model = ASHARPModel(name="Test Report", description="Test")
     scanner = model._convert_to_scanner(sample_scanner_dict)
     assert scanner.name == sample_scanner_dict["name"]
     assert scanner.version == sample_scanner_dict["version"]
@@ -80,9 +82,8 @@ def test_asharp_model_scanners_property(sample_finding):
     """Test scanners property."""
     model = ASHARPModel(
         name="Test Report",
-        version="1.0.0",
         description="Test description",
-        findings=[sample_finding],
+        findings=[],
         scanners_used=[sample_finding.scanner],
     )
     scanners = model.scanners
@@ -90,30 +91,39 @@ def test_asharp_model_scanners_property(sample_finding):
     assert scanners[0].name == sample_finding.scanner.name
 
 
-def test_asharp_model_export():
-    """Test model export functionality."""
-    model = ASHARPModel(name="Test Report", version="1.0.0", description="Test")
+def test_asharp_model_trend_analysis(sample_finding):
+    """Test trend analysis functionality."""
+    model = ASHARPModel(
+        name="Test Report",
+        description="Test description",
+        findings=[],
+    )
 
-    # Test JSON export
-    json_export = model.export(format=ExportFormat.JSON)
-    assert isinstance(json_export, str)
-    assert "Test Report" in json_export
+    # Add findings and record scan time
+    model.add_finding(sample_finding)
+    scan_time = datetime.now(timezone.utc)
+    model.add_scan_findings(scan_time)
 
-    # Test dict export
-    dict_export = model.export(format=ExportFormat.DICT)
-    assert isinstance(dict_export, dict)
-    assert dict_export["name"] == "Test Report"
+    # Test finding counts
+    counts = model.get_finding_counts_over_time()
+    assert len(counts) == 1
+    assert counts[scan_time] == 1
+
+    # Test severity trends
+    trends = model.get_severity_trends()
+    assert "HIGH" in trends
+    assert scan_time in trends["HIGH"]
+    assert trends["HIGH"][scan_time] == 1
 
 
 def test_asharp_model_from_json():
     """Test model creation from JSON."""
     json_data = {
         "name": "Test Report",
-        "version": "1.0.0",
         "description": "Test description",
         "findings": [],
     }
     model = ASHARPModel.from_json(json_data)
     assert model.name == "Test Report"
-    assert model.version == "1.0.0"
     assert model.description == "Test description"
+    assert len(model.findings) == 0

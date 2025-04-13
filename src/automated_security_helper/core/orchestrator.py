@@ -81,6 +81,13 @@ class ASHScanOrchestrator(BaseModel):
         ResultProcessor | None, Field(description="Result processor")
     ] = None
     execution_engine: Annotated[ScanExecutionEngine | None, Field()] = None
+    output_formats: List[ExportFormat] = [
+        ExportFormat.HTML,
+        ExportFormat.JSON,
+        ExportFormat.JUNITXML,
+        ExportFormat.SARIF,
+        ExportFormat.CYCLONEDX,
+    ]
 
     def ensure_directories(self):
         """Ensure required directories exist in a thread-safe manner.
@@ -265,6 +272,11 @@ class ASHScanOrchestrator(BaseModel):
                 ASH_LOGGER.debug("No results returned, using empty result set")
                 asharp_model_results = ASHARPModel(
                     description="ASH execution engine returned no results!"
+                )
+            else:
+                asharp_model_results.format(
+                    output_formats=self.output_formats,
+                    output_dir=self.output_dir,
                 )
 
                 ASH_LOGGER.info("ASH scan completed successfully!")
