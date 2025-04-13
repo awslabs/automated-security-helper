@@ -2,93 +2,186 @@
 
 from importlib.metadata import version
 import json
-from datetime import datetime
+import logging
 from pathlib import Path
-from typing import Annotated, Any, Dict, Literal, Optional
+from typing import Annotated, Dict, List, Literal
 
 from pydantic import Field
-from automated_security_helper.models.core import BaseScannerOptions, ScanStatistics
+from automated_security_helper.base.options import BaseScannerOptions
+from automated_security_helper.base.types import ToolArgs
 from automated_security_helper.models.core import (
-    SCANNER_TYPES,
-    Location,
+    ToolExtraArg,
+)
+from automated_security_helper.base.scanner import (
     ScannerBaseConfig,
 )
-from automated_security_helper.models.core import (
-    ExportFormat,
-)
-from automated_security_helper.models.security_vulnerability import (
-    SecurityVulnerability,
-)
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.scanner_plugin import (
+from automated_security_helper.base.plugin import (
     ScannerPlugin,
 )
-from automated_security_helper.models.core import (
-    ScannerPluginConfig,
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactLocation,
+    Invocation,
+    PropertyBag,
+    SarifReport,
 )
-from automated_security_helper.models.static_analysis import (
-    StaticAnalysisReport,
-)
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
 class BanditScannerConfigOptions(BaseScannerOptions):
-    pass
+    confidence_level: Annotated[
+        Literal["all", "low", "medium", "high"],
+        Field(description="Confidence level for Bandit findings"),
+    ] = "all"
+    severity_level: Annotated[
+        Literal["all", "low", "medium", "high"],
+        Field(description="Confidence level for Bandit findings"),
+    ] = "all"
+    ignore_nosec: Annotated[
+        bool,
+        Field(
+            description="If True, do not skip lines with # nosec comments. Defaults to False."
+        ),
+    ] = False
+    excluded_paths: Annotated[
+        List[str], Field(description="List of paths to exclude from scanning")
+    ] = []
+    additional_formats: Annotated[
+        List[
+            Literal[
+                "csv",
+                "custom",
+                "html",
+                "json",
+                "sarif",
+                "txt",
+                "xml",
+                "yaml",
+            ]
+        ],
+        Field(description="List of additional formats to output"),
+    ] = []
 
 
 class BanditScannerConfig(ScannerBaseConfig):
-    """Bandit SAST scanner configuration."""
-
     name: Literal["bandit"] = "bandit"
-    type: SCANNER_TYPES = "SAST"
+    enabled: bool = True
     options: Annotated[
         BanditScannerConfigOptions, Field(description="Configure Bandit scanner")
     ] = BanditScannerConfigOptions()
 
 
-class BanditScanner(ScannerPlugin, BanditScannerConfig):
+class BanditScanner(ScannerPlugin[BanditScannerConfig]):
     """Implementation of a Python security scanner using Bandit.
 
     This scanner uses Bandit to perform static security analysis of Python code
     and returns results in a structured format using the StaticAnalysisReport model.
     """
 
-    _default_config = ScannerPluginConfig(
-        name="bandit",
-        type="SAST",
-        command="bandit",
-        output_arg="-o",
-        output_arg_position="before_args",
-        scan_path_arg="-r",
-        scan_path_arg_position="after_args",
-        format_arg="-f",
-        format_arg_value="sarif",
-        format_arg_position="before_args",
-        invocation_mode="directory",
-        get_tool_version_command=["bandit", "--version"],
-        output_stream="file",
-        enabled=True,
-        output_format=ExportFormat.SARIF,
-    )
-    tool_version: str = version("bandit")
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = BanditScannerConfig()
+        self.command = "bandit"
+        self.description = "Bandit is a Python source code security analyzer."
+        self.tool_type = "SAST"
+        self.tool_version = version("bandit")
+        extra_args = [
+            ToolExtraArg(
+                key="--recursive",
+                value=None,
+            ),
+        ]
+        if ASH_LOGGER.level == logging.DEBUG:
+            extra_args.append(
+                ToolExtraArg(
+                    key="--verbose",
+                    value=None,
+                )
+            )
+        self.args = ToolArgs(
+            format_arg="--format",
+            format_arg_value="sarif",
+            output_arg="--output",
+            scan_path_arg=None,
+            extra_args=extra_args,
+        )
+        super().model_post_init(context)
 
-    def configure(
-        self,
-        config: ScannerPluginConfig | None = None,
-        options: BanditScannerConfigOptions | None = None,
-    ) -> None:
-        """Configure the scanner with provided settings."""
-        super().configure(config=config, options=options)
+    def configure(self, config: ScannerPlugin | None = None):
+        """Configure the scanner with the provided configuration.
+
+        Args:
+            config: Scanner configuration
+
+        Raises:
+            ScannerError: If configuration fails
+        """
+        try:
+            if config is not None:
+                self.config = config
+
+        except Exception as e:
+            raise ScannerError(
+                f"Failed to configure {self.__class__.__name__}: {str(e)}"
+            )
 
     def validate(self) -> bool:
-        """Verify scanner configuration and requirements."""
-        self._is_valid = self._config is not None and self.tool_version is not None
-        return self._is_valid
+        """Validate the scanner configuration and requirements.
+
+        Returns:
+            True if validation passes, False otherwise
+
+        Raises:
+            ScannerError: If validation fails
+        """
+        # Bandit is a direct dependency of this Python package. If the Python import
+        # reached this point then we know we're in a valid runtime for this scanner.
+        return True
+
+    def _process_config_options(self):
+        # Bandit config path
+        possible_config_paths: Dict[str, Dict[str, str | int | float | bool | None]] = {
+            f"{self.source_dir}/.bandit": [
+                ToolExtraArg(key="--ini", value=f"{self.source_dir}/.bandit")
+            ],
+            f"{self.source_dir}/bandit.yaml": [
+                ToolExtraArg(key="--configfile", value=f"{self.source_dir}/bandit.yaml")
+            ],
+            f"{self.source_dir}/bandit.toml": [
+                ToolExtraArg(key="--configfile", value=f"{self.source_dir}/bandit.toml")
+            ],
+        }
+
+        for conf_path, extra_arg_list in possible_config_paths.items():
+            if Path(conf_path).exists():
+                self.args.extra_args.extend(extra_arg_list)
+                break
+
+        for item in ['--exclude="*venv/*"', '--exclude=".venv/*"']:
+            self.args.extra_args.append(ToolExtraArg(key=item, value=None))
+        self.args.extra_args.append(
+            ToolExtraArg(
+                key="--confidence-level", value=self.config.options.confidence_level
+            )
+        )
+        self.args.extra_args.append(
+            ToolExtraArg(
+                key="--severity-level", value=self.config.options.severity_level
+            )
+        )
+        for fmt in self.config.options.additional_formats:
+            self.args.extra_args.append(ToolExtraArg(key="--format", value=fmt))
+        if self.config.options.ignore_nosec:
+            self.args.extra_args.append(ToolExtraArg(key="--ignore-nosec", value=None))
+
+        return super()._process_config_options()
 
     def scan(
         self,
         target: Path,
-        options: Optional[Dict[str, Any]] = {},
-    ) -> StaticAnalysisReport:
+        config: BanditScannerConfig | None = None,
+    ) -> SarifReport:
         """Execute Bandit scan and return results.
 
         Args:
@@ -100,117 +193,62 @@ class BanditScanner(ScannerPlugin, BanditScannerConfig):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
-        # self._pre_scan() validates the target and options
         try:
-            self._pre_scan(target, options)
-        except ScannerError as exc:
-            raise exc
+            try:
+                self._pre_scan(
+                    target=target,
+                    options=self.config.options,
+                )
+            except ScannerError as exc:
+                raise exc
+            ASH_LOGGER.debug(f"self.config: {self.config}")
+            ASH_LOGGER.debug(f"config: {config}")
 
-        possible_config_paths = {
-            f"{self.source_dir}/.bandit": [
-                "--ini",
-                f"{self.source_dir}/.bandit",
-            ],
-            f"{self.source_dir}/bandit.yaml": [
-                "-c",
-                f"{self.source_dir}/bandit.yaml",
-            ],
-            f"{self.source_dir}/bandit.toml": [
-                "-c",
-                f"{self.source_dir}/bandit.toml",
-            ],
-        }
+            normalized_file_name = get_normalized_filename(str_to_normalize=target)
+            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            results_file = target_results_dir.joinpath("bandit.sarif")
+            Path(results_file).parent.mkdir(exist_ok=True, parents=True)
 
-        for conf_path, new_args in possible_config_paths.items():
-            if Path(conf_path).exists():
-                self._config.args.extend(new_args)
-                break
-        self._config.args.extend(
-            ['--exclude="*venv/*"', '--exclude=".venv/*"', "--severity-level=all"]
-        )
+            final_args = self._resolve_arguments(
+                target=target, results_file=results_file
+            )
+            self._run_subprocess(
+                command=final_args,
+                results_dir=target_results_dir,
+            )
 
-        start_time = datetime.now()
+            self._post_scan(
+                target=target,
+            )
 
-        # Add config-specific args if provided
-        if self._config:
-            if "confidence" in self.options:
-                self._config.args.extend(["-l", self._config["confidence"]])
-            if "severity" in self.options:
-                self._config.args.extend(["-i", self._config["severity"]])
+            bandit_results = {}
+            with open(results_file, "r") as f:
+                bandit_results = json.load(f)
+            try:
+                sarif_report = SarifReport.model_validate(bandit_results)
+                sarif_report.runs[0].invocations = [
+                    Invocation(
+                        commandLine=final_args[0],
+                        arguments=final_args[1:],
+                        startTimeUtc=self.start_time,
+                        endTimeUtc=self.end_time,
+                        executionSuccessful=True,
+                        exitCode=self.exit_code,
+                        exitCodeDescription="\n".join(self.errors),
+                        workingDirectory=ArtifactLocation(
+                            uri=target.as_posix(),
+                        ),
+                        properties=PropertyBag(
+                            tool=sarif_report.runs[0].tool,
+                        ),
+                    )
+                ]
+            except Exception as e:
+                ASH_LOGGER.warning(f"Failed to parse Bandit results as SARIF: {str(e)}")
+                sarif_report = bandit_results
 
-        try:
-            Path(self.results_file).parent.mkdir(exist_ok=True, parents=True)
-            final_args = self._resolve_arguments(target=target)
-            self.logger.debug(f"Running Bandit with args: {final_args}")
-            self._run_subprocess(final_args)
-            end_time = datetime.now()
-            scan_duration = (end_time - start_time).total_seconds()
-            self.logger.debug(f"Bandit completed in {scan_duration} seconds")
-
-            self._output = self._parse_outputs(scan_duration=scan_duration)
-            return self._output
+            return sarif_report
 
         except Exception as e:
             # Check if there are useful error details
             raise ScannerError(f"Bandit scan failed: {str(e)}")
-
-    def _parse_outputs(self, *args, **kwargs):
-        # Parse Bandit JSON output
-        with open(self.results_file, "r") as f:
-            bandit_results = json.load(f)
-
-        # Create findings list
-        findings = []
-        for result in bandit_results.get("results", []):
-            finding = SecurityVulnerability(
-                id=result.get("filename") + "/" + result.get("test_id"),
-                location=Location(
-                    file_path=result.get("filename", ""),
-                    start_line=result.get("line_range", [0, 0])[0],
-                    end_line=result.get("line_range", [0, 0])[1],
-                    snippet=result.get("code", None),
-                ),
-                title=result.get("test_name", "Unknown Issue"),
-                description=" ".join(
-                    [item for item in [result.get("issue_text", False)] if item]
-                ),
-                link=result.get("more_info", None),
-                cwe_id=result.get("issue_cwe", {}).get("id", None),
-                cwe_link=result.get("issue_cwe", {}).get("link", None),
-                severity=result.get("issue_severity", "UNKNOWN").upper(),
-                source_file=result.get("filename", None),
-                line_number=result.get("line_number", None),
-                code_snippet=result.get("code", None),
-                remediation_advice=result.get("more_info", None),
-                confidence=result.get("issue_confidence", "UNKNOWN").upper(),
-                # raw=result,
-            )
-            findings.append(finding)
-
-        # Create statistics
-        metrics = bandit_results.get("metrics", {})
-
-        # Count findings by severity
-        severity_counts = {}
-        for finding in findings:
-            severity = finding.severity
-            severity_counts[severity] = severity_counts.get(severity, 0) + 1
-
-        stats = ScanStatistics(
-            files_scanned=metrics.get("_totals", {}).get("loc", 0),
-            lines_of_code=metrics.get("_totals", {}).get("loc", 0),
-            total_findings=len(findings),
-            findings_by_type=severity_counts,
-            scan_duration_seconds=kwargs["scan_duration"],
-        )
-
-        # Create and return report
-        return StaticAnalysisReport(
-            name=self.name,
-            scanner_name="bandit",
-            scanners_used=[{"bandit": version("bandit")}],
-            project_name=self.name,
-            findings=findings,
-            statistics=stats,
-            scan_config=self._config,
-        )

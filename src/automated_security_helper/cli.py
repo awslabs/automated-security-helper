@@ -1,18 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from enum import Enum
+import logging
 import os
 from typing import Annotated, List
 import typer
 import json
 import sys
 from pathlib import Path
-
-
-from automated_security_helper.core.execution_engine import ExecutionStrategy
-from automated_security_helper.core.orchestrator import ASHScanOrchestrator
-from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.core import ExportFormat
-from automated_security_helper.utils.log import ASH_LOGGER
 
 
 app = typer.Typer(
@@ -24,9 +19,22 @@ app = typer.Typer(
 )
 
 
+class Strategy(Enum):
+    parallel = "parallel"
+    sequential = "sequential"
+
+
+class OutputFormats(Enum):
+    sarif = "sarif"
+    cyclonedx = "cyclonedx"
+    json = "json"
+    html = "html"
+    junitxml = "junitxml"
+
+
 @app.command(
     name="scan",
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
 def scan(
     source_dir: Annotated[
@@ -63,9 +71,9 @@ def scan(
         typer.Option(help="Specify OCI runner to use (e.g. 'docker', 'finch')"),
     ] = os.environ.get("OCI_RUNNER", None),
     strategy: Annotated[
-        ExecutionStrategy,
+        Strategy,
         typer.Option(help="Whether to run scanners in parallel or sequential"),
-    ] = ExecutionStrategy.PARALLEL,
+    ] = "parallel",
     scanners: Annotated[
         List[str],
         typer.Option(help="Specific scanner names to run. Defaults to all scanners."),
@@ -75,99 +83,26 @@ def scan(
         typer.Option(help="Keep working directory after scan completes"),
     ] = False,
     output_formats: Annotated[
-        list[ExportFormat],
+        List[OutputFormats],
         typer.Option(
             help="The output formats to use",
         ),
     ] = ["sarif", "cyclonedx", "json", "html", "junitxml"],
 ):
     """Main entry point."""
-
-    # def parse_args():
-    #     """Parse command line arguments."""
-    #     parser = argparse.ArgumentParser(description="ASH Multi-Scanner")
-    #     parser.add_argument(
-    #         "-s", "--source-dir", dest="source", help="Source directory to scan"
-    #     )
-    #     parser.add_argument(
-    #         "-o",
-    #         "--output-dir",
-    #         dest="output",
-    #         required=False,
-    #         help="Output file path",
-    #     )
-    #     parser.add_argument("-c", "--config", help="Path to configuration file")
-    #     parser.add_argument(
-    #         "-f",
-    #         "--format",
-    #         dest="formats",
-    #         action="append",
-    #         default=[],
-    #         help="Output format(s) (can be specified multiple times, defaults to json if none specified)",
-    #         choices=[
-    #             "json",
-    #             "text",
-    #             "html",
-    #             "csv",
-    #             "yaml",
-    #             "junitxml",
-    #             "sarif",
-    #             "asff",
-    #             "cyclonedx",
-    #             "spdx",
-    #         ],
-    #     )
-    #     parser.add_argument(
-    #         "-v", "--verbose", action="store_true", help="Enable verbose logging"
-    #     )
-    #     parser.add_argument(
-    #         "--debug", action="store_true", help="Enable debug logging"
-    #     )
-    #     parser.add_argument(
-    #         "--offline",
-    #         action="store_true",
-    #         help="Run in offline mode (skips NPM/PNPM/Yarn Audit checks)",
-    #     )
-    #     parser.add_argument(
-    #         "--no-run",
-    #         action="store_true",
-    #         help="Only build the container image, do not run scans",
-    #     )
-    #     parser.add_argument(
-    #         "--build-target",
-    #         default="default",
-    #         help="Specify build target for container image (e.g. 'ci' for elevated access)",
-    #     )
-    #     parser.add_argument(
-    #         "--oci-runner",
-    #         default="docker",
-    #         help="Specify OCI runner to use (e.g. 'docker', 'finch')",
-    #     )
-    #     parser.add_argument(
-    #         "--strategy",
-    #         default="sequential",
-    #         help="Whether to run scanners in parallel or sequential",
-    #         choices=[
-    #             "sequential",
-    #             "parallel",
-    #         ],
-    #     )
-    #     parser.add_argument(
-    #         "--scanners",
-    #         help="Specific scanner names to run",
-    #     )
-    #     parser.add_argument(
-    #         "--no-cleanup",
-    #         action="store_true",
-    #         help="Keep working directory after scan completes",
-    #     )
-
-    # args = parse_args()
+    # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
+    from automated_security_helper.core.execution_engine import ExecutionStrategy
+    from automated_security_helper.models.core import ExportFormat
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+    from automated_security_helper.models.asharp_model import ASHARPModel
+    from automated_security_helper.utils.log import get_logger
 
     try:
+        logger = get_logger(level=logging.DEBUG if verbose else logging.INFO)
         # Create orchestrator instance
         source_dir = Path(source_dir)
         output_dir = Path(output_dir)
+        logger.debug(f"Scanners specified: {scanners}")
 
         orchestrator = ASHScanOrchestrator(
             source_dir=source_dir,
@@ -183,7 +118,10 @@ def scan(
             enabled_scanners=scanners,
             config_path=config,
             verbose=verbose,
-            strategy=strategy,
+            strategy=ExecutionStrategy.PARALLEL
+            if strategy == Strategy.parallel
+            else ExecutionStrategy.SEQUENTIAL,
+            no_cleanup=no_cleanup,
         )
 
         # Execute scan
@@ -199,7 +137,7 @@ def scan(
             f.write(content)
 
     except Exception as e:
-        ASH_LOGGER.exception(e)
+        logger.exception(e)
         sys.exit(1)
 
 

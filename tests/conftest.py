@@ -4,13 +4,10 @@ from pathlib import Path
 import sys
 import pytest
 import yaml
+from automated_security_helper.base.options import BaseScannerOptions
 from automated_security_helper.config.config import (
     ASHConfig,
     BuildConfig,
-    SASTScannerConfig,
-    SASTScannerListConfig,
-    SBOMScannerConfig,
-    SBOMScannerListConfig,
 )
 from automated_security_helper.config.scanner_types import (
     CfnNagScannerConfig,
@@ -24,11 +21,11 @@ from automated_security_helper.config.scanner_types import (
 )
 
 from automated_security_helper.models.core import (
-    BaseScannerOptions,
+    ExportFormat,
     Location,
     Scanner,
-    ScannerPluginConfig,
 )
+from automated_security_helper.base.plugin import ScannerPlugin
 from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
 )
@@ -179,7 +176,7 @@ def ash_config() -> ASHConfig:
                 ]
             },
             custom_scanners=[
-                ScannerPluginConfig(
+                ScannerPlugin(
                     name="trivy-sast",
                     command="trivy",
                     args=["fs", "--format", "sarif"],
@@ -196,7 +193,7 @@ def ash_config() -> ASHConfig:
                     invocation_mode="directory",
                     type="SAST",
                 ),
-                ScannerPluginConfig(
+                ScannerPlugin(
                     name="trivy-sbom",
                     command="trivy",
                     args=["fs", "--format", "cyclonedx"],
@@ -210,49 +207,49 @@ def ash_config() -> ASHConfig:
         output_dir="ash_output",
         converters={
             "jupyter": True,
-            # "archive": True,
+            "archive": True,
         },
-        sast=SASTScannerConfig(
-            output_formats=["json", "csv", "junitxml", "html"],
-            scanners=SASTScannerListConfig(
-                bandit=BanditScannerConfig(),
-                cdknag=CdkNagScannerConfig(
-                    enabled=True,
-                    options=CdkNagScannerConfigOptions(
-                        nag_packs=CdkNagPacks(
-                            AwsSolutionsChecks=True,
-                            HIPAASecurityChecks=True,
-                            NIST80053R4Checks=True,
-                            NIST80053R5Checks=True,
-                            PCIDSS321Checks=True,
-                        ),
+        no_cleanup=True,
+        output_formats=[
+            ExportFormat.HTML,
+            ExportFormat.JUNITXML,
+            ExportFormat.SARIF,
+            ExportFormat.CYCLONEDX,
+        ],
+        severity_threshold="ALL",
+        scanners=[
+            BanditScannerConfig(),
+            CdkNagScannerConfig(
+                enabled=True,
+                options=CdkNagScannerConfigOptions(
+                    nag_packs=CdkNagPacks(
+                        AwsSolutionsChecks=True,
+                        HIPAASecurityChecks=True,
+                        NIST80053R4Checks=True,
+                        NIST80053R5Checks=True,
+                        PCIDSS321Checks=True,
                     ),
                 ),
-                cfnnag=CfnNagScannerConfig(),
-                checkov=CheckovScannerConfig(),
-                gitsecrets=GitSecretsScannerConfig(
-                    options=BaseScannerOptions(enabled=True),
-                ),
-                grype=GrypeScannerConfig(),
-                npmaudit=NpmAuditScannerConfig(),
-                semgrep=SemgrepScannerConfig(),
-                trivysasy=CustomScannerConfig(
-                    name="trivy-sast",
-                    type="SAST",
-                    custom=BaseScannerOptions(enabled=True),
-                ),
             ),
-        ),
-        sbom=SBOMScannerConfig(
-            output_formats=["cyclonedx", "html"],
-            scanners=SBOMScannerListConfig(
-                syft=SyftScannerConfig(),
-                trivysbom=CustomScannerConfig(
-                    name="trivy-sbom",
-                    type="SBOM",
-                    custom=BaseScannerOptions(enabled=True),
-                ),
+            CfnNagScannerConfig(),
+            CheckovScannerConfig(),
+            GitSecretsScannerConfig(
+                options=BaseScannerOptions(enabled=True),
             ),
-        ),
+            GrypeScannerConfig(),
+            NpmAuditScannerConfig(),
+            SemgrepScannerConfig(),
+            CustomScannerConfig(
+                name="trivy-sast",
+                type="SAST",
+                custom=BaseScannerOptions(enabled=True),
+            ),
+            SyftScannerConfig(),
+            CustomScannerConfig(
+                name="trivy-sbom",
+                type="SBOM",
+                custom=BaseScannerOptions(enabled=True),
+            ),
+        ],
     )
     return conf

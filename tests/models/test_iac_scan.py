@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timezone
 from automated_security_helper.models.core import Location, Scanner
-from automated_security_helper.models.data_interchange import ReportMetadata
+from automated_security_helper.schemas.data_interchange import ReportMetadata
 from automated_security_helper.models.iac_scan import IaCVulnerability, IaCScanReport
 
 

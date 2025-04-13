@@ -114,13 +114,13 @@ Example from Bandit:
 
 from typing import Annotated, Any, Dict, List, Literal
 from pydantic import Field
+from automated_security_helper.base.options import BaseParserOptions
+from automated_security_helper.base.scanner import ParserConfig
 from automated_security_helper.models.core import (
-    BaseParserOptions,
     Location,
     ParserBaseConfig,
-    ParserConfig,
 )
-from automated_security_helper.models.data_interchange import SecurityReport
+from automated_security_helper.schemas.data_interchange import SecurityReport
 from automated_security_helper.models.parser_plugin import ParserPlugin
 
 
@@ -129,12 +129,12 @@ class SarifParserConfigOptions(BaseParserOptions):
 
 
 class SarifParserConfig(ParserBaseConfig):
-    """Bandit SAST scanner configuration."""
+    """SARIF parser configuration."""
 
     name: Literal["sarif"] = "sarif"
     enabled: bool = True
     options: Annotated[
-        SarifParserConfigOptions, Field(description="Configure Bandit scanner")
+        SarifParserConfigOptions, Field(description="Configure SARIF parser")
     ] = SarifParserConfigOptions()
     config = ParserConfig(
         name="sarif",
@@ -144,10 +144,6 @@ class SarifParserConfig(ParserBaseConfig):
 
 class SarifParser(ParserPlugin, SarifParserConfig):
     """Parser for SARIF formatted outputs."""
-
-    def configure(self, config: ParserConfig) -> None:
-        """Configure the parser with provided configuration."""
-        pass
 
     def parse(self, raw_results: List[Dict[str, Any]]) -> SecurityReport:
         """Parse raw scanner results into a standardized format."""

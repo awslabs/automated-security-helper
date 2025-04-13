@@ -1,6 +1,5 @@
 """Module containing the ConverterPlugin base class."""
 
-import logging
 import shutil
 from abc import abstractmethod
 from pathlib import Path
@@ -9,7 +8,7 @@ from typing_extensions import Self
 
 from pydantic import BaseModel, model_validator
 
-from automated_security_helper.models.core import BaseConverterOptions
+from automated_security_helper.base.options import BaseConverterOptions
 from automated_security_helper.models.interfaces import IConverter
 
 
@@ -62,7 +61,6 @@ class ConverterPlugin(IConverter, BaseModel):
         scanner_name = (
             getattr(self._config, "name", "unknown") if self._config else "unknown"
         )
-        self.logger = logging.getLogger(f"ash.scanners.{scanner_name}")
 
         self.results_dir = self.output_dir.joinpath("scanners").joinpath(scanner_name)
         if self.results_dir.exists():

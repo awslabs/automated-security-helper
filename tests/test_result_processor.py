@@ -3,7 +3,7 @@
 import json
 import pytest
 from typing import Any, Dict, List, Union
-from automated_security_helper.models.data_interchange import ReportMetadata
+from automated_security_helper.schemas.data_interchange import ReportMetadata
 from automated_security_helper.core.result_processor import (
     ResultProcessor,
     IResultParser,

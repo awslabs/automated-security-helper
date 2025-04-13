@@ -2,7 +2,7 @@
 
 from typing import Dict, List, Any, Optional
 
-from automated_security_helper.models.core import ParserConfig
+from automated_security_helper.base.scanner import ParserConfig
 from .interfaces import IParser
 from .core import Location
 from .asharp_model import ASHARPModel

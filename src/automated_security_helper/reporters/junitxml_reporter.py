@@ -4,10 +4,15 @@ import junit_xml
 
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.interfaces import IOutputReporter
+import defusedxml
 
 
 class JUnitXMLReporter(IOutputReporter):
     """Formats results as JUnitXML."""
+
+    def __init__(self):
+        super().__init__()
+        defusedxml.defuse_stdlib()
 
     def format(self, model: ASHARPModel) -> str:
         """Format ASH model in JUnitXML.

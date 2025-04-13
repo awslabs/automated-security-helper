@@ -15,10 +15,20 @@ class ASHARPModelSerializer:
         if not output_dir.exists():
             output_dir.mkdir(parents=True)
 
-        # Save model as JSON
-        json_path = output_dir / "asharp_model.json"
+        # Save aggregated results as JSON
+        json_path = output_dir.joinpath("ash_aggregated_results.json")
         with open(json_path, "w") as f:
-            json.dump(model.dict(), f, indent=2, default=str)
+            json.dump(model.model_dump(), f, indent=2, default=str)
+
+        # Save model.sarif as ash.sarif (JSON formatted SARIF report)
+        json_path = output_dir.joinpath("ash.sarif")
+        with open(json_path, "w") as f:
+            json.dump(model.sarif.model_dump(), f, indent=2, default=str)
+
+        # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
+        json_path = output_dir.joinpath("ash.cdx.json")
+        with open(json_path, "w") as f:
+            json.dump(model.sbom.model_dump(), f, indent=2, default=str)
 
     @staticmethod
     def load_model(json_path: Path) -> Optional[ASHARPModel]:

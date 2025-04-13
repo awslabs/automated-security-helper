@@ -9,7 +9,7 @@ from automated_security_helper.models.core import (
     Scanner,
     BaseFinding,
 )
-from automated_security_helper.models.data_interchange import (
+from automated_security_helper.schemas.data_interchange import (
     DataInterchange,
     ReportMetadata,
     SecurityReport,

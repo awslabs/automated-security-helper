@@ -1,0 +1,274 @@
+from datetime import datetime, timezone
+from automated_security_helper.base.options import BaseScannerOptions
+from automated_security_helper.base.scanner import ScannerBaseConfig
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.base.types import ToolArgs
+from automated_security_helper.schemas.data_interchange import SecurityReport
+from automated_security_helper.utils.log import ASH_LOGGER
+
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Any, Generic, List, Optional, TypeVar
+import shutil
+import subprocess
+from abc import abstractmethod
+from pathlib import Path
+
+T = TypeVar("T", bound=ScannerBaseConfig)
+
+
+class ScannerPlugin(BaseModel, Generic[T]):
+    """Base class for all scanner plugins."""
+
+    model_config = ConfigDict(extra="allow")
+
+    config: T | ScannerBaseConfig | None = None
+
+    tool_type: str = "UNKNOWN"
+    tool_version: str | None = None
+    description: str | None = None
+    command: Annotated[
+        str,
+        Field(
+            description="The command to invoke the scanner, typically the binary or path to a script"
+        ),
+    ] = None
+    args: Annotated[
+        ToolArgs,
+        Field(
+            description="Specialized arguments to pass to the scanner command. Includes an `extra_args` field which accepts a dictionary of arbitrary arguments to pass to the scanner. These are not configurable at scan time."
+        ),
+    ] = ToolArgs()
+    source_dir: Path | None = None
+    output_dir: Path | None = None
+
+    output: List[str] = []
+    errors: List[str] = []
+
+    # These will be initialized during `self.model_post_init()`
+    # in paths relative to the `output_dir` provided
+    work_dir: Path | None = None
+    results_dir: Path | None = None
+    results_file: Path | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    exit_code: int = 0
+
+    def model_post_init(self, context):
+        if self.config is None:
+            raise ScannerError(
+                f"Unable to initialize {self.__class__.__name__}! Configuration is empty."
+            )
+
+        if self.source_dir is None:
+            self.source_dir = Path.cwd()
+        if self.output_dir is None:
+            self.output_dir = self.source_dir.joinpath("ash_output")
+
+        # Ensure paths are Path objects
+        self.source_dir = Path(str(self.source_dir))
+        self.output_dir = Path(str(self.output_dir))
+        self.work_dir = self.output_dir.joinpath("work")
+        self.results_dir = self.output_dir.joinpath("scanners").joinpath(
+            self.config.name
+        )
+
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+
+        return super().model_post_init(context)
+
+    @abstractmethod
+    def validate(self) -> bool:
+        """Validate scanner configuration.
+
+        Returns:
+            bool: True if validation passes
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__}.validate() not implemented"
+        )
+
+    @abstractmethod
+    def scan(
+        self,
+        target: Path,
+        config: T | ScannerBaseConfig = None,
+        *args,
+        **kwargs,
+    ) -> Any:
+        """Execute scanner against a target.
+
+        Args:
+            *args: Variable length argument list
+            **kwargs: Arbitrary keyword arguments
+
+        Returns:
+            SecurityReport: Full scan results
+
+        Raises:
+            ScannerError: if scanning failed for any reason
+        """
+        raise NotImplementedError(f"{self.__class__.__name__}.scan() not implemented")
+
+    def _build_security_report(self, scan_results: Any) -> SecurityReport:
+        """Build security report from scan results.
+
+        Args:
+            scan_results: Raw scan results to process
+
+        Returns:
+            SecurityReport: Processed scan results
+        """
+        report = SecurityReport()
+        return report
+
+    def _process_config_options(self) -> None:
+        """By default, returns False to indicate that the scanner did not perform any
+        configuration option processing.
+
+        Override this method if you need to process custom options before
+        arguments are resolved!
+
+        This method is called at the start of `self._resolve_arguments(target)` before
+        `self.args.extra_args` is processed. Use this method to populate additional
+        argument key/value pairs where needed.
+        """
+        pass
+
+    def _resolve_arguments(
+        self, target: str | Path, results_file: str | Path = None
+    ) -> List[str]:
+        """Resolve any configured options into command line arguments.
+
+        Args:
+            target: Target to scan
+
+        Returns:
+            List[str]: Arguments to pass to scanner
+        """
+        self._process_config_options()
+
+        args = [
+            self.command,
+            self.args.format_arg,
+            self.args.format_arg_value,
+        ]
+
+        for tool_extra_arg in self.args.extra_args:
+            args.append(tool_extra_arg.key)
+            args.append(tool_extra_arg.value)
+
+        args.extend(
+            [
+                self.args.scan_path_arg,
+                Path(target).as_posix(),
+                self.args.output_arg,
+                (
+                    Path(results_file).as_posix()
+                    if results_file is not None
+                    else (
+                        self.results_file.as_posix()
+                        if self.results_file is not None
+                        else None
+                    )
+                ),
+            ]
+        )
+        return [item for item in args if item is not None]
+
+    def _pre_scan(
+        self,
+        target: Path,
+        options: Optional[BaseScannerOptions] = None,
+        *args,
+        **kwargs,
+    ) -> None:
+        """Perform pre-scan setup.
+
+        Args:
+            target: Target to scan
+            options: Optional scanner-specific options
+        """
+        if not Path(target).exists():
+            raise ScannerError(f"Target {target} does not exist!")
+
+        self.start_time = datetime.now(timezone.utc)
+        ASH_LOGGER.debug(f"Starting {self.__class__.__name__} scan of {target}")
+
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        if self.results_dir:
+            self.results_dir.mkdir(parents=True, exist_ok=True)
+
+    def _post_scan(
+        self,
+        target: Path,
+    ) -> None:
+        """Perform pre-scan setup.
+
+        Args:
+            target: Target to scan
+            options: Optional scanner-specific options
+        """
+        self.end_time = datetime.now(timezone.utc)
+
+        ASH_LOGGER.info(
+            f"ASH scan of {target} completed in {(self.end_time - self.start_time).total_seconds()} seconds"
+        )
+
+    def _run_subprocess(
+        self, command: List[str], results_dir: str | Path = None
+    ) -> None:
+        """Run a subprocess with the given command.
+
+        Args:
+            command: Command to run
+
+        Raises:
+            ScannerError: If process errors
+        """
+        try:
+            binary_full_path = shutil.which(command[0])
+            if binary_full_path is not None:
+                command = [binary_full_path, *command[1:]]
+        except Exception as e:
+            ASH_LOGGER.debug(e)
+
+        ASH_LOGGER.debug(f"Running subprocess command: {command}")
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            shell=False,
+            check=False,
+            cwd=self.source_dir.as_posix(),
+            # env=os.environ.copy(),
+        )
+
+        self.exit_code = result.returncode
+
+        # Store output and errors in class variables
+        self._output = []
+        self._errors = []
+
+        # Process stdout
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                self._output.append(line)
+                # ASH_LOGGER.debug(line)
+            if results_dir is not None:
+                with open(
+                    Path(results_dir).joinpath(f"{self.__class__.__name__}.stdout.log"),
+                    "w",
+                ) as stdout_file:
+                    stdout_file.write(result.stdout)
+        # Process stderr
+        if result.stderr:
+            for line in result.stderr.splitlines():
+                self._errors.append(line)
+                # ASH_LOGGER.debug(line)
+            if results_dir is not None:
+                with open(
+                    Path(results_dir).joinpath(f"{self.__class__.__name__}.stderr.log"),
+                    "w",
+                ) as stderr_file:
+                    stderr_file.write(result.stderr)

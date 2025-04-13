@@ -13,9 +13,8 @@ from pydantic import Field
 from automated_security_helper.models.converter_plugin import ConverterPlugin
 from automated_security_helper.models.core import (
     ConverterBaseConfig,
-    ConverterPluginConfig,
 )
-from automated_security_helper.models.core import (
+from automated_security_helper.base.options import (
     BaseConverterOptions,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
@@ -50,14 +49,6 @@ class JupyterNotebookConverter(ConverterPlugin, JupyterNotebookConverterConfig):
             self.output_dir.joinpath("work").joinpath("converters").joinpath("jupyter")
         )
         return super().model_post_init(context)
-
-    def configure(
-        self,
-        config: ConverterPluginConfig | None = None,
-        options: JupyterNotebookConverterConfigOptions | None = None,
-    ) -> None:
-        """Configure the converter with provided settings."""
-        super().configure(config=config, options=options)
 
     def validate(self):
         # Return True since this scanner is entirely within the same Python module,

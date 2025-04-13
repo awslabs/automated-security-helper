@@ -3,7 +3,7 @@
 import glob
 import os
 import pytest
-from automated_security_helper.scanners.cdk_nag_scanner import CDKNagScanner
+from automated_security_helper.scanners.cdk_nag_scanner import CdkNagScanner
 
 # def test_scanner_validate_script_missing(tmp_path):
 #     """Test validation fails when docker script is missing."""
@@ -72,7 +72,7 @@ from automated_security_helper.scanners.cdk_nag_scanner import CDKNagScanner
 @pytest.fixture
 def scanner(test_source_dir, test_output_dir):
     """Create a CDK Nag scanner instance for testing."""
-    return CDKNagScanner(
+    return CdkNagScanner(
         source_dir=test_source_dir,
         output_dir=test_output_dir,
     )
@@ -99,7 +99,7 @@ def test_scanner_scan_parses_findings(
     mocker, template_file, test_source_dir, test_output_dir
 ):
     """Test that scanner can parse findings from CDK nag output."""
-    scanner = CDKNagScanner(source_dir=test_source_dir, output_dir=test_output_dir)
+    scanner = CdkNagScanner(source_dir=test_source_dir, output_dir=test_output_dir)
 
     report = scanner.scan(template_file)
     assert report is not None
@@ -108,7 +108,7 @@ def test_scanner_scan_parses_findings(
 @pytest.mark.parametrize("csv_file", get_csv_files())
 def test_scanner_parse_csv_findings(csv_file, test_source_dir, test_output_dir):
     """Test that scanner can parse findings from CSV file."""
-    scanner = CDKNagScanner(source_dir=test_source_dir, output_dir=test_output_dir)
+    scanner = CdkNagScanner(source_dir=test_source_dir, output_dir=test_output_dir)
     findings = scanner._parse_findings(csv_file)
 
     assert findings is not None

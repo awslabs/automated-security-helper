@@ -5,15 +5,10 @@ from typing import Any, Dict, Literal, Optional
 
 import pytest
 
-from automated_security_helper.models.core import ScannerPluginConfig
+from automated_security_helper.base.plugin import ScannerPlugin
 
-import logging
 
-from automated_security_helper.models.scanner_plugin import (
-    ScannerPlugin,
-)
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.utils.log import get_logger
 from tests.conftest import TEST_SOURCE_DIR, TEST_OUTPUT_DIR
 
 
@@ -24,7 +19,7 @@ class ConcreteScanner(ScannerPlugin):
     enabled: bool = True
     tool_version: str = version("automated_security_helper")
 
-    _default_config = ScannerPluginConfig(
+    _default_config = ScannerPlugin(
         name="test_scanner",
         type="CUSTOM",
         command="test_command",
@@ -33,7 +28,6 @@ class ConcreteScanner(ScannerPlugin):
     def model_post_init(self, context):
         self.source_dir = TEST_SOURCE_DIR
         self.output_dir = TEST_OUTPUT_DIR
-        self.logger = get_logger("test_logger", level=logging.DEBUG)
         return super().model_post_init(context)
 
     def validate(self):
@@ -48,14 +42,14 @@ class ConcreteScanner(ScannerPlugin):
 
 def test_scanner_initialization(test_source_dir, test_output_dir):
     """Test scanner initialization with config."""
-    config = ScannerPluginConfig(
+    config = ScannerPlugin(
         name="test_scanner",
         command="pwd",
         source_dir=test_source_dir,
         output_dir=test_output_dir,
     )
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(config)
+    # scanner.configure(config)
     assert scanner.name == "test_scanner"
     assert scanner.config == config
     assert scanner.options == {}
@@ -72,26 +66,15 @@ def test_scanner_initialization_none(test_source_dir, test_output_dir):
 
 def test_scanner_initialization_with_options(test_source_dir, test_output_dir):
     """Test scanner initialization with custom options."""
-    config = ScannerPluginConfig(
-        name="test_scanner",
-        type="SAST",
-        options={"severity": "high", "threshold": 5},
-        source_dir=test_source_dir,
-        output_dir=test_output_dir,
-    )
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(config)
+    # scanner.configure(config)
     assert scanner.options == {"severity": "high", "threshold": 5}
 
 
 def test_scanner_execution(test_source_dir, test_output_dir):
     """Test basic scanner execution."""
-    config = ScannerPluginConfig(
-        name="test_scanner",
-        type="SAST",
-    )
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(config)
+    # scanner.configure(config)
 
     # Execute scan
     scanner.scan("test/target")
@@ -105,15 +88,8 @@ def test_scanner_execution(test_source_dir, test_output_dir):
 
 def test_scanner_execution_with_options(test_source_dir, test_output_dir):
     """Test scanner execution with options."""
-    config = ScannerPluginConfig(
-        name="test_scanner",
-        type="SAST",
-        options={"severity": "high"},
-        source_dir=test_source_dir,
-        output_dir=test_output_dir,
-    )
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(config)
+    # scanner.configure(config)
 
     # Execute scan with additional options
     scanner.scan("test/target", {"threshold": 5})
@@ -126,14 +102,14 @@ def test_scanner_execution_with_options(test_source_dir, test_output_dir):
 def test_scanner_error_handling(test_source_dir, test_output_dir):
     """Test scanner error handling."""
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(
-        ScannerPluginConfig(
-            name="test_scanner",
-            type="SAST",
-            source_dir=test_source_dir,
-            output_dir=test_output_dir,
-        )
-    )
+    # scanner.configure(
+    #     ScannerPluginConfig(
+    #         name="test_scanner",
+    #         type="SAST",
+    #         source_dir=test_source_dir,
+    #         output_dir=test_output_dir,
+    #     )
+    # )
 
     # Test with empty target
     with pytest.raises(ScannerError, match="No target specified"):
@@ -143,7 +119,7 @@ def test_scanner_error_handling(test_source_dir, test_output_dir):
 def test_scanner_result_processing(test_source_dir, test_output_dir):
     """Test scanner result handling."""
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(scanner.default_config)
+    # scanner.configure(scanner.default_config)
     scanner.scan("test/target")
     assert (
         len([item for item in scanner.output if item is not None and item != ""]) == 1
@@ -154,9 +130,9 @@ def test_scanner_result_processing(test_source_dir, test_output_dir):
 def test_scanner_metadata_handling(test_source_dir, test_output_dir):
     """Test scanner metadata access."""
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(
-        ScannerPluginConfig(name="test_scanner", type="SAST", options={"key": "value"})
-    )
+    # scanner.configure(
+    #     ScannerPluginConfig(name="test_scanner", type="SAST", options={"key": "value"})
+    # )
     assert scanner.name == "test_scanner"
     assert scanner.type == "SAST"
     assert scanner.options == {
@@ -169,45 +145,39 @@ def test_scanner_metadata_handling(test_source_dir, test_output_dir):
 def test_scanner_command_execution(test_source_dir, test_output_dir):
     """Test scanner subprocess execution."""
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(
-        ScannerPluginConfig(
-            name="test_scanner",
-            type="SAST",
-        )
-    )
+    # scanner.configure(
+    #     ScannerPluginConfig(
+    #         name="test_scanner",
+    #         type="SAST",
+    #     )
+    # )
     scanner._run_subprocess(["echo", "test"])
     assert (
         len([item for item in scanner.output if item is not None and item != ""]) == 1
     )
-    assert scanner.output[0] == "test\n"
+    assert scanner.output[0] == "test"
+    assert len(scanner.errors) == 0
 
 
 def test_scanner_command_execution_error(test_source_dir, test_output_dir):
     """Test scanner subprocess error handling."""
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(
-        ScannerPluginConfig(
-            name="test_scanner",
-            type="SAST",
-            source_dir=test_source_dir,
-            output_dir=test_output_dir,
-        )
-    )
-    with pytest.raises(ScannerError):
-        scanner._run_subprocess(["nonexistent_command"])
+    # scanner.configure(
+    #     ScannerPluginConfig(
+    #         name="test_scanner",
+    #         type="SAST",
+    #         source_dir=test_source_dir,
+    #         output_dir=test_output_dir,
+    #     )
+    # )
+    scanner._run_subprocess(["nonexistent_command"])
+    assert len(scanner.errors) > 0  # Should have error message in stderr
 
 
 def test_scanner_with_custom_config(test_source_dir, test_output_dir):
     """Test scanner with custom configuration."""
     scanner = ConcreteScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    config = ScannerPluginConfig(
-        name="custom_scanner",
-        type="IAC",
-        options={"level": "high", "include": ["*.py"], "exclude": ["test/*"]},
-        source_dir=test_source_dir,
-        output_dir=test_output_dir,
-    )
-    scanner.configure(config)
+    # scanner.configure(config)
     assert scanner._config.name == "custom_scanner"
     assert scanner.name == "concrete"
     assert scanner._config.type is not None
@@ -225,11 +195,10 @@ def test_scanner_with_custom_config(test_source_dir, test_output_dir):
 
 def test_scanner_validate_config():
     """Test scanner configuration validation."""
-    config = {"name": "invalid", "command": "pwd"}
     scanner = ConcreteScanner()
     scanner._default_config.name = "invalid"
     scanner._default_config = "pwd"
-    scanner.configure(config)
+    # scanner.configure(config)
     assert scanner.name == "invalid"
     assert scanner.config.command == "pwd"
     assert scanner.options == {

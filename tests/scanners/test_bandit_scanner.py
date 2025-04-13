@@ -1,16 +1,17 @@
 """Test module for BanditScanner implementation."""
 
 import pytest
+from automated_security_helper.base.plugin import ScannerPlugin
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import ExportFormat, ScannerPluginConfig
+from automated_security_helper.models.core import ExportFormat
 
 
 def test_bandit_scanner_init(test_source_dir, test_output_dir):
     """Test BanditScanner initialization and configuration."""
     # Test default initialization
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(scanner.default_config)
+    # scanner.configure(scanner.default_config)
     assert scanner.name == "bandit"
     assert scanner.type == "SAST"
     assert scanner.options == {"severity": "high"}
@@ -18,10 +19,10 @@ def test_bandit_scanner_init(test_source_dir, test_output_dir):
     assert scanner.tool_version is not None
 
     # Test explicit configuration
-    config = ScannerPluginConfig(
+    config = ScannerPlugin(
         name="bandit", type="SAST", command="bandit", enabled=True, output_format="json"
     )
-    scanner.configure(config)
+    # scanner.configure(config)
     assert scanner._config == config
     assert scanner.validate() is True
 
@@ -29,8 +30,8 @@ def test_bandit_scanner_init(test_source_dir, test_output_dir):
 def test_bandit_scanner_configure(test_source_dir, test_output_dir):
     """Test scanner configuration."""
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    config = ScannerPluginConfig(name="bandit", output_format="text")
-    scanner.configure(config)
+    config = ScannerPlugin(name="bandit", output_format="text")
+    # scanner.configure(config)
     assert scanner._config == config
     # We have to force standardization of output format at the scanner level so we
     # know what format to parse from and what data is available for a particular scanner
@@ -50,15 +51,15 @@ def test_bandit_scanner_validate(test_source_dir, test_output_dir):
 def test_bandit_scanner_scan_json(mocker, test_source_dir, test_output_dir):
     """Test scanning with JSON output format."""
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(
-        ScannerPluginConfig(
-            name="bandit",
-            type="SAST",
-            command="bandit",
-            enabled=True,
-            output_format="json",
-        )
-    )
+    # scanner.configure(
+    #     ScannerPluginConfig(
+    #         name="bandit",
+    #         type="SAST",
+    #         command="bandit",
+    #         enabled=True,
+    #         output_format="json",
+    #     )
+    # )
 
     # Mock scanning methods
     mocker.patch.object(scanner, "_pre_scan")
@@ -80,7 +81,7 @@ def test_bandit_scanner_scan_json(mocker, test_source_dir, test_output_dir):
 def test_bandit_scanner_scan_with_config(mocker, test_source_dir, test_output_dir):
     """Test scanning with additional config options."""
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    scanner.configure(scanner.default_config)
+    # scanner.configure(scanner.default_config)
 
     # Mock subprocess execution
     mock_run = mocker.patch.object(scanner, "_run_subprocess")

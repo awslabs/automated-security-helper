@@ -1,12 +1,13 @@
-from pathlib import Path
 from typing import Literal
-from automated_security_helper.config.config import ASHConfig
-from automated_security_helper.models.asharp_model import ASHARPModel
-import json
 
 
 def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
     """Generate JSON schemas for the models."""
+    from pathlib import Path
+    from automated_security_helper.config.ash_config import ASHConfig
+    from automated_security_helper.models.asharp_model import ASHARPModel
+    import json
+
     cur_file_path = Path(__file__)
     # create schemas dir if not existing
     schemas_dir = cur_file_path.parent

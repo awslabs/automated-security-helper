@@ -5,9 +5,9 @@ from typing import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from automated_security_helper.models.core import SCANNER_TYPES
-from automated_security_helper.models.core import ScannerBaseConfig
-from automated_security_helper.models.core import BaseScannerOptions
+from automated_security_helper.core.constants import SCANNER_TYPES
+from automated_security_helper.base.scanner import ScannerBaseConfig
+from automated_security_helper.base.options import BaseScannerOptions
 
 T = TypeVar("T", bound="ScannerBaseConfig")
 
@@ -28,6 +28,12 @@ class CustomScannerConfig(ScannerBaseConfig):
             description="The name of the custom scanner.",
         ),
     ]
+    enabled: Annotated[
+        bool,
+        Field(
+            description="Whether the custom scanner is enabled.",
+        ),
+    ] = True
     type: SCANNER_TYPES = "CUSTOM"
     options: Annotated[
         BaseScannerOptions, Field(description="Configure custom scanner")
@@ -37,7 +43,13 @@ class CustomScannerConfig(ScannerBaseConfig):
 class NpmAuditScannerConfig(ScannerBaseConfig):
     """JS/TS Dependency scanner configuration."""
 
-    name: Literal["npmaudit"] = "npmaudit"
+    name: Literal["npm-audit"] = "npm-audit"
+    enabled: Annotated[
+        bool,
+        Field(
+            description="Whether the custom scanner is enabled.",
+        ),
+    ] = True
     type: SCANNER_TYPES = "DEPENDENCY"
     options: Annotated[
         BaseScannerOptions,
@@ -50,7 +62,13 @@ class NpmAuditScannerConfig(ScannerBaseConfig):
 class GitSecretsScannerConfig(ScannerBaseConfig):
     """Git Secrets scanner configuration."""
 
-    name: Literal["gitsecrets"] = "gitsecrets"
+    name: Literal["git-secrets"] = "git-secrets"
+    enabled: Annotated[
+        bool,
+        Field(
+            description="Whether the custom scanner is enabled.",
+        ),
+    ] = True
     type: SCANNER_TYPES = "SECRETS"
     options: Annotated[
         BaseScannerOptions,
@@ -62,19 +80,15 @@ class SemgrepScannerConfig(ScannerBaseConfig):
     """Semgrep SAST scanner configuration."""
 
     name: Literal["semgrep"] = "semgrep"
+    enabled: Annotated[
+        bool,
+        Field(
+            description="Whether the custom scanner is enabled.",
+        ),
+    ] = True
     type: SCANNER_TYPES = "SAST"
     options: Annotated[
         BaseScannerOptions, Field(description="Configure Semgrep scanner")
-    ] = BaseScannerOptions()
-
-
-class CheckovScannerConfig(ScannerBaseConfig):
-    """Checkov SAST/IaC scanner configuration."""
-
-    name: Literal["checkov"] = "checkov"
-    type: SCANNER_TYPES = "IAC"
-    options: Annotated[
-        BaseScannerOptions, Field(description="Configure Checkov scanner")
     ] = BaseScannerOptions()
 
 
@@ -82,6 +96,12 @@ class GrypeScannerConfig(ScannerBaseConfig):
     """Grype SAST scanner configuration."""
 
     name: Literal["grype"] = "grype"
+    enabled: Annotated[
+        bool,
+        Field(
+            description="Whether the custom scanner is enabled.",
+        ),
+    ] = True
     type: SCANNER_TYPES = "SAST"
     options: Annotated[
         BaseScannerOptions, Field(description="Configure Grype scanner")
@@ -92,6 +112,12 @@ class SyftScannerConfig(ScannerBaseConfig):
     """Syft SBOM scanner configuration."""
 
     name: Literal["syft"] = "syft"
+    enabled: Annotated[
+        bool,
+        Field(
+            description="Whether the custom scanner is enabled.",
+        ),
+    ] = True
     type: SCANNER_TYPES = "SBOM"
     options: Annotated[
         BaseScannerOptions, Field(description="Configure Syft scanner")
@@ -101,7 +127,13 @@ class SyftScannerConfig(ScannerBaseConfig):
 class CfnNagScannerConfig(ScannerBaseConfig):
     """CFN Nag IAC SAST scanner configuration."""
 
-    name: Literal["cfnnag"] = "cfnnag"
+    name: Literal["cfn-nag"] = "cfn-nag"
+    enabled: Annotated[
+        bool,
+        Field(
+            description="Whether the custom scanner is enabled.",
+        ),
+    ] = True
     type: SCANNER_TYPES = "IAC"
     options: Annotated[
         BaseScannerOptions,

@@ -6,7 +6,6 @@ This module contains the OutputFormatter class and related formatters for:
 - CSV output
 """
 
-import logging
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.reporters import (
@@ -21,6 +20,7 @@ from automated_security_helper.reporters import (
     TextReporter,
     YAMLReporter,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class OutputFormatter:
@@ -28,10 +28,8 @@ class OutputFormatter:
 
     def __init__(
         self,
-        logger: logging.Logger = logging.Logger(name=__name__),
     ):
-        logger.info("Initializing OutputFormatter")
-        self.logger = logger
+        ASH_LOGGER.info("Initializing OutputFormatter")
 
         self._formatters = {
             "asff": ASFFReporter(),

@@ -2,11 +2,9 @@
   "$defs": {
     "BanditScannerConfig": {
       "additionalProperties": true,
-      "description": "Bandit SAST scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -18,24 +16,14 @@
         },
         "options": {
           "$ref": "#/$defs/BanditScannerConfigOptions",
-          "default": {},
+          "default": {
+            "additional_formats": [],
+            "confidence_level": "all",
+            "excluded_paths": [],
+            "ignore_nosec": false,
+            "severity_level": "all"
+          },
           "description": "Configure Bandit scanner"
-        },
-        "type": {
-          "default": "SAST",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
         }
       },
       "title": "BanditScannerConfig",
@@ -43,7 +31,66 @@
     },
     "BanditScannerConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "properties": {
+        "additional_formats": {
+          "default": [],
+          "description": "List of additional formats to output",
+          "items": {
+            "enum": [
+              "csv",
+              "custom",
+              "html",
+              "json",
+              "sarif",
+              "txt",
+              "xml",
+              "yaml"
+            ],
+            "type": "string"
+          },
+          "title": "Additional Formats",
+          "type": "array"
+        },
+        "confidence_level": {
+          "default": "all",
+          "description": "Confidence level for Bandit findings",
+          "enum": [
+            "all",
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Confidence Level",
+          "type": "string"
+        },
+        "excluded_paths": {
+          "default": [],
+          "description": "List of paths to exclude from scanning",
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Paths",
+          "type": "array"
+        },
+        "ignore_nosec": {
+          "default": false,
+          "description": "If True, do not skip lines with # nosec comments. Defaults to False.",
+          "title": "Ignore Nosec",
+          "type": "boolean"
+        },
+        "severity_level": {
+          "default": "all",
+          "description": "Confidence level for Bandit findings",
+          "enum": [
+            "all",
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Severity Level",
+          "type": "string"
+        }
+      },
       "title": "BanditScannerConfigOptions",
       "type": "object"
     },
@@ -62,7 +109,7 @@
           "default": [],
           "description": "Scanner configurations by type",
           "items": {
-            "$ref": "#/$defs/ScannerPluginConfig"
+            "$ref": "#/$defs/ScannerPlugin"
           },
           "title": "Custom Scanners",
           "type": "array"
@@ -132,17 +179,15 @@
     },
     "CdkNagScannerConfig": {
       "additionalProperties": true,
-      "description": "CDK Nag IAC SAST scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
           "title": "Enabled",
           "type": "boolean"
         },
         "name": {
-          "const": "cdknag",
-          "default": "cdknag",
+          "const": "cdk-nag",
+          "default": "cdk-nag",
           "title": "Name",
           "type": "string"
         },
@@ -156,23 +201,8 @@
               "NIST80053R5Checks": false,
               "PCIDSS321Checks": false
             }
-          }
-        },
-        "type": {
-          "default": "IAC",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
+          },
+          "description": "Configure Bandit scanner"
         }
       },
       "title": "CdkNagScannerConfig",
@@ -203,13 +233,13 @@
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
+          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
         "name": {
-          "const": "cfnnag",
-          "default": "cfnnag",
+          "const": "cfn-nag",
+          "default": "cfn-nag",
           "title": "Name",
           "type": "string"
         },
@@ -240,11 +270,9 @@
     },
     "CheckovScannerConfig": {
       "additionalProperties": true,
-      "description": "Checkov SAST/IaC scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -255,28 +283,115 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
-          "default": {},
+          "$ref": "#/$defs/CheckovScannerConfigOptions",
+          "default": {
+            "additional_formats": [
+              "cyclonedx_json"
+            ],
+            "config_file": "NOT_PROVIDED",
+            "frameworks": [
+              "all"
+            ],
+            "skip_path": []
+          },
           "description": "Configure Checkov scanner"
-        },
-        "type": {
-          "default": "IAC",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
         }
       },
       "title": "CheckovScannerConfig",
+      "type": "object"
+    },
+    "CheckovScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "additional_formats": {
+          "default": [
+            "cyclonedx_json"
+          ],
+          "description": "List of additional formats to output. Defaults to including CycloneDX JSON",
+          "items": {
+            "enum": [
+              "cli",
+              "csv",
+              "cyclonedx",
+              "cyclonedx_json",
+              "json",
+              "junitxml",
+              "github_failed_only",
+              "gitlab_sast",
+              "sarif",
+              "spdx"
+            ],
+            "type": "string"
+          },
+          "title": "Additional Formats",
+          "type": "array"
+        },
+        "config_file": {
+          "default": "NOT_PROVIDED",
+          "description": "Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
+          "title": "Config File",
+          "type": "string"
+        },
+        "frameworks": {
+          "default": [
+            "all"
+          ],
+          "description": "Specific frameworks to include with Checkov. Defaults to `all`.",
+          "items": {
+            "enum": [
+              "all",
+              "ansible",
+              "argo_workflows",
+              "arm",
+              "azure_pipelines",
+              "bicep",
+              "bitbucket_pipelines",
+              "cdk",
+              "circleci_pipelines",
+              "cloudformation",
+              "dockerfile",
+              "github_configuration",
+              "github_actions",
+              "gitlab_configuration",
+              "gitlab_ci",
+              "bitbucket_configuration",
+              "helm",
+              "json",
+              "yaml",
+              "kubernetes",
+              "kustomize",
+              "openapi",
+              "sca_package",
+              "sca_image",
+              "secrets",
+              "serverless",
+              "terraform",
+              "terraform_json",
+              "terraform_plan",
+              "sast",
+              "sast_python",
+              "sast_java",
+              "sast_javascript",
+              "sast_typescript",
+              "sast_golang",
+              "3d_policy"
+            ],
+            "type": "string"
+          },
+          "title": "Frameworks",
+          "type": "array"
+        },
+        "skip_path": {
+          "default": [],
+          "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Skip Path",
+          "type": "array"
+        }
+      },
+      "title": "CheckovScannerConfigOptions",
       "type": "object"
     },
     "CustomScannerConfig": {
@@ -284,7 +399,7 @@
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
+          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -321,69 +436,19 @@
       "title": "CustomScannerConfig",
       "type": "object"
     },
-    "ExportFormat": {
-      "description": "Supported export formats.",
-      "enum": [
-        "text",
-        "json",
-        "yaml",
-        "csv",
-        "html",
-        "dict",
-        "junitxml",
-        "sarif",
-        "asff",
-        "cyclonedx",
-        "spdx"
-      ],
-      "title": "ExportFormat",
-      "type": "string"
-    },
-    "FileInvocationConfig": {
-      "additionalProperties": false,
-      "description": "Configuration for file scanning.",
-      "properties": {
-        "exclude": {
-          "default": [],
-          "description": "List of file patterns to exclude. Defaults to an empty list, which excludes no files.",
-          "examples": [
-            "tests/"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "title": "Exclude",
-          "type": "array"
-        },
-        "include": {
-          "default": [],
-          "description": "List of file patterns to include. Defaults to an empty list, which includes all files.",
-          "examples": [
-            "**/*"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "title": "Include",
-          "type": "array"
-        }
-      },
-      "title": "FileInvocationConfig",
-      "type": "object"
-    },
     "GitSecretsScannerConfig": {
       "additionalProperties": true,
       "description": "Git Secrets scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
+          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
         "name": {
-          "const": "gitsecrets",
-          "default": "gitsecrets",
+          "const": "git-secrets",
+          "default": "git-secrets",
           "title": "Name",
           "type": "string"
         },
@@ -418,7 +483,7 @@
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
+          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -459,13 +524,13 @@
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
+          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
         "name": {
-          "const": "npmaudit",
-          "default": "npmaudit",
+          "const": "npm-audit",
+          "default": "npm-audit",
           "title": "Name",
           "type": "string"
         },
@@ -494,21 +559,6 @@
       "title": "NpmAuditScannerConfig",
       "type": "object"
     },
-    "OutputConfig": {
-      "description": "Configuration model for output formats.",
-      "properties": {
-        "formats": {
-          "description": "List of output formats to generate",
-          "items": {
-            "type": "string"
-          },
-          "title": "Formats",
-          "type": "array"
-        }
-      },
-      "title": "OutputConfig",
-      "type": "object"
-    },
     "ScannerBaseConfig": {
       "additionalProperties": true,
       "description": "Base converter configuration model with common settings.",
@@ -531,40 +581,144 @@
           "$ref": "#/$defs/BaseScannerOptions",
           "default": {},
           "description": "Scanner options"
-        },
-        "type": {
-          "default": "UNKNOWN",
-          "description": "Type of scanner. Valid options include: typing.Literal['CONTAINER', 'DAST', 'DEPENDENCY', 'IAC', 'SAST', 'SBOM', 'SECRETS', 'UNKNOWN', 'CUSTOM']",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
         }
       },
       "title": "ScannerBaseConfig",
       "type": "object"
     },
-    "ScannerPluginConfig": {
+    "ScannerConfigSegment": {
+      "additionalProperties": {
+        "$ref": "#/$defs/CustomScannerConfig"
+      },
+      "properties": {
+        "bandit": {
+          "$ref": "#/$defs/BanditScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "bandit",
+            "options": {
+              "additional_formats": [],
+              "confidence_level": "all",
+              "excluded_paths": [],
+              "ignore_nosec": false,
+              "severity_level": "all"
+            }
+          },
+          "description": "Configure the options for Bandit"
+        },
+        "cdk-nag": {
+          "$ref": "#/$defs/CdkNagScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "cdk-nag",
+            "options": {
+              "nag_packs": {
+                "AwsSolutionsChecks": true,
+                "HIPAASecurityChecks": false,
+                "NIST80053R4Checks": false,
+                "NIST80053R5Checks": false,
+                "PCIDSS321Checks": false
+              }
+            }
+          },
+          "description": "Configure the options for CdkNag"
+        },
+        "cfn-nag": {
+          "$ref": "#/$defs/CfnNagScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "cfn-nag",
+            "options": {},
+            "type": "IAC"
+          },
+          "description": "Configure the options for CfnNag"
+        },
+        "checkov": {
+          "$ref": "#/$defs/CheckovScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "checkov",
+            "options": {
+              "additional_formats": [
+                "cyclonedx_json"
+              ],
+              "config_file": "NOT_PROVIDED",
+              "frameworks": [
+                "all"
+              ],
+              "skip_path": []
+            }
+          },
+          "description": "Configure the options for Checkov"
+        },
+        "git-secrets": {
+          "$ref": "#/$defs/GitSecretsScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "git-secrets",
+            "options": {},
+            "type": "SECRETS"
+          },
+          "description": "Configure the options for GitSecrets"
+        },
+        "grype": {
+          "$ref": "#/$defs/GrypeScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "grype",
+            "options": {},
+            "type": "SAST"
+          },
+          "description": "Configure the options for Grype"
+        },
+        "npm-audit": {
+          "$ref": "#/$defs/NpmAuditScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "npm-audit",
+            "options": {},
+            "type": "DEPENDENCY"
+          },
+          "description": "Configure the options for NpmAudit"
+        },
+        "semgrep": {
+          "$ref": "#/$defs/SemgrepScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "semgrep",
+            "options": {},
+            "type": "SAST"
+          },
+          "description": "Configure the options for Semgrep"
+        },
+        "syft": {
+          "$ref": "#/$defs/SyftScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "syft",
+            "options": {},
+            "type": "SBOM"
+          },
+          "description": "Configure the options for Syft"
+        }
+      },
+      "title": "ScannerConfigSegment",
+      "type": "object"
+    },
+    "ScannerPlugin": {
       "additionalProperties": true,
-      "description": "Configuration model for scanner plugins.",
+      "description": "Base class for all scanner plugins.",
       "properties": {
         "args": {
-          "default": [],
-          "description": "List of arguments to pass to the scanner command. Defaults to an empty list.",
-          "items": {
-            "type": "string"
+          "$ref": "#/$defs/ToolArgs",
+          "default": {
+            "extra_args": [],
+            "format_arg": null,
+            "format_arg_value": null,
+            "output_arg": null,
+            "scan_path_arg": null
           },
-          "title": "Args",
-          "type": "array"
+          "description": "Specialized arguments to pass to the scanner command. Includes an `extra_args` field which accepts a dictionary of arbitrary arguments to pass to the scanner. These are not configurable at scan time."
         },
         "command": {
           "default": null,
@@ -572,23 +726,68 @@
           "title": "Command",
           "type": "string"
         },
-        "enabled": {
-          "default": true,
-          "description": "Whether the component is enabled",
-          "title": "Enabled",
-          "type": "boolean"
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScannerBaseConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Config"
         },
-        "file_config": {
-          "$ref": "#/$defs/FileInvocationConfig",
-          "default": {
-            "exclude": [],
-            "include": []
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "end_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Time"
+        },
+        "errors": {
+          "default": [],
+          "items": {
+            "type": "string"
           },
-          "description": "Configuration for file scanning. Required if invocation_mode is 'file'."
+          "title": "Errors",
+          "type": "array"
         },
-        "format_arg": {
+        "exit_code": {
+          "default": 0,
+          "title": "Exit Code",
+          "type": "integer"
+        },
+        "output": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Output",
+          "type": "array"
+        },
+        "output_dir": {
           "anyOf": [
             {
+              "format": "path",
               "type": "string"
             },
             {
@@ -596,84 +795,12 @@
             }
           ],
           "default": null,
-          "description": "Argument to pass the format option to when invoking the scanner command. Defaults to not including an arg for the format value, which results in the format option being passed to the scanner as a positional argument at the format_arg_position specified. If a value is provided, the value will be passed into the runtime args prior to the format option.",
-          "examples": [
-            "--format",
-            "-f",
-            "--output-format"
-          ],
-          "title": "Format Arg"
+          "title": "Output Dir"
         },
-        "format_arg_position": {
-          "default": "before_args",
-          "description": "Whether to place the format argument before or after the scanner command args. Defaults to 'before_args'.",
-          "enum": [
-            "before_args",
-            "after_args"
-          ],
-          "title": "Format Arg Position",
-          "type": "string"
-        },
-        "format_arg_value": {
+        "results_dir": {
           "anyOf": [
             {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": "json",
-          "description": "Value to pass to the format argument when invoking the scanner command. Defaults to 'json', but typically is explicitly set in ScannerPlugin implementations as a frozen property.",
-          "examples": [
-            "json",
-            "sarif",
-            "cyclonedx"
-          ],
-          "title": "Format Arg Value"
-        },
-        "get_tool_version_command": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Command to run that should return the scanner version",
-          "title": "Get Tool Version Command"
-        },
-        "invocation_mode": {
-          "default": "directory",
-          "description": "Whether to run the scanner on a directory or a file. Defaults to 'directory' to scan the entire directory. If set to 'file', uses the file_config values to identify the files to scan and scan each one individually.",
-          "enum": [
-            "directory",
-            "file"
-          ],
-          "title": "Invocation Mode",
-          "type": "string"
-        },
-        "name": {
-          "default": null,
-          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-          "minLength": 1,
-          "pattern": "^[a-zA-Z][\\w-]+$",
-          "title": "Name",
-          "type": "string"
-        },
-        "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
-          "default": {},
-          "description": "Scanner options"
-        },
-        "output_arg": {
-          "anyOf": [
-            {
+              "format": "path",
               "type": "string"
             },
             {
@@ -681,50 +808,12 @@
             }
           ],
           "default": null,
-          "description": "Argument to pass the output option to when invoking the scanner command. Defaults to not including an arg for the output value, which results in the output option being passed to the scanner as a positional argument at the format_arg_position specified. If a value is provided, the value will be passed into the runtime args prior to the output option.",
-          "examples": [
-            "--output",
-            "-o",
-            "--outfile"
-          ],
-          "title": "Output Arg"
+          "title": "Results Dir"
         },
-        "output_arg_position": {
-          "default": "before_args",
-          "description": "Whether to place the output argument before or after the scanner command args. Defaults to 'before_args'.",
-          "enum": [
-            "before_args",
-            "after_args"
-          ],
-          "title": "Output Arg Position",
-          "type": "string"
-        },
-        "output_format": {
+        "results_file": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ExportFormat"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Expected output format from the scanner itself."
-        },
-        "output_stream": {
-          "default": "stdout",
-          "description": "Where to read scanner output from. Can be 'stdout', 'stderr' or 'file'. Defaults to 'stdout' to capture the output of the scanner directly.",
-          "enum": [
-            "stdout",
-            "stderr",
-            "file"
-          ],
-          "title": "Output Stream",
-          "type": "string"
-        },
-        "scan_path_arg": {
-          "anyOf": [
-            {
+              "format": "path",
               "type": "string"
             },
             {
@@ -732,44 +821,66 @@
             }
           ],
           "default": null,
-          "description": "Argument to pass the scan path to when invoking the scanner command. Defaults to not including an arg for the scan path value, which results in the path being passed to the scanner as a positional argument at the scan_path_arg_position specified. If the ",
-          "examples": [
-            "-f",
-            "--file",
-            "-p",
-            "--path"
-          ],
-          "title": "Scan Path Arg"
+          "title": "Results File"
         },
-        "scan_path_arg_position": {
-          "default": "after_args",
-          "description": "Whether to place the scan path argument before or after the scanner command args. Defaults to 'after_args'.",
-          "enum": [
-            "before_args",
-            "after_args"
+        "source_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Scan Path Arg Position",
-          "type": "string"
+          "default": null,
+          "title": "Source Dir"
         },
-        "type": {
+        "start_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Time"
+        },
+        "tool_type": {
           "default": "UNKNOWN",
-          "description": "Type of scanner. Valid options include: typing.Literal['CONTAINER', 'DAST', 'DEPENDENCY', 'IAC', 'SAST', 'SBOM', 'SECRETS', 'UNKNOWN', 'CUSTOM']",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
+          "title": "Tool Type",
           "type": "string"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Version"
+        },
+        "work_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Work Dir"
         }
       },
-      "title": "ScannerPluginConfig",
+      "title": "ScannerPlugin",
       "type": "object"
     },
     "SemgrepScannerConfig": {
@@ -778,7 +889,7 @@
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
+          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -819,7 +930,7 @@
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the component is enabled",
+          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -852,6 +963,105 @@
         }
       },
       "title": "SyftScannerConfig",
+      "type": "object"
+    },
+    "ToolArgs": {
+      "additionalProperties": true,
+      "description": "Base class for tool argument dictionaries.",
+      "properties": {
+        "extra_args": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ToolExtraArg"
+          },
+          "title": "Extra Args",
+          "type": "array"
+        },
+        "format_arg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Format Arg"
+        },
+        "format_arg_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Format Arg Value"
+        },
+        "output_arg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Arg"
+        },
+        "scan_path_arg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scan Path Arg"
+        }
+      },
+      "title": "ToolArgs",
+      "type": "object"
+    },
+    "ToolExtraArg": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "title": "ToolExtraArg",
       "type": "object"
     }
   },
@@ -901,14 +1111,11 @@
       "title": "Max Concurrent Scanners",
       "type": "integer"
     },
-    "output": {
-      "$ref": "#/$defs/OutputConfig",
-      "default": {
-        "formats": [
-          "json"
-        ]
-      },
-      "description": "Output configuration settings"
+    "no_cleanup": {
+      "default": false,
+      "description": "Whether to keep the work directory after scanning",
+      "title": "No Cleanup",
+      "type": "boolean"
     },
     "output_dir": {
       "default": "ash_output",
@@ -916,33 +1123,58 @@
       "title": "Output Dir",
       "type": "string"
     },
+    "output_formats": {
+      "default": [
+        "text",
+        "yaml",
+        "json",
+        "junitxml",
+        "html",
+        "cyclonedx",
+        "spdx",
+        "sarif",
+        "csv"
+      ],
+      "description": "Format for scanner results output",
+      "items": {
+        "enum": [
+          "text",
+          "yaml",
+          "json",
+          "junitxml",
+          "html",
+          "cyclonedx",
+          "spdx",
+          "sarif",
+          "csv"
+        ],
+        "type": "string"
+      },
+      "title": "Output Formats",
+      "type": "array"
+    },
     "project_name": {
       "description": "Name of the project being scanned",
       "title": "Project Name",
       "type": "string"
     },
-    "scan_paths": {
-      "default": [
-        "."
-      ],
-      "description": "List of paths to scan",
-      "items": {
-        "type": "string"
-      },
-      "title": "Scan Paths",
-      "type": "array"
-    },
     "scanners": {
-      "default": [
-        {
+      "$ref": "#/$defs/ScannerConfigSegment",
+      "default": {
+        "bandit": {
           "enabled": true,
           "name": "bandit",
-          "options": {},
-          "type": "SAST"
+          "options": {
+            "additional_formats": [],
+            "confidence_level": "all",
+            "excluded_paths": [],
+            "ignore_nosec": false,
+            "severity_level": "all"
+          }
         },
-        {
+        "cdk-nag": {
           "enabled": true,
-          "name": "cdknag",
+          "name": "cdk-nag",
           "options": {
             "nag_packs": {
               "AwsSolutionsChecks": true,
@@ -951,96 +1183,71 @@
               "NIST80053R5Checks": false,
               "PCIDSS321Checks": false
             }
-          },
-          "type": "IAC"
+          }
         },
-        {
+        "cfn-nag": {
           "enabled": true,
-          "name": "cfnnag",
+          "name": "cfn-nag",
           "options": {},
           "type": "IAC"
         },
-        {
+        "checkov": {
           "enabled": true,
           "name": "checkov",
-          "options": {},
-          "type": "IAC"
+          "options": {
+            "additional_formats": [
+              "cyclonedx_json"
+            ],
+            "config_file": "NOT_PROVIDED",
+            "frameworks": [
+              "all"
+            ],
+            "skip_path": []
+          }
         },
-        {
+        "git-secrets": {
           "enabled": true,
-          "name": "gitsecrets",
+          "name": "git-secrets",
           "options": {},
           "type": "SECRETS"
         },
-        {
+        "grype": {
           "enabled": true,
           "name": "grype",
           "options": {},
           "type": "SAST"
         },
-        {
+        "npm-audit": {
           "enabled": true,
-          "name": "npmaudit",
+          "name": "npm-audit",
           "options": {},
           "type": "DEPENDENCY"
         },
-        {
+        "semgrep": {
           "enabled": true,
           "name": "semgrep",
           "options": {},
           "type": "SAST"
         },
-        {
+        "syft": {
           "enabled": true,
           "name": "syft",
           "options": {},
           "type": "SBOM"
         }
-      ],
-      "description": "Scanner configurations by type",
-      "items": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/ScannerBaseConfig"
-          },
-          {
-            "$ref": "#/$defs/CustomScannerConfig"
-          },
-          {
-            "$ref": "#/$defs/BanditScannerConfig"
-          },
-          {
-            "$ref": "#/$defs/CdkNagScannerConfig"
-          },
-          {
-            "$ref": "#/$defs/CfnNagScannerConfig"
-          },
-          {
-            "$ref": "#/$defs/CheckovScannerConfig"
-          },
-          {
-            "$ref": "#/$defs/GitSecretsScannerConfig"
-          },
-          {
-            "$ref": "#/$defs/GrypeScannerConfig"
-          },
-          {
-            "$ref": "#/$defs/NpmAuditScannerConfig"
-          },
-          {
-            "$ref": "#/$defs/SemgrepScannerConfig"
-          },
-          {
-            "$ref": "#/$defs/SyftScannerConfig"
-          }
-        ]
       },
-      "title": "Scanners",
-      "type": "array"
+      "description": "Scanner configurations by type"
     },
     "severity_threshold": {
-      "default": "LOW",
-      "description": "Minimum severity level to report",
+      "default": "MEDIUM",
+      "description": "Minimum severity level to raise unsuccessful exit codes from ASH if found",
+      "enum": [
+        "ALL",
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ],
       "title": "Severity Threshold",
       "type": "string"
     }

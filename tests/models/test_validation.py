@@ -1,8 +1,8 @@
 """Unit tests for validation module."""
 
-from automated_security_helper.models.core import ScannerPluginConfig
+from automated_security_helper.base.plugin import ScannerPlugin
 from automated_security_helper.models.validation import ConfigurationValidator
-from automated_security_helper.models.core import ParserConfig
+from automated_security_helper.base.scanner import ParserConfig
 
 
 def test_validate_config():
@@ -11,24 +11,24 @@ def test_validate_config():
 
     # Test valid dict config
     valid_dict = {"name": "test", "type": "static"}
-    is_valid, error = validator.validate_config(valid_dict, ScannerPluginConfig)
+    is_valid, error = validator.validate_config(valid_dict, ScannerPlugin)
     assert is_valid is True
     assert error is None
 
     # Test valid model config
-    valid_model = ScannerPluginConfig(name="test", type="static")
-    is_valid, error = validator.validate_config(valid_model, ScannerPluginConfig)
+    valid_model = ScannerPlugin(name="test", type="static")
+    is_valid, error = validator.validate_config(valid_model, ScannerPlugin)
     assert is_valid is True
     assert error is None
 
     # Test invalid config
     invalid_config = {}
-    is_valid, error = validator.validate_config(invalid_config, ScannerPluginConfig)
+    is_valid, error = validator.validate_config(invalid_config, ScannerPlugin)
     assert is_valid is False
     assert "Empty configuration" in str(error)
 
     # Test invalid type
-    is_valid, error = validator.validate_config(None, ScannerPluginConfig)  # type: ignore
+    is_valid, error = validator.validate_config(None, ScannerPlugin)  # type: ignore
     assert not is_valid
     assert error is not None
 
@@ -90,13 +90,13 @@ def test_validate_configs_integration():
         {"name": "scanner1", "type": "STATIC"},
         {"name": "scanner2", "type": "IAC"},
     ]
-    results = validator.validate_configs(valid_configs, ScannerPluginConfig)
+    results = validator.validate_configs(valid_configs, ScannerPlugin)
     assert all(result[0] for result in results)
     assert all(result[1] is None for result in results)
 
     # Test invalid configs
     invalid_configs = [{}, {"invalid": "config"}]
-    results = validator.validate_configs(invalid_configs, ScannerPluginConfig)
+    results = validator.validate_configs(invalid_configs, ScannerPlugin)
     print(results)
     assert all(not result[0] for result in results)
     assert all(result[1] is not None for result in results)

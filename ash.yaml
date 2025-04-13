@@ -1,87 +1,67 @@
 # yaml-language-server: $schema=./src/automated_security_helper/schemas/ASHConfig.json
 project_name: automated-security-helper
-ash_image_tag: 'awslabs/ash:v3.0.0'
-# Build overrides to customize the container build.
-# Plugins and other settings set during build cannot be overridden at scan time unless
-# they are explicitly allowed here in the build configuration.
-# This only affects containerized ASH runs.
 build:
-  mode: ASH_MODE_OFFLINE # Build image in offline mode
-  tool_install_scripts:
-    trivy:
-      - wget https://github.com/aquasecurity/trivy/releases/download/v0.61.0/trivy_0.61.0_Linux-64bit.deb
-      - dpkg -i trivy_0.61.0_Linux-64bit.deb
-  custom_scanners:
-    - name: trivy-sast
-      command: trivy
-      args: ["fs"]
-      output_format: sarif
-      output_stream: stdout
-      format_arg: '--format'
-      format_arg_value: sarif
-      format_arg_position: after_args
-      get_tool_version_command:
-        - trivy
-        - '--version'
-      scan_path_arg_position: after_args
-      type: SAST
-    - name: trivy-sbom
-      command: trivy
-      args: ["fs"]
-      output_format: cyclonedx
-      output_stream: stdout
-      format_arg: '--format'
-      format_arg_value: cyclonedx
-      format_arg_position: after_args
-      get_tool_version_command:
-        - trivy
-        - '--version'
-      scan_path_arg_position: after_args
-      type: SBOM
-# General scan settings
+  mode: ASH_MODE_ONLINE
+  custom_scanners: []
 fail_on_findings: true
 ignore_paths:
-  - 'tests/**'
+  - tests/test_data/**
+  - .venv
+  - .git
+  - .ruff
+  - .pytest_cache
+  - .mypy_cache
 output_dir: ash_output
-# SAST scanner settings
-sast:
-  output_formats:
-    - json
-    - csv
-    - junitxml
-    - html
-  scanners:
-    # Default scanners
-    bandit: true
-    cdknag:
-      enabled: true
-      options:
-        nag_packs:
-          AwsSolutionsChecks: true
-          HIPAASecurityChecks: true
-          NIST80053R4Checks: false
-          NIST80053R5Checks: false
-          PCIDSS321Checks: false
-    cfnnag: true
-    checkov: true
-    gitsecrets: true
-    grype: true
-    npmaudit: true
-    semgrep: true
-    # Custom scanner provided by plugin at build time, referencable by key
-    trivy-sast:
-      name: trivy-sast
-      type: SAST
-      enabled: true
-# SBOM scanner settings
-sbom:
-  output_formats:
-    - cyclonedx
-    - html
-  scanners:
-    syft: true
-    # Custom scanner provided by plugin at build time, referencable by key
-    trivy-sbom:
-      name: trivy-sbom
-      type: SBOM
-      enabled: true
+output_formats:
+  - sarif
+  - html
+  - json
+  - csv
+  - junitxml
+  - cyclonedx
+  - text
+severity_threshold: ALL
+
+scanners:
+  bandit:
+    enabled: true
+    name: bandit
+    options:
+      confidence_level: all
+      ignore_nosec: false
+      severity_level: all
+  cdk-nag:
+    enabled: true
+    name: cdk-nag
+    options:
+      nag_packs:
+        AwsSolutionsChecks: true
+        HIPAASecurityChecks: false
+        NIST80053R4Checks: false
+        NIST80053R5Checks: false
+        PCIDSS321Checks: false
+  cfn-nag:
+    enabled: true
+    name: cfn-nag
+    type: IAC
+  checkov:
+    enabled: true
+    name: checkov
+    options:
+      frameworks:
+        - all
+  git-secrets:
+    enabled: true
+    name: git-secrets
+  npm-audit:
+    enabled: true
+    name: npm-audit
+  grype:
+    enabled: true
+    name: grype
+  semgrep:
+    enabled: true
+    name: semgrep
+  syft:
+    enabled: true
+    name: syft

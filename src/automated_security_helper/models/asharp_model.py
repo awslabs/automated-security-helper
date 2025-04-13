@@ -2,13 +2,24 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timezone
-from pydantic import ConfigDict, Field
-from automated_security_helper.models.data_interchange import (
-    SecurityReport,
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
+from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
+from automated_security_helper.schemas.data_interchange import (
     ReportMetadata,
 )
-from typing import Annotated, List, Dict, Any, Union, Optional
+from typing import Annotated, List, Dict, Any, Union
 from automated_security_helper.models.core import BaseFinding, Scanner
+from automated_security_helper.schemas.sarif_schema_model import (
+    PropertyBag,
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
+)
+from automated_security_helper.utils.get_ash_version import get_ash_version
 
 __all__ = ["ASHARPModel"]
 
@@ -19,7 +30,7 @@ from automated_security_helper.models.aggregation import (
 )
 
 
-class ASHARPModel(SecurityReport):
+class ASHARPModel(BaseModel):
     """Main model class for parsing security scan reports from ASH tooling.
 
     This model is the primary interface for handling aggregated security findings from
@@ -39,34 +50,77 @@ class ASHARPModel(SecurityReport):
 
     model_config = ConfigDict(str_strip_whitespace=True, arbitrary_types_allowed=True)
 
-    name: str = Field(default="ASHARP Report", description="Name of the report")
+    name: str = Field(default="ASH Scan Report", description="Name of the report")
     description: str = Field(
-        default="Automated Security Helper Aggregated Report",
+        default="Automated Security Helper - Aggregated Report",
         description="The description of the generated report.",
     )
     metadata: ReportMetadata = Field(
         default_factory=lambda: ReportMetadata(
-            report_id="ASHARP-" + datetime.now(timezone.utc).strftime("%Y%M%d"),
-            project_name="ASHARP",
-            tool_name="ASHARP",
-            tool_version="1.0.0",
+            report_id="ASH-" + datetime.now(timezone.utc).strftime("%Y%M%d"),
+            project_name="ASH",
+            tool_name="ASH",
+            tool_version=get_ash_version(),
             description="Automated Security Helper Aggregated Report Post-processor",
         )
     )
-    findings: List[BaseFinding] = Field(
-        default_factory=list, description="List of security findings from all scanners"
+    ash_config: Annotated[
+        Any,
+        Field(description="The full ASH configuration used during this scan."),
+    ] = None
+    sarif: Annotated[
+        SarifReport | None,
+        Field(description="The SARIF formatted vulnerability report"),
+    ] = SarifReport(
+        properties=PropertyBag(),
+        runs=[
+            Run(
+                tool=Tool(
+                    driver=ToolComponent(
+                        name="ASH Aggregated Results",
+                        fullName="awslabs/automated-security-helper",
+                        version=get_ash_version(),
+                        organization="Amazon Web Services",
+                        downloadUri=ASH_REPO_URL,
+                        informationUri=ASH_DOCS_URL,
+                    )
+                ),
+                results=[],
+                invocations=[],
+                properties=PropertyBag(),
+            )
+        ],
     )
+    sbom: Annotated[
+        CycloneDXReport | None,
+        Field(description="The CycloneDXReport formatted SBOM report"),
+    ] = CycloneDXReport()
+    additional_reports: Annotated[
+        Dict[str, Any],
+        Field(
+            description="Dictionary of additional reports where the keys are the scanner name and the values are the outputs of the scanner."
+        ),
+    ] = {}
     scanners_used: Annotated[
         List[Scanner], Field(description="List of scanners used in this report")
     ] = []
-    _scanners_used_raw: Optional[List[Dict[str, str]]] = None
 
-    def __init__(self, **data):
-        super().__init__(**data)
+    @field_validator("ash_config")
+    def validate_ash_config(cls, v: any):
+        from automated_security_helper.config.ash_config import ASHConfig
+
+        try:
+            return ASHConfig.model_validate(v)
+        except Exception as e:
+            print(f"Failed to validate ASH config: {e}")
+        return get_default_config()
+
+    def model_post_init(self, context):
         self._aggregator = FindingAggregator()
         self._trend_analyzer = TrendAnalyzer()
-        for finding in self.findings:
-            self._aggregator.add_finding(finding)
+        # for finding in self.findings:
+        #     self._aggregator.add_finding(finding)
+        return super().model_post_init(context)
 
     def deduplicate_findings(self) -> List[BaseFinding]:
         """Remove duplicate findings based on key attributes."""
@@ -155,3 +209,23 @@ class ASHARPModel(SecurityReport):
         if isinstance(json_data, str):
             return cls.model_validate_json(json_data)
         return cls.model_validate(json_data)
+
+    def add_report(self, reporter: str, report: SarifReport | CycloneDXReport | str):
+        """Add a report to the model.
+
+        Args:
+            report: The report to add. Can be a SarifReport, CycloneDXReport, or a JSON string.
+        """
+        if isinstance(report, SarifReport):
+            self.sarif.merge_sarif_report(report)
+        elif isinstance(report, CycloneDXReport):
+            self.sbom = report
+        elif isinstance(report, str):
+            self.additional_reports[reporter] = report
+        else:
+            raise ValueError("Invalid report type")
+
+
+if __name__ == "__main__":
+    model = ASHARPModel()
+    print(model.model_dump_json(indent=2))

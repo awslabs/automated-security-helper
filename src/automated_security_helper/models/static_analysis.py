@@ -8,7 +8,7 @@ from pydantic import Field
 
 # Import base classes using relative imports
 from automated_security_helper.models.core import BaseFinding
-from automated_security_helper.models.data_interchange import SecurityReport
+from automated_security_helper.schemas.data_interchange import SecurityReport
 
 
 class StaticAnalysisFinding(BaseFinding):

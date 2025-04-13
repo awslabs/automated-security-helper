@@ -10,7 +10,7 @@ from typing import Annotated, Any, Dict, List, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from automated_security_helper.config.default_config import DEFAULT_ASH_CONFIG
+from automated_security_helper.config.default_config import get_default_config
 
 from automated_security_helper.core.execution_engine import (
     ExecutionStrategy,
@@ -20,8 +20,10 @@ from automated_security_helper.core.result_processor import ResultProcessor
 
 from automated_security_helper.config.config import ASHConfig
 from automated_security_helper.core.exceptions import ASHValidationError
+from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.utils.get_scan_set import scan_set
-from automated_security_helper.utils.log import get_logger
+from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class ASHScanOrchestrator(BaseModel):
@@ -29,8 +31,12 @@ class ASHScanOrchestrator(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
-    source_dir: Annotated[Path, Field(..., description="Source directory to scan")]
-    output_dir: Annotated[Path, Field(..., description="Output directory for results")]
+    source_dir: Annotated[Path, Field(description="Source directory to scan")] = (
+        Path.cwd()
+    )
+    output_dir: Annotated[Path, Field(description="Output directory for results")] = (
+        Path.cwd().joinpath("ash_output")
+    )
     work_dir: Annotated[
         Path, Field(description="Working directory for scan operations")
     ] = None
@@ -43,9 +49,9 @@ class ASHScanOrchestrator(BaseModel):
         Field(description="Whether to execute scanners in parallel or sequentially"),
     ] = ExecutionStrategy.PARALLEL
     scan_output_formats: Annotated[
-        List[str],
+        List[ExportFormat],
         Field(description="List of output formats to generate"),
-    ] = Field(default_factory=lambda: ["json"])
+    ] = ["sarif", "cyclonedx", "json", "html", "junitxml"]
     config_path: Annotated[
         Optional[Path], Field(None, description="Path to configuration file")
     ]
@@ -76,7 +82,6 @@ class ASHScanOrchestrator(BaseModel):
         ResultProcessor | None, Field(description="Result processor")
     ] = None
     execution_engine: Annotated[ScanExecutionEngine | None, Field()] = None
-    logger: Annotated[logging.Logger | None, Field()] = logging.Logger(name=__name__)
 
     def ensure_directories(self):
         """Ensure required directories exist in a thread-safe manner.
@@ -86,7 +91,7 @@ class ASHScanOrchestrator(BaseModel):
         """
         try:
             # Create work directory if it doesn't exist or if no_cleanup is True
-            self.logger.debug(
+            ASH_LOGGER.debug(
                 f"Creating work directory if it does not exist: {self.work_dir}"
             )
             if not self.work_dir.exists() or self.no_cleanup:
@@ -95,14 +100,14 @@ class ASHScanOrchestrator(BaseModel):
                     try:
                         shutil.rmtree(self.work_dir)
                     except PermissionError as e:
-                        self.logger.error(
+                        ASH_LOGGER.error(
                             f"Permission error removing work directory: {str(e)}"
                         )
                         raise ASHValidationError(
                             f"Failed to clean work directory: {str(e)}"
                         )
                     except Exception as e:
-                        self.logger.error(f"Error removing work directory: {str(e)}")
+                        ASH_LOGGER.error(f"Error removing work directory: {str(e)}")
                         raise ASHValidationError(
                             f"Failed to clean work directory: {str(e)}"
                         )
@@ -110,92 +115,90 @@ class ASHScanOrchestrator(BaseModel):
                 try:
                     self.work_dir.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
-                    self.logger.error(f"Failed to create work directory: {str(e)}")
+                    ASH_LOGGER.error(f"Failed to create work directory: {str(e)}")
                     raise ASHValidationError(
                         f"Failed to create work directory: {str(e)}"
                     )
 
             # Create output directory if it doesn't exist
-            self.logger.debug(
+            ASH_LOGGER.debug(
                 f"Creating output directory if it does not exist: {self.output_dir}"
             )
             try:
                 self.output_dir.mkdir(parents=True, exist_ok=True)
             except Exception as e:
-                self.logger.error(f"Failed to create output directory: {str(e)}")
+                ASH_LOGGER.error(f"Failed to create output directory: {str(e)}")
                 raise ASHValidationError(f"Failed to create output directory: {str(e)}")
         except Exception as e:
-            self.logger.error(f"Error ensuring directories: {str(e)}")
+            ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
             raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
 
     def model_post_init(self, context):
         """Post initialization configuration."""
         super().model_post_init(context)
-        self.logger = self._get_logger()
-        self.validate_output_formats()
 
-    def validate_output_formats(self):
-        """Validate output formats."""
-        valid_formats = [
-            "json",
-            "text",
-            "html",
-            "csv",
-            "yaml",
-            "junitxml",
-            "sarif",
-            "asff",
-            "cyclonedx",
-            "spdx",
-        ]
-        invalid_formats = [
-            fmt for fmt in self.scan_output_formats if fmt not in valid_formats
-        ]
-        if invalid_formats:
-            self.logger.error(f"Invalid output formats specified: {invalid_formats}")
-            raise ASHValidationError(f"Invalid output formats: {invalid_formats}")
+        self.config = self._load_config()
 
-        self.logger.debug(f"Using output formats: {self.scan_output_formats}")
+        ASH_LOGGER.debug(f"Using output formats: {self.config.output_formats}")
+        if self.source_dir is None:
+            self.source_dir = Path.cwd()
+        elif not isinstance(self.source_dir, Path):
+            self.source_dir = Path(self.source_dir)
+
+        if self.output_dir is None:
+            self.output_dir = self.source_dir.joinpath("ash_output")
+        elif not isinstance(self.output_dir, Path):
+            self.output_dir = Path(self.output_dir)
+
+        if not self.config.no_cleanup and self.output_dir.exists():
+            shutil.rmtree(self.output_dir)
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.work_dir = self.output_dir.joinpath("work")
         if self.work_dir is None:
             self.work_dir = self.output_dir.joinpath("work")
-        self.result_processor = ResultProcessor(
-            logger=self.logger,
-        )
+
+        if self.work_dir.exists():
+            shutil.rmtree(self.work_dir)
+
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+
         self.scan_set = scan_set(
             source=self.source_dir,
-            output=self.work_dir,
+            output=self.output_dir,
             debug=self.verbose,
         )
-        self.config = self._load_config()
 
         self.execution_engine = ScanExecutionEngine(
             source_dir=self.source_dir,
             output_dir=self.output_dir,
             strategy=self.strategy,
-            logger=self.logger,
             enabled_scanners=self.enabled_scanners,
             config=self.config,
         )
+        self.result_processor = ResultProcessor()
+
+        return super().model_post_init(context)
 
     def _get_logger(self) -> logging.Logger:
         """Configure and return a logger instance."""
-        log_level = (
-            logging.DEBUG
-            if self.debug
-            else (logging.INFO if not self.verbose else logging.DEBUG)
-        )
-        return get_logger(level=log_level)
+        # log_level = (
+        #     logging.DEBUG
+        #     if self.debug
+        #     else (logging.INFO if not self.verbose else logging.DEBUG)
+        # )
+        return ASH_LOGGER
 
     def _load_config(self) -> ASHConfig:
         """Load configuration from file or return default configuration."""
         try:
             if not self.config_path:
-                self.logger.debug(
+                ASH_LOGGER.debug(
                     "No configuration file provided, using default configuration"
                 )
-                config = DEFAULT_ASH_CONFIG
+                config = get_default_config()
             else:
-                self.logger.debug(f"Loading configuration from {self.config_path}")
+                ASH_LOGGER.debug(f"Loading configuration from {self.config_path}")
                 try:
                     with open(self.config_path, "r") as f:
                         if str(self.config_path).endswith(".json"):
@@ -206,79 +209,86 @@ class ASHScanOrchestrator(BaseModel):
                     if not isinstance(config_data, dict):
                         raise ValueError("Configuration must be a dictionary")
 
-                    self.logger.debug("Transforming file config")
+                    ASH_LOGGER.debug("Transforming file config")
                     config = ASHConfig(**config_data)
                 except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
-                    self.logger.error(f"Failed to load configuration file: {str(e)}")
+                    ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
                     raise ASHValidationError(f"Failed to load configuration: {str(e)}")
                 except ValidationError as e:
-                    self.logger.error(f"Configuration validation failed: {str(e)}")
+                    ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
                     raise ASHValidationError(
                         f"Configuration validation failed: {str(e)}"
                     )
 
             # Use CLI-specified formats if provided
             if self.scan_output_formats:
-                config.output.formats = self.scan_output_formats
-                self.logger.debug(
+                config.output_formats = self.scan_output_formats
+                ASH_LOGGER.debug(
                     f"Using CLI-specified output formats: {self.scan_output_formats}"
                 )
 
             return config
         except Exception as e:
-            self.logger.error(f"Error during configuration loading: {str(e)}")
+            ASH_LOGGER.error(f"Error during configuration loading: {str(e)}")
             raise ASHValidationError(f"Failed to load configuration: {str(e)}")
 
     def execute_scan(self) -> Dict:
         """Execute the security scan and return results."""
-        self.logger.info("Starting ASH scan")
-        self.logger.debug(f"Source directory: {self.source_dir}")
-        self.logger.debug(f"Output directory: {self.output_dir}")
-        self.logger.debug(f"Work directory: {self.work_dir}")
-        self.logger.debug(f"Configuration path: {self.config_path}")
-        self.logger.debug(f"Output formats: {self.scan_output_formats}")
+        ASH_LOGGER.info("Starting ASH scan")
+        ASH_LOGGER.debug(f"Source directory: {self.source_dir}")
+        ASH_LOGGER.debug(f"Output directory: {self.output_dir}")
+        ASH_LOGGER.debug(f"Work directory: {self.work_dir}")
+        ASH_LOGGER.debug(f"Configuration path: {self.config_path}")
+        ASH_LOGGER.debug(f"Output formats: {self.scan_output_formats}")
 
         try:
             # Ensure required directories exist
-            self.logger.debug("Ensuring required directories exist")
+            ASH_LOGGER.debug("Ensuring required directories exist")
             self.ensure_directories()
 
             # Load and validate configuration
-            self.logger.debug("Loading and validating configuration")
+            ASH_LOGGER.debug("Loading and validating configuration")
             config = self._load_config()
 
             # Setup execution engine if not already configured
             if self.execution_engine is None:
-                self.logger.debug("Creating execution engine")
+                ASH_LOGGER.debug("Creating execution engine")
                 self.execution_engine = ScanExecutionEngine(
                     source_dir=self.source_dir,
                     output_dir=self.output_dir,
                     work_dir=self.work_dir,
                     strategy=self.strategy,
-                    logger=self.logger,
                     enabled_scanners=self.enabled_scanners,
                     config=self.config,
                 )
 
             # Execute scanners with validated config
-            self.logger.info("Starting ASH execution engine")
+            ASH_LOGGER.info("Starting ASH execution engine")
             try:
-                results = self.execution_engine.execute(config)
-                self.logger.debug("Scan execution completed successfully")
+                asharp_model_results = self.execution_engine.execute(config)
+                ASH_LOGGER.debug("Scan execution completed successfully")
             except Exception as e:
-                self.logger.error(f"Scan execution failed: {str(e)}")
+                ASH_LOGGER.error(f"Scan execution failed: {str(e)}")
                 raise ASHValidationError(f"Scan execution failed: {str(e)}")
 
             # Process and validate results
-            if not results:
-                self.logger.debug("No results returned, using empty result set")
-                results = {"scanners": {}}
+            if not asharp_model_results:
+                ASH_LOGGER.debug("No results returned, using empty result set")
+                asharp_model_results = ASHARPModel(
+                    description="ASH execution engine returned no results!"
+                )
 
-            self.logger.info("ASH scan completed successfully")
-            return results
+                ASH_LOGGER.info("ASH scan completed successfully!")
+            if not self.config.no_cleanup:
+                ASH_LOGGER.info("Cleaning up working directory...")
+                shutil.rmtree(self.work_dir)
+                # ASH_LOGGER.info("Cleaning up scanners directory...")
+                # shutil.rmtree(self.output_dir.joinpath("scanners"))
+
+            return asharp_model_results
 
         except ASHValidationError:
             raise
         except Exception as e:
-            self.logger.error(f"Unexpected error during scan execution: {str(e)}")
+            ASH_LOGGER.error(f"Unexpected error during scan execution: {str(e)}")
             raise ASHValidationError(f"Scan execution failed: {str(e)}")

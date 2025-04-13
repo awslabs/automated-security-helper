@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Union
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AnyUrl, BaseModel, ConfigDict, EmailStr, Field, RootModel
 
 from . import spdx
 
@@ -34,23 +34,23 @@ class Confidence(BaseModel):
     )
 
 
-class RefType(BaseModel):
-    __root__: str = Field(
+class RefType(RootModel):
+    root: str = Field(
         ...,
         description="Identifier for referable and therefore interlinkable elements.\nValue SHOULD not start with the BOM-Link intro 'urn:cdx:' to avoid conflicts with BOM-Links.",
         min_length=1,
     )
 
 
-class RefLinkType(BaseModel):
-    __root__: RefType = Field(
+class RefLinkType(RootModel):
+    root: RefType = Field(
         ...,
         description="Descriptor for an element identified by the attribute 'bom-ref' in the same BOM document.\nIn contrast to `bomLinkElementType`.",
     )
 
 
-class BomLinkDocumentType(BaseModel):
-    __root__: str = Field(
+class BomLinkDocumentType(RootModel):
+    root: str = Field(
         ...,
         description="Descriptor for another BOM document. See https://cyclonedx.org/capabilities/bomlink/",
         title="BOM-Link Document",
@@ -58,8 +58,8 @@ class BomLinkDocumentType(BaseModel):
     )
 
 
-class BomLinkElementType(BaseModel):
-    __root__: str = Field(
+class BomLinkElementType(RootModel):
+    root: str = Field(
         ...,
         description="Descriptor for an element in a BOM document. See https://cyclonedx.org/capabilities/bomlink/",
         title="BOM-Link Element",
@@ -67,10 +67,8 @@ class BomLinkElementType(BaseModel):
     )
 
 
-class BomLink(BaseModel):
-    __root__: Union[BomLinkDocumentType, BomLinkElementType] = Field(
-        ..., title="BOM-Link"
-    )
+class BomLink(RootModel):
+    root: Union[BomLinkDocumentType, BomLinkElementType] = Field(..., title="BOM-Link")
 
 
 class Phase(Enum):
@@ -199,8 +197,8 @@ class HashAlg(Enum):
     BLAKE3 = "BLAKE3"
 
 
-class HashContent(BaseModel):
-    __root__: str = Field(
+class HashContent(RootModel):
+    root: str = Field(
         ...,
         description="The value of the hash.",
         examples=["3942447fac867ae5cdb3229b658f4d48"],
@@ -233,8 +231,8 @@ class LicenseAcknowledgementEnumeration(Enum):
     concluded = "concluded"
 
 
-class LicenseChoice(BaseModel):
-    __root__: List = Field(
+class LicenseChoice(RootModel):
+    root: List = Field(
         ...,
         description="EITHER (list of SPDX licenses and/or named licenses) OR (tuple of one SPDX License Expression)",
         title="License Choice",
@@ -399,13 +397,11 @@ class Dependency(BaseModel):
         None,
         description="The bom-ref identifiers of the components or services that are dependencies of this dependency object.",
         title="Depends On",
-        unique_items=True,
     )
     provides: Optional[List[RefLinkType]] = Field(
         None,
         description="The bom-ref identifiers of the components or services that define a given specification or standard, which are provided or implemented by this dependency object.\nFor example, a cryptographic library which implements a cryptographic algorithm. A component which implements another component does not imply that the implementation is in use.",
         title="Provides",
-        unique_items=True,
     )
 
 
@@ -546,8 +542,8 @@ class Property(BaseModel):
     )
 
 
-class LocaleType(BaseModel):
-    __root__: str = Field(
+class LocaleType(RootModel):
+    root: str = Field(
         ...,
         description="Defines a syntax for representing two character language code (ISO-639) followed by an optional two character country code. The language code must be lower case. If the country code is specified, the country code must be upper case. The language code and country code must be separated by a minus sign. Examples: en, en-US, fr, fr-CA",
         title="Locale",
@@ -555,8 +551,8 @@ class LocaleType(BaseModel):
     )
 
 
-class ReleaseType(BaseModel):
-    __root__: str = Field(
+class ReleaseType(RootModel):
+    root: str = Field(
         ...,
         description="The software versioning type. It is recommended that the release type use one of 'major', 'minor', 'patch', 'pre-release', or 'internal'. Representing all possible software release types is not practical, so standardizing on the recommended values, whenever possible, is strongly encouraged.\n\n* __major__ = A major release may contain significant changes or may introduce breaking changes.\n* __minor__ = A minor release, also known as an update, may contain a smaller number of changes than major releases.\n* __patch__ = Patch releases are typically unplanned and may resolve defects or important security issues.\n* __pre-release__ = A pre-release may include alpha, beta, or release candidates and typically have limited support. They provide the ability to preview a release prior to its general availability.\n* __internal__ = Internal releases are not for public consumption and are intended to be used exclusively by the project or manufacturer that produced it.",
         examples=["major", "minor", "patch", "pre-release", "internal"],
@@ -593,8 +589,8 @@ class Advisory(BaseModel):
     )
 
 
-class Cwe(BaseModel):
-    __root__: int = Field(
+class Cwe(RootModel):
+    root: int = Field(
         ...,
         description="Integer representation of a Common Weaknesses Enumerations (CWE). For example 399 (of https://cwe.mitre.org/data/definitions/399.html)",
         title="CWE",
@@ -749,8 +745,8 @@ class AffectedStatus(Enum):
     unknown = "unknown"
 
 
-class Version(BaseModel):
-    __root__: str = Field(
+class Version(RootModel):
+    root: str = Field(
         ...,
         description="A single disjunctive version identifier, for a component or service.",
         examples=["9.0.14", "v1.33.7", "7.0.0-M1", "2.0pre1", "1.0.0-beta1", "0.8.15"],
@@ -758,8 +754,8 @@ class Version(BaseModel):
     )
 
 
-class VersionRange(BaseModel):
-    __root__: str = Field(
+class VersionRange(RootModel):
+    root: str = Field(
         ...,
         description="A version range specified in Package URL Version Range syntax (vers) which is defined at https://github.com/package-url/purl-spec/blob/master/VERSION-RANGE-SPEC.rst",
         examples=[
@@ -774,8 +770,8 @@ class VersionRange(BaseModel):
     )
 
 
-class Range(BaseModel):
-    __root__: VersionRange = Field(
+class Range(RootModel):
+    root: VersionRange = Field(
         ..., description="Deprecated definition. use definition `versionRange` instead."
     )
 
@@ -948,8 +944,8 @@ class FairnessAssessment(BaseModel):
     )
 
 
-class DataClassification(BaseModel):
-    __root__: str = Field(
+class DataClassification(RootModel):
+    root: str = Field(
         ...,
         description="Data classification tags data according to its type, sensitivity, and value if altered, stolen, or destroyed.",
         title="Data Classification",
@@ -1276,7 +1272,6 @@ class ComponentIdentityEvidence(BaseModel):
         None,
         description="The object in the BOM identified by its bom-ref. This is often a component or service but may be any object type supporting bom-refs. Tools used for analysis should already be defined in the BOM, either in the metadata/tools, components, or formulation.",
         title="BOM References",
-        unique_items=True,
     )
 
 
@@ -1574,7 +1569,7 @@ class CertificateProperties(BaseModel):
 class Type10(Enum):
     private_key = "private-key"
     public_key = "public-key"
-    secret_key = "secret-key"
+    secret_key = "secret-key"  # nosec - False positive, not a hardcoded password
     key = "key"
     ciphertext = "ciphertext"
     signature = "signature"
@@ -1583,12 +1578,12 @@ class Type10(Enum):
     nonce = "nonce"
     seed = "seed"
     salt = "salt"
-    shared_secret = "shared-secret"
+    shared_secret = "shared-secret"  # nosec - False positive, not a hardcoded password
     tag = "tag"
     additional_data = "additional-data"
-    password = "password"
+    password = "password"  # nosec - False positive, not a hardcoded password
     credential = "credential"
-    token = "token"
+    token = "token"  # nosec - False positive, not a hardcoded password
     other = "other"
     unknown = "unknown"
 
@@ -1636,8 +1631,8 @@ class CipherSuite(BaseModel):
     )
 
 
-class CryptoRefArray(BaseModel):
-    __root__: List[RefType]
+class CryptoRefArray(RootModel):
+    root: List[RefType]
 
 
 class SecuredBy(BaseModel):
@@ -1656,8 +1651,8 @@ class SecuredBy(BaseModel):
     )
 
 
-class Tags(BaseModel):
-    __root__: List[str] = Field(
+class Tags(RootModel):
+    root: List[str] = Field(
         ...,
         description="Textual strings that aid in discovery, search, and retrieval of the associated object. Tags often serve as a way to group or categorize similar or related objects by various attributes.",
         examples=[
@@ -2210,8 +2205,8 @@ class License2(BaseModel):
     )
 
 
-class License(BaseModel):
-    __root__: Union[License1, License2] = Field(
+class License(RootModel):
+    root: Union[License1, License2] = Field(
         ...,
         description="Specifies the details and attributes related to a software license. It can either include a valid SPDX license identifier or a named license, along with additional properties such as license acknowledgment, comprehensive commercial licensing information, and the full text of the license.",
         title="License",
@@ -2516,8 +2511,8 @@ class DataGovernanceResponsibleParty2(BaseModel):
     )
 
 
-class DataGovernanceResponsibleParty(BaseModel):
-    __root__: Union[DataGovernanceResponsibleParty1, DataGovernanceResponsibleParty2]
+class DataGovernanceResponsibleParty(RootModel):
+    root: Union[DataGovernanceResponsibleParty1, DataGovernanceResponsibleParty2]
 
 
 class GraphicsCollection(BaseModel):
@@ -2624,8 +2619,8 @@ class ResourceReferenceChoice2(BaseModel):
     )
 
 
-class ResourceReferenceChoice(BaseModel):
-    __root__: Union[ResourceReferenceChoice1, ResourceReferenceChoice2] = Field(
+class ResourceReferenceChoice(RootModel):
+    root: Union[ResourceReferenceChoice1, ResourceReferenceChoice2] = Field(
         ...,
         description="A reference to a locally defined resource (e.g., a bom-ref) or an externally accessible resource.",
         title="Resource reference choice",
@@ -3031,7 +3026,6 @@ class Workspace(BaseModel):
         None,
         description="References to component or service resources that are used to realize the resource instance.",
         title="Resource references",
-        unique_items=True,
     )
     accessMode: Optional[AccessMode] = Field(
         None,
@@ -3138,13 +3132,11 @@ class InputType1(BaseModel):
         None,
         description="Inputs that have the form of parameters with names and values.",
         title="Parameters",
-        unique_items=True,
     )
     environmentVars: Optional[List[Union[Property, str]]] = Field(
         None,
         description="Inputs that have the form of parameters with names and values.",
         title="Environment variables",
-        unique_items=True,
     )
     data: Optional[Attachment] = Field(
         None, description="Inputs that have the form of data.", title="Data"
@@ -3186,13 +3178,11 @@ class InputType2(BaseModel):
         ...,
         description="Inputs that have the form of parameters with names and values.",
         title="Parameters",
-        unique_items=True,
     )
     environmentVars: Optional[List[Union[Property, str]]] = Field(
         None,
         description="Inputs that have the form of parameters with names and values.",
         title="Environment variables",
-        unique_items=True,
     )
     data: Optional[Attachment] = Field(
         None, description="Inputs that have the form of data.", title="Data"
@@ -3234,13 +3224,11 @@ class InputType3(BaseModel):
         None,
         description="Inputs that have the form of parameters with names and values.",
         title="Parameters",
-        unique_items=True,
     )
     environmentVars: List[Union[Property, str]] = Field(
         ...,
         description="Inputs that have the form of parameters with names and values.",
         title="Environment variables",
-        unique_items=True,
     )
     data: Optional[Attachment] = Field(
         None, description="Inputs that have the form of data.", title="Data"
@@ -3282,13 +3270,11 @@ class InputType4(BaseModel):
         None,
         description="Inputs that have the form of parameters with names and values.",
         title="Parameters",
-        unique_items=True,
     )
     environmentVars: Optional[List[Union[Property, str]]] = Field(
         None,
         description="Inputs that have the form of parameters with names and values.",
         title="Environment variables",
-        unique_items=True,
     )
     data: Attachment = Field(
         ..., description="Inputs that have the form of data.", title="Data"
@@ -3300,8 +3286,8 @@ class InputType4(BaseModel):
     )
 
 
-class InputType(BaseModel):
-    __root__: Union[InputType1, InputType2, InputType3, InputType4] = Field(
+class InputType(RootModel):
+    root: Union[InputType1, InputType2, InputType3, InputType4] = Field(
         ...,
         description="Type that represents various input data types and formats.",
         title="Input type",
@@ -3342,7 +3328,6 @@ class OutputType1(BaseModel):
         None,
         description="Outputs that have the form of environment variables.",
         title="Environment variables",
-        unique_items=True,
     )
     properties: Optional[List[Property]] = Field(
         None,
@@ -3385,7 +3370,6 @@ class OutputType2(BaseModel):
         ...,
         description="Outputs that have the form of environment variables.",
         title="Environment variables",
-        unique_items=True,
     )
     properties: Optional[List[Property]] = Field(
         None,
@@ -3428,7 +3412,6 @@ class OutputType3(BaseModel):
         None,
         description="Outputs that have the form of environment variables.",
         title="Environment variables",
-        unique_items=True,
     )
     properties: Optional[List[Property]] = Field(
         None,
@@ -3437,8 +3420,8 @@ class OutputType3(BaseModel):
     )
 
 
-class OutputType(BaseModel):
-    __root__: Union[OutputType1, OutputType2, OutputType3]
+class OutputType(RootModel):
+    root: Union[OutputType1, OutputType2, OutputType3]
 
 
 class Signature1(BaseModel):
@@ -3465,8 +3448,8 @@ class Signature2(BaseModel):
     )
 
 
-class Signature(BaseModel):
-    __root__: Union[Signature1, Signature2, Signer] = Field(..., title="Signature")
+class Signature(RootModel):
+    root: Union[Signature1, Signature2, Signer] = Field(..., title="Signature")
 
 
 class Datum(BaseModel):
@@ -3611,7 +3594,6 @@ class Trigger(BaseModel):
         None,
         description="References to component or service resources that are used to realize the resource instance.",
         title="Resource references",
-        unique_items=True,
     )
     type: Type6 = Field(
         ...,
@@ -3627,7 +3609,6 @@ class Trigger(BaseModel):
         None,
         description="A list of conditions used to determine if a trigger should be activated.",
         title="Conditions",
-        unique_items=True,
     )
     timeActivated: Optional[datetime] = Field(
         None,
@@ -3641,14 +3622,12 @@ class Trigger(BaseModel):
             "a `configuration` file which was declared as a local `component` or `externalReference`"
         ],
         title="Inputs",
-        unique_items=True,
     )
     outputs: Optional[List[OutputType]] = Field(
         None,
         description="Represents resources and data output from a task at runtime by executor or task commands",
         examples=["a log file or metrics data produced by the task"],
         title="Outputs",
-        unique_items=True,
     )
     properties: Optional[List[Property]] = Field(
         None,
@@ -3967,19 +3946,16 @@ class Compositions(BaseModel):
         None,
         description="The bom-ref identifiers of the components or services being described. Assemblies refer to nested relationships whereby a constituent part may include other constituent parts. References do not cascade to child parts. References are explicit for the specified constituent part only.",
         title="BOM references",
-        unique_items=True,
     )
     dependencies: Optional[List[str]] = Field(
         None,
         description="The bom-ref identifiers of the components or services being described. Dependencies refer to a relationship whereby an independent constituent part requires another independent constituent part. References do not cascade to transitive dependencies. References are explicit for the specified dependency only.",
         title="BOM references",
-        unique_items=True,
     )
     vulnerabilities: Optional[List[str]] = Field(
         None,
         description="The bom-ref identifiers of the vulnerabilities being described.",
         title="BOM references",
-        unique_items=True,
     )
     signature: Optional[Signature] = Field(
         None,
@@ -4125,7 +4101,6 @@ class Task(BaseModel):
         None,
         description="References to component or service resources that are used to realize the resource instance.",
         title="Resource references",
-        unique_items=True,
     )
     taskTypes: List[TaskType] = Field(
         ...,
@@ -4139,7 +4114,6 @@ class Task(BaseModel):
         None,
         description="The sequence of steps for the task.",
         title="Steps",
-        unique_items=True,
     )
     inputs: Optional[List[InputType]] = Field(
         None,
@@ -4148,14 +4122,12 @@ class Task(BaseModel):
             "a `configuration` file which was declared as a local `component` or `externalReference`"
         ],
         title="Inputs",
-        unique_items=True,
     )
     outputs: Optional[List[OutputType]] = Field(
         None,
         description="Represents resources and data output from a task at runtime by executor or task commands",
         examples=["a log file or metrics data produced by the task"],
         title="Outputs",
-        unique_items=True,
     )
     timeStart: Optional[datetime] = Field(
         None,
@@ -4171,13 +4143,11 @@ class Task(BaseModel):
         None,
         description="A set of named filesystem or data resource shareable by workflow tasks.",
         title="Workspaces",
-        unique_items=True,
     )
     runtimeTopology: Optional[List[Dependency]] = Field(
         None,
         description="A graph of the component runtime topology for task's instance.",
         title="Runtime topology",
-        unique_items=True,
     )
     properties: Optional[List[Property]] = Field(
         None,
@@ -4273,19 +4243,16 @@ class Workflow(BaseModel):
         None,
         description="References to component or service resources that are used to realize the resource instance.",
         title="Resource references",
-        unique_items=True,
     )
     tasks: Optional[List[Task]] = Field(
         None,
         description="The tasks that comprise the workflow.",
         title="Tasks",
-        unique_items=True,
     )
     taskDependencies: Optional[List[Dependency]] = Field(
         None,
         description="The graph of dependencies between tasks within the workflow.",
         title="Task dependency graph",
-        unique_items=True,
     )
     taskTypes: List[TaskType] = Field(
         ...,
@@ -4299,7 +4266,6 @@ class Workflow(BaseModel):
         None,
         description="The sequence of steps for the task.",
         title="Steps",
-        unique_items=True,
     )
     inputs: Optional[List[InputType]] = Field(
         None,
@@ -4308,14 +4274,12 @@ class Workflow(BaseModel):
             "a `configuration` file which was declared as a local `component` or `externalReference`"
         ],
         title="Inputs",
-        unique_items=True,
     )
     outputs: Optional[List[OutputType]] = Field(
         None,
         description="Represents resources and data output from a task at runtime by executor or task commands",
         examples=["a log file or metrics data produced by the task"],
         title="Outputs",
-        unique_items=True,
     )
     timeStart: Optional[datetime] = Field(
         None,
@@ -4331,13 +4295,11 @@ class Workflow(BaseModel):
         None,
         description="A set of named filesystem or data resource shareable by workflow tasks.",
         title="Workspaces",
-        unique_items=True,
     )
     runtimeTopology: Optional[List[Dependency]] = Field(
         None,
         description="A graph of the component runtime topology for workflow's instance.",
         title="Runtime topology",
-        unique_items=True,
     )
     properties: Optional[List[Property]] = Field(
         None,
@@ -4415,13 +4377,11 @@ class Tools(BaseModel):
         None,
         description="A list of software and hardware components used as tools.",
         title="Components",
-        unique_items=True,
     )
     services: Optional[List[Service]] = Field(
         None,
         description="A list of services used as tools. This may include microservices, function-as-a-service, and other types of network or intra-process services.",
         title="Services",
-        unique_items=True,
     )
 
 
@@ -4795,7 +4755,6 @@ class Vulnerability(BaseModel):
         None,
         description="The components or services that are affected by the vulnerability.",
         title="Affects",
-        unique_items=True,
     )
     properties: Optional[List[Property]] = Field(
         None,
@@ -4893,7 +4852,6 @@ class Annotations(BaseModel):
         ...,
         description="The object in the BOM identified by its bom-ref. This is often a component or service, but may be any object type supporting bom-refs.",
         title="Subjects",
-        unique_items=True,
     )
     annotator: Union[Annotator, Annotator1, Annotator2, Annotator3] = Field(
         ...,
@@ -4930,19 +4888,16 @@ class Formula(BaseModel):
         None,
         description="Transient components that are used in tasks that constitute one or more of this formula's workflows",
         title="Components",
-        unique_items=True,
     )
     services: Optional[List[Service]] = Field(
         None,
         description="Transient services that are used in tasks that constitute one or more of this formula's workflows",
         title="Services",
-        unique_items=True,
     )
     workflows: Optional[List[Workflow]] = Field(
         None,
         description="List of workflows that can be declared to accomplish specific orchestrated goals and independently triggered.",
         title="Workflows",
-        unique_items=True,
     )
     properties: Optional[List[Property]] = Field(
         None,
@@ -4951,19 +4906,19 @@ class Formula(BaseModel):
     )
 
 
-class CyclonedxBillOfMaterialsStandard(BaseModel):
+class CycloneDXReport(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
 
     field_schema: Optional[str] = Field(None, alias="$schema")
     bomFormat: BomFormat = Field(
-        ...,
+        BomFormat.CycloneDX,
         description='Specifies the format of the BOM. This helps to identify the file as CycloneDX since BOMs do not have a filename convention, nor does JSON schema support namespaces. This value must be "CycloneDX".',
         title="BOM Format",
     )
     specVersion: str = Field(
-        ...,
+        "1.6",
         description="The version of the CycloneDX specification the BOM conforms to.",
         examples=["1.6"],
         title="CycloneDX Specification Version",
@@ -4991,13 +4946,11 @@ class CyclonedxBillOfMaterialsStandard(BaseModel):
         None,
         description="A list of software and hardware components.",
         title="Components",
-        unique_items=True,
     )
     services: Optional[List[Service]] = Field(
         None,
         description="A list of services. This may include microservices, function-as-a-service, and other types of network or intra-process services.",
         title="Services",
-        unique_items=True,
     )
     externalReferences: Optional[List[ExternalReference]] = Field(
         None,
@@ -5008,31 +4961,26 @@ class CyclonedxBillOfMaterialsStandard(BaseModel):
         None,
         description="Provides the ability to document dependency relationships including provided & implemented components.",
         title="Dependencies",
-        unique_items=True,
     )
     compositions: Optional[List[Compositions]] = Field(
         None,
         description="Compositions describe constituent parts (including components, services, and dependency relationships) and their completeness. The completeness of vulnerabilities expressed in a BOM may also be described.",
         title="Compositions",
-        unique_items=True,
     )
     vulnerabilities: Optional[List[Vulnerability]] = Field(
         None,
         description="Vulnerabilities identified in components or services.",
         title="Vulnerabilities",
-        unique_items=True,
     )
     annotations: Optional[List[Annotations]] = Field(
         None,
         description="Comments made by people, organizations, or tools about any object with a bom-ref, such as components, services, vulnerabilities, or the BOM itself. Unlike inventory information, annotations may contain opinions or commentary from various stakeholders. Annotations may be inline (with inventory) or externalized via BOM-Link and may optionally be signed.",
         title="Annotations",
-        unique_items=True,
     )
     formulation: Optional[List[Formula]] = Field(
         None,
         description="Describes how a component or service was manufactured or deployed. This is achieved through the use of formulas, workflows, tasks, and steps, which declare the precise steps to reproduce along with the observed formulas describing the steps which transpired in the manufacturing process.",
         title="Formulation",
-        unique_items=True,
     )
     declarations: Optional[Declarations] = Field(
         None,
@@ -5058,7 +5006,7 @@ class CyclonedxBillOfMaterialsStandard(BaseModel):
 
 Service.model_rebuild()
 Targets.model_rebuild()
-CyclonedxBillOfMaterialsStandard.model_rebuild()
+CycloneDXReport.model_rebuild()
 Tools.model_rebuild()
 Metadata.model_rebuild()
 Pedigree.model_rebuild()

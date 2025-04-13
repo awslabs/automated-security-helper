@@ -1,13 +1,12 @@
 """Unit tests for execution engine module."""
 
-import logging
 from typing import Dict, Optional, Type
 
 from automated_security_helper.core.execution_engine import (
     ExecutionStrategy,
     ScanExecutionEngine,
 )
-from automated_security_helper.models.scanner_plugin import ScannerPlugin
+from automated_security_helper.base.plugin import ScannerPlugin
 
 from automated_security_helper.config.config import (
     ASHConfig,
@@ -19,6 +18,7 @@ from automated_security_helper.config.config import (
 from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 
+from automated_security_helper.utils.log import ASH_LOGGER
 from tests.conftest import TEST_OUTPUT_DIR, TEST_SOURCE_DIR
 
 
@@ -34,7 +34,6 @@ class MockEngine(ScanExecutionEngine):
         # Set up paths and logging first
         source_dir = source_dir or TEST_SOURCE_DIR
         output_dir = output_dir or TEST_OUTPUT_DIR
-        self.logger = logging.getLogger("test_execution_engine")
 
         # Initialize engine state and scanners
         self._scanners = {}  # Start with empty scanner registry
@@ -45,13 +44,12 @@ class MockEngine(ScanExecutionEngine):
         class TestScannerFactory:
             """Scanner factory for testing."""
 
-            def __init__(self, logger):
-                self._logger = logger
+            def __init__(self):
                 self._scanners = {
                     "bandit": BanditScanner,
                     # 'cfnnag': CFNNagScanner
                 }
-                self._logger.debug(
+                ASH_LOGGER.debug(
                     f"Initialized scanner factory with: {list(self._scanners.keys())}"
                 )
 
@@ -76,7 +74,7 @@ class MockEngine(ScanExecutionEngine):
                 return scanner_class(**kwargs)
 
         # Create scanner factory and mark engine as uninitialized
-        self._scanner_factory = TestScannerFactory(self.logger)
+        self._scanner_factory = TestScannerFactory()
         self._initialized = False
 
         # Initialize parent with scanner factory ready
@@ -84,7 +82,6 @@ class MockEngine(ScanExecutionEngine):
             source_dir=source_dir,
             output_dir=output_dir,
             strategy=strategy,
-            logger=self.logger,
         )
 
         # Default config for testing

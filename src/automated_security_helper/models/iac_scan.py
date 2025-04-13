@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Annotated, List, Optional, Dict, Union
 from pydantic import Field, ConfigDict
 from automated_security_helper.models.core import BaseFinding
-from automated_security_helper.models.data_interchange import SecurityReport
+from automated_security_helper.schemas.data_interchange import SecurityReport
 
 __all__ = [
     "ComplianceFramework",

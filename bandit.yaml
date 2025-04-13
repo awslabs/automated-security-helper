@@ -1,5 +1,16 @@
+# These are already in .gitignore, but bandit likes to include
+# the still in the scan. These are excluded to decrease scan time
+# on code that shouldn't be included in scan the first place.
+exclude_dirs:
+  - .venv
+  - test-results
+  - ash_output
+  - .mypy_cache
+  - .pytest_cache
+  - .ruff_cache
 # Do not check for assert_used in test files;
-# they use `assert` intentionally, leading to B101 false positives.
-
+# they use `assert` intentionally (pytest), leading to `B101` false positives.
 assert_used:
-  skips: ["*/test_*.py", "**/test_*.py"]
+  skips:
+    - "*/test_*.py"
+    - "**/test_*.py"

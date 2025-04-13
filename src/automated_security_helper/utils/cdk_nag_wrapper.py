@@ -1,6 +1,14 @@
-#!/usr/bin/env python3
-import inspect
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 import os
+
+# noqa
+os.environ["JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION"] = "1"
+# noqa
+os.environ["JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION"] = "1"
+
+import inspect
 import re
 import shutil
 
@@ -9,9 +17,6 @@ from cfn_tools import load_yaml
 
 from automated_security_helper.models.core import Location
 from automated_security_helper.models.iac_scan import IaCVulnerability
-
-# noqa
-os.environ["JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION"] = "1"
 
 import cdk_nag
 import json
@@ -85,7 +90,13 @@ def get_model_from_template(
     with open(template_path, "r") as f:
         template = load_yaml(f.read())
 
-    return CloudFormationTemplateModel.model_validate(template)
+    try:
+        res = CloudFormationTemplateModel.model_validate(template)
+    except Exception:
+        # ASH_LOGGER.debug(f"Error validating template: {e}")
+        # ASH_LOGGER.debug(f"Error validating template: {e}")
+        return None
+    return res
 
 
 # Enumerate all classes in `cdk_nag`, identify any that extend `NagPack`
@@ -275,89 +286,8 @@ def run_cdk_nag_against_cfn_template(
                 raw=json.loads(json.dumps(line, default=str)),
             )
             results[pack_name].append(finding)
-            # ASH_LOGGER.debug(f"Finding: {finding.model_dump_json(indent=2)}")
 
-    # item: SynthesisMessage
-    # for pack in nag_packs:
-    #     results[pack] = []
-    #     pack_type: type[cdk_nag.NagPack] = nag_pack_lookup[pack]["packType"]
-    #     pack_name = pack_type().read_pack_name
-
-    #     cdk_nag_annotations = []
-    #     # cdk_nag_annotations = [
-    #     #     *(
-    #     #         Annotations.from_stack(stack).find_info(
-    #     #             "*",
-    #     #             Match.string_like_regexp(rf"{re.escape(pack_name)}-.*"),
-    #     #         )
-    #     #     ),
-    #     #     *(
-    #     #         Annotations.from_stack(stack).find_warning(
-    #     #             "*",
-    #     #             Match.string_like_regexp(rf"{re.escape(pack_name)}-.*"),
-    #     #         )
-    #     #     ),
-    #     #     *(
-    #     #         Annotations.from_stack(stack).find_error(
-    #     #             "*",
-    #     #             Match.string_like_regexp(rf"{re.escape(pack_name)}-.*"),
-    #     #         )
-    #     #     ),
-    #     # ]
-    #     # ASH_LOGGER.debug(f"Pack '{pack}' annotations: {len(cdk_nag_annotations)}")
-    #     # ASH_LOGGER.debug(
-    #     #     f"Pack '{pack}' annotations: {json.dumps(cdk_nag_annotations, default=str, indent=2)}"
-    #     # )
-    #     for item in cdk_nag_annotations:
-    #         finding_ids: re.Match[str] | None = re.search(
-    #             rf"({re.escape(pack_name)}-\w+):", item.entry.data
-    #         )
-    #         if finding_ids is not None:
-    #             finding_id = finding_ids.group(1)
-
-    #         resource_log_id = item.id.split("/")[-1]
-
-    #         finding = IaCVulnerability(
-    #             compliance_frameworks=[pack_name],
-    #             id=f"{item.id}/{finding_id}".lstrip("/"),
-    #             title=item.id.lstrip("/"),
-    #             rule_id=finding_id.lstrip("/"),
-    #             severity=(
-    #                 "CRITICAL"
-    #                 if item.level == SynthesisMessageLevel.ERROR
-    #                 else (
-    #                     "MEDIUM"
-    #                     if item.level == SynthesisMessageLevel.WARNING
-    #                     else "INFO"
-    #                 )
-    #             ),
-    #             resource_name=resource_log_id,
-    #             resource_type=[
-    #                 item.Type
-    #                 for resource_id, item in model.Resources.items()
-    #                 if resource_id == resource_log_id
-    #             ][0],
-    #             description=item.entry.data,
-    #             location=Location(
-    #                 file_path=Path(template_path).as_posix(),
-    #             ),
-    #             raw=dict(
-    #                 id=item.id,
-    #                 level=item.level,
-    #                 entry=json.loads(json.dumps(item.entry.__dict__, default=str)),
-    #             ),
-    #         )
-    #         results[pack].append(finding)
-    #         # ASH_LOGGER.debug(f"Finding: {finding.model_dump_json(indent=2)}")
-
-    jsonnable_res = {k: [item.model_dump() for item in v] for k, v in results.items()}
-
-    with open(
-        Path(outdir).joinpath("IaCVulnerabilities_from_Annotations.json"), "w"
-    ) as f:
-        json.dump(jsonnable_res, f, default=str)
-
-    return results
+    return {"results": results, "outdir": outdir}
 
 
 if __name__ == "__main__":

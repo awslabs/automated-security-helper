@@ -7,7 +7,7 @@ import tempfile
 import pytest
 import yaml
 
-from automated_security_helper.config.default_config import DEFAULT_ASH_CONFIG
+from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
 
@@ -16,8 +16,7 @@ def default_config():
     """Create a temporary configuration file."""
     with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as f:
         # Create minimal config that gets transformed to ASHConfig
-        DEFAULT_ASH_CONFIG
-        yaml.safe_dump(json.loads(DEFAULT_ASH_CONFIG.model_dump_json()), f)
+        yaml.safe_dump(json.loads(get_default_config().model_dump_json()), f)
         f.flush()
         yield f.name
         os.unlink(f.name)
@@ -28,7 +27,7 @@ def test_execute_scan_with_config(test_source_dir: Path, test_output_dir: Path):
     # Create minimal config that gets transformed to ASHConfig
     try:
         with open(test_source_dir.joinpath("ash.yaml"), "w") as f:
-            config_to_dump: dict = json.loads(DEFAULT_ASH_CONFIG.model_dump_json())
+            config_to_dump: dict = json.loads(get_default_config().model_dump_json())
             with open(f.name, "w") as f:
                 yaml.safe_dump(config_to_dump, f)
 

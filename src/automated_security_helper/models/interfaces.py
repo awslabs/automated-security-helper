@@ -3,40 +3,19 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-import re
 from typing import Any, Dict, List
 
+from automated_security_helper.base.scanner import ParserConfig
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.core import (
     ConverterPluginConfig,
     Location,
-    ParserConfig,
-    ScannerPluginConfig,
 )
-from automated_security_helper.models.data_interchange import SecurityReport
+from automated_security_helper.schemas.data_interchange import SecurityReport
+from automated_security_helper.base.plugin import ScannerPlugin
 
 
-class Normalizer:
-    @staticmethod
-    def get_normalized_filename(str_to_normalize: str) -> str:
-        """Returns a normalized filename for the given string.
-
-        Args:
-            str_to_normalize (str): The string to normalize.
-
-        Returns:
-            str: The normalized filename.
-        """
-        normalized = re.sub(
-            pattern=r"\W+",
-            repl="-",
-            string=str_to_normalize.replace("/", "--").replace(".", "_"),
-            flags=re.IGNORECASE,
-        )
-        return normalized
-
-
-class IParser(ABC, Normalizer):
+class IParser(ABC):
     """Interface for parsing scanner results."""
 
     @abstractmethod
@@ -55,11 +34,11 @@ class IParser(ABC, Normalizer):
         pass
 
 
-class IScanner(ABC, Normalizer):
+class IScanner(ABC):
     """Interface for security scanners."""
 
     @abstractmethod
-    def configure(self, config: ScannerPluginConfig) -> None:
+    def configure(self, config: ScannerPlugin) -> None:
         """Configure the scanner with provided configuration."""
         pass
 
@@ -82,7 +61,7 @@ class IScanner(ABC, Normalizer):
         return self.parser.parse(raw_results)
 
 
-class IConverter(ABC, Normalizer):
+class IConverter(ABC):
     """Interface for file converters.
 
     Converters are responsible for converting an unscannable file type (e.g.
@@ -113,7 +92,7 @@ class IConverter(ABC, Normalizer):
         pass
 
 
-class IOutputReporter(ABC, Normalizer):
+class IOutputReporter(ABC):
     """Interface for output reporters/formatters."""
 
     @abstractmethod

@@ -11,31 +11,41 @@ from importlib.metadata import version
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Dict, List
+from typing import Annotated, Any, Dict
 
 from pydantic import Field
+from automated_security_helper.base.options import BaseScannerOptions
+from automated_security_helper.core.constants import SCANNER_TYPES
+from automated_security_helper.base.scanner import ScannerBaseConfig
+from automated_security_helper.base.types import ToolArgs
 from automated_security_helper.models.core import (
-    SCANNER_TYPES,
-    BaseScannerOptions,
     Location,
-    ScanStatistics,
-    Scanner,
-    ScannerBaseConfig,
 )
-from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.models.iac_scan import (
-    IaCScanReport,
     IaCVulnerability,
     CheckResultType,
 )
-from automated_security_helper.models.scanner_plugin import (
+from automated_security_helper.base.plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import ScannerPluginConfig
-from automated_security_helper.models.static_analysis import (
-    StaticAnalysisReport,
+from automated_security_helper.schemas.sarif_schema_model import (
+    Artifact,
+    ArtifactLocation,
+    Invocation,
+    Message,
+    PhysicalLocation,
+    PropertyBag,
+    Region,
+    Result,
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
 )
+from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
 class CustomScannerConfigOptions(BaseScannerOptions):
@@ -46,30 +56,23 @@ class CustomScannerConfig(ScannerBaseConfig):
     """Custom scanner configuration."""
 
     name: str = "custom"
+    enabled: bool = True
     type: SCANNER_TYPES = "CUSTOM"
     options: Annotated[
         CustomScannerConfigOptions, Field(description="Configure custom scanner")
     ] = CustomScannerConfigOptions()
 
 
-class CustomScanner(ScannerPlugin, CustomScannerConfig):
+class CustomScanner(ScannerPlugin[CustomScannerConfig]):
     """CustomScanner provides an interface for custom scanners using known formats."""
 
-    _default_config = ScannerPluginConfig(
-        name="custom",
-        type="CUSTOM",
-        enabled=True,
-    )
-    _output_format: ExportFormat = ExportFormat.JSON
-    tool_version: str = version("automated_security_helper")
-
-    def configure(
-        self,
-        config: ScannerPluginConfig | None = None,
-        options: CustomScannerConfigOptions | None = None,
-    ) -> None:
-        """Configure the scanner with provided settings."""
-        super().configure(config=config, options=options)
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = CustomScannerConfig()
+        self.tool_type = "CUSTOM"
+        self.tool_version = version("checkov")
+        self.args = ToolArgs()
+        super().model_post_init(context)
 
     def _create_finding_from_check(
         self, result: Dict[str, Any], check_type: CheckResultType
@@ -130,98 +133,148 @@ class CustomScanner(ScannerPlugin, CustomScannerConfig):
         Raises:
             ScannerError: If validation fails
         """
-        # Checkov is a dependency this Python module, if the Python import got
-        # this far then we know we're in a valid runtime for this scanner.
         return True
 
     def scan(
         self,
         target: Path,
-    ) -> StaticAnalysisReport:
+        config: CustomScannerConfig | None = None,
+    ) -> SarifReport:
         """Execute Checkov scan and return results.
 
         Args:
             target: Path to scan
 
         Returns:
-            StaticAnalysisReport containing the scan findings and metadata
+            SarifReport containing the scan findings and metadata
 
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
         try:
-            self._pre_scan(target, self.options)
+            self._pre_scan(
+                target=target,
+                options=self.config.options,
+            )
         except ScannerError as exc:
             raise exc
+        ASH_LOGGER.debug(f"self.config: {self.config}")
+        ASH_LOGGER.debug(f"config: {config}")
 
+        scanner_name = self.config.name
         try:
-            start_time = datetime.now()
+            normalized_file_name = get_normalized_filename(str_to_normalize=target)
+            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            results_file = target_results_dir.joinpath("results_sarif.sarif")
+            results_file.parent.mkdir(exist_ok=True, parents=True)
+            final_args = self._resolve_arguments(
+                target=target,
+                # We want to use the parent here, not the results_file, as Checkov is expecting the output
+                # directory and not the file name.
+                results_file=target_results_dir,
+            )
             final_args = self._resolve_arguments(target=target)
             self._run_subprocess(final_args)
-            end_time = datetime.now()
-            scan_duration = (end_time - start_time).total_seconds()
 
-            # Parse Checkov JSON output
-            checkov_results = json.loads("".join(self.output))
-            results = checkov_results.get("results", {})
+            # Parse JSON output
+            scanner_results = json.loads("".join(self.output))
+            results = scanner_results.get("results", {})
+            ASH_LOGGER.debug(f"({scanner_name}) Found {len(results)} results")
 
-            # Create findings list for all result types
-            findings: List[IaCVulnerability] = []
+            self._post_scan(target=target)
 
-            # Process failed checks
-            for result in results.get("failed_checks", []):
-                findings.append(
-                    self._create_finding_from_check(result, CheckResultType.FAILED)
+            tool = Tool(
+                driver=ToolComponent(
+                    name=scanner_name,
+                    version=get_ash_version(),
+                    informationUri="XXXXXXXXXXXXXXXXXXX",
                 )
-
-            # Process passed checks
-            for result in results.get("passed_checks", []):
-                findings.append(
-                    self._create_finding_from_check(result, CheckResultType.PASSED)
-                )
-
-            # Process skipped checks
-            for result in results.get("skipped_checks", []):
-                findings.append(
-                    self._create_finding_from_check(result, CheckResultType.SKIPPED)
-                )
-
-            # Process parsing errors
-            for result in results.get("parsing_errors", []):
-                findings.append(
-                    self._create_finding_from_check(result, CheckResultType.ERROR)
-                )
-
-            # Create statistics
-            metrics = checkov_results.get("metrics", {})
-
-            # Count findings by severity
-            severity_counts = {}
-            for finding in findings:
-                severity = finding.severity
-                severity_counts[severity] = severity_counts.get(severity, 0) + 1
-
-            stats = ScanStatistics(
-                files_scanned=metrics.get("_totals", {}).get("loc", 0),
-                lines_of_code=metrics.get("_totals", {}).get("loc", 0),
-                total_findings=len(findings),
-                findings_by_type=severity_counts,
-                scan_duration_seconds=scan_duration,
             )
-
             # Create and return report
-            return IaCScanReport(
-                name="checkov",
-                description="Checkov security scan report",
-                scanners_used=[
-                    Scanner(name="checkov", version=version("checkov"), type="IAC"),
+            return SarifReport(
+                runs=[
+                    Run(
+                        tool=tool,
+                        artifacts=[
+                            Artifact(
+                                location=ArtifactLocation(
+                                    uri=target.as_posix(),
+                                )
+                            )
+                        ],
+                        invocations=[
+                            Invocation(
+                                commandLine=final_args[0],
+                                arguments=final_args[1:],
+                                startTimeUtc=self.start_time,
+                                endTimeUtc=self.end_time,
+                                executionSuccessful=True,
+                                exitCode=self.exit_code,
+                                exitCodeDescription="\n".join(self.errors),
+                                workingDirectory=ArtifactLocation(
+                                    uri=target.as_posix(),
+                                ),
+                                properties=PropertyBag(
+                                    tool=tool,
+                                ),
+                            )
+                        ],
+                        results=[
+                            Result(
+                                ruleId=result.get("check_id", ""),
+                                message=Message(
+                                    text=result.get("check_name", ""),
+                                ),
+                                locations=[
+                                    Location(
+                                        physicalLocation=PhysicalLocation(
+                                            artifactLocation=ArtifactLocation(
+                                                uri=result.get("file_path", ""),
+                                                index=0,
+                                            ),
+                                            region=Region(
+                                                startLine=result.get(
+                                                    "file_line_range", [0, 0]
+                                                )[0],
+                                                endLine=result.get(
+                                                    "file_line_range", [0, 0]
+                                                )[1],
+                                            ),
+                                        )
+                                    )
+                                ],
+                            )
+                            for result in results
+                        ],
+                    )
                 ],
-                findings=findings,
-                statistics=stats,
-                scan_config=self._config,
+                properties=PropertyBag(
+                    tool=Tool(
+                        driver=ToolComponent(
+                            name=scanner_name,
+                            version=self.tool_version,
+                            informationUri="XXXXXXXXXXXXXXXXXXX",
+                        )
+                    ),
+                    timestamp=datetime.now().isoformat(),
+                    projectRoot=ArtifactLocation(
+                        uri=target.as_posix(),
+                    ),
+                    ashVersion=get_ash_version(),
+                    scannerConfig=self.config.model_dump(),
+                    scannerResults=scanner_results,
+                    scannerErrors=[
+                        Message(
+                            text=error,
+                        )
+                        for error in self.errors()
+                    ],
+                ),
             )
 
         except Exception as e:
             # Check if there are useful error details
             error_output = "".join(self.errors())
-            raise ScannerError(f"Checkov scan failed: {str(e)}\nErrors: {error_output}")
+            raise ScannerError(
+                f"{scanner_name} scan failed: {str(e)}\nErrors: {error_output}"
+            )

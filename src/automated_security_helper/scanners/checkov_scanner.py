@@ -2,127 +2,140 @@
 
 from importlib.metadata import version
 import json
-from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Literal
+from typing import Annotated, List, Literal
 
 from pydantic import Field
+from automated_security_helper.base.options import BaseScannerOptions
+from automated_security_helper.base.scanner import ScannerBaseConfig
+from automated_security_helper.base.types import ToolArgs
 from automated_security_helper.models.core import (
-    SCANNER_TYPES,
-    BaseScannerOptions,
-    Location,
-    ScanStatistics,
-    Scanner,
-    ScannerBaseConfig,
+    ToolExtraArg,
 )
-from automated_security_helper.models.core import ExportFormat
-from automated_security_helper.models.iac_scan import (
-    IaCScanReport,
-    IaCVulnerability,
-    CheckResultType,
-)
-from automated_security_helper.models.scanner_plugin import (
+from automated_security_helper.base.plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import ScannerPluginConfig
 from automated_security_helper.models.static_analysis import (
     StaticAnalysisReport,
 )
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactLocation,
+    Invocation,
+    PropertyBag,
+    SarifReport,
+)
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.normalizers import get_normalized_filename
+
+
+CheckFrameworks = Literal[
+    "all",
+    "ansible",
+    "argo_workflows",
+    "arm",
+    "azure_pipelines",
+    "bicep",
+    "bitbucket_pipelines",
+    "cdk",
+    "circleci_pipelines",
+    "cloudformation",
+    "dockerfile",
+    "github_configuration",
+    "github_actions",
+    "gitlab_configuration",
+    "gitlab_ci",
+    "bitbucket_configuration",
+    "helm",
+    "json",
+    "yaml",
+    "kubernetes",
+    "kustomize",
+    "openapi",
+    "sca_package",
+    "sca_image",
+    "secrets",
+    "serverless",
+    "terraform",
+    "terraform_json",
+    "terraform_plan",
+    "sast",
+    "sast_python",
+    "sast_java",
+    "sast_javascript",
+    "sast_typescript",
+    "sast_golang",
+    "3d_policy",
+]
 
 
 class CheckovScannerConfigOptions(BaseScannerOptions):
-    pass
+    config_file: Annotated[
+        str,
+        Field(
+            description="Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
+        ),
+    ] = "NOT_PROVIDED"
+    skip_path: Annotated[
+        List[str],
+        Field(
+            description='Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.',
+        ),
+    ] = []
+    additional_formats: Annotated[
+        List[
+            Literal[
+                "cli",
+                "csv",
+                "cyclonedx",
+                "cyclonedx_json",
+                "json",
+                "junitxml",
+                "github_failed_only",
+                "gitlab_sast",
+                "sarif",
+                "spdx",
+            ]
+        ],
+        Field(
+            description="List of additional formats to output. Defaults to including CycloneDX JSON"
+        ),
+    ] = ["cyclonedx_json"]
+    frameworks: Annotated[
+        List[CheckFrameworks],
+        Field(
+            description="Specific frameworks to include with Checkov. Defaults to `all`."
+        ),
+    ] = ["all"]
 
 
 class CheckovScannerConfig(ScannerBaseConfig):
-    """Checkov SAST scanner configuration."""
-
     name: Literal["checkov"] = "checkov"
-    type: SCANNER_TYPES = "IAC"
+    enabled: bool = True
     options: Annotated[
         CheckovScannerConfigOptions, Field(description="Configure Checkov scanner")
     ] = CheckovScannerConfigOptions()
 
 
-class CheckovScanner(ScannerPlugin, CheckovScannerConfig):
+class CheckovScanner(ScannerPlugin[CheckovScannerConfig]):
     """CheckovScanner implements IaC scanning using Checkov."""
 
-    _default_config = ScannerPluginConfig(
-        name="checkov",
-        type="IAC",
-        command="checkov",
-        output_arg="-o",
-        scan_path_arg="-r",
-        scan_path_arg_position="before_args",
-        format_arg="-f",
-        format_arg_value="json",
-        format_arg_position="before_args",
-        invocation_mode="directory",
-        output_stream="file",
-        enabled=True,
-        output_format="json",
-    )
-    _output_format: ExportFormat = ExportFormat.JSON
-    tool_version: str = version("checkov")
-
-    def configure(
-        self,
-        config: ScannerPluginConfig | None = None,
-        options: CheckovScannerConfigOptions | None = None,
-    ) -> None:
-        """Configure the scanner with provided settings."""
-        super().configure(config=config, options=options)
-
-    def _create_finding_from_check(
-        self, result: Dict[str, Any], check_type: CheckResultType
-    ) -> IaCVulnerability:
-        """Create an IaCVulnerability from a check result."""
-        finding_id = "/".join(
-            [
-                item
-                for item in [
-                    result.get("check_id", None),
-                    result.get("repo_file_path", None),
-                    result.get("resource", None),
-                    result.get("resource_address", None),
-                ]
-                if item
-            ]
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = CheckovScannerConfig()
+        self.command = "checkov"
+        self.tool_type = "IAC"
+        self.tool_version = version("checkov")
+        self.args = ToolArgs(
+            format_arg="--output",
+            format_arg_value="sarif",
+            output_arg="--output-file-path",
+            scan_path_arg="--directory",
+            extra_args=[
+                # ToolExtraArg(key="--skip-framework", value="cloudformation"),
+            ],
         )
-
-        # Extract location information from the result
-        file_path = result.get("file_path", "")
-        file_line_range = result.get("file_line_range", [0, 0])
-        location = Location(
-            path=file_path,
-            start_line=file_line_range[0] if file_line_range else 0,
-            end_line=file_line_range[1] if file_line_range else 0,
-        )
-
-        return IaCVulnerability(
-            id=finding_id,
-            title=result.get("check_name", "Unknown Check"),
-            description=result.get("check_name", ""),
-            location=location,
-            resource_name=result.get("resource", ""),
-            resource_type=(
-                result.get("resource", "").split(".")[0]
-                if result.get("resource", "")
-                else None
-            ),
-            rule_id=result.get("check_id", ""),
-            check_result_type=check_type,
-            violation_details={
-                "check_class": result.get("check_class", ""),
-                "guideline": result.get("guideline", ""),
-                "evaluated_keys": result.get("check_result", {}).get(
-                    "evaluated_keys", []
-                ),
-                "result_details": result.get("check_result", {}).get("result", ""),
-                "bc_category": result.get("bc_category", ""),
-            },
-        )
+        super().model_post_init(context)
 
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -137,9 +150,41 @@ class CheckovScanner(ScannerPlugin, CheckovScannerConfig):
         # this far then we know we're in a valid runtime for this scanner.
         return True
 
+    def _process_config_options(self):
+        # Bandit config path
+        possible_config_paths = [
+            item
+            for item in [
+                self.config.options.config_file,
+                ".checkov.yaml",
+                ".checkov.yml",
+            ]
+            if item is not None
+        ]
+
+        for conf_path in possible_config_paths:
+            if Path(conf_path).exists():
+                self.args.extra_args.extend(
+                    [
+                        "--config-file",
+                        Path(conf_path).absolute().relative_to(Path.cwd()).as_posix(),
+                    ]
+                )
+                break
+
+        for item in self.config.options.additional_formats:
+            self.args.extra_args.append(ToolExtraArg(key="--output", value=item))
+        for item in self.config.options.skip_path:
+            self.args.extra_args.append(ToolExtraArg(key="--skip-path", value=item))
+        for item in self.config.options.frameworks:
+            self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
+
+        return super()._process_config_options()
+
     def scan(
         self,
         target: Path,
+        config: CheckovScannerConfig | None = None,
     ) -> StaticAnalysisReport:
         """Execute Checkov scan and return results.
 
@@ -153,78 +198,64 @@ class CheckovScanner(ScannerPlugin, CheckovScannerConfig):
             ScannerError: If the scan fails or results cannot be parsed
         """
         try:
-            self._pre_scan(target, self.options)
+            self._pre_scan(
+                target=target,
+                options=self.config.options,
+            )
         except ScannerError as exc:
             raise exc
+        ASH_LOGGER.debug(f"self.config: {self.config}")
+        ASH_LOGGER.debug(f"config: {config}")
 
         try:
-            start_time = datetime.now()
-            final_args = self._resolve_arguments(target=target)
-            self._run_subprocess(final_args)
-            end_time = datetime.now()
-            scan_duration = (end_time - start_time).total_seconds()
-
-            # Parse Checkov JSON output
-            checkov_results = json.loads("".join(self.output))
-            results = checkov_results.get("results", {})
-
-            # Create findings list for all result types
-            findings: List[IaCVulnerability] = []
-
-            # Process failed checks
-            for result in results.get("failed_checks", []):
-                findings.append(
-                    self._create_finding_from_check(result, CheckResultType.FAILED)
-                )
-
-            # Process passed checks
-            for result in results.get("passed_checks", []):
-                findings.append(
-                    self._create_finding_from_check(result, CheckResultType.PASSED)
-                )
-
-            # Process skipped checks
-            for result in results.get("skipped_checks", []):
-                findings.append(
-                    self._create_finding_from_check(result, CheckResultType.SKIPPED)
-                )
-
-            # Process parsing errors
-            for result in results.get("parsing_errors", []):
-                findings.append(
-                    self._create_finding_from_check(result, CheckResultType.ERROR)
-                )
-
-            # Create statistics
-            metrics = checkov_results.get("metrics", {})
-
-            # Count findings by severity
-            severity_counts = {}
-            for finding in findings:
-                severity = finding.severity
-                severity_counts[severity] = severity_counts.get(severity, 0) + 1
-
-            stats = ScanStatistics(
-                files_scanned=metrics.get("_totals", {}).get("loc", 0),
-                lines_of_code=metrics.get("_totals", {}).get("loc", 0),
-                total_findings=len(findings),
-                findings_by_type=severity_counts,
-                scan_duration_seconds=scan_duration,
+            normalized_file_name = get_normalized_filename(str_to_normalize=target)
+            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            results_file = target_results_dir.joinpath("results_sarif.sarif")
+            results_file.parent.mkdir(exist_ok=True, parents=True)
+            final_args = self._resolve_arguments(
+                target=target,
+                # We want to use the parent here, not the results_file, as Checkov is expecting the output
+                # directory and not the file name.
+                results_file=target_results_dir,
+            )
+            self._run_subprocess(
+                command=final_args,
+                results_dir=target_results_dir,
             )
 
-            # Create and return report
-            return IaCScanReport(
-                name="checkov",
-                description="Checkov security scan report",
-                scanners_used=[
-                    Scanner(name="checkov", version=version("checkov"), type="IAC"),
-                ],
-                findings=findings,
-                statistics=stats,
-                scan_config=self._config,
-            )
+            self._post_scan(target=target)
+
+            checkov_results = {}
+            Path(results_file).parent.mkdir(exist_ok=True, parents=True)
+            with open(results_file, "r") as f:
+                checkov_results = json.load(f)
+            try:
+                sarif_report = SarifReport.model_validate(checkov_results)
+                sarif_report.runs[0].invocations = [
+                    Invocation(
+                        commandLine=final_args[0],
+                        arguments=final_args[1:],
+                        startTimeUtc=self.start_time,
+                        endTimeUtc=self.end_time,
+                        executionSuccessful=True,
+                        exitCode=self.exit_code,
+                        exitCodeDescription="\n".join(self.errors),
+                        workingDirectory=ArtifactLocation(
+                            uri=target.as_posix(),
+                        ),
+                        properties=PropertyBag(
+                            tool=sarif_report.runs[0].tool,
+                        ),
+                    )
+                ]
+            except Exception as e:
+                ASH_LOGGER.warning(
+                    f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}"
+                )
+                sarif_report = checkov_results
+
+            return sarif_report
 
         except Exception as e:
             # Check if there are useful error details
-            error_output = "".join(self.errors())
-            raise ScannerError(f"Checkov scan failed: {str(e)}\nErrors: {error_output}")
+            raise ScannerError(f"Checkov scan failed: {str(e)}")

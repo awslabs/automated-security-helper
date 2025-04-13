@@ -2,19 +2,18 @@
 
 from pathlib import Path
 import re
-import logging
 from typing import Callable, Dict, Optional, Type, Union
 from importlib import import_module
 
 from automated_security_helper.config.config import ASHConfig
-from automated_security_helper.models.core import ScannerPluginConfig
-from automated_security_helper.models.scanner_plugin import ScannerPlugin
+from automated_security_helper.base.scanner import ScannerBaseConfig
+from automated_security_helper.base.plugin import ScannerPlugin
 
 from automated_security_helper.scanners.custom_scanner import CustomScanner
-from automated_security_helper.utils.log import ASH_LOGGER, get_logger
+from automated_security_helper.utils.log import ASH_LOGGER
 
 # Placeholder for now
-_OPTIONAL_SCANNER_CONFIGS: Dict[str, ScannerPluginConfig] = {}
+_OPTIONAL_SCANNER_CONFIGS: Dict[str, ScannerPlugin] = {}
 
 
 class ScannerFactory:
@@ -23,16 +22,13 @@ class ScannerFactory:
     def __init__(
         self,
         config: ASHConfig = None,
-        logger: logging.Logger = get_logger(),
     ) -> None:
         """Initialize the scanner factory with empty scanner registry.
 
         Args:
             config: Optional ASHConfig instance to load custom scanner configurations
-            logger: Optional logger instance to use
         """
         self.config = config
-        self.logger = logger
         self.default_scanners = set()
         self._scanners: Dict[
             str, Union[Type[ScannerPlugin], Callable[[], ScannerPlugin]]
@@ -61,19 +57,15 @@ class ScannerFactory:
                     continue
 
                 # Try to find matching scanner class
-                scanner_class = CustomScanner(
-                    name=scanner.name,
-                    _default_config=scanner,
-                    _config=scanner,
-                )
+                scanner_class = CustomScanner(**scanner.model_dump())
                 self.register_scanner(normalized_name, scanner_class)
                 ASH_LOGGER.debug(f"Registered build-time scanner {scanner.name}")
             except ValueError as e:
-                self.logger.warning(
+                ASH_LOGGER.warning(
                     f"Could not register build-time scanner {scanner.name}: {str(e)}"
                 )
-        for scanner in self.config.scanners:
-            normalized_name = self._normalize_scanner_name(scanner.name)
+        for scanner_name, scanner_config in self.config.scanners.model_dump().items():
+            normalized_name = self._normalize_scanner_name(scanner_name)
             try:
                 self.default_scanners.add(normalized_name)
                 if normalized_name in self._scanners:
@@ -82,19 +74,18 @@ class ScannerFactory:
 
                 # Try to find matching scanner class
                 scanner_class = CustomScanner(
-                    name=scanner.name,
-                    _default_config=scanner,
-                    _config=scanner,
+                    name=scanner_name,
+                    config=scanner_config,
                 )
                 self.register_scanner(normalized_name, scanner_class)
-                ASH_LOGGER.debug(f"Registered config scanner {scanner.name}")
+                ASH_LOGGER.debug(f"Registered config scanner {scanner_name}")
             except ValueError as e:
-                self.logger.warning(
-                    f"Could not register config scanner {scanner.name} due to ValueError: {str(e)}"
+                ASH_LOGGER.warning(
+                    f"Could not register config scanner {scanner_name} due to ValueError: {str(e)}"
                 )
             except Exception as e:
-                self.logger.error(
-                    f"Error registering config scanner {scanner.name} due to Exception: {str(e)}"
+                ASH_LOGGER.error(
+                    f"Error registering config scanner {scanner_name} due to Exception: {str(e)}"
                 )
 
     def _register_default_scanners(self) -> None:
@@ -133,7 +124,7 @@ class ScannerFactory:
                             # Skip if scanner is already registered
                             continue
             except (ImportError, AttributeError) as e:
-                self.logger.warning(
+                ASH_LOGGER.warning(
                     f"Failed to load scanner module {module_name}: {str(e)}"
                 )
                 continue
@@ -167,18 +158,15 @@ class ScannerFactory:
                     continue
 
                 # Check for required config
-                if (
-                    not hasattr(scanner_class, "_default_config")
-                    or scanner_class._default_config is None
-                ):
+                if not hasattr(scanner_class, "config") or scanner_class.config is None:
                     ASH_LOGGER.warning(
-                        f"Scanner {scanner_class.__name__} missing _default_config (factory)"
+                        f"Scanner {scanner_class.__name__} missing config (factory)"
                     )
                     continue
 
                 if callable(scanner_class):
                     scanner_class = scanner_class()
-                config = scanner_class._default_config
+                config: ScannerBaseConfig = scanner_class.config
                 if (
                     not hasattr(config, "name")
                     or config.name is None
@@ -189,7 +177,7 @@ class ScannerFactory:
                     )
                     continue
 
-                scanner_name = scanner_class._default_config.name
+                scanner_name = config.name
                 # scanner_name = self._normalize_scanner_name(scanner_name)
 
                 # Only register if not already present
@@ -240,9 +228,9 @@ class ScannerFactory:
 
         # Check for duplicate registration
         if normalized_name in self._scanners:
-            self.logger.debug(f"Scanner '{normalized_name}' is already registered")
+            ASH_LOGGER.debug(f"Scanner '{normalized_name}' is already registered")
         else:
-            self.logger.debug(f"Registering scanner: {normalized_name} (factory)")
+            ASH_LOGGER.debug(f"Registering scanner: {normalized_name} (factory)")
 
         # Validate input
         try:
@@ -266,10 +254,9 @@ class ScannerFactory:
     def create_scanner(
         self,
         scanner_name: str,
-        config: Optional[ScannerPluginConfig] = None,
+        config: Optional[ScannerPlugin] = None,
         source_dir: Optional[Path] = None,
         output_dir: Optional[Path] = None,
-        logger: Optional[logging.Logger] = None,
     ) -> ScannerPlugin:
         """Create a scanner instance of the specified type with optional configuration.
 
@@ -309,7 +296,7 @@ class ScannerFactory:
             setattr(scanner_class, "output_dir", output_dir)
             instance = scanner_class
 
-        instance.configure(config)
+        # instance.configure(config)
 
         return instance
 
@@ -364,4 +351,4 @@ class ScannerFactory:
 if __name__ == "__main__":
     config = ASHConfig
     factory = ScannerFactory()
-    factory.logger.info("[__main__] ScannerFactory initialized")
+    ASH_LOGGER.info("[__main__] ScannerFactory initialized")

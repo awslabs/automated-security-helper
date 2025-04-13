@@ -6,9 +6,6 @@
         "${workspaceFolder}",
         "--output-dir",
         "${workspaceFolder}/ash_output",
-        "--verbose",
-        "--config",
-        "${workspaceFolder}/ash.yaml",
         "--strategy",
         "parallel"
       ],

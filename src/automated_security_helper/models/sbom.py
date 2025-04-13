@@ -7,7 +7,7 @@ from typing import Any, List, Optional, Dict, Union
 from typing_extensions import Annotated
 
 from .core import ExportFormat
-from .data_interchange import DataInterchange
+from ..schemas.data_interchange import DataInterchange
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 

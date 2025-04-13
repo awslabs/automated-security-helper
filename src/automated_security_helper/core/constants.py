@@ -1,0 +1,134 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from typing import Literal
+
+
+ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
+ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
+
+KNOWN_SCANNABLE_EXTENSIONS = [
+    # JavaScript and TypeScript ecosystem
+    "js",
+    "ts",
+    "jsx",
+    "tsx",
+    # Scripting languages
+    "py",
+    "ipynb",
+    "rb",
+    "php",
+    "pl",
+    "pm",
+    "t",
+    # Systems programming languages
+    "java",
+    "go",
+    "rs",
+    "cpp",
+    "c",
+    "h",
+    "hpp",
+    "cs",
+    # Apple development
+    "m",
+    "mm",
+    "swift",
+    # JVM languages
+    "kt",
+    "kts",
+    "scala",
+    "sc",
+    "groovy",
+    "gvy",
+    "gradle",
+    # Clojure ecosystem
+    "clj",
+    "cljs",
+    "cljc",
+    "edn",
+    "cljx",
+    # Other programming languages
+    "dart",
+    "r",
+    # Database
+    "sql",
+    "tsql",
+    # Shell scripting
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "fsh",
+    # Windows scripting
+    "ps1",
+    "psm1",
+    "cmd",
+    "bat",
+    "vbs",
+    "wsf",
+    "wsh",
+    # IaC Code
+    "tf",
+    "tfvars",
+    "tfstate",
+    "hcl",
+    "json",
+    "yaml",
+    "yml",
+    "xml",
+    # Configuration
+    "cfg",
+    "conf",
+    "ini",
+    "properties",
+    "env",
+    "toml",
+    # Markup
+    "html",
+    "htm",
+    "xhtml",
+    "xml",
+    "svg",
+    "md",
+    "markdown",
+    "rst",
+    "adoc",
+    "asciidoc",
+    "asc",
+    "txt",
+    "text",
+    "csv",
+    "tsv",
+    # # Data
+    # "data",
+    # "dat",
+    # "db",
+    # "sqlite",
+    # "sqlite3",
+    # "mdb",
+    # "accdb",
+    # "frm",
+    # "ibd",
+    # "myd",
+    # "myi",
+    # "ndb",
+    # "sdf",
+    # "sqlitedb",
+    # "sqlite3db",
+    # "sqlite3db",
+    # "sqlite3db",
+]
+SCANNER_TYPES = Literal[
+    # Standard scanner types
+    "CONTAINER",
+    "DAST",
+    "DEPENDENCY",
+    "IAC",
+    "SAST",
+    "SBOM",
+    "SECRETS",
+    "UNKNOWN",
+    "CUSTOM",
+]
+VALID_SEVERITY_VALUES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"})
