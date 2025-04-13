@@ -17316,7 +17316,7 @@
       "type": "string"
     }
   },
-  "description": "Main model class for parsing security scan reports from ASH tooling.\n\nThis model is the primary interface for handling aggregated security findings from\nvarious scanners. It supports both legacy scanner formats and the newer\nscanners_used format.\n\nExample:\n\n```python\nwith open('aggregated_results.json', 'r') as f:\n    report = ASHARPModel.from_json(f.read())\nprint(f\"Found {len(report.findings)} security findings\")\nfor scanner in report.scanners_used:\n    print(f\"Used scanner: {scanner['name']} v{scanner['version']}\")\n```",
+  "description": "Main model class for parsing security scan reports from ASH tooling.",
   "properties": {
     "additional_reports": {
       "additionalProperties": true,

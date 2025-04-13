@@ -12,7 +12,7 @@ from automated_security_helper.models.core import (
     Location,
 )
 from automated_security_helper.schemas.data_interchange import SecurityReport
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 
 
 class IParser(ABC):

@@ -25,7 +25,7 @@ from automated_security_helper.models.iac_scan import (
     IaCVulnerability,
     CheckResultType,
 )
-from automated_security_helper.base.plugin import (
+from automated_security_helper.base.scanner_plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.core.exceptions import ScannerError
@@ -65,6 +65,8 @@ class CustomScannerConfig(ScannerBaseConfig):
 
 class CustomScanner(ScannerPlugin[CustomScannerConfig]):
     """CustomScanner provides an interface for custom scanners using known formats."""
+
+    command: str | None = None
 
     def model_post_init(self, context):
         if self.config is None:
@@ -138,7 +140,7 @@ class CustomScanner(ScannerPlugin[CustomScannerConfig]):
     def scan(
         self,
         target: Path,
-        config: CustomScannerConfig | None = None,
+        config: Any | CustomScannerConfig | None = None,
     ) -> SarifReport:
         """Execute Checkov scan and return results.
 
@@ -151,6 +153,9 @@ class CustomScanner(ScannerPlugin[CustomScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        if self.command is None:
+            # ASH_LOGGER.warning(f"({(config is not None and config.name) or self.config.name or self.__class__.__name__}) No command specified for custom scanner. Config provided: {config}")
+            return
         try:
             self._pre_scan(
                 target=target,
@@ -173,7 +178,6 @@ class CustomScanner(ScannerPlugin[CustomScannerConfig]):
                 # directory and not the file name.
                 results_file=target_results_dir,
             )
-            final_args = self._resolve_arguments(target=target)
             self._run_subprocess(final_args)
 
             # Parse JSON output
@@ -267,14 +271,17 @@ class CustomScanner(ScannerPlugin[CustomScannerConfig]):
                         Message(
                             text=error,
                         )
-                        for error in self.errors()
+                        for error in self.errors
                     ],
                 ),
             )
 
         except Exception as e:
             # Check if there are useful error details
-            error_output = "".join(self.errors())
-            raise ScannerError(
-                f"{scanner_name} scan failed: {str(e)}\nErrors: {error_output}"
-            )
+            error_output = "".join(self.errors)
+            if error_output.strip() != "":
+                raise ScannerError(
+                    f"{scanner_name} scan failed: {str(e)}. Additional error output: {error_output}"
+                )
+            else:
+                raise ScannerError(f"{scanner_name} scan failed: {str(e)}.")

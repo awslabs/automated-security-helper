@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 from pydantic import BaseModel, ValidationError
 
 from automated_security_helper.base.scanner import ParserConfig
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 
 
 class ConfigurationValidator:

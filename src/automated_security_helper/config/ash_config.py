@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Annotated, Any, List, Dict, Literal
 
 import yaml
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 from automated_security_helper.config.scanner_types import (
     CfnNagScannerConfig,
     CustomScannerConfig,

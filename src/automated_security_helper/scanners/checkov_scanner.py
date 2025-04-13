@@ -12,7 +12,7 @@ from automated_security_helper.base.types import ToolArgs
 from automated_security_helper.models.core import (
     ToolExtraArg,
 )
-from automated_security_helper.base.plugin import (
+from automated_security_helper.base.scanner_plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.core.exceptions import ScannerError

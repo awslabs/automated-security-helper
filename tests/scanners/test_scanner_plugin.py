@@ -5,7 +5,7 @@ from typing import Any, Dict, Literal, Optional
 
 import pytest
 
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 
 
 from automated_security_helper.core.exceptions import ScannerError

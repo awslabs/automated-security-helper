@@ -2,7 +2,6 @@
 """Main entry point for ASH multi-scanner execution."""
 
 import json
-import logging
 import shutil
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional
@@ -18,7 +17,7 @@ from automated_security_helper.core.execution_engine import (
 )
 from automated_security_helper.core.result_processor import ResultProcessor
 
-from automated_security_helper.config.config import ASHConfig
+from automated_security_helper.config.ash_config import ASHConfig
 from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.core import ExportFormat
@@ -136,6 +135,7 @@ class ASHScanOrchestrator(BaseModel):
     def model_post_init(self, context):
         """Post initialization configuration."""
         super().model_post_init(context)
+        ASH_LOGGER.info("Initializing ASH Scan orchestrator")
 
         self.config = self._load_config()
 
@@ -179,15 +179,6 @@ class ASHScanOrchestrator(BaseModel):
         self.result_processor = ResultProcessor()
 
         return super().model_post_init(context)
-
-    def _get_logger(self) -> logging.Logger:
-        """Configure and return a logger instance."""
-        # log_level = (
-        #     logging.DEBUG
-        #     if self.debug
-        #     else (logging.INFO if not self.verbose else logging.DEBUG)
-        # )
-        return ASH_LOGGER
 
     def _load_config(self) -> ASHConfig:
         """Load configuration from file or return default configuration."""
@@ -234,7 +225,6 @@ class ASHScanOrchestrator(BaseModel):
 
     def execute_scan(self) -> Dict:
         """Execute the security scan and return results."""
-        ASH_LOGGER.info("Starting ASH scan")
         ASH_LOGGER.debug(f"Source directory: {self.source_dir}")
         ASH_LOGGER.debug(f"Output directory: {self.output_dir}")
         ASH_LOGGER.debug(f"Work directory: {self.work_dir}")
@@ -263,7 +253,6 @@ class ASHScanOrchestrator(BaseModel):
                 )
 
             # Execute scanners with validated config
-            ASH_LOGGER.info("Starting ASH execution engine")
             try:
                 asharp_model_results = self.execution_engine.execute(config)
                 ASH_LOGGER.debug("Scan execution completed successfully")

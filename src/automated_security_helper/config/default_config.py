@@ -3,7 +3,7 @@
 
 
 def get_default_config():
-    from automated_security_helper.config.config import ASHConfig
+    from automated_security_helper.config.ash_config import ASHConfig
 
     return ASHConfig(
         project_name="automated-security-helper",

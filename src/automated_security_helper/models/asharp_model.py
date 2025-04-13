@@ -20,6 +20,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.log import ASH_LOGGER
 
 __all__ = ["ASHARPModel"]
 
@@ -31,22 +32,7 @@ from automated_security_helper.models.aggregation import (
 
 
 class ASHARPModel(BaseModel):
-    """Main model class for parsing security scan reports from ASH tooling.
-
-    This model is the primary interface for handling aggregated security findings from
-    various scanners. It supports both legacy scanner formats and the newer
-    scanners_used format.
-
-    Example:
-
-    ```python
-    with open('aggregated_results.json', 'r') as f:
-        report = ASHARPModel.from_json(f.read())
-    print(f"Found {len(report.findings)} security findings")
-    for scanner in report.scanners_used:
-        print(f"Used scanner: {scanner['name']} v{scanner['version']}")
-    ```
-    """
+    """Main model class for parsing security scan reports from ASH tooling."""
 
     model_config = ConfigDict(str_strip_whitespace=True, arbitrary_types_allowed=True)
 
@@ -112,7 +98,7 @@ class ASHARPModel(BaseModel):
         try:
             return ASHConfig.model_validate(v)
         except Exception as e:
-            print(f"Failed to validate ASH config: {e}")
+            ASH_LOGGER.error(f"Failed to validate ASH config: {e}")
         return get_default_config()
 
     def model_post_init(self, context):

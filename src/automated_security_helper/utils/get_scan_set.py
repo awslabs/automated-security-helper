@@ -212,18 +212,18 @@ def scan_set(
             with open(ashignore_path) as f:
                 ashignore_content = f.readlines()
             ashignore_imported = True
-            print(
-                cyan(f"Imported ash-ignore-report.txt from {output}"),
-                file=sys.stderr,
-            )
+            # print(
+            #     cyan(f"Imported ash-ignore-report.txt from {output}"),
+            #     file=sys.stderr,
+            # )
         if ashscanset_path.exists():
             with open(ashscanset_path) as f:
                 ashscanset_list = f.readlines()
             ashscanset_imported = True
-            print(
-                cyan(f"Imported ash-scan-set-files-list.txt from {output}"),
-                file=sys.stderr,
-            )
+            # print(
+            #     cyan(f"Imported ash-scan-set-files-list.txt from {output}"),
+            #     file=sys.stderr,
+            # )
 
     if not ashignore_content:
         ashignore_content = get_ash_ignorespec_lines(source, ignorefile, debug=debug)

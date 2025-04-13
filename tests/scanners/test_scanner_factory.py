@@ -2,8 +2,8 @@
 
 import pytest
 
-from automated_security_helper.config.config import ASHConfig, BuildConfig
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.config.ash_config import ASHConfig, BuildConfig
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 from automated_security_helper.scanners.cdk_nag_scanner import CdkNagScanner
 from automated_security_helper.core.scanner_factory import ScannerFactory

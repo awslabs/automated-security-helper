@@ -193,7 +193,9 @@ class ScannerPlugin(BaseModel, Generic[T]):
             raise ScannerError(f"Target {target} does not exist!")
 
         self.start_time = datetime.now(timezone.utc)
-        ASH_LOGGER.debug(f"Starting {self.__class__.__name__} scan of {target}")
+        ASH_LOGGER.debug(
+            f"Starting {self.config.name or self.__class__.__name__} scan of {target}"
+        )
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
         if self.results_dir:
@@ -211,8 +213,8 @@ class ScannerPlugin(BaseModel, Generic[T]):
         """
         self.end_time = datetime.now(timezone.utc)
 
-        ASH_LOGGER.info(
-            f"ASH scan of {target} completed in {(self.end_time - self.start_time).total_seconds()} seconds"
+        ASH_LOGGER.debug(
+            f"{self.config.name} scan of {target} completed in {(self.end_time - self.start_time).total_seconds()} seconds"
         )
 
     def _run_subprocess(

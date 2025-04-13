@@ -5,9 +5,9 @@ import re
 from typing import Callable, Dict, Optional, Type, Union
 from importlib import import_module
 
-from automated_security_helper.config.config import ASHConfig
+from automated_security_helper.config.ash_config import ASHConfig
 from automated_security_helper.base.scanner import ScannerBaseConfig
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 
 from automated_security_helper.scanners.custom_scanner import CustomScanner
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -157,15 +157,9 @@ class ScannerFactory:
                     ASH_LOGGER.warning(f"Invalid scanner class: {scanner_class}")
                     continue
 
-                # Check for required config
-                if not hasattr(scanner_class, "config") or scanner_class.config is None:
-                    ASH_LOGGER.warning(
-                        f"Scanner {scanner_class.__name__} missing config (factory)"
-                    )
-                    continue
-
                 if callable(scanner_class):
                     scanner_class = scanner_class()
+
                 config: ScannerBaseConfig = scanner_class.config
                 if (
                     not hasattr(config, "name")
@@ -181,7 +175,6 @@ class ScannerFactory:
                 # scanner_name = self._normalize_scanner_name(scanner_name)
 
                 # Only register if not already present
-                self.default_scanners.add(scanner_name)
                 if scanner_name not in self._scanners:
                     self._scanners[scanner_name] = scanner_class
 

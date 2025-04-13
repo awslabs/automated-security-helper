@@ -48,6 +48,49 @@ class Level(Enum):
     error = "error"
 
 
+class Kind(Enum):
+    notApplicable = "notApplicable"
+    pass_ = "pass"  # nosec - False positive, not a hardcoded password
+    fail = "fail"
+    review = "review"
+    open = "open"
+    informational = "informational"
+
+
+class BaselineState(Enum):
+    new = "new"
+    unchanged = "unchanged"
+    updated = "updated"
+    absent = "absent"
+
+
+class ColumnKind(Enum):
+    utf16CodeUnits = "utf16CodeUnits"
+    unicodeCodePoints = "unicodeCodePoints"
+
+
+class Kind1(Enum):
+    inSource = "inSource"
+    external = "external"
+
+
+class State(Enum):
+    accepted = "accepted"
+    underReview = "underReview"
+    rejected = "rejected"
+
+
+class Importance(Enum):
+    important = "important"
+    essential = "essential"
+    unimportant = "unimportant"
+
+
+class Content(Enum):
+    localizedData = "localizedData"
+    nonLocalizedData = "nonLocalizedData"
+
+
 class PropertyBag(BaseModel):
     model_config = ConfigDict(
         extra="allow",
@@ -93,49 +136,6 @@ class ReportingConfiguration(BaseModel):
         None,
         description="Key/value pairs that provide additional information about the reporting configuration.",
     )
-
-
-class Kind(Enum):
-    notApplicable = "notApplicable"
-    pass_ = "pass"  # nosec - False positive, not a hardcoded password
-    fail = "fail"
-    review = "review"
-    open = "open"
-    informational = "informational"
-
-
-class BaselineState(Enum):
-    new = "new"
-    unchanged = "unchanged"
-    updated = "updated"
-    absent = "absent"
-
-
-class ColumnKind(Enum):
-    utf16CodeUnits = "utf16CodeUnits"
-    unicodeCodePoints = "unicodeCodePoints"
-
-
-class Kind1(Enum):
-    inSource = "inSource"
-    external = "external"
-
-
-class State(Enum):
-    accepted = "accepted"
-    underReview = "underReview"
-    rejected = "rejected"
-
-
-class Importance(Enum):
-    important = "important"
-    essential = "essential"
-    unimportant = "unimportant"
-
-
-class Content(Enum):
-    localizedData = "localizedData"
-    nonLocalizedData = "nonLocalizedData"
 
 
 class ToolComponentReference(BaseModel):

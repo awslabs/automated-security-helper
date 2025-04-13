@@ -16,7 +16,7 @@ from automated_security_helper.base.scanner import (
     ScannerBaseConfig,
 )
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.base.plugin import (
+from automated_security_helper.base.scanner_plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.schemas.sarif_schema_model import (

@@ -6,17 +6,18 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+from rich.progress import Progress
 
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models.scan_results import ScanResultsContainer
-from automated_security_helper.config.config import (
+from automated_security_helper.config.ash_config import (
     ASHConfig,
 )
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.json_serializer import ASHARPModelSerializer
 from automated_security_helper.core.scanner_factory import ScannerFactory
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 from automated_security_helper.base.scanner import (
     ScannerBaseConfig,
 )
@@ -342,26 +343,31 @@ class ScanExecutionEngine:
                     if scanner_config:
                         # Add scanner to execution queue with default target
                         self._queue.put(
-                            (scanner_name, scanner_config(), self.source_dir)
+                            (scanner_name, scanner_config(), self.source_dir, "source")
                         )
-                        self._queue.put((scanner_name, scanner_config(), self.work_dir))
+                        self._queue.put(
+                            (scanner_name, scanner_config(), self.work_dir, "temp")
+                        )
                         enabled_scanners.add(scanner_name)
 
             # Initialize progress tracker for execution
-            self._progress = ScanProgress(len(enabled_scanners))
+            with Progress(
+                auto_refresh=True,
+            ) as progress:
+                self._progress = ScanProgress(len(enabled_scanners))
 
-            # Execute scanners based on mode
-            if self._strategy == ExecutionStrategy.PARALLEL:
-                out = self._execute_parallel()
-            else:
-                out = self._execute_sequential()
-            ASH_LOGGER.debug(f"Execution completed: {out}")
+                # Execute scanners based on mode
+                if self._strategy == ExecutionStrategy.PARALLEL:
+                    out = self._execute_parallel(progress=progress)
+                else:
+                    out = self._execute_sequential(progress=progress)
+                ASH_LOGGER.debug(f"Execution completed: {out}")
 
-            # Save ASHARPModel as JSON alongside results if output_dir is configured
-            output_dir = getattr(self._config, "output_dir", None)
-            if output_dir:
-                output_path = Path(output_dir)
-                ASHARPModelSerializer.save_model(self._asharp_model, output_path)
+                # Save ASHARPModel as JSON alongside results if output_dir is configured
+                output_dir = getattr(self._config, "output_dir", None)
+                if output_dir:
+                    output_path = Path(output_dir)
+                    ASHARPModelSerializer.save_model(self._asharp_model, output_path)
 
             return self._asharp_model
 
@@ -370,7 +376,11 @@ class ScanExecutionEngine:
             raise
 
     def _execute_scanner(
-        self, scanner_name: str, scanner_plugin: ScannerPlugin, scan_target: Path
+        self,
+        scanner_name: str,
+        scanner_plugin: ScannerPlugin,
+        scan_target: Path,
+        target_type: str | None = None,
     ) -> ScanResultsContainer:
         """Execute a single scanner and process its results.
 
@@ -416,8 +426,18 @@ class ScanExecutionEngine:
             ASH_LOGGER.debug(f"scanner_name: {scanner_name}")
             ASH_LOGGER.debug(f"scanner_config overridden: {config_overridden}")
 
+            container = ScanResultsContainer(
+                scanner_name=scanner_config.name,
+                target=scan_target,
+                target_type=target_type,
+            )
+            if not scanner_config.enabled:
+                ASH_LOGGER.warning(f"{scanner_config.name}")
+
             # Execute scan
-            ASH_LOGGER.debug(f"Executing {scanner_plugin.__class__.__name__}.scan()")
+            ASH_LOGGER.debug(
+                f"Executing {scanner_config.name or scanner_plugin.__class__.__name__}.scan()"
+            )
             try:
                 raw_results = scanner_plugin.scan(
                     target=scan_target,
@@ -425,23 +445,20 @@ class ScanExecutionEngine:
                 )
             except Exception as e:
                 ASH_LOGGER.error(
-                    f"Failed to execute {scanner_plugin.__class__.__name__} scanner: {e}"
+                    f"Failed to execute {scanner_config.name or scanner_plugin.__class__.__name__} scanner: {e}"
                 )
                 raw_results = {"error": str(e)}
             finally:
                 # ASH_LOGGER.debug(
                 #     f"{scanner_plugin.__class__.__name__} raw_results: {raw_results}"
                 # )
-
-                # Wrap results in container
-                container = ScanResultsContainer(
-                    scanner_name=scanner_plugin.config.name,
-                )
                 container.raw_results = raw_results
-                # Extract and add metadata if present
-                if "metadata" in raw_results:
-                    for key, value in raw_results["metadata"].items():
-                        container.add_metadata(key, value)
+
+                if raw_results is not None:
+                    # Extract and add metadata if present
+                    if "metadata" in raw_results:
+                        for key, value in raw_results["metadata"].items():
+                            container.add_metadata(key, value)
 
                 ASH_LOGGER.debug("Executing engine.progress.increment()")
                 if self._progress:
@@ -460,7 +477,7 @@ class ScanExecutionEngine:
             )
             raise
 
-    def _execute_sequential(self) -> None:
+    def _execute_sequential(self, progress: Progress) -> None:
         """Execute scanners sequentially and update ASHARPModel."""
         while not self._queue.empty():
             scanner_tuple = self._queue.get()
@@ -468,20 +485,28 @@ class ScanExecutionEngine:
             scanner_name = scanner_tuple[0]
             scanner_plugin = scanner_tuple[1]
             scan_target = scanner_tuple[2]
+            target_type = scanner_tuple[3]
+
+            task = progress.add_task(
+                f"[cyan]({scanner_name}) Scanning {target_type} dir...", total=100
+            )
 
             results = self._execute_scanner(
                 scanner_name=scanner_name,
                 scanner_plugin=scanner_plugin,
                 scan_target=scan_target,
+                target_type=target_type,
             )
             self._process_results(results)
+            progress.update(task, completed=100)
             if self._progress:
                 self._progress.increment()
 
-    def _execute_parallel(self) -> None:
+    def _execute_parallel(self, progress: Progress) -> None:
         """Execute scanners in parallel and update ASHARPModel."""
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = []
+            tasks = {}
             # Submit all scanners to the thread pool
             while not self._queue.empty():
                 ASH_LOGGER.debug("Getting scanners from queue")
@@ -490,12 +515,24 @@ class ScanExecutionEngine:
                 scanner_name = scanner_tuple[0]
                 scanner_plugin = scanner_tuple[1]
                 scan_target = scanner_tuple[2]
+                target_type = scanner_tuple[3]
+
+                if scanner_name not in tasks:
+                    tasks[scanner_name] = {}
+                tasks[scanner_name][Path(scan_target).as_posix()] = progress.add_task(
+                    f"[magenta]({scanner_name}) Scanning {target_type} directory...",
+                    total=100,
+                )
 
                 ASH_LOGGER.debug(
                     f"Submitting {scanner_name} to thread pool to scan target: {scan_target}"
                 )
                 future = executor.submit(
-                    self._execute_scanner, scanner_name, scanner_plugin, scan_target
+                    self._execute_scanner,
+                    scanner_name,
+                    scanner_plugin,
+                    scan_target,
+                    target_type,
                 )
                 ASH_LOGGER.debug(f"Submitted {scanner_name} to thread pool")
                 futures.append(future)
@@ -505,11 +542,19 @@ class ScanExecutionEngine:
             for future in as_completed(futures):
                 try:
                     ASH_LOGGER.debug("Getting results from completed future")
-                    results = future.result()
+                    results: ScanResultsContainer | None = future.result()
                     ASH_LOGGER.debug("Got results from completed future, processing")
                     self._process_results(results)
+
+                    task_scan_target = Path(results.target).as_posix()
+
+                    task = tasks.get(results.scanner_name, {}).get(
+                        task_scan_target, None
+                    )
+                    if task is not None:
+                        progress.update(task, completed=100)
+
                     if self._progress:
-                        ASH_LOGGER.debug("Incrementing progress")
                         self._progress.increment()
                 except Exception as e:
                     ASH_LOGGER.error(f"Scanner execution failed: {str(e)}")

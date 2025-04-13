@@ -6,16 +6,11 @@ from automated_security_helper.core.execution_engine import (
     ExecutionStrategy,
     ScanExecutionEngine,
 )
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 
-from automated_security_helper.config.config import (
+from automated_security_helper.config.ash_config import (
     ASHConfig,
-    SASTScannerConfig,
-    SASTScannerListConfig,
-    SBOMScannerConfig,
-    SBOMScannerListConfig,
 )
-from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -88,16 +83,6 @@ class MockEngine(ScanExecutionEngine):
         self._config = ASHConfig(
             project_name="test",
             fail_on_findings=False,
-            sast=SASTScannerConfig(
-                output_formats=[ExportFormat.JSON],
-                enabled=True,
-                scanners=SASTScannerListConfig(),
-            ),
-            sbom=SBOMScannerConfig(
-                output_formats=[ExportFormat.JSON],
-                enabled=True,
-                scanners=SBOMScannerListConfig(),
-            ),
         )
 
         # Register and enable scanners

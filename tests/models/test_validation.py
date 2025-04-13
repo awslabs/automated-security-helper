@@ -1,6 +1,6 @@
 """Unit tests for validation module."""
 
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 from automated_security_helper.models.validation import ConfigurationValidator
 from automated_security_helper.base.scanner import ParserConfig
 

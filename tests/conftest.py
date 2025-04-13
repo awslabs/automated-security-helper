@@ -5,7 +5,7 @@ import sys
 import pytest
 import yaml
 from automated_security_helper.base.options import BaseScannerOptions
-from automated_security_helper.config.config import (
+from automated_security_helper.config.ash_config import (
     ASHConfig,
     BuildConfig,
 )
@@ -25,7 +25,7 @@ from automated_security_helper.models.core import (
     Location,
     Scanner,
 )
-from automated_security_helper.base.plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPlugin
 from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
 )

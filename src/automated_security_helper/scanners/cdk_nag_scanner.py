@@ -30,7 +30,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
-from automated_security_helper.base.plugin import (
+from automated_security_helper.base.scanner_plugin import (
     ScannerPlugin,
 )
 from automated_security_helper.utils.cdk_nag_wrapper import (
@@ -186,6 +186,7 @@ class CdkNagScanner(ScannerPlugin[CdkNagScannerConfig]):
         target_rel_path = Path(target).absolute().relative_to(Path.cwd()).as_posix()
 
         outdir = self.output_dir.joinpath("scanners").joinpath("cdk-nag")
+        sarif_results: List[Result] = []
         for cfn_file in cfn_files:
             try:
                 cfn_file_rel_path = (
@@ -216,7 +217,6 @@ class CdkNagScanner(ScannerPlugin[CdkNagScannerConfig]):
 
                 nag_result = nag_result_dict.get("results", None)
 
-                sarif_results: List[Result] = []
                 findings: List[IaCVulnerability]
                 for pack_name, findings in nag_result.items():
                     ASH_LOGGER.debug(f"Found {len(findings)} findings in {pack_name}")
@@ -256,7 +256,8 @@ class CdkNagScanner(ScannerPlugin[CdkNagScannerConfig]):
                         sarif_results.append(sarif_result)
 
             except Exception as e:
-                ASH_LOGGER.warning(f"Error scanning {cfn_file}: {e}")
+                if "could not determine a constructor for the tag" not in str(e):
+                    ASH_LOGGER.warning(f"Error scanning {cfn_file}: {e}")
                 failed_files.append((cfn_file, str(e)))
 
         self._post_scan(target=target)

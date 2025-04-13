@@ -21,47 +21,37 @@ output_formats:
   - cyclonedx
   - text
 severity_threshold: ALL
-
 scanners:
   bandit:
     enabled: true
-    name: bandit
     options:
       confidence_level: all
       ignore_nosec: false
       severity_level: all
   cdk-nag:
     enabled: true
-    name: cdk-nag
     options:
       nag_packs:
         AwsSolutionsChecks: true
-        HIPAASecurityChecks: false
-        NIST80053R4Checks: false
-        NIST80053R5Checks: false
-        PCIDSS321Checks: false
+        HIPAASecurityChecks: true
+        NIST80053R4Checks: true
+        NIST80053R5Checks: true
+        PCIDSS321Checks: true
   cfn-nag:
     enabled: true
-    name: cfn-nag
     type: IAC
   checkov:
     enabled: true
-    name: checkov
     options:
       frameworks:
         - all
   git-secrets:
     enabled: true
-    name: git-secrets
   npm-audit:
     enabled: true
-    name: npm-audit
   grype:
     enabled: true
-    name: grype
   semgrep:
     enabled: true
-    name: semgrep
   syft:
     enabled: true
-    name: syft
