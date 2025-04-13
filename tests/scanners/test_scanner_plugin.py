@@ -1,10 +1,10 @@
 """Unit tests for abstract scanner module."""
 
-from importlib.metadata import version
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Optional
 
 import pytest
 
+from automated_security_helper.base.scanner import ScannerBaseConfig
 from automated_security_helper.base.scanner_plugin import ScannerPlugin
 
 
@@ -12,18 +12,8 @@ from automated_security_helper.core.exceptions import ScannerError
 from tests.conftest import TEST_SOURCE_DIR, TEST_OUTPUT_DIR
 
 
-class ConcreteScanner(ScannerPlugin):
+class ConcreteScanner(ScannerPlugin[ScannerBaseConfig]):
     """Concrete implementation of Scanner for testing."""
-
-    name: Literal["concrete"] = "concrete"
-    enabled: bool = True
-    tool_version: str = version("automated_security_helper")
-
-    _default_config = ScannerPlugin(
-        name="test_scanner",
-        type="CUSTOM",
-        command="test_command",
-    )
 
     def model_post_init(self, context):
         self.source_dir = TEST_SOURCE_DIR

@@ -9,7 +9,6 @@ from typing_extensions import Self
 from pydantic import BaseModel, model_validator
 
 from automated_security_helper.base.options import BaseConverterOptions
-from automated_security_helper.models.interfaces import IConverter
 
 
 class ConverterPluginConfig(BaseModel):
@@ -22,7 +21,7 @@ class ConverterPluginConfig(BaseModel):
     check_for_updates: bool = False
 
 
-class ConverterPlugin(IConverter, BaseModel):
+class ConverterPlugin(BaseModel):
     """Base converter plugin with some methods of the IConverter abstract class
     implemented for convenience.
     """

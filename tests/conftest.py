@@ -8,10 +8,10 @@ from automated_security_helper.base.options import BaseScannerOptions
 from automated_security_helper.config.ash_config import (
     ASHConfig,
     BuildConfig,
+    ScannerConfigSegment,
 )
 from automated_security_helper.config.scanner_types import (
     CfnNagScannerConfig,
-    CheckovScannerConfig,
     GitSecretsScannerConfig,
     NpmAuditScannerConfig,
     SemgrepScannerConfig,
@@ -35,6 +35,7 @@ from automated_security_helper.scanners.cdk_nag_scanner import (
     CdkNagScannerConfig,
     CdkNagScannerConfigOptions,
 )
+from automated_security_helper.scanners.checkov_scanner import CheckovScannerConfig
 
 
 TEST_DIR = Path(__file__).parent.joinpath("pytest-temp")
@@ -217,9 +218,9 @@ def ash_config() -> ASHConfig:
             ExportFormat.CYCLONEDX,
         ],
         severity_threshold="ALL",
-        scanners=[
-            BanditScannerConfig(),
-            CdkNagScannerConfig(
+        scanners=ScannerConfigSegment(
+            bandit=BanditScannerConfig(),
+            cdk_nag=CdkNagScannerConfig(
                 enabled=True,
                 options=CdkNagScannerConfigOptions(
                     nag_packs=CdkNagPacks(
@@ -231,25 +232,25 @@ def ash_config() -> ASHConfig:
                     ),
                 ),
             ),
-            CfnNagScannerConfig(),
-            CheckovScannerConfig(),
-            GitSecretsScannerConfig(
+            cfn_nag=CfnNagScannerConfig(),
+            checkov=CheckovScannerConfig(),
+            git_secrets=GitSecretsScannerConfig(
                 options=BaseScannerOptions(enabled=True),
             ),
-            GrypeScannerConfig(),
-            NpmAuditScannerConfig(),
-            SemgrepScannerConfig(),
-            CustomScannerConfig(
+            grype=GrypeScannerConfig(),
+            npm_audit=NpmAuditScannerConfig(),
+            semgrep=SemgrepScannerConfig(),
+            trivy_sast=CustomScannerConfig(
                 name="trivy-sast",
                 type="SAST",
                 custom=BaseScannerOptions(enabled=True),
             ),
-            SyftScannerConfig(),
-            CustomScannerConfig(
+            syft=SyftScannerConfig(),
+            trivy_sbom=CustomScannerConfig(
                 name="trivy-sbom",
                 type="SBOM",
                 custom=BaseScannerOptions(enabled=True),
             ),
-        ],
+        ),
     )
     return conf
