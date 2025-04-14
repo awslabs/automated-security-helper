@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from rich.progress import Progress
 
-from automated_security_helper.core.plugin_registry import PluginRegistry
+from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
@@ -129,6 +129,9 @@ class ScanExecutionEngine:
         )
         self._scanner_factory = ScannerFactory(
             config=config,
+            registered_scanner_plugins=self._plugin_registry.get_plugin(
+                plugin_type=PluginType.scanner
+            ),
         )
 
         self._registered_scanners = {}
@@ -145,7 +148,7 @@ class ScanExecutionEngine:
                 and val_instance.config.enabled
             ):
                 ASH_LOGGER.debug(
-                    f"Scanner {key} is enabled, adding to enabled scanner list"
+                    f"Scanner {key} is enabled via config, adding to enabled scanner list"
                 )
                 enabled_from_config.append(key)
 
@@ -424,10 +427,20 @@ class ScanExecutionEngine:
             ASH_LOGGER.debug("EVALUATING CONFIGURED SCANNERS")
             scanner_config = scanner_plugin.config
             ASH_LOGGER.debug(f"scanner_plugin.config: {scanner_plugin.config}")
-            scanner_config_override = self._config.get_plugin_config(
-                plugin_type="scanners",
+            scanner_config_override = self._plugin_registry.get_plugin(
+                plugin_type="scanner",
                 plugin_name=scanner_name.replace("_", "-"),
             )
+            if scanner_config_override is not None:
+                ASH_LOGGER.verbose(
+                    f"Found scanner_plugin.plugin_config in registry: {scanner_config_override.plugin_config}"
+                )
+                scanner_config_override = scanner_config_override.plugin_config
+            else:
+                scanner_config_override = self._config.get_plugin_config(
+                    plugin_type="scanner",
+                    plugin_name=scanner_name.replace("_", "-"),
+                )
             if scanner_config_override is not None:
                 ASH_LOGGER.debug(
                     f"scanner_config_override override: {scanner_config_override}"

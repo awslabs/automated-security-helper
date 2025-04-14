@@ -318,7 +318,13 @@ def run_cdk_nag_against_cfn_template(
                                 startLine=1,
                                 endLine=1,
                                 snippet=ArtifactContent(
-                                    text=dump_yaml(cfn_resource.model_dump())
+                                    text=dump_yaml(
+                                        {
+                                            "Resources": {
+                                                resource_log_id: cfn_resource.model_dump()
+                                            }
+                                        }
+                                    )
                                 ),
                             ),
                         ),

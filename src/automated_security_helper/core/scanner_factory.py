@@ -2,17 +2,14 @@
 
 from pathlib import Path
 from typing import Callable, Dict, Optional, Type, Union
-from importlib import import_module
 
 from automated_security_helper.config.ash_config import ASHConfig
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 
+from automated_security_helper.core.plugin_registry import RegisteredPlugin
 from automated_security_helper.scanners.ash_default.custom_scanner import CustomScanner
 from automated_security_helper.utils.log import ASH_LOGGER
-
-# Placeholder for now
-_OPTIONAL_SCANNER_CONFIGS: Dict[str, ScannerPluginBase] = {}
 
 
 class ScannerFactory:
@@ -21,6 +18,7 @@ class ScannerFactory:
     def __init__(
         self,
         config: ASHConfig = None,
+        registered_scanner_plugins: Dict[str, RegisteredPlugin] = {},
     ) -> None:
         """Initialize the scanner factory with empty scanner registry.
 
@@ -32,8 +30,9 @@ class ScannerFactory:
         self._scanners: Dict[
             str, Union[Type[ScannerPluginBase], Callable[[], ScannerPluginBase]]
         ] = {}
+        self._registered_scanner_plugins = registered_scanner_plugins
         self._register_default_scanners()
-        self._register_config_scanners()
+        # self._register_config_scanners()
 
     def _register_config_scanners(self) -> None:
         """Register scanners from the ASHConfig.
@@ -93,99 +92,21 @@ class ScannerFactory:
         """Register all available scanner plugins.
 
         This includes:
-        - All classes that extend ScannerPlugin in automated_security_helper.scanners.ash_default
+        - All classes that extend ScannerPlugin in automated_security_helper.base.scanner_plugin
         - Any custom scanners from ASHConfig if provided
         """
-        # First register all scanner plugins from the scanners namespace
-        scanners_module = import_module(
-            "automated_security_helper.scanners.ash_default"
-        )
-        # ash_plugins = {
-        #     "builders": {},
-        #     "converters": {},
-        #     "scanners": {},
-        #     "reporters": {},
-        # }
-        # for name, obj in inspect.getmembers(scanners_module):
-        #     if isinstance(obj, ModuleType):
-        #         ASH_LOGGER.info(f"Found scanners namespace module {name}: {obj}")
-        #         if name not in ash_plugins["scanners"]:
-        #             ash_plugins["scanners"][name] = {}
-        #         else:
-        #             ASH_LOGGER.warning(f"Duplicate scanners namespace module '{name}'. Skipping re-registration.")
-        #             continue
-        #         ash_plugins["scanners"][name]["module"] = obj
-        #         ash_plugins["scanners"][name]["plugins"] = {}
-
-        scanners_path = Path(scanners_module.__file__).parent
-
         # Iterate through all .py files in the scanners directory
-        for file_path in scanners_path.glob("*.py"):
-            if file_path.name.startswith("_"):
-                continue
-
-            module_name = (
-                f"automated_security_helper.scanners.ash_default.{file_path.stem}"
-            )
+        for scanner_name, reg_plugin in self._registered_scanner_plugins.items():
             try:
-                module = import_module(module_name)
-
-                # Find all classes in the module that inherit from ScannerPlugin
-                for attr_name in dir(module):
-                    attr = getattr(module, attr_name)
-                    if (
-                        isinstance(attr, type)
-                        and issubclass(attr, ScannerPluginBase)
-                        and attr != ScannerPluginBase
-                    ):
-                        scanner_name = attr_name
-                        try:
-                            self.register_scanner(scanner_name, attr)
-                            self.default_scanners.add(scanner_name)
-                        except ValueError:
-                            # Skip if scanner is already registered
-                            continue
-            except (ImportError, AttributeError) as e:
-                ASH_LOGGER.warning(
-                    f"Failed to load scanner module {module_name}: {str(e)}"
-                )
-                continue
-
-        # Process all default scanners
-        for scanner_name in self.default_scanners:
-            scanner_class = self._scanners[scanner_name]
-            try:
-                # Skip invalid scanner classes
-                if isinstance(scanner_class, type) and not issubclass(
-                    scanner_class, ScannerPluginBase
-                ):
-                    ASH_LOGGER.warning(f"Invalid scanner class: {scanner_class}")
-                    continue
-
+                scanner_class = reg_plugin.plugin_class
+                self.register_scanner(scanner_name, scanner_class)
+                self.default_scanners.add(scanner_name)
                 if callable(scanner_class):
                     scanner_class = scanner_class()
-
-                config: ScannerPluginConfigBase = scanner_class.config
-                if (
-                    not hasattr(config, "name")
-                    or config.name is None
-                    or config.name == ""
-                ):
-                    ASH_LOGGER.warning(
-                        f"Scanner {scanner_class.__name__} missing required name in default config, current: {config.name}"
-                    )
-                    continue
-
-                scanner_name = config.name
-
-                # Only register if not already present
-                if scanner_name not in self._scanners:
-                    self._scanners[scanner_name] = scanner_class
-
-            except Exception as e:
-                ASH_LOGGER.warning(
-                    f"Failed to register scanner {scanner_class.__name__}: {str(e)}"
-                )
+                self._scanners[scanner_name] = scanner_class
+            except ValueError:
+                # Skip if scanner is already registered
+                continue
 
     def register_scanner(
         self,
@@ -214,7 +135,7 @@ class ScannerFactory:
         if scanner_name in self._scanners:
             ASH_LOGGER.debug(f"Scanner '{scanner_name}' is already registered")
         else:
-            ASH_LOGGER.debug(f"Registering scanner: {scanner_name} (factory)")
+            ASH_LOGGER.verbose(f"Registering scanner: {scanner_name} (factory)")
 
         # Validate input
         try:

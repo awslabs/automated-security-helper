@@ -1,6 +1,7 @@
 from enum import Enum
 import importlib
 import inspect
+import json
 import pkgutil
 from typing import Annotated, Dict
 
@@ -8,13 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
+    ConverterPluginConfigBase,
 )
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
+    ReporterPluginConfigBase,
 )
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
+    ScannerPluginConfigBase,
 )
 from automated_security_helper.config.ash_config import ASHConfig
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -63,14 +67,14 @@ class PluginRegistry(BaseModel):
             self.registered_plugins[plug_type] = self.discover_plugins(
                 plug_type=plug_type
             )
-            reg_log = "\n- ".join(
+            reg_log = "\n\n- ".join(
                 [
-                    f"{plug_name}: {plug}"
+                    f"{plug_name}: {json.dumps(plug, default=str)}"
                     for plug_name, plug in self.registered_plugins[plug_type].items()
                 ]
             )
             ASH_LOGGER.debug(
-                f"Registered {len(self.registered_plugins[plug_type])} {plug_type} plugins:\n- {reg_log}"
+                f"Registered {len(self.registered_plugins[plug_type])} {plug_type} plugins:\n\n- {reg_log}"
             )
         return super().model_post_init(context)
 
@@ -158,6 +162,22 @@ class PluginRegistry(BaseModel):
                     plugin_type=plug_type,
                     plugin_name=plugin_name,
                 )
+                if isinstance(plugin_config, dict):
+                    if plug_type == "converter":
+                        plugin_config = ConverterPluginConfigBase(**plugin_config)
+                    elif plug_type == "scanner":
+                        plugin_config = ScannerPluginConfigBase(**plugin_config)
+                    elif plug_type == "reporter":
+                        plugin_config = ReporterPluginConfigBase(**plugin_config)
+                    else:
+                        plugin_config = PluginConfigBase(**plugin_config)
+
+                if (
+                    plugin_config is not None
+                    and plugin_config.name is not None
+                    and plugin_config.name != plugin_name
+                ):
+                    plugin_name = plugin_config.name
                 state_dict[plugin_name] = RegisteredPlugin(
                     name=plugin_name,
                     enabled=(
@@ -173,17 +193,17 @@ class PluginRegistry(BaseModel):
         return state_dict
 
     def get_plugin(
-        self, plug_type: PluginType, plugin_name: str
-    ) -> RegisteredPlugin | None:
-        """Get a plugin by name."""
-        ptype = plug_type.value
+        self, plugin_type: PluginType, plugin_name: str = None
+    ) -> RegisteredPlugin | Dict[str, RegisteredPlugin] | None:
+        """Get a plugin by name or get all plugins for a specific type."""
+        ptype = plugin_type if isinstance(plugin_type, str) else plugin_type.value
         if ptype not in self.registered_plugins:
-            ASH_LOGGER.warning(f"Plugin type {plug_type} not found in registry.")
+            ASH_LOGGER.warning(f"Plugin type {plugin_type} not found in registry.")
             return None
-        if plugin_name not in self.registered_plugins[ptype]:
-            ASH_LOGGER.warning(
-                f"Plugin {plugin_name} not found registered as plugin type."
-            )
+
+        if plugin_name is None:
+            return self.registered_plugins[ptype]
+
         found = self.registered_plugins[ptype].get(plugin_name, None)
         if found is not None:
             ASH_LOGGER.debug(f"Found plugin {plugin_name}: {found.plugin_fqn}")

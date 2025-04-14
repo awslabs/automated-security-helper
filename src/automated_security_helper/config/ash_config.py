@@ -235,7 +235,7 @@ class ASHConfig(BaseModel):
 
     def get_plugin_config(
         self,
-        plugin_type: Literal["converters", "scanners", "reporters"],
+        plugin_type: Literal["converter", "scanner", "reporter"],
         plugin_name: str,
     ):
         found = None
@@ -246,7 +246,7 @@ class ASHConfig(BaseModel):
         plugin_name = re.sub(
             r"Scanner(Config)?", "", plugin_name, flags=re.IGNORECASE
         ).lower()
-        # if plugin_type == "builders":
+        # if plugin_type == "builder":
         #     for item in self.build.custom_scanners:
         #         if isinstance(item, dict):
         #             item = ScannerPluginBase(**item)
@@ -256,7 +256,7 @@ class ASHConfig(BaseModel):
         #         ]:
         #             found = item
         #             break
-        if plugin_type == "scanners":
+        if plugin_type == "scanner":
             item_dict = self.scanners.model_dump()
             key_map = {}
             for item_name, item in item_dict.items():
@@ -307,7 +307,7 @@ class ASHConfig(BaseModel):
             #         if plugin_name in possible:
             #             found = item
             #             break
-        if plugin_type == "converters":
+        if plugin_type == "converter":
             item_dict = self.converters
             key_map = {}
             for item_name, item in item_dict.items():
@@ -337,34 +337,7 @@ class ASHConfig(BaseModel):
             #     if plugin_name == item_name:
             #         found = ConverterPluginConfigBase(name=item_name, enabled=enabled)
             #         break
-        if plugin_type == "reporters":
-            item_dict = self.output_formats
-            key_map = {}
-            for item_name, item in item_dict.items():
-                if found is not None:
-                    break
-                for possible in list(
-                    sorted(
-                        set(
-                            [
-                                item_name,
-                                re.sub(
-                                    r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
-                                ).lower(),
-                            ]
-                        )
-                    )
-                ):
-                    key_map[possible] = item_name
-            if plugin_name in key_map:
-                ASH_LOGGER.debug(
-                    f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
-                )
-                found = item_dict[key_map[plugin_name]]
-                found = ReporterPluginConfigBase(
-                    name=item_name, enabled=item_dict[key_map[plugin_name]]["enabled"]
-                )
-
+        if plugin_type == "reporter":
             for item_name in self.output_formats:
                 if plugin_name in list(
                     sorted(
