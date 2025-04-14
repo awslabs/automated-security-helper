@@ -1,6 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import yaml
 from typing import Any, Literal
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -28,5 +27,5 @@ class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
 
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
-        # TODO - Replace with CycloneDX adapter
-        return yaml.dump(model.model_dump(), indent=2)
+
+        return model.cyclonedx.model_dump_json()

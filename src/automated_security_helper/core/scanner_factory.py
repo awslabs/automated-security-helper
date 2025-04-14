@@ -32,7 +32,7 @@ class ScannerFactory:
         ] = {}
         self._registered_scanner_plugins = registered_scanner_plugins
         self._register_default_scanners()
-        # self._register_config_scanners()
+        self._register_config_scanners()
 
     def _register_config_scanners(self) -> None:
         """Register scanners from the ASHConfig.
@@ -132,10 +132,16 @@ class ScannerFactory:
         # Normalize scanner name
 
         # Check for duplicate registration
-        if scanner_name in self._scanners:
+        if scanner_name in ["CustomScanner"]:
+            ASH_LOGGER.debug(
+                f"Scanner '{scanner_name}' is not allowed for registration"
+            )
+            return
+        elif scanner_name in self._scanners:
             ASH_LOGGER.debug(f"Scanner '{scanner_name}' is already registered")
+            return
         else:
-            ASH_LOGGER.verbose(f"Registering scanner: {scanner_name}")
+            ASH_LOGGER.debug(f"Registering scanner: {scanner_name}")
 
         # Validate input
         try:

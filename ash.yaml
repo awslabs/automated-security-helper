@@ -28,6 +28,9 @@ scanners:
       confidence_level: all
       severity_level: all
       ignore_nosec: false
+      excluded_paths:
+        - path: test_data
+          reason: this is my test data folder
   cdk-nag:
     enabled: true
     options:

@@ -237,7 +237,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         except Exception as e:
             ASH_LOGGER.debug(e)
 
-        ASH_LOGGER.verbose(f"({self.config.name}) Running: {command}")
+        ASH_LOGGER.debug(f"({self.config.name}) Running: {command}")
         result = subprocess.run(
             command,
             capture_output=True,
