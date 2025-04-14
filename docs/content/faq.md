@@ -4,6 +4,8 @@
 - [How can I run `ash` on a Windows machine?](#how-can-i-run-ash-on-a-windows-machine)
 - [How can I run `ash` in a CI/CD pipline?](#how-can-i-run-ash-in-a-cicd-pipline)
 - [How can I run `ash` with finch or another OCI compatible tool?](#how-can-i-run-ash-with-finch-or-another-oci-compatible-tool)
+- [Can I use a Bandit configuration file when `ash` runs?](#can-i-use-a-bandit-configuration-file-when-ash-runs)
+- [How can I configure `detect-secrets` to run with custom settings?](#how-can-i-configure-detect-secrets-to-run-with-custom-settings)
 <!-- /TOC -->
 
 ## How can I run `ash` on a Windows machine?
@@ -28,3 +30,9 @@ You can configure the OCI compatible tool to use with by using the environment v
 Yes, `ash` will use a bandit configuration file if it is placed at the root of your project directory. It must be named `.bandit`, `bandit.yaml`, or `bandit.toml`. Configuration files must be formatted properly according to the [Bandit documentation](https://bandit.readthedocs.io/en/latest/config.html).
 
 > Note: paths excluded in a Bandit configuration file must begin with a `/` because `ash` uses an absolute path when calling `bandit`.
+
+## How can I configure `detect-secrets` to run with custom settings?
+
+Yes, `ash` can run `detect-secrets` with custom settings. If you have an existing baseline for `detect-secrets` you would like to use with `ash`, simply place it in your repository and ensure it is tracking with git. `ash` will automatically use the settings from an existing baseline file as long as it is named `.secrets.baseline` like `detect-secrets` recommends.
+
+For more information on creating a baseline and changing the plugins, filters, or other settings for `detect-secrets` please refer to the `detect-secrets` [README file](https://github.com/Yelp/detect-secrets/tree/master).
