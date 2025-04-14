@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 [tool.poetry]
 name = "automated-security-helper"
-version = "2.0.1"
+version = "2.1.0"
 description = ""
 authors = ["Nate Ferrell <nateferl@amazon.com>", "Nathan Bates <nbb@amazon.com>"]
 license = "Apache-2.0"
