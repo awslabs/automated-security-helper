@@ -1,12 +1,27 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import html
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 
 from automated_security_helper.schemas.sarif_schema_model import Result
+from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 
 
-class HTMLReporter:
+class HTMLReporterConfigOptions(ReporterOptionsBase):
+    pass
+
+
+class HTMLReporterConfig(ReporterPluginConfigBase):
+    name: Literal["html"] = "html"
+    extension: str = "html"
+    enabled: bool = True
+
+
+class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
     """Formats results as HTML."""
 
     def format(self, model: Any) -> str:

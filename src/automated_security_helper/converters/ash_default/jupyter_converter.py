@@ -3,48 +3,43 @@
 
 """Module containing the JupyterScanner implementation."""
 
-from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, List, Literal
 from nbconvert import PythonExporter
 
 from pydantic import Field
 
-from automated_security_helper.models.converter_plugin import ConverterPlugin
-from automated_security_helper.models.core import (
-    ConverterBaseConfig,
+from automated_security_helper.base.converter_plugin import (
+    ConverterPluginBase,
+    ConverterPluginConfigBase,
 )
+
 from automated_security_helper.base.options import (
-    BaseConverterOptions,
+    ConverterOptionsBase,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class JupyterNotebookConverterConfigOptions(BaseConverterOptions):
+class JupyterNotebookConverterConfigOptions(ConverterOptionsBase):
     pass
 
 
-class JupyterNotebookConverterConfig(ConverterBaseConfig):
+class JupyterNotebookConverterConfig(ConverterPluginConfigBase):
     """Jupyter Notebook (.ipynb) to Python converter configuration."""
 
     name: Literal["jupyter"] = "jupyter"
-    tool_version: str = version("jupyterlab")
+    enabled: bool = True
     options: Annotated[
         JupyterNotebookConverterConfigOptions,
         Field(description="Configure Jupyter Notebook converter"),
     ] = JupyterNotebookConverterConfigOptions()
 
 
-class JupyterNotebookConverter(ConverterPlugin, JupyterNotebookConverterConfig):
+class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfig]):
     """Converter implementation for Jupyter notebooks security scanning."""
 
-    options: JupyterNotebookConverterConfigOptions = (
-        JupyterNotebookConverterConfigOptions()
-    )
-
     def model_post_init(self, context):
-        self.options
         self.work_dir = (
             self.output_dir.joinpath("work").joinpath("converters").joinpath("jupyter")
         )

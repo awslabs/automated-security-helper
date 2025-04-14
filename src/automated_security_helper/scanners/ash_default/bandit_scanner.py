@@ -7,17 +7,18 @@ from pathlib import Path
 from typing import Annotated, Dict, List, Literal
 
 from pydantic import Field
-from automated_security_helper.base.options import BaseScannerOptions
-from automated_security_helper.base.types import ToolArgs
+from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
+    PathExclusionEntry,
     ToolExtraArg,
 )
-from automated_security_helper.base.scanner import (
-    ScannerBaseConfig,
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginConfigBase,
 )
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.base.scanner_plugin import (
-    ScannerPlugin,
+    ScannerPluginBase,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -29,7 +30,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
-class BanditScannerConfigOptions(BaseScannerOptions):
+class BanditScannerConfigOptions(ScannerOptionsBase):
     confidence_level: Annotated[
         Literal["all", "low", "medium", "high"],
         Field(description="Confidence level for Bandit findings"),
@@ -45,7 +46,10 @@ class BanditScannerConfigOptions(BaseScannerOptions):
         ),
     ] = False
     excluded_paths: Annotated[
-        List[str], Field(description="List of paths to exclude from scanning")
+        List[PathExclusionEntry],
+        Field(
+            description="List of excluded paths and their corresponding reason to exclude from scanning"
+        ),
     ] = []
     additional_formats: Annotated[
         List[
@@ -64,7 +68,7 @@ class BanditScannerConfigOptions(BaseScannerOptions):
     ] = []
 
 
-class BanditScannerConfig(ScannerBaseConfig):
+class BanditScannerConfig(ScannerPluginConfigBase):
     name: Literal["bandit"] = "bandit"
     enabled: bool = True
     options: Annotated[
@@ -72,7 +76,7 @@ class BanditScannerConfig(ScannerBaseConfig):
     ] = BanditScannerConfigOptions()
 
 
-class BanditScanner(ScannerPlugin[BanditScannerConfig]):
+class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     """Implementation of a Python security scanner using Bandit.
 
     This scanner uses Bandit to perform static security analysis of Python code
@@ -108,7 +112,7 @@ class BanditScanner(ScannerPlugin[BanditScannerConfig]):
         )
         super().model_post_init(context)
 
-    def configure(self, config: ScannerPlugin | None = None):
+    def configure(self, config: ScannerPluginBase | None = None):
         """Configure the scanner with the provided configuration.
 
         Args:
@@ -174,6 +178,15 @@ class BanditScanner(ScannerPlugin[BanditScannerConfig]):
             self.args.extra_args.append(ToolExtraArg(key="--format", value=fmt))
         if self.config.options.ignore_nosec:
             self.args.extra_args.append(ToolExtraArg(key="--ignore-nosec", value=None))
+        for item in self.config.options.excluded_paths:
+            ASH_LOGGER.debug(
+                f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
+            )
+            self.args.extra_args.append(
+                ToolExtraArg(
+                    key=f'--exclude="{item.path}"',
+                )
+            )
 
         return super()._process_config_options()
 

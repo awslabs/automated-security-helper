@@ -14,15 +14,19 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import Field
-from automated_security_helper.base.options import BaseScannerOptions
-from automated_security_helper.core.constants import SCANNER_TYPES
-from automated_security_helper.base.scanner import ScannerBaseConfig
-from automated_security_helper.base.types import ToolArgs
+from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.core.constants import (
+    ASH_DOCS_URL,
+    ASH_REPO_URL,
+    SCANNER_TYPES,
+)
+from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     Location,
 )
 from automated_security_helper.base.scanner_plugin import (
-    ScannerPlugin,
+    ScannerPluginBase,
 )
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -44,11 +48,11 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
-class CustomScannerConfigOptions(BaseScannerOptions):
+class CustomScannerConfigOptions(ScannerOptionsBase):
     pass
 
 
-class CustomScannerConfig(ScannerBaseConfig):
+class CustomScannerConfig(ScannerPluginConfigBase):
     """Custom scanner configuration."""
 
     name: str = "custom"
@@ -59,7 +63,7 @@ class CustomScannerConfig(ScannerBaseConfig):
     ] = CustomScannerConfigOptions()
 
 
-class CustomScanner(ScannerPlugin[CustomScannerConfig]):
+class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
     """CustomScanner provides an interface for custom scanners using known formats."""
 
     command: str | None = None
@@ -137,7 +141,8 @@ class CustomScanner(ScannerPlugin[CustomScannerConfig]):
                 driver=ToolComponent(
                     name=scanner_name,
                     version=get_ash_version(),
-                    informationUri="XXXXXXXXXXXXXXXXXXX",
+                    informationUri=ASH_DOCS_URL,
+                    downloadUri=ASH_REPO_URL,
                 )
             )
             # Create and return report
@@ -180,14 +185,14 @@ class CustomScanner(ScannerPlugin[CustomScannerConfig]):
                                         physicalLocation=PhysicalLocation(
                                             artifactLocation=ArtifactLocation(
                                                 uri=result.get("file_path", ""),
-                                                index=0,
+                                                index=1,
                                             ),
                                             region=Region(
                                                 startLine=result.get(
-                                                    "file_line_range", [0, 0]
+                                                    "file_line_range", [1, 1]
                                                 )[0],
                                                 endLine=result.get(
-                                                    "file_line_range", [0, 0]
+                                                    "file_line_range", [1, 1]
                                                 )[1],
                                             ),
                                         )
@@ -199,13 +204,7 @@ class CustomScanner(ScannerPlugin[CustomScannerConfig]):
                     )
                 ],
                 properties=PropertyBag(
-                    tool=Tool(
-                        driver=ToolComponent(
-                            name=scanner_name,
-                            version=self.tool_version,
-                            informationUri="XXXXXXXXXXXXXXXXXXX",
-                        )
-                    ),
+                    tool=tool,
                     timestamp=datetime.now().isoformat(),
                     projectRoot=ArtifactLocation(
                         uri=target.as_posix(),

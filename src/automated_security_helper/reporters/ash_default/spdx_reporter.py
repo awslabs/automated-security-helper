@@ -1,10 +1,25 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Any
 import yaml
+from typing import Any, Literal
+from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 
 
-class SPDXReporter:
+class SPDXReporterConfigOptions(ReporterOptionsBase):
+    pass
+
+
+class SPDXReporterConfig(ReporterPluginConfigBase):
+    name: Literal["spdx"] = "spdx"
+    extension: str = "spdx.json"
+    enabled: bool = True
+
+
+class SPDXReporter(ReporterPluginBase[SPDXReporterConfig]):
     """Formats results as SPDX."""
 
     def format(self, model: Any) -> str:

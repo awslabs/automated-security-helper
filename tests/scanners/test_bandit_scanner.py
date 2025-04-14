@@ -1,8 +1,8 @@
 """Test module for BanditScanner implementation."""
 
 import pytest
-from automated_security_helper.base.scanner_plugin import ScannerPlugin
-from automated_security_helper.scanners.bandit_scanner import BanditScanner
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.scanners.ash_default.bandit_scanner import BanditScanner
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ExportFormat
 
@@ -19,7 +19,7 @@ def test_bandit_scanner_init(test_source_dir, test_output_dir):
     assert scanner.tool_version is not None
 
     # Test explicit configuration
-    config = ScannerPlugin(
+    config = ScannerPluginBase(
         name="bandit", type="SAST", command="bandit", enabled=True, output_format="json"
     )
     # scanner.configure(config)
@@ -30,7 +30,7 @@ def test_bandit_scanner_init(test_source_dir, test_output_dir):
 def test_bandit_scanner_configure(test_source_dir, test_output_dir):
     """Test scanner configuration."""
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    config = ScannerPlugin(name="bandit", output_format="text")
+    config = ScannerPluginBase(name="bandit", output_format="text")
     # scanner.configure(config)
     assert scanner._config == config
     # We have to force standardization of output format at the scanner level so we

@@ -15,7 +15,6 @@ from automated_security_helper.core.execution_engine import (
     ExecutionStrategy,
     ScanExecutionEngine,
 )
-from automated_security_helper.core.result_processor import ResultProcessor
 
 from automated_security_helper.config.ash_config import ASHConfig
 from automated_security_helper.core.exceptions import ASHValidationError
@@ -56,6 +55,10 @@ class ASHScanOrchestrator(BaseModel):
     ]
     verbose: Annotated[bool, Field(False, description="Enable verbose logging")]
     debug: Annotated[bool, Field(False, description="Enable debug logging")]
+    show_progress: Annotated[
+        bool,
+        Field(True, description="Enable graphical progress visibility in the console."),
+    ]
     offline: Annotated[bool, Field(False, description="Run in offline mode")]
     no_run: Annotated[bool, Field(False, description="Only build container image")]
     build_target: Annotated[
@@ -77,10 +80,8 @@ class ASHScanOrchestrator(BaseModel):
     ]
 
     # Core components
-    result_processor: Annotated[
-        ResultProcessor | None, Field(description="Result processor")
-    ] = None
     execution_engine: Annotated[ScanExecutionEngine | None, Field()] = None
+
     output_formats: List[ExportFormat] = [
         ExportFormat.HTML,
         ExportFormat.JSON,
@@ -173,7 +174,7 @@ class ASHScanOrchestrator(BaseModel):
         self.scan_set = scan_set(
             source=self.source_dir,
             output=self.output_dir,
-            debug=self.verbose,
+            debug=self.debug,
         )
 
         self.execution_engine = ScanExecutionEngine(
@@ -182,8 +183,8 @@ class ASHScanOrchestrator(BaseModel):
             strategy=self.strategy,
             enabled_scanners=self.enabled_scanners,
             config=self.config,
+            show_progress=self.show_progress,
         )
-        self.result_processor = ResultProcessor()
 
         return super().model_post_init(context)
 
@@ -261,7 +262,7 @@ class ASHScanOrchestrator(BaseModel):
 
             # Execute scanners with validated config
             try:
-                asharp_model_results = self.execution_engine.execute(config)
+                asharp_model_results = self.execution_engine.run_scan_phase(config)
                 ASH_LOGGER.debug("Scan execution completed successfully")
             except Exception as e:
                 ASH_LOGGER.error(f"Scan execution failed: {str(e)}")

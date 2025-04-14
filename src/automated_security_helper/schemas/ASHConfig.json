@@ -65,9 +65,9 @@
         },
         "excluded_paths": {
           "default": [],
-          "description": "List of paths to exclude from scanning",
+          "description": "List of excluded paths and their corresponding reason to exclude from scanning",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/PathExclusionEntry"
           },
           "title": "Excluded Paths",
           "type": "array"
@@ -94,35 +94,28 @@
       "title": "BanditScannerConfigOptions",
       "type": "object"
     },
-    "BaseScannerOptions": {
-      "additionalProperties": true,
-      "description": "Base class for scanner options.",
-      "properties": {},
-      "title": "BaseScannerOptions",
-      "type": "object"
-    },
     "BuildConfig": {
       "additionalProperties": true,
       "description": "Configuration model for build-time settings.",
       "properties": {
+        "build_mode": {
+          "default": "OFFLINE",
+          "description": "Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning.",
+          "enum": [
+            "ONLINE",
+            "OFFLINE"
+          ],
+          "title": "Build Mode",
+          "type": "string"
+        },
         "custom_scanners": {
           "default": [],
           "description": "Scanner configurations by type",
           "items": {
-            "$ref": "#/$defs/ScannerPlugin"
+            "$ref": "#/$defs/ScannerPluginBase"
           },
           "title": "Custom Scanners",
           "type": "array"
-        },
-        "mode": {
-          "default": "ASH_MODE_ONLINE",
-          "description": "Build mode for the container",
-          "enum": [
-            "ASH_MODE_ONLINE",
-            "ASH_MODE_OFFLINE"
-          ],
-          "title": "Mode",
-          "type": "string"
         },
         "tool_install_scripts": {
           "additionalProperties": {
@@ -244,7 +237,7 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
+          "$ref": "#/$defs/ScannerOptionsBase",
           "default": {},
           "description": "Enable CFN Nag IAC scanner"
         },
@@ -385,7 +378,7 @@
           "default": [],
           "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/PathExclusionEntry"
           },
           "title": "Skip Path",
           "type": "array"
@@ -396,20 +389,20 @@
     },
     "CustomScannerConfig": {
       "additionalProperties": true,
+      "description": "Custom scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
         "name": {
-          "description": "The name of the custom scanner.",
+          "default": "custom",
           "title": "Name",
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
+          "$ref": "#/$defs/CustomScannerConfigOptions",
           "default": {},
           "description": "Configure custom scanner"
         },
@@ -430,10 +423,13 @@
           "type": "string"
         }
       },
-      "required": [
-        "name"
-      ],
       "title": "CustomScannerConfig",
+      "type": "object"
+    },
+    "CustomScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "CustomScannerConfigOptions",
       "type": "object"
     },
     "GitSecretsScannerConfig": {
@@ -453,7 +449,7 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
+          "$ref": "#/$defs/ScannerOptionsBase",
           "default": {},
           "description": "Enable Git Secrets scanner"
         },
@@ -494,7 +490,7 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
+          "$ref": "#/$defs/ScannerOptionsBase",
           "default": {},
           "description": "Configure Grype scanner"
         },
@@ -535,7 +531,7 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
+          "$ref": "#/$defs/ScannerOptionsBase",
           "default": {},
           "description": "Enable NPM/PNPM/Yarn Audit dependency scanner"
         },
@@ -559,31 +555,25 @@
       "title": "NpmAuditScannerConfig",
       "type": "object"
     },
-    "ScannerBaseConfig": {
-      "additionalProperties": true,
-      "description": "Base converter configuration model with common settings.",
+    "PathExclusionEntry": {
+      "description": "Represents a path exclusion entry.",
       "properties": {
-        "enabled": {
-          "default": true,
-          "description": "Whether the component is enabled",
-          "title": "Enabled",
-          "type": "boolean"
-        },
-        "name": {
-          "default": null,
-          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-          "minLength": 1,
-          "pattern": "^[a-zA-Z][\\w-]+$",
-          "title": "Name",
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
           "type": "string"
         },
-        "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
-          "default": {},
-          "description": "Scanner options"
+        "reason": {
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
         }
       },
-      "title": "ScannerBaseConfig",
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "PathExclusionEntry",
       "type": "object"
     },
     "ScannerConfigSegment": {
@@ -705,7 +695,14 @@
       "title": "ScannerConfigSegment",
       "type": "object"
     },
-    "ScannerPlugin": {
+    "ScannerOptionsBase": {
+      "additionalProperties": true,
+      "description": "Base class for scanner options.",
+      "properties": {},
+      "title": "ScannerOptionsBase",
+      "type": "object"
+    },
+    "ScannerPluginBase": {
       "additionalProperties": true,
       "description": "Base class for all scanner plugins.",
       "properties": {
@@ -729,7 +726,7 @@
         "config": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ScannerBaseConfig"
+              "$ref": "#/$defs/ScannerPluginConfigBase"
             },
             {
               "type": "null"
@@ -880,7 +877,33 @@
           "title": "Work Dir"
         }
       },
-      "title": "ScannerPlugin",
+      "title": "ScannerPluginBase",
+      "type": "object"
+    },
+    "ScannerPluginConfigBase": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "default": null,
+          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z][\\w-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ScannerOptionsBase",
+          "default": {},
+          "description": "Scanner options"
+        }
+      },
+      "title": "ScannerPluginConfigBase",
       "type": "object"
     },
     "SemgrepScannerConfig": {
@@ -900,7 +923,7 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
+          "$ref": "#/$defs/ScannerOptionsBase",
           "default": {},
           "description": "Configure Semgrep scanner"
         },
@@ -941,7 +964,7 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/BaseScannerOptions",
+          "$ref": "#/$defs/ScannerOptionsBase",
           "default": {},
           "description": "Configure Syft scanner"
         },
@@ -1071,8 +1094,8 @@
     "build": {
       "$ref": "#/$defs/BuildConfig",
       "default": {
+        "build_mode": "OFFLINE",
         "custom_scanners": [],
-        "mode": "ASH_MODE_ONLINE",
         "tool_install_scripts": {}
       },
       "description": "Build-time configuration settings"

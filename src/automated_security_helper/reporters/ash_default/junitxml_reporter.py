@@ -1,7 +1,21 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Any
-from junitparser import (
+from typing import Any, Literal
+
+
+from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
+from automated_security_helper.config.ash_config import ASHConfig
+
+
+import defusedxml
+
+defusedxml.defuse_stdlib()  # Defuse stdlib before importing any XML libs
+
+from junitparser import (  # noqa: E402
     Error,
     JUnitXml,
     Skipped,
@@ -9,17 +23,23 @@ from junitparser import (
     TestSuite,
 )
 
-import defusedxml
 
-from automated_security_helper.config.ash_config import ASHConfig
+class JUnitXMLReporterConfigOptions(ReporterOptionsBase):
+    pass
 
 
-class JUnitXMLReporter:
+class JUnitXMLReporterConfig(ReporterPluginConfigBase):
+    name: Literal["junitxml"] = "junitxml"
+    extension: str = "junit.xml"
+    enabled: bool = True
+
+
+class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
     """Formats results as JUnitXML."""
 
-    def __init__(self):
-        super().__init__()
+    def model_post_init(self, context):
         defusedxml.defuse_stdlib()
+        return super().model_post_init(context)
 
     def format(self, model: Any) -> str:
         """Format ASH model in JUnitXML.

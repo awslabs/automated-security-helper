@@ -3,9 +3,9 @@
 import pytest
 
 from automated_security_helper.config.ash_config import ASHConfig, BuildConfig
-from automated_security_helper.base.scanner_plugin import ScannerPlugin
-from automated_security_helper.scanners.bandit_scanner import BanditScanner
-from automated_security_helper.scanners.cdk_nag_scanner import CdkNagScanner
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.scanners.ash_default.bandit_scanner import BanditScanner
+from automated_security_helper.scanners.ash_default.cdk_nag_scanner import CdkNagScanner
 from automated_security_helper.core.scanner_factory import ScannerFactory
 
 
@@ -41,7 +41,6 @@ def test_scanner_factory_registration(ash_config):
     # Verify registration
     assert "test" in factory._scanners
     assert factory._scanners["test"] == BanditScanner
-    assert factory.get_scanner_class("test") == BanditScanner
 
     # Verify in available scanners
     scanners = factory.available_scanners()
@@ -73,7 +72,7 @@ def test_create_bandit_scanner(ash_config, test_source_dir, test_output_dir):
     factory = ScannerFactory(config=ash_config)
 
     # Test with ScannerConfig
-    config = ScannerPlugin(
+    config = ScannerPluginBase(
         name="bandit",
         type="SAST",
         source_dir=test_source_dir,
@@ -106,7 +105,7 @@ def test_create_cdk_nag_scanner(ash_config, test_source_dir, test_output_dir):
     factory = ScannerFactory(config=ash_config)
 
     # Test with ScannerConfig
-    config = ScannerPlugin(
+    config = ScannerPluginBase(
         name="cdknag",
         type="IAC",
         source_dir=test_source_dir,
@@ -139,7 +138,7 @@ def test_create_invalid_scanner(ash_config, test_source_dir, test_output_dir):
     factory = ScannerFactory(config=ash_config)
 
     # Test non-existent scanner
-    config = ScannerPlugin(name="invalid", type="UNKNOWN")
+    config = ScannerPluginBase(name="invalid", type="UNKNOWN")
     with pytest.raises(ValueError, match="Unable to determine scanner class"):
         factory.create_scanner(config.name, config, test_source_dir, test_output_dir)
 
@@ -184,7 +183,7 @@ def test_scanner_factory_default_scanners(ash_config, test_source_dir, test_outp
 
     # Test creating all default scanners
     for name, scanner_class in scanners.items():
-        config = ScannerPlugin(name=name, type="SAST")
+        config = ScannerPluginBase(name=name, type="SAST")
         scanner = factory.create_scanner(name, config, test_source_dir, test_output_dir)
         assert isinstance(scanner, scanner_class)
         assert scanner.config.name == name
@@ -205,8 +204,8 @@ def test_scanner_factory_buildtime_scanners(
                 ]
             },
             custom_scanners=[
-                ScannerPlugin(name="trivy-sast", type="SAST"),
-                ScannerPlugin(name="trivy-sbom", type="SBOM"),
+                ScannerPluginBase(name="trivy-sast", type="SAST"),
+                ScannerPluginBase(name="trivy-sbom", type="SBOM"),
             ],
         ),
     )
@@ -233,12 +232,12 @@ def test_scanner_factory_config_scanners(ash_config, test_source_dir, test_outpu
     config.sast = type(
         "SASTConfig",
         (),
-        {"scanners": [ScannerPlugin(name="custom-sast", type="SAST")]},
+        {"scanners": [ScannerPluginBase(name="custom-sast", type="SAST")]},
     )()
     config.sbom = type(
         "SBOMConfig",
         (),
-        {"scanners": [ScannerPlugin(name="custom-sbom", type="SBOM")]},
+        {"scanners": [ScannerPluginBase(name="custom-sbom", type="SBOM")]},
     )()
 
     # Create factory with config
@@ -261,7 +260,7 @@ def test_scanner_factory_duplicate_registration(test_source_dir, test_output_dir
     config.sast = type(
         "SASTConfig",
         (),
-        {"scanners": [ScannerPlugin(name="bandit", type="SAST")]},
+        {"scanners": [ScannerPluginBase(name="bandit", type="SAST")]},
     )()
 
     # Create factory - should log warning but not fail

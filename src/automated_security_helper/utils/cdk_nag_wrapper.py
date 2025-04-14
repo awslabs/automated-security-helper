@@ -27,7 +27,7 @@ import shutil
 from pydantic import BaseModel, ConfigDict, Field
 from cfn_tools import load_yaml, dump_yaml
 
-from automated_security_helper.models.core import Location
+from automated_security_helper.schemas.sarif_schema_model import Location
 
 import cdk_nag
 import json
@@ -123,6 +123,18 @@ def get_nag_packs():
     return nag_packs
 
 
+class CdkNagWrapperResponse:
+    def __init__(
+        self,
+        results: Dict[str, List[Result]] | None = None,
+        outdir: Path = None,
+        template: CloudFormationTemplateModel | None = None,
+    ):
+        self.results = results
+        self.outdir = outdir
+        self.template = template
+
+
 def run_cdk_nag_against_cfn_template(
     template_path: Path,
     nag_packs: List[
@@ -139,7 +151,7 @@ def run_cdk_nag_against_cfn_template(
     outdir: Path = None,
     include_compliant_checks: bool = True,
     stack_name: str = "ASHCDKNagScanner",
-) -> Dict[str, List[Result]] | None:
+) -> CdkNagWrapperResponse | None:
     results: Dict[str, List[dict]] = {}
 
     model = get_model_from_template(template_path)
@@ -297,6 +309,7 @@ def run_cdk_nag_against_cfn_template(
                 ),
                 locations=[
                     Location(
+                        id=1,
                         physicalLocation=PhysicalLocation(
                             artifactLocation=ArtifactLocation(
                                 uri=line.resource_id,
@@ -308,7 +321,7 @@ def run_cdk_nag_against_cfn_template(
                                     text=dump_yaml(cfn_resource.model_dump())
                                 ),
                             ),
-                        )
+                        ),
                     )
                 ],
                 properties=PropertyBag(
@@ -359,7 +372,7 @@ def run_cdk_nag_against_cfn_template(
             # )
             results[pack_name].append(finding)
 
-    return {"results": results, "outdir": outdir}
+    return CdkNagWrapperResponse(results=results, outdir=outdir, template=model)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,26 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Any
+
 import yaml
+from typing import Any, Literal
+from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 
 
-class YAMLReporter:
+class YAMLReporterConfigOptions(ReporterOptionsBase):
+    pass
+
+
+class YAMLReporterConfig(ReporterPluginConfigBase):
+    name: Literal["yaml"] = "yaml"
+    extension: str = "yaml"
+    enabled: bool = True
+
+
+class YAMLReporter(ReporterPluginBase[YAMLReporterConfig]):
     """Formats results as YAML."""
 
     def format(self, model: Any) -> str:

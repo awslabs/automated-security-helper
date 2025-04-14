@@ -1,10 +1,25 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Any
 import yaml
+from typing import Any, Literal
+from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 
 
-class TextReporter:
+class SPDXReporterConfigOptions(ReporterOptionsBase):
+    pass
+
+
+class TextReporterConfig(ReporterPluginConfigBase):
+    name: Literal["text"] = "text"
+    extension: str = "txt"
+    enabled: bool = True
+
+
+class TextReporter(ReporterPluginBase[TextReporterConfig]):
     """Formats results as text."""
 
     def format(self, model: Any) -> str:

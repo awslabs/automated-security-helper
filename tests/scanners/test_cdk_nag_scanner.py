@@ -3,7 +3,7 @@
 import glob
 import os
 import pytest
-from automated_security_helper.scanners.cdk_nag_scanner import CdkNagScanner
+from automated_security_helper.scanners.ash_default.cdk_nag_scanner import CdkNagScanner
 
 # def test_scanner_validate_script_missing(tmp_path):
 #     """Test validation fails when docker script is missing."""

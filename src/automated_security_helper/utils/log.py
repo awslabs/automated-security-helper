@@ -1,5 +1,57 @@
 import logging
-from typing import Any
+
+
+def addLoggingLevel(levelName, levelNum, methodName=None):
+    """
+    Adapted from: https://stackoverflow.com/a/35804945
+
+    Comprehensively adds a new logging level to the `logging` module and the
+    currently configured logging class.
+
+    `levelName` becomes an attribute of the `logging` module with the value
+    `levelNum`. `methodName` becomes a convenience method for both `logging`
+    itself and the class returned by `logging.getLoggerClass()` (usually just
+    `logging.Logger`). If `methodName` is not specified, `levelName.lower()` is
+    used.
+
+    To avoid accidental clobberings of existing attributes, this method will
+    raise an `AttributeError` if the level name is already an attribute of the
+    `logging` module or if the method name is already present
+
+    Example
+    -------
+    >>> addLoggingLevel('TRACE', logging.DEBUG - 5)
+    >>> logging.getLogger(__name__).setLevel("TRACE")
+    >>> logging.getLogger(__name__).trace('that worked')
+    >>> logging.trace('so did this')
+    >>> logging.TRACE
+    5
+    """
+    if not methodName:
+        methodName = levelName.lower()
+
+    if hasattr(logging, levelName):
+        raise AttributeError("{} already defined in logging module".format(levelName))
+    if hasattr(logging, methodName):
+        raise AttributeError("{} already defined in logging module".format(methodName))
+    if hasattr(logging.getLoggerClass(), methodName):
+        raise AttributeError("{} already defined in logger class".format(methodName))
+
+    def logForLevel(self, message, *args, **kwargs):
+        if self.isEnabledFor(levelNum):
+            self._log(levelNum, message, args, **kwargs)
+
+    def logToRoot(message, *args, **kwargs):
+        logging.log(levelNum, message, *args, **kwargs)
+
+    logging.addLevelName(levelNum, levelName)
+    setattr(logging, levelName, levelNum)
+    setattr(logging.getLoggerClass(), methodName, logForLevel)
+    setattr(logging, methodName, logToRoot)
+
+
+addLoggingLevel("TRACE", logging.DEBUG - 5)
+addLoggingLevel("VERBOSE", logging.INFO - 5)
 
 
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
@@ -11,6 +63,16 @@ RESET_SEQ = "\033[0m"
 COLOR_SEQ = "\033[1;%dm"
 BOLD_SEQ = "\033[1m"
 
+COLORS = {
+    "WARNING": YELLOW,
+    "INFO": CYAN,
+    "DEBUG": BLUE,
+    "VERBOSE": MAGENTA,
+    "TRACE": GREEN,
+    "CRITICAL": YELLOW,
+    "ERROR": RED,
+}
+
 
 def formatter_message(message, use_color=True):
     if use_color:
@@ -18,15 +80,6 @@ def formatter_message(message, use_color=True):
     else:
         message = message.replace("$RESET", "").replace("$BOLD", "")
     return message
-
-
-COLORS = {
-    "WARNING": YELLOW,
-    "INFO": CYAN,
-    "DEBUG": BLUE,
-    "CRITICAL": YELLOW,
-    "ERROR": RED,
-}
 
 
 class ColoredFormatter(logging.Formatter):
@@ -45,12 +98,12 @@ class ColoredFormatter(logging.Formatter):
 
 
 # Custom logger class with multiple destinations
-class ColoredLogger(logging.Logger):
-    FORMAT = "[$BOLD%(asctime)s$RESET] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)-5d) %(message)s "
+class ColoredLogger(logging.getLoggerClass()):
+    FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)-5s) %(message)s "
     COLOR_FORMAT = formatter_message(FORMAT, True)
 
-    def __init__(self, name):
-        logging.Logger.__init__(self, name, logging.DEBUG)
+    def __init__(self, name: str):
+        logging.Logger.__init__(self, name, logging.INFO)
 
         color_formatter = ColoredFormatter(self.COLOR_FORMAT)
 
@@ -59,6 +112,12 @@ class ColoredLogger(logging.Logger):
 
         self.addHandler(console)
         return
+
+    def verbose(self, msg, *args, **kws):
+        self._log(logging._nameToLevel.get("VERBOSE", 15), msg, args, **kws)
+
+    def trace(self, msg, *args, **kws):
+        self._log(logging._nameToLevel.get("TRACE", 5), msg, args, **kws)
 
 
 logging.setLoggerClass(ColoredLogger)
@@ -122,28 +181,28 @@ class Color:
 #         return formatter.format(record)
 
 
-def get_logger(name: str = "ash", level: Any = logging.INFO):
-    logger = logging.getLogger(name)
-
+def get_logger(name: str = "ash", level: str | int | None = None):
+    logger = ColoredLogger(name)
     if level is not None:
         logger.setLevel(level)
-        logger.debug("Logger level set to: %s", level)
-
-    if logger.level == logging.DEBUG:
-        formatter_str = "[%(asctime)s] [%(name)s] [%(filename)s:%(lineno)d] %(levelname)s: %(message)s"
-        # formatter_str = f"{Color.cyan('[%(asctime)s]')} {Color.gray('[%(name)s]')} {Color.yellow('[%(filename)s:%(lineno)d]')} {Color.yellow('[%(levelname)s]')}: %(message)s"
-        formatter = logging.Formatter(formatter_str)
-        # formatter = logging.Formatter(CustomFormatter())
-    else:
-        formatter_str = "[%(asctime)s] %(levelname)s: %(message)s"
-        formatter = logging.Formatter(formatter_str)
+        logger.debug(
+            "Log level set to: %s",
+            logging._levelToName[level] if isinstance(level, int) else level,
+        )
 
     handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
+
+    # if logger.level == logging.DEBUG:
+    #     formatter_str = "[%(asctime)s] [%(name)s] [%(filename)s:%(lineno)d] %(levelname)s: %(message)s"
+    #     # formatter_str = f"{Color.cyan('[%(asctime)s]')} {Color.gray('[%(name)s]')} {Color.yellow('[%(filename)s:%(lineno)d]')} {Color.yellow('[%(levelname)s]')}: %(message)s"
+    #     formatter = logging.Formatter(formatter_str)
+    #     # formatter = logging.Formatter(CustomFormatter())
+    # else:
+    #     formatter_str = "[%(asctime)s] %(levelname)s: %(message)s"
+    #     formatter = logging.Formatter(formatter_str)
+    # handler.setFormatter(formatter)
 
     if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(formatter)
         logger.addHandler(handler)
     return logger
 

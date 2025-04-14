@@ -6,14 +6,15 @@ from pathlib import Path
 from typing import Annotated, List, Literal
 
 from pydantic import Field
-from automated_security_helper.base.options import BaseScannerOptions
-from automated_security_helper.base.scanner import ScannerBaseConfig
-from automated_security_helper.base.types import ToolArgs
+from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
+    PathExclusionEntry,
     ToolExtraArg,
 )
 from automated_security_helper.base.scanner_plugin import (
-    ScannerPlugin,
+    ScannerPluginBase,
 )
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -66,7 +67,7 @@ CheckFrameworks = Literal[
 ]
 
 
-class CheckovScannerConfigOptions(BaseScannerOptions):
+class CheckovScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         str,
         Field(
@@ -74,7 +75,7 @@ class CheckovScannerConfigOptions(BaseScannerOptions):
         ),
     ] = "NOT_PROVIDED"
     skip_path: Annotated[
-        List[str],
+        List[PathExclusionEntry],
         Field(
             description='Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.',
         ),
@@ -106,7 +107,7 @@ class CheckovScannerConfigOptions(BaseScannerOptions):
     ] = ["all"]
 
 
-class CheckovScannerConfig(ScannerBaseConfig):
+class CheckovScannerConfig(ScannerPluginConfigBase):
     name: Literal["checkov"] = "checkov"
     enabled: bool = True
     options: Annotated[
@@ -114,7 +115,7 @@ class CheckovScannerConfig(ScannerBaseConfig):
     ] = CheckovScannerConfigOptions()
 
 
-class CheckovScanner(ScannerPlugin[CheckovScannerConfig]):
+class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     """CheckovScanner implements IaC scanning using Checkov."""
 
     def model_post_init(self, context):
@@ -171,10 +172,18 @@ class CheckovScanner(ScannerPlugin[CheckovScannerConfig]):
 
         for item in self.config.options.additional_formats:
             self.args.extra_args.append(ToolExtraArg(key="--output", value=item))
-        for item in self.config.options.skip_path:
-            self.args.extra_args.append(ToolExtraArg(key="--skip-path", value=item))
         for item in self.config.options.frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
+        for item in self.config.options.skip_path:
+            ASH_LOGGER.debug(
+                f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
+            )
+            self.args.extra_args.append(
+                ToolExtraArg(
+                    key="--skip-path",
+                    value=item.path,
+                )
+            )
 
         return super()._process_config_options()
 

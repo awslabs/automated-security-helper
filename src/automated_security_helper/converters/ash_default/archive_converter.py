@@ -11,39 +11,38 @@ import zipfile
 from pydantic import Field
 
 from automated_security_helper.core.constants import KNOWN_SCANNABLE_EXTENSIONS
-from automated_security_helper.models.converter_plugin import ConverterPlugin
-from automated_security_helper.models.core import (
-    ConverterBaseConfig,
+from automated_security_helper.base.converter_plugin import (
+    ConverterPluginBase,
+    ConverterPluginConfigBase,
 )
+
 from automated_security_helper.base.options import (
-    BaseConverterOptions,
+    ConverterOptionsBase,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
-class ArchiveConverterConfigOptions(BaseConverterOptions):
+class ArchiveConverterConfigOptions(ConverterOptionsBase):
     pass
 
 
-class ArchiveConverterConfig(ConverterBaseConfig):
+class ArchiveConverterConfig(ConverterPluginConfigBase):
     """Archive (ZIP/TAR/GZIP/etc) converter configuration."""
 
     name: Literal["archive"] = "archive"
+    enabled: bool = True
     options: Annotated[
         ArchiveConverterConfigOptions,
         Field(description="Configure Archive converter"),
     ] = ArchiveConverterConfigOptions()
 
 
-class ArchiveConverter(ConverterPlugin, ArchiveConverterConfig):
+class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     """Converter implementation for Archive file extraction."""
 
-    options: ArchiveConverterConfigOptions = ArchiveConverterConfigOptions()
-
     def model_post_init(self, context):
-        self.options
         self.work_dir = (
             self.output_dir.joinpath("work").joinpath("converters").joinpath("archive")
         )

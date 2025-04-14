@@ -2,10 +2,25 @@
 # SPDX-License-Identifier: Apache-2.0
 import csv
 from io import StringIO
-from typing import Any
+from typing import Any, Literal
+from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 
 
-class CSVReporter:
+class CSVReporterConfigOptions(ReporterOptionsBase):
+    pass
+
+
+class CSVReporterConfig(ReporterPluginConfigBase):
+    name: Literal["csv"] = "csv"
+    extension: str = "csv"
+    enabled: bool = True
+
+
+class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
     """Formats results as CSV."""
 
     def format(self, model: Any) -> str:

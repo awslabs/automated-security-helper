@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -11,7 +12,7 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDX
 from automated_security_helper.schemas.data_interchange import (
     ReportMetadata,
 )
-from typing import Annotated, List, Dict, Any, Union
+from typing import Annotated, List, Dict, Any, Optional, Union
 from automated_security_helper.models.core import ExportFormat, Scanner
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
@@ -219,30 +220,58 @@ class ASHARPModel(BaseModel):
         else:
             raise ValueError("Invalid report type")
 
+    def save_model(self, output_dir: Path) -> None:
+        """Save ASHARPModel as JSON alongside aggregated results."""
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True)
+
+        # Save aggregated results as JSON
+        json_path = output_dir.joinpath("ash_aggregated_results.json")
+        with open(json_path, "w") as f:
+            json.dump(self.model_dump(), f, indent=2, default=str)
+
+        # Save model.sarif as ash.sarif (JSON formatted SARIF report)
+        json_path = output_dir.joinpath("ash.sarif")
+        with open(json_path, "w") as f:
+            json.dump(self.sarif.model_dump(), f, indent=2, default=str)
+
+        # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
+        json_path = output_dir.joinpath("ash.cdx.json")
+        with open(json_path, "w") as f:
+            json.dump(self.cyclonedx.model_dump(), f, indent=2, default=str)
+
+    @classmethod
+    def load_model(cls, json_path: Path) -> Optional["ASHARPModel"]:
+        """Load ASHARPModel from JSON file."""
+        if not json_path.exists():
+            return None
+
+        with open(json_path) as f:
+            json_data = json.load(f)
+
+        return cls.from_json(json_data)
+
     def format(
         self, output_formats: List[ExportFormat], output_dir: Path | None = None
     ) -> str:
         """Format ASH model using specified formatter."""
-        from automated_security_helper.reporters.asff_reporter import ASFFReporter
-        from automated_security_helper.reporters.csv_reporter import CSVReporter
-        from automated_security_helper.reporters.cyclonedx_reporter import (
+        from automated_security_helper.reporters.ash_default import (
+            ASFFReporter,
+            CSVReporter,
             CycloneDXReporter,
-        )
-        from automated_security_helper.reporters.html_reporter import HTMLReporter
-        from automated_security_helper.reporters.json_reporter import JSONReporter
-        from automated_security_helper.reporters.junitxml_reporter import (
+            HTMLReporter,
+            JSONReporter,
             JUnitXMLReporter,
+            SARIFReporter,
+            SPDXReporter,
+            TextReporter,
+            YAMLReporter,
         )
-        from automated_security_helper.reporters.sarif_reporter import SARIFReporter
-        from automated_security_helper.reporters.spdx_reporter import SPDXReporter
-        from automated_security_helper.reporters.text_reporter import TextReporter
-        from automated_security_helper.reporters.yaml_reporter import YAMLReporter
 
         formatters = {
             "asff": {"formatter": ASFFReporter(), "ext": "asff"},
             "csv": {"formatter": CSVReporter(), "ext": "csv"},
             "cyclonedx": {"formatter": CycloneDXReporter(), "ext": "cdx.json"},
-            "dict": {"formatter": JSONReporter(), "ext": "json"},
             "html": {"formatter": HTMLReporter(), "ext": "html"},
             "json": {"formatter": JSONReporter(), "ext": "json"},
             "junitxml": {"formatter": JUnitXMLReporter(), "ext": "junit.xml"},

@@ -4,15 +4,15 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from automated_security_helper.base.scanner import ScannerBaseConfig
-from automated_security_helper.base.scanner_plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 
 
 from automated_security_helper.core.exceptions import ScannerError
 from tests.conftest import TEST_SOURCE_DIR, TEST_OUTPUT_DIR
 
 
-class ConcreteScanner(ScannerPlugin[ScannerBaseConfig]):
+class ConcreteScanner(ScannerPluginBase[ScannerPluginConfigBase]):
     """Concrete implementation of Scanner for testing."""
 
     def model_post_init(self, context):
@@ -32,7 +32,7 @@ class ConcreteScanner(ScannerPlugin[ScannerBaseConfig]):
 
 def test_scanner_initialization(test_source_dir, test_output_dir):
     """Test scanner initialization with config."""
-    config = ScannerPlugin(
+    config = ScannerPluginBase(
         name="test_scanner",
         command="pwd",
         source_dir=test_source_dir,

@@ -6,8 +6,15 @@
         "${workspaceFolder}",
         "--output-dir",
         "${workspaceFolder}/ash_output",
+        "--config",
+        "${workspaceFolder}/ash.yaml",
         "--strategy",
-        "parallel"
+        "parallel",
+        "--scanners",
+        "cdk-nag",
+        "--verbose",
+        "--no-progress",
+        "--no-cleanup"
       ],
       "console": "integratedTerminal",
       "name": "ASH: Test CLI",

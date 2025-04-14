@@ -26,6 +26,11 @@ class Strategy(Enum):
     sequential = "sequential"
 
 
+class AshBuildTarget(Enum):
+    default = "default"
+    ci = "ci"
+
+
 @app.command(
     name="scan",
     no_args_is_help=False,
@@ -48,26 +53,35 @@ def scan(
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
     offline: Annotated[
         bool,
-        typer.Option(help="Run in offline mode (skips NPM/PNPM/Yarn Audit checks)"),
+        typer.Option(
+            help="Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage."
+        ),
+    ] = False,
+    no_build: Annotated[
+        bool,
+        typer.Option(help="Only run the container image, do not rebuild it."),
     ] = False,
     no_run: Annotated[
         bool,
         typer.Option(help="Only build the container image, do not run scans"),
     ] = False,
     build_target: Annotated[
-        str,
+        AshBuildTarget,
         typer.Option(
             help="Specify build target for container image (e.g. 'ci' for elevated access)",
         ),
-    ] = "default",
+    ] = AshBuildTarget.default.value,
     oci_runner: Annotated[
         str,
-        typer.Option(help="Specify OCI runner to use (e.g. 'docker', 'finch')"),
+        typer.Option(
+            help="Specify OCI runner to use (e.g. 'docker', 'finch')",
+            envvar="OCI_RUNNER",
+        ),
     ] = os.environ.get("OCI_RUNNER", None),
     strategy: Annotated[
         Strategy,
         typer.Option(help="Whether to run scanners in parallel or sequential"),
-    ] = "parallel",
+    ] = Strategy.parallel.value,
     scanners: Annotated[
         List[str],
         typer.Option(help="Specific scanner names to run. Defaults to all scanners."),
@@ -76,12 +90,27 @@ def scan(
         bool,
         typer.Option(help="Keep working directory after scan completes"),
     ] = False,
+    progress: Annotated[
+        bool,
+        typer.Option(
+            help="Show progress of each job interactively in the console. Defaults to True."
+        ),
+    ] = True,
     output_formats: Annotated[
         List[ExportFormat],
         typer.Option(
             help="The output formats to use",
         ),
-    ] = ["sarif", "cyclonedx", "json", "html", "junitxml"],
+    ] = [
+        e.value
+        for e in [
+            ExportFormat.SARIF,
+            ExportFormat.CYCLONEDX,
+            ExportFormat.JSON,
+            ExportFormat.HTML,
+            ExportFormat.JUNITXML,
+        ]
+    ],
 ):
     """Main entry point."""
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
@@ -92,7 +121,9 @@ def scan(
     from automated_security_helper.utils.log import get_logger
 
     try:
-        logger = get_logger(level=logging.DEBUG if verbose else logging.INFO)
+        logger = get_logger(
+            level=logging.DEBUG if debug else 15 if verbose else logging.INFO
+        )
         # Create orchestrator instance
         source_dir = Path(source_dir)
         output_dir = Path(output_dir)
@@ -112,11 +143,14 @@ def scan(
             enabled_scanners=scanners,
             config_path=config,
             verbose=verbose,
-            strategy=ExecutionStrategy.PARALLEL
-            if strategy == Strategy.parallel
-            else ExecutionStrategy.SEQUENTIAL,
+            strategy=(
+                ExecutionStrategy.PARALLEL
+                if strategy == Strategy.parallel
+                else ExecutionStrategy.SEQUENTIAL
+            ),
             no_cleanup=no_cleanup,
             output_formats=output_formats,
+            show_progress=progress,
         )
 
         # Execute scan

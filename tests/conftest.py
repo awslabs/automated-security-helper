@@ -5,7 +5,7 @@ import shutil
 import sys
 import pytest
 import yaml
-from automated_security_helper.base.options import BaseScannerOptions
+from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.config.ash_config import (
     ASHConfig,
     BuildConfig,
@@ -26,17 +26,21 @@ from automated_security_helper.models.core import (
     Location,
     Scanner,
 )
-from automated_security_helper.base.scanner_plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
 )
-from automated_security_helper.scanners.bandit_scanner import BanditScannerConfig
-from automated_security_helper.scanners.cdk_nag_scanner import (
+from automated_security_helper.scanners.ash_default.bandit_scanner import (
+    BanditScannerConfig,
+)
+from automated_security_helper.scanners.ash_default.cdk_nag_scanner import (
     CdkNagPacks,
     CdkNagScannerConfig,
     CdkNagScannerConfigOptions,
 )
-from automated_security_helper.scanners.checkov_scanner import CheckovScannerConfig
+from automated_security_helper.scanners.ash_default.checkov_scanner import (
+    CheckovScannerConfig,
+)
 
 
 TEST_DIR = Path(__file__).parent.joinpath("pytest-temp")
@@ -181,7 +185,7 @@ def ash_config() -> ASHConfig:
                 ]
             },
             custom_scanners=[
-                ScannerPlugin(
+                ScannerPluginBase(
                     name="trivy-sast",
                     command="trivy",
                     args=["fs", "--format", "sarif"],
@@ -198,7 +202,7 @@ def ash_config() -> ASHConfig:
                     invocation_mode="directory",
                     type="SAST",
                 ),
-                ScannerPlugin(
+                ScannerPluginBase(
                     name="trivy-sbom",
                     command="trivy",
                     args=["fs", "--format", "cyclonedx"],
@@ -239,7 +243,7 @@ def ash_config() -> ASHConfig:
             cfn_nag=CfnNagScannerConfig(),
             checkov=CheckovScannerConfig(),
             git_secrets=GitSecretsScannerConfig(
-                options=BaseScannerOptions(enabled=True),
+                options=ScannerOptionsBase(enabled=True),
             ),
             grype=GrypeScannerConfig(),
             npm_audit=NpmAuditScannerConfig(),
@@ -247,13 +251,13 @@ def ash_config() -> ASHConfig:
             trivy_sast=CustomScannerConfig(
                 name="trivy-sast",
                 type="SAST",
-                custom=BaseScannerOptions(enabled=True),
+                custom=ScannerOptionsBase(enabled=True),
             ),
             syft=SyftScannerConfig(),
             trivy_sbom=CustomScannerConfig(
                 name="trivy-sbom",
                 type="SBOM",
-                custom=BaseScannerOptions(enabled=True),
+                custom=ScannerOptionsBase(enabled=True),
             ),
         ),
     )

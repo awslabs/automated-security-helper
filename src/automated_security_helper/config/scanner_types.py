@@ -1,15 +1,12 @@
 from typing import (
     Annotated,
     Literal,
-    TypeVar,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
 from automated_security_helper.core.constants import SCANNER_TYPES
-from automated_security_helper.base.scanner import ScannerBaseConfig
-from automated_security_helper.base.options import BaseScannerOptions
-
-T = TypeVar("T", bound="ScannerBaseConfig")
+from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.base.options import ScannerOptionsBase
 
 
 class BasePluginOptions(BaseModel):
@@ -18,7 +15,7 @@ class BasePluginOptions(BaseModel):
     enabled: bool = True
 
 
-class CustomScannerConfig(ScannerBaseConfig):
+class CustomScannerConfig(ScannerPluginConfigBase):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     name: Annotated[
@@ -36,11 +33,11 @@ class CustomScannerConfig(ScannerBaseConfig):
     ] = True
     type: SCANNER_TYPES = "CUSTOM"
     options: Annotated[
-        BaseScannerOptions, Field(description="Configure custom scanner")
-    ] = BaseScannerOptions()
+        ScannerOptionsBase, Field(description="Configure custom scanner")
+    ] = ScannerOptionsBase()
 
 
-class NpmAuditScannerConfig(ScannerBaseConfig):
+class NpmAuditScannerConfig(ScannerPluginConfigBase):
     """JS/TS Dependency scanner configuration."""
 
     name: Literal["npm-audit"] = "npm-audit"
@@ -52,14 +49,14 @@ class NpmAuditScannerConfig(ScannerBaseConfig):
     ] = True
     type: SCANNER_TYPES = "DEPENDENCY"
     options: Annotated[
-        BaseScannerOptions,
+        ScannerOptionsBase,
         Field(
             description="Enable NPM/PNPM/Yarn Audit dependency scanner",
         ),
-    ] = BaseScannerOptions()
+    ] = ScannerOptionsBase()
 
 
-class GitSecretsScannerConfig(ScannerBaseConfig):
+class GitSecretsScannerConfig(ScannerPluginConfigBase):
     """Git Secrets scanner configuration."""
 
     name: Literal["git-secrets"] = "git-secrets"
@@ -71,12 +68,12 @@ class GitSecretsScannerConfig(ScannerBaseConfig):
     ] = True
     type: SCANNER_TYPES = "SECRETS"
     options: Annotated[
-        BaseScannerOptions,
+        ScannerOptionsBase,
         Field(description="Enable Git Secrets scanner"),
-    ] = BaseScannerOptions()
+    ] = ScannerOptionsBase()
 
 
-class SemgrepScannerConfig(ScannerBaseConfig):
+class SemgrepScannerConfig(ScannerPluginConfigBase):
     """Semgrep SAST scanner configuration."""
 
     name: Literal["semgrep"] = "semgrep"
@@ -88,11 +85,11 @@ class SemgrepScannerConfig(ScannerBaseConfig):
     ] = True
     type: SCANNER_TYPES = "SAST"
     options: Annotated[
-        BaseScannerOptions, Field(description="Configure Semgrep scanner")
-    ] = BaseScannerOptions()
+        ScannerOptionsBase, Field(description="Configure Semgrep scanner")
+    ] = ScannerOptionsBase()
 
 
-class GrypeScannerConfig(ScannerBaseConfig):
+class GrypeScannerConfig(ScannerPluginConfigBase):
     """Grype SAST scanner configuration."""
 
     name: Literal["grype"] = "grype"
@@ -104,11 +101,11 @@ class GrypeScannerConfig(ScannerBaseConfig):
     ] = True
     type: SCANNER_TYPES = "SAST"
     options: Annotated[
-        BaseScannerOptions, Field(description="Configure Grype scanner")
-    ] = BaseScannerOptions()
+        ScannerOptionsBase, Field(description="Configure Grype scanner")
+    ] = ScannerOptionsBase()
 
 
-class SyftScannerConfig(ScannerBaseConfig):
+class SyftScannerConfig(ScannerPluginConfigBase):
     """Syft SBOM scanner configuration."""
 
     name: Literal["syft"] = "syft"
@@ -120,11 +117,11 @@ class SyftScannerConfig(ScannerBaseConfig):
     ] = True
     type: SCANNER_TYPES = "SBOM"
     options: Annotated[
-        BaseScannerOptions, Field(description="Configure Syft scanner")
-    ] = BaseScannerOptions()
+        ScannerOptionsBase, Field(description="Configure Syft scanner")
+    ] = ScannerOptionsBase()
 
 
-class CfnNagScannerConfig(ScannerBaseConfig):
+class CfnNagScannerConfig(ScannerPluginConfigBase):
     """CFN Nag IAC SAST scanner configuration."""
 
     name: Literal["cfn-nag"] = "cfn-nag"
@@ -136,6 +133,6 @@ class CfnNagScannerConfig(ScannerBaseConfig):
     ] = True
     type: SCANNER_TYPES = "IAC"
     options: Annotated[
-        BaseScannerOptions,
+        ScannerOptionsBase,
         Field(description="Enable CFN Nag IAC scanner"),
-    ] = BaseScannerOptions()
+    ] = ScannerOptionsBase()

@@ -7,8 +7,8 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
-from automated_security_helper.base.scanner import ScannerBaseConfig
-from automated_security_helper.base.options import BaseScannerOptions
+from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -23,7 +23,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.base.scanner_plugin import (
-    ScannerPlugin,
+    ScannerPluginBase,
 )
 from automated_security_helper.utils.cdk_nag_wrapper import (
     run_cdk_nag_against_cfn_template,
@@ -60,7 +60,7 @@ class CdkNagPacks(BaseModel):
     ] = False
 
 
-class CdkNagScannerConfigOptions(BaseScannerOptions):
+class CdkNagScannerConfigOptions(ScannerOptionsBase):
     """CDK Nag IAC SAST scanner options."""
 
     nag_packs: Annotated[
@@ -71,7 +71,7 @@ class CdkNagScannerConfigOptions(BaseScannerOptions):
     ] = CdkNagPacks()
 
 
-class CdkNagScannerConfig(ScannerBaseConfig):
+class CdkNagScannerConfig(ScannerPluginConfigBase):
     name: Literal["cdk-nag"] = "cdk-nag"
     enabled: bool = True
     options: Annotated[
@@ -79,7 +79,7 @@ class CdkNagScannerConfig(ScannerBaseConfig):
     ] = CdkNagScannerConfigOptions()
 
 
-class CdkNagScanner(ScannerPlugin[CdkNagScannerConfig]):
+class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     """CDK Nag security scanner, custom CDK-CLI-less implementation."""
 
     def model_post_init(self, context):
@@ -144,8 +144,12 @@ class CdkNagScanner(ScannerPlugin[CdkNagScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
-        ASH_LOGGER.debug(f"self.config: {self.config}")
-        ASH_LOGGER.debug(f"config: {config}")
+        ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
+        if config is not None:
+            if hasattr(config, "model_dump") and callable(config.model_dump):
+                config = config.model_dump()
+            self.config = CdkNagScannerConfig(**config)
+        ASH_LOGGER.debug(f"({self.config.name}) config: {config}")
 
         # Find all JSON/YAML files to scan from the scan set
         cfn_files = scan_set(
@@ -203,46 +207,11 @@ class CdkNagScanner(ScannerPlugin[CdkNagScannerConfig]):
                     failed_files.append(cfn_file)
                     continue
 
-                nag_result = nag_result_dict.get("results", None)
-
-                findings: List[Result]
-                for pack_name, findings in nag_result.items():
-                    ASH_LOGGER.debug(f"Found {len(findings)} findings in {pack_name}")
-                    for finding in findings:
-                        # sarif_result = Result(
-                        #     ruleId=finding.rule_id,
-                        #     level=self._map_severity_to_level(finding.severity),
-                        #     kind=self._map_status_to_kind(finding.status),
-                        #     message=Message(text=finding.description),
-                        #     analysisTarget=ArtifactLocation(
-                        #         uri=cfn_file_rel_path,
-                        #     ),
-                        #     locations=[
-                        #         Location(
-                        #             physicalLocation=PhysicalLocation(
-                        #                 artifactLocation=ArtifactLocation(
-                        #                     uri=finding.location.file_path
-                        #                 ),
-                        #                 region=Region(
-                        #                     startLine=finding.location.start_line,
-                        #                     endLine=finding.location.end_line,
-                        #                     snippet=ArtifactContent(
-                        #                         text=finding.location.snippet
-                        #                     ),
-                        #                 ),
-                        #             )
-                        #         )
-                        #     ],
-                        #     properties=PropertyBag(
-                        #         tags=[
-                        #             pack_name,
-                        #         ],
-                        #         resourceName=finding.resource_name,
-                        #         resourceType=finding.resource_type,
-                        #     ),
-                        # )
-                        sarif_results.append(finding)
-
+                for pack, findings in nag_result_dict.results.items():
+                    ASH_LOGGER.debug(
+                        f"Found {len(findings)} findings for {pack} on template {cfn_file}"
+                    )
+                    sarif_results.extend(findings)
             except Exception as e:
                 if "could not determine a constructor for the tag" not in str(e):
                     ASH_LOGGER.warning(f"Error scanning {cfn_file}: {e}")

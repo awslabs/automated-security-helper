@@ -8,9 +8,6 @@ from enum import Enum
 from typing import Any, List, Optional, Dict, Literal, Annotated, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
-from automated_security_helper.base.options import BaseConverterOptions
-from automated_security_helper.base.options import BaseParserOptions
-from automated_security_helper.base.options import BaseReporterOptions
 from automated_security_helper.core.constants import SCANNER_TYPES
 from automated_security_helper.core.constants import VALID_SEVERITY_VALUES
 
@@ -195,10 +192,6 @@ class BaseFinding(BaseModel):
             self.timestamp = default_timestamp
 
 
-# Define exports at the bottom after all classes are defined
-__all__ = ["Location", "Scanner", "BaseFinding"]
-
-
 class FileInvocationConfig(BaseModel):
     """Configuration for file scanning."""
 
@@ -228,81 +221,6 @@ class ToolExtraArg(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str
     value: str | int | float | bool | None = None
-
-
-class ConverterBaseConfig(BaseModel):
-    """Base converter configuration model with common settings."""
-
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        arbitrary_types_allowed=True,
-        extra="allow",
-    )
-
-    name: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-            pattern=r"^[a-zA-Z][\w-]+$",
-        ),
-    ] = None
-    enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
-        True
-    )
-    options: Annotated[BaseConverterOptions, Field(description="Converter options")] = (
-        BaseConverterOptions()
-    )
-
-
-class ParserBaseConfig(BaseModel):
-    """Base parser configuration model with common settings."""
-
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        arbitrary_types_allowed=True,
-        extra="allow",
-    )
-
-    name: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-            pattern=r"^[a-zA-Z][\w-]+$",
-        ),
-    ] = None
-    enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
-        True
-    )
-    options: Annotated[BaseParserOptions, Field(description="Parser options")] = (
-        BaseParserOptions()
-    )
-
-
-class ReporterBaseConfig(BaseModel):
-    """Base reporter configuration model with common settings."""
-
-    model_config = ConfigDict(
-        str_strip_whitespace=True,
-        arbitrary_types_allowed=True,
-        extra="allow",
-    )
-
-    name: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
-            pattern=r"^[a-zA-Z][\w-]+$",
-        ),
-    ] = None
-    enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
-        True
-    )
-    options: Annotated[BaseReporterOptions, Field(description="Reporter options")] = (
-        BaseReporterOptions()
-    )
 
 
 class ExportFormat(Enum):
@@ -337,3 +255,22 @@ class ScanStatistics(BaseModel):
     scan_duration_seconds: Annotated[
         float, Field(description="Duration of scan in seconds")
     ] = 0.0
+
+
+class PathExclusionEntry(BaseModel):
+    """Represents a path exclusion entry."""
+
+    path: Annotated[str, Field(..., description="Path or pattern to exclude")]
+    reason: Annotated[str, Field(..., description="Reason for exclusion")]
+
+
+class ToolArgs(BaseModel):
+    """Base class for tool argument dictionaries."""
+
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+    output_arg: str | None = None
+    scan_path_arg: str | None = None
+    format_arg: str | None = None
+    format_arg_value: str | None = None
+    extra_args: List[ToolExtraArg] = []

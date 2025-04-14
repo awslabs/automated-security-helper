@@ -1,25 +1,25 @@
 from pydantic import BaseModel, ConfigDict
 
 
-class BaseScannerOptions(BaseModel):
-    """Base class for scanner options."""
+class BuilderOptionsBase(BaseModel):
+    """Base class for builder options."""
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
 
-class BaseConverterOptions(BaseModel):
+class ConverterOptionsBase(BaseModel):
     """Base class for converter options."""
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
 
-class BaseParserOptions(BaseModel):
-    """Base class for parser options."""
+class ScannerOptionsBase(BaseModel):
+    """Base class for scanner options."""
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
 
-class BaseReporterOptions(BaseModel):
+class ReporterOptionsBase(BaseModel):
     """Base class for reporter options."""
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)

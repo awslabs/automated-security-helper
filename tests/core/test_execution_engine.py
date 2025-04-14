@@ -6,12 +6,12 @@ from automated_security_helper.core.execution_engine import (
     ExecutionStrategy,
     ScanExecutionEngine,
 )
-from automated_security_helper.base.scanner_plugin import ScannerPlugin
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 
 from automated_security_helper.config.ash_config import (
     ASHConfig,
 )
-from automated_security_helper.scanners.bandit_scanner import BanditScanner
+from automated_security_helper.scanners.ash_default.bandit_scanner import BanditScanner
 
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.conftest import TEST_OUTPUT_DIR, TEST_SOURCE_DIR
@@ -48,20 +48,20 @@ class MockEngine(ScanExecutionEngine):
                     f"Initialized scanner factory with: {list(self._scanners.keys())}"
                 )
 
-            def available_scanners(self) -> Dict[str, Type[ScannerPlugin]]:
+            def available_scanners(self) -> Dict[str, Type[ScannerPluginBase]]:
                 return self._scanners.copy()
 
-            def get_scanner_class(self, name: str) -> Optional[Type[ScannerPlugin]]:
+            def get_scanner_class(self, name: str) -> Optional[Type[ScannerPluginBase]]:
                 return self._scanners.get(name.lower().strip())
 
             def register_scanner(
-                self, scanner_name: str, scanner_class: Type[ScannerPlugin]
+                self, scanner_name: str, scanner_class: Type[ScannerPluginBase]
             ) -> None:
                 name = scanner_name.lower().strip()
                 self._scanners[name] = scanner_class
                 self._logger.debug(f"Registered scanner: {name}")
 
-            def create_scanner(self, scanner_name: str, **kwargs) -> ScannerPlugin:
+            def create_scanner(self, scanner_name: str, **kwargs) -> ScannerPluginBase:
                 name = scanner_name.lower().strip()
                 scanner_class = self.get_scanner_class(name)
                 if not scanner_class:

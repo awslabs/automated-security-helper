@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from rich.progress import Progress
 
+from automated_security_helper.core.plugin_registry import PluginRegistry
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
@@ -15,11 +16,10 @@ from automated_security_helper.config.ash_config import (
     ASHConfig,
 )
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.asharp_serializer import ASHARPModelSerializer
 from automated_security_helper.core.scanner_factory import ScannerFactory
-from automated_security_helper.base.scanner_plugin import ScannerPlugin
-from automated_security_helper.base.scanner import (
-    ScannerBaseConfig,
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginConfigBase,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -59,6 +59,7 @@ class ScanExecutionEngine:
         strategy: Optional[ExecutionStrategy] = ExecutionStrategy.PARALLEL,
         asharp_model: Optional[ASHARPModel] = None,
         config: Optional[ASHConfig] = None,
+        show_progress: bool = True,
     ):
         """Initialize the execution engine.
 
@@ -84,6 +85,7 @@ class ScanExecutionEngine:
         self._scanners = {}
         self._scan_results = {}
         self._strategy = strategy
+        self.show_progress = show_progress
         self._initialized = False  # Track initialization state
         # self._enabled_scanners = enabled_scanners  # None means all enabled
 
@@ -122,6 +124,9 @@ class ScanExecutionEngine:
         self._scanners = {}
         self._registered_scanners = {}
         self._initialized = False
+        self._plugin_registry = PluginRegistry(
+            config=config,
+        )
         self._scanner_factory = ScannerFactory(
             config=config,
         )
@@ -167,7 +172,7 @@ class ScanExecutionEngine:
 
     def get_scanner(
         self, scanner_name: str, check_enabled: bool = True
-    ) -> ScannerPlugin:
+    ) -> ScannerPluginBase:
         """Get a scanner instance by name.
 
         Attempts to find and instantiate a scanner in the following order:
@@ -193,8 +198,7 @@ class ScanExecutionEngine:
             ASH_LOGGER.warning("Scanner name cannot be empty")
 
         # Ensure initialized and verify enabled status
-        if not self._initialized:
-            self.ensure_initialized()
+        self.ensure_initialized(config=self._config)
 
         if check_enabled and lookup_name not in (self._enabled_scanners or set()):
             ASH_LOGGER.warning(f"Scanner {lookup_name} is not enabled")
@@ -287,21 +291,44 @@ class ScanExecutionEngine:
         Args:
             config: ASH configuration object for initialization
         """
-        if not self._initialized:
+        if not self._initialized or (self._config is None and config is not None):
             ASH_LOGGER.info("Initializing execution engine")
-
-            # Add any necessary initialization code here (placeholder method)
+            if config is not None:
+                self._config = config
+            if not self._config:
+                self._config = ASHConfig(
+                    project_name="ASH Default Project Config",
+                )
+            if not isinstance(self._config, ASHConfig):
+                raise ValueError("Configuration must be an ASHConfig instance")
 
             # Mark initialization complete
             self._initialized = True
 
-    def execute(self, config: Optional[ASHConfig] = None, **kwargs) -> ASHARPModel:
+    def run_prepare_phase(self, config: Optional[ASHConfig] = None) -> None:
+        """The Prepare phase of ASH runs any tasks that need to be ran before scanning
+        starts. This typically includes running any registered Converters to make
+        unscannable content scannable, resolving any remaining configuration items, or
+        preparing other scanner peripherals such as sidecar containers for reporter
+        storage.
+
+        Args:
+            config (Optional[ASHConfig], optional): An override configuration to be
+            provided at the start of this phase.
+            Defaults to None.
+        """
+        ASH_LOGGER.debug("Entering: ScanExecutionEngine.run_prepare_phase()")
+        self.ensure_initialized(config=config)
+
+        pass
+
+    def run_scan_phase(self, config: Optional[ASHConfig] = None) -> ASHARPModel:
         """Execute registered scanners based on provided configuration.
 
         Args:
-            config: ASHConfig instance containing scanner configuration in sast/sbom sections
-            **kwargs: Additional execution parameters. Supports:
-                - mode: ExecutionStrategy value to override execution mode
+            config (Optional[ASHConfig], optional): An override configuration to be
+            provided at the start of this phase.
+            Defaults to None.
 
         Returns:
             Dict[str, Any]: Results dictionary with scanner results and ASHARPModel
@@ -310,18 +337,8 @@ class ScanExecutionEngine:
             ValueError: If config is invalid or mode is invalid
             RuntimeError: If scanner execution fails critically
         """
-        ASH_LOGGER.debug("Entering: ScanExecutionEngine.execute()")
-        if config is not None:
-            self._config = config
-        if not self._config:
-            ASH_LOGGER.debug(
-                "!!! NO CONFIGURATION RESOLVED BEFORE ENGINE.EXECUTE(), USING DEFAULT ASHCONFIG !!!"
-            )
-            self._config = ASHConfig(
-                project_name="ASH Default Project Config",
-            )
-        if not isinstance(self._config, ASHConfig):
-            raise ValueError("Configuration must be an ASHConfig instance")
+        ASH_LOGGER.debug("Entering: ScanExecutionEngine.run_scan_phase()")
+        self.ensure_initialized(config=config)
 
         # Reset state for new execution
         self._completed_scanners = []
@@ -336,12 +353,18 @@ class ScanExecutionEngine:
 
             # Get all enabled scanners from SAST and SBOM configurations using helper
             scanner_configs = self._scanner_factory.available_scanners()
+            ASH_LOGGER.debug(f"Scanner configs: {scanner_configs}")
 
             # Process SAST and SBOM scanners
             if scanner_configs:
                 for scanner_name, scanner_config in scanner_configs.items():
                     if scanner_config:
                         # Add scanner to execution queue with default target
+                        scanner_config_instance = scanner_config()
+                        if "cdk" in scanner_name:
+                            ASH_LOGGER.debug(
+                                f"(scanner_name: {scanner_name}) scanner_config_instance: {scanner_config_instance} scanner_config: {scanner_config_instance}"
+                            )
                         self._queue.put(
                             (scanner_name, scanner_config(), self.source_dir, "source")
                         )
@@ -352,7 +375,8 @@ class ScanExecutionEngine:
 
             # Initialize progress tracker for execution
             with Progress(
-                auto_refresh=True,
+                auto_refresh=self.show_progress,
+                disable=not self.show_progress,
             ) as progress:
                 self._progress = ScanProgress(len(enabled_scanners))
 
@@ -367,7 +391,7 @@ class ScanExecutionEngine:
                 output_dir = getattr(self._config, "output_dir", None)
                 if output_dir:
                     output_path = Path(output_dir)
-                    ASHARPModelSerializer.save_model(self._asharp_model, output_path)
+                    self._asharp_model.save_model(output_path)
 
             return self._asharp_model
 
@@ -378,7 +402,7 @@ class ScanExecutionEngine:
     def _execute_scanner(
         self,
         scanner_name: str,
-        scanner_plugin: ScannerPlugin,
+        scanner_plugin: ScannerPluginBase,
         scan_target: Path,
         target_type: str | None = None,
     ) -> ScanResultsContainer:
@@ -397,52 +421,78 @@ class ScanExecutionEngine:
         """
         try:
             config_overridden = False
-            scanner_config = scanner_plugin.config
             ASH_LOGGER.debug("EVALUATING CONFIGURED SCANNERS")
-            scanner_config_override: ScannerBaseConfig = (
-                self._config.scanners.model_dump().get(scanner_name, None)
+            scanner_config = scanner_plugin.config
+            ASH_LOGGER.debug(f"scanner_plugin.config: {scanner_plugin.config}")
+            scanner_config_override = self._config.get_plugin_config(
+                plugin_type="scanners",
+                plugin_name=scanner_name.replace("_", "-"),
             )
+            if scanner_config_override is not None:
+                ASH_LOGGER.debug(
+                    f"scanner_config_override override: {scanner_config_override}"
+                )
+                # if isinstance(scanner_config_override, dict):
+                #     scanner_config_override = ScannerPluginConfigBase(**scanner_config_override)
+                # scanner_config = scanner_config_override
+                config_overridden = True
+            # scanner_plugin_from_registry = self._plugin_registry.get_plugin(
+            #     plug_type=PluginType.scanner,
+            #     plugin_name=scanner_plugin.__class__,
+            # )
+            # ASH_LOGGER.debug(f"scanner_plugin_from_registry: {scanner_plugin_from_registry}")
+
+            # Force scanner_config to dict for the next section
+            if hasattr(scanner_config, "model_dump") and callable(
+                scanner_config.model_dump
+            ):
+                scanner_config = scanner_config.model_dump()
+
             if scanner_config_override is not None:
                 if hasattr(scanner_config_override, "model_dump") and callable(
                     scanner_config_override.model_dump
                 ):
                     scanner_config_override = scanner_config_override.model_dump()
-
-                ASH_LOGGER.debug(f"scanner_name: {scanner_name}")
-                ASH_LOGGER.debug(f"scanner_config: {scanner_config}")
-                ASH_LOGGER.debug(f"scanner_config_override: {scanner_config_override}")
+                ASH_LOGGER.debug(f"({scanner_name}) scanner_config: {scanner_config}")
+                ASH_LOGGER.debug(
+                    f"({scanner_name}) scanner_config_override: {scanner_config_override}"
+                )
 
                 if scanner_config_override.get("enabled", None) is not None:
-                    setattr(
-                        scanner_config,
-                        "enabled",
-                        scanner_config_override.get("enabled"),
+                    scanner_config["enabled"] = scanner_config_override.get(
+                        "enabled", True
                     )
                     config_overridden = True
                 for key, val in scanner_config_override.get("options", {}).items():
-                    setattr(scanner_config, key, val)
-                    config_overridden = True
+                    if "options" not in scanner_config or not isinstance(
+                        scanner_config["options"], dict
+                    ):
+                        scanner_config["options"] = {}
+                    scanner_config["options"][key] = val
 
-            ASH_LOGGER.debug(f"scanner_name: {scanner_name}")
-            ASH_LOGGER.debug(f"scanner_config overridden: {config_overridden}")
+            scanner_config = ScannerPluginConfigBase(**scanner_config)
+            ASH_LOGGER.debug(
+                f"({scanner_name}) scanner_config overridden: {config_overridden} -- {scanner_config}"
+            )
 
             container = ScanResultsContainer(
                 scanner_name=scanner_config.name,
                 target=scan_target,
                 target_type=target_type,
             )
-            if not scanner_config.enabled:
-                ASH_LOGGER.warning(f"{scanner_config.name}")
 
             # Execute scan
-            ASH_LOGGER.debug(
-                f"Executing {scanner_config.name or scanner_plugin.__class__.__name__}.scan()"
-            )
             try:
-                raw_results = scanner_plugin.scan(
-                    target=scan_target,
-                    config=scanner_config,
-                )
+                if scanner_config.enabled:
+                    ASH_LOGGER.debug(
+                        f"Executing {scanner_config.name or scanner_plugin.__class__.__name__}.scan()"
+                    )
+                    raw_results = scanner_plugin.scan(
+                        target=scan_target,
+                        config=scanner_config,
+                    )
+                else:
+                    ASH_LOGGER.warning(f"{scanner_config.name} is not enabled!")
             except Exception as e:
                 ASH_LOGGER.error(
                     f"Failed to execute {scanner_config.name or scanner_plugin.__class__.__name__} scanner: {e}"
@@ -595,7 +645,7 @@ class ScanExecutionEngine:
         #         )
 
     @property
-    def completed_scanners(self) -> List[ScannerPlugin]:
+    def completed_scanners(self) -> List[ScannerPluginBase]:
         """Get list of completed scanners."""
         return self._completed_scanners
 
@@ -626,7 +676,7 @@ class ScanExecutionEngine:
                 scanner_name
             ) in self._config.sast.scanners.__class__.model_fields.keys():
                 config = getattr(self._config.sast.scanners, scanner_name)
-                if isinstance(config, ScannerBaseConfig):
+                if isinstance(config, ScannerPluginConfigBase):
                     ASH_LOGGER.debug(
                         f"Found built-in SAST scanner '{scanner_name}' config: {config}"
                     )
@@ -647,7 +697,7 @@ class ScanExecutionEngine:
                 scanner_name,
                 config,
             ) in self._config.sast.scanners.__pydantic_extra__.items():
-                if isinstance(config, ScannerBaseConfig):
+                if isinstance(config, ScannerPluginConfigBase):
                     ASH_LOGGER.debug(
                         f"Found custom SAST scanner '{scanner_name}' config: {config}"
                     )
@@ -671,7 +721,7 @@ class ScanExecutionEngine:
                 scanner_name
             ) in self._config.sbom.scanners.__class__.model_fields.keys():
                 config = getattr(self._config.sbom.scanners, scanner_name)
-                if isinstance(config, ScannerBaseConfig):
+                if isinstance(config, ScannerPluginConfigBase):
                     ASH_LOGGER.debug(
                         f"Found built-in SBOM scanner '{scanner_name}' config: {config}"
                     )
@@ -692,7 +742,7 @@ class ScanExecutionEngine:
                 scanner_name,
                 config,
             ) in self._config.sbom.scanners.__pydantic_extra__.items():
-                if isinstance(config, ScannerBaseConfig):
+                if isinstance(config, ScannerPluginConfigBase):
                     ASH_LOGGER.debug(
                         f"Found custom SBOM scanner '{scanner_name}' config: {config}"
                     )

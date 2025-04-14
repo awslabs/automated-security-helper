@@ -61,6 +61,7 @@ pytest-cov = "^6.1.0"
 pytest-mock = "^3.14.0"
 mypy = "^1.15.0"
 types-pyyaml = "^6.0.12.20250402"
+vulture = "^2.14"
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]

@@ -1,10 +1,26 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Any
 import yaml
 
+from typing import Any, Literal
+from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 
-class ASFFReporter:
+
+class ASFFReporterConfigOptions(ReporterOptionsBase):
+    pass
+
+
+class ASFFReporterConfig(ReporterPluginConfigBase):
+    name: Literal["asff"] = "asff"
+    extension: str = "asff"
+    enabled: bool = True
+
+
+class ASFFReporter(ReporterPluginBase[ASFFReporterConfig]):
     """Formats results as Amazon Security Finding Format (ASFF)."""
 
     def format(self, model: Any) -> str:
@@ -13,5 +29,5 @@ class ASFFReporter:
 
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
-        # TODO - Replace with ASFF adapter
+        # TODO - Replace with ASFF reporter
         return yaml.dump(model.model_dump(), indent=2)

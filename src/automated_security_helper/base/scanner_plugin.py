@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
-from automated_security_helper.base.options import BaseScannerOptions
-from automated_security_helper.base.scanner import ScannerBaseConfig
+from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.base.types import ToolArgs
+from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.schemas.data_interchange import SecurityReport
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -13,15 +12,20 @@ import subprocess
 from abc import abstractmethod
 from pathlib import Path
 
-T = TypeVar("T", bound=ScannerBaseConfig)
+
+class ScannerPluginConfigBase(PluginConfigBase):
+    pass
 
 
-class ScannerPlugin(BaseModel, Generic[T]):
+T = TypeVar("T", bound=ScannerPluginConfigBase)
+
+
+class ScannerPluginBase(BaseModel, Generic[T]):
     """Base class for all scanner plugins."""
 
     model_config = ConfigDict(extra="allow")
 
-    config: T | ScannerBaseConfig | None = None
+    config: T | ScannerPluginConfigBase | None = None
 
     tool_type: str = "UNKNOWN"
     tool_version: str | None = None
@@ -72,9 +76,6 @@ class ScannerPlugin(BaseModel, Generic[T]):
             self.config.name
         )
 
-        self.work_dir.mkdir(parents=True, exist_ok=True)
-        self.results_dir.mkdir(parents=True, exist_ok=True)
-
         return super().model_post_init(context)
 
     @abstractmethod
@@ -92,7 +93,7 @@ class ScannerPlugin(BaseModel, Generic[T]):
     def scan(
         self,
         target: Path,
-        config: T | ScannerBaseConfig = None,
+        config: T | ScannerPluginConfigBase = None,
         *args,
         **kwargs,
     ) -> Any:
@@ -179,7 +180,7 @@ class ScannerPlugin(BaseModel, Generic[T]):
     def _pre_scan(
         self,
         target: Path,
-        options: Optional[BaseScannerOptions] = None,
+        config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
     ) -> None:
@@ -189,6 +190,7 @@ class ScannerPlugin(BaseModel, Generic[T]):
             target: Target to scan
             options: Optional scanner-specific options
         """
+        self.results_dir.mkdir(parents=True, exist_ok=True)
         if not Path(target).exists():
             raise ScannerError(f"Target {target} does not exist!")
 
