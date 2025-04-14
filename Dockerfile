@@ -140,8 +140,6 @@ RUN mkdir -p /src && \
 COPY ./utils/cdk-nag-scan /ash/utils/cdk-nag-scan/
 # Limit memory size available for Node to prevent segmentation faults during npm install
 ENV NODE_OPTIONS=--max_old_space_size=512
-RUN cd /ash/utils/cdk-nag-scan && \
-    npm install --quiet
 
 #
 # COPY ASH source to /ash instead of / to isolate

@@ -1,4 +1,6 @@
+from datetime import datetime, timezone
 import logging
+from pathlib import Path
 
 
 def addLoggingLevel(levelName, levelNum, methodName=None):
@@ -50,8 +52,8 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
     setattr(logging, methodName, logToRoot)
 
 
-addLoggingLevel("TRACE", logging.DEBUG - 5)
-addLoggingLevel("VERBOSE", logging.INFO - 5)
+addLoggingLevel("TRACE", 5)
+addLoggingLevel("VERBOSE", 15)
 
 
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
@@ -99,11 +101,21 @@ class ColoredFormatter(logging.Formatter):
 
 # Custom logger class with multiple destinations
 class ColoredLogger(logging.getLoggerClass()):
-    FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)-5s) %(message)s "
-    COLOR_FORMAT = formatter_message(FORMAT, True)
+    VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
+    DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
 
-    def __init__(self, name: str):
-        logging.Logger.__init__(self, name, logging.INFO)
+    def __init__(
+        self,
+        name: str,
+        output_dir: Path | None = None,
+        level: str | int | None = None,
+    ):
+        super().__init__(name=name, level=logging.INFO)
+
+        if self.level is None or self.level > 15:
+            self.COLOR_FORMAT = formatter_message(self.DEFAULT_FORMAT, True)
+        else:
+            self.COLOR_FORMAT = formatter_message(self.VERBOSE_FORMAT, True)
 
         color_formatter = ColoredFormatter(self.COLOR_FORMAT)
 
@@ -111,7 +123,6 @@ class ColoredLogger(logging.getLoggerClass()):
         console.setFormatter(color_formatter)
 
         self.addHandler(console)
-        return
 
     def verbose(self, msg, *args, **kws):
         self._log(logging._nameToLevel.get("VERBOSE", 15), msg, args, **kws)
@@ -181,8 +192,10 @@ class Color:
 #         return formatter.format(record)
 
 
-def get_logger(name: str = "ash", level: str | int | None = None):
-    logger = ColoredLogger(name)
+def get_logger(
+    name: str = "ash", level: str | int | None = None, output_dir: Path | None = None
+):
+    logger = ColoredLogger(name=name, output_dir=output_dir, level=level)
     if level is not None:
         logger.setLevel(level)
         logger.debug(
@@ -204,6 +217,24 @@ def get_logger(name: str = "ash", level: str | int | None = None):
 
     if not logger.handlers:
         logger.addHandler(handler)
+    if output_dir:
+        """Add a file handler for this logger with the specified `name` (and
+        store the log file under `output_dir`)."""
+        # Format for file log (use JSON Lines for easier indexing/querying)
+        fmt = '{"time": "%(asctime)s", "level": "%(levelname)s", "source": "%(filename)s:%(lineno)d", "message": "%(message)s"}'
+        formatter = logging.Formatter(fmt)
+
+        # Determine log path/file name; create output_dir if necessary
+        now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+        log_file = Path(output_dir).joinpath(f"{name}.{now}.log")
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create file handler for logging to a file (log all five levels)
+        file_handler = logging.FileHandler(log_file.as_posix())
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
     return logger
 
 

@@ -122,7 +122,8 @@ def scan(
 
     try:
         logger = get_logger(
-            level=logging.DEBUG if debug else 15 if verbose else logging.INFO
+            level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
+            output_dir=Path(output_dir),
         )
         # Create orchestrator instance
         source_dir = Path(source_dir)
@@ -142,7 +143,8 @@ def scan(
             ],
             enabled_scanners=scanners,
             config_path=config,
-            verbose=verbose,
+            verbose=verbose or debug,
+            debug=debug,
             strategy=(
                 ExecutionStrategy.PARALLEL
                 if strategy == Strategy.parallel

@@ -5,9 +5,9 @@ import json
 import pytest
 from automated_security_helper.models.core import Scanner
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.reporters.csv_reporter import CSVReporter
-from automated_security_helper.reporters.html_reporter import HTMLReporter
-from automated_security_helper.reporters.json_reporter import JSONReporter
+from automated_security_helper.reporters.ash_default import CSVReporter
+from automated_security_helper.reporters.ash_default import HTMLReporter
+from automated_security_helper.reporters.ash_default import JSONReporter
 
 
 @pytest.fixture

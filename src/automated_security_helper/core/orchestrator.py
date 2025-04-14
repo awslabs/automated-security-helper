@@ -143,11 +143,12 @@ class ASHScanOrchestrator(BaseModel):
     def model_post_init(self, context):
         """Post initialization configuration."""
         super().model_post_init(context)
-        ASH_LOGGER.info("Initializing ASH Scan orchestrator")
+        ASH_LOGGER.info("Initializing ASH Scanner")
 
         self.config = self._load_config()
 
-        ASH_LOGGER.debug(f"Using output formats: {self.config.output_formats}")
+        ASH_LOGGER.verbose(f"Using output formats: {self.config.output_formats}")
+        ASH_LOGGER.verbose("Setting up working directories")
         if self.source_dir is None:
             self.source_dir = Path.cwd()
         elif not isinstance(self.source_dir, Path):
@@ -171,12 +172,6 @@ class ASHScanOrchestrator(BaseModel):
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
 
-        self.scan_set = scan_set(
-            source=self.source_dir,
-            output=self.output_dir,
-            debug=self.debug,
-        )
-
         self.execution_engine = ScanExecutionEngine(
             source_dir=self.source_dir,
             output_dir=self.output_dir,
@@ -186,6 +181,19 @@ class ASHScanOrchestrator(BaseModel):
             show_progress=self.show_progress,
         )
 
+        ASH_LOGGER.info("Identifying non-ignored files to include in scans")
+        self.scan_set = scan_set(
+            source=self.source_dir,
+            output=self.output_dir,
+            debug=self.debug,
+        )
+        ASH_LOGGER.info(
+            f"Found {len(self.scan_set)} files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan."
+        )
+
+        ASH_LOGGER.info(
+            "ASH Orchestrator and ScanExecutionEngine initialized, ready to start next phase."
+        )
         return super().model_post_init(context)
 
     def _load_config(self) -> ASHConfig:

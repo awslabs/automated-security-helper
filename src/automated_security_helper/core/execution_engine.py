@@ -432,7 +432,7 @@ class ScanExecutionEngine:
                 plugin_name=scanner_name.replace("_", "-"),
             )
             if scanner_config_override is not None:
-                ASH_LOGGER.verbose(
+                ASH_LOGGER.debug(
                     f"Found scanner_plugin.plugin_config in registry: {scanner_config_override.plugin_config}"
                 )
                 scanner_config_override = scanner_config_override.plugin_config

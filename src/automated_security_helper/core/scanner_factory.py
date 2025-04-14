@@ -135,7 +135,7 @@ class ScannerFactory:
         if scanner_name in self._scanners:
             ASH_LOGGER.debug(f"Scanner '{scanner_name}' is already registered")
         else:
-            ASH_LOGGER.verbose(f"Registering scanner: {scanner_name} (factory)")
+            ASH_LOGGER.verbose(f"Registering scanner: {scanner_name}")
 
         # Validate input
         try:

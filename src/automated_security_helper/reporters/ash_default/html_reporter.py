@@ -134,7 +134,14 @@ class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
         """Group results by their severity level."""
         severity_groups = {}
         for result in results:
-            severity = result.level.upper() if result.level else "UNKNOWN"
+            result_level = (
+                result.level.value
+                if result.level and hasattr(result.level, "value")
+                else str(result.level)
+                if result.level
+                else "UNKNOWN"
+            )
+            severity = result_level.upper() if result.level else "UNKNOWN"
             if severity not in severity_groups:
                 severity_groups[severity] = []
             severity_groups[severity].append(result)
@@ -182,8 +189,13 @@ class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
         """
 
         for finding in findings:
+            finding_level = (
+                finding.level.value
+                if finding.level and hasattr(finding.level, "value")
+                else str(finding.level)
+            )
             severity_class = (
-                f"severity-{finding.level.lower() if finding.level else 'none'}"
+                f"severity-{finding_level.lower() if finding.level else 'none'}"
             )
 
             # Get location information
@@ -202,7 +214,7 @@ class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
 
             table += f"""
             <tr>
-                <td class="{severity_class}">{html.escape(finding.level.upper() if finding.level else "NONE")}</td>
+                <td class="{severity_class}">{html.escape(finding_level.upper() if finding.level else "NONE")}</td>
                 <td>{html.escape(finding.ruleId or "N/A")}</td>
                 <td>{html.escape(finding.message.root.text if finding.message else "N/A")}</td>
                 <td>{html.escape(location_str)}</td>
