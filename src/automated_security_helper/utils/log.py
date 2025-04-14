@@ -112,7 +112,7 @@ class ColoredLogger(logging.getLoggerClass()):
     ):
         super().__init__(name=name, level=logging.INFO)
 
-        if self.level is None or self.level > 15:
+        if level is None or level > 15:
             self.COLOR_FORMAT = formatter_message(self.DEFAULT_FORMAT, True)
         else:
             self.COLOR_FORMAT = formatter_message(self.VERBOSE_FORMAT, True)
@@ -131,7 +131,7 @@ class ColoredLogger(logging.getLoggerClass()):
         self._log(logging._nameToLevel.get("TRACE", 5), msg, args, **kws)
 
 
-logging.setLoggerClass(ColoredLogger)
+# logging.setLoggerClass(ColoredLogger)
 
 
 class Color:
@@ -195,7 +195,10 @@ class Color:
 def get_logger(
     name: str = "ash", level: str | int | None = None, output_dir: Path | None = None
 ):
-    logger = ColoredLogger(name=name, output_dir=output_dir, level=level)
+    VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
+    DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
+
+    logger = logging.getLogger(name)
     if level is not None:
         logger.setLevel(level)
         logger.debug(
@@ -204,6 +207,14 @@ def get_logger(
         )
 
     handler = logging.StreamHandler()
+    if logger.level is None or logger.level > 15:
+        COLOR_FORMAT = formatter_message(DEFAULT_FORMAT, True)
+    else:
+        COLOR_FORMAT = formatter_message(VERBOSE_FORMAT, True)
+
+    color_formatter = ColoredFormatter(COLOR_FORMAT)
+
+    handler.setFormatter(color_formatter)
 
     # if logger.level == logging.DEBUG:
     #     formatter_str = "[%(asctime)s] [%(name)s] [%(filename)s:%(lineno)d] %(levelname)s: %(message)s"
@@ -222,7 +233,7 @@ def get_logger(
         store the log file under `output_dir`)."""
         # Format for file log (use JSON Lines for easier indexing/querying)
         fmt = '{"time": "%(asctime)s", "level": "%(levelname)s", "source": "%(filename)s:%(lineno)d", "message": "%(message)s"}'
-        formatter = logging.Formatter(fmt)
+        json_formatter = logging.Formatter(fmt)
 
         # Determine log path/file name; create output_dir if necessary
         now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -233,7 +244,7 @@ def get_logger(
         # Create file handler for logging to a file (log all five levels)
         file_handler = logging.FileHandler(log_file.as_posix())
         file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(formatter)
+        file_handler.setFormatter(json_formatter)
         logger.addHandler(file_handler)
     return logger
 

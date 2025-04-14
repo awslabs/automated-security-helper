@@ -15,7 +15,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     Kind,
     Level,
+    MultiformatMessageString,
     PropertyBag,
+    ReportingDescriptor,
     Result,
     Run,
     SarifReport,
@@ -219,13 +221,38 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         self._post_scan(target=target)
         # Create SARIF report
+        rules: List[ReportingDescriptor] = []
+        for result in sarif_results:
+            finding_props = result.properties.model_extra.get("cdk_nag_finding", {})
+            rules.append(
+                ReportingDescriptor(
+                    id=result.ruleId,
+                    shortDescription=MultiformatMessageString(
+                        text=result.message.root.text,
+                    ),
+                    fullDescription=MultiformatMessageString(
+                        text=result.message.root.text,
+                        markdown=result.message.root.markdown,
+                    ),
+                    helpUri=f"https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#{str(finding_props.get('rule_level', 'rule')).lower()}s",
+                    properties=PropertyBag(
+                        rule_level=finding_props.get("rule_level", "unknown"),
+                        rule_info=finding_props.get("rule_info", "unknown"),
+                        tags=finding_props.get("tags", []),
+                    ),
+                    # help,
+                )
+            )
         tool = Tool(
             driver=ToolComponent(
                 name="ash-cdk-nag-wrapper",
+                fullName="awslabs/automated-security-helper",
+                organization="Amazon Web Services",
                 version=get_ash_version(),
                 informationUri=ASH_DOCS_URL,
                 downloadUri=ASH_REPO_URL,
-            )
+                rules=rules,
+            ),
         )
         report = SarifReport(
             runs=[

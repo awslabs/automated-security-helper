@@ -257,7 +257,7 @@ def run_cdk_nag_against_cfn_template(
             results[pack_name] = []
         line: cdk_nag.NagReportLine
         for line in report_lines:
-            line = cdk_nag.NagReportLine(
+            line_dict = dict(
                 rule_id=line["ruleId"],
                 resource_id=line["resourceId"],
                 compliance=line["compliance"],
@@ -265,6 +265,7 @@ def run_cdk_nag_against_cfn_template(
                 rule_level=line["ruleLevel"],
                 rule_info=line["ruleInfo"],
             )
+            line = cdk_nag.NagReportLine(**line_dict)
             if line.compliance == "Compliant" and not include_compliant_checks:
                 ASH_LOGGER.debug(f"Skipping compliant check: {line.rule_id}")
                 continue
@@ -279,7 +280,23 @@ def run_cdk_nag_against_cfn_template(
                 for resource_id, item in model.Resources.items()
                 if resource_id == resource_log_id
             ][0]
+            cfn_resource_dict = {
+                "Resources": {resource_log_id: cfn_resource.model_dump()}
+            }
             finding = Result(
+                properties=PropertyBag(
+                    cdk_nag_finding=line_dict,
+                    cfn_resource=cfn_resource_dict,
+                    tags=[
+                        "aws",
+                        "cdk",
+                        "cdk-nag",
+                        pack_name,
+                        line.rule_id,
+                        resource_log_id,
+                        cfn_resource.Type,
+                    ],
+                ),
                 ruleId=line.rule_id,
                 level=(
                     Level.error
@@ -330,13 +347,6 @@ def run_cdk_nag_against_cfn_template(
                         ),
                     )
                 ],
-                properties=PropertyBag(
-                    tags=[
-                        pack_name,
-                    ],
-                    resourceName=resource_log_id,
-                    resourceType=cfn_resource.Type,
-                ),
             )
 
             # finding = Result(

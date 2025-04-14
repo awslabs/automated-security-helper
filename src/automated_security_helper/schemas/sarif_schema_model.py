@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+import json
 from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, RootModel
@@ -2352,20 +2353,48 @@ class SarifReport(BaseModel):
     )
 
     def merge_sarif_report(self, sarif_report: "SarifReport"):
+        report_run = sarif_report.runs[0]
+        report_tool = report_run.tool
+        report_invocations = report_run.invocations
+        report_results = report_run.results
+
+        self_run = self.runs[0] if self.runs is not None else None
+        if self_run is None:
+            cleaned_run = json.loads(report_run.model_dump_json())
+            self_run = Run(**cleaned_run)
+        else:
+            if self_run.tool.extensions is None or len(self_run.tool.extensions) == 0:
+                self_run.tool.extensions = [report_tool.driver]
+            else:
+                # Check if report_tool.driver.name already exists in self_run.tool.extensions
+                existing_extension = next(
+                    (
+                        ext
+                        for ext in self_run.tool.extensions
+                        if ext.name == report_tool.driver.name
+                        and ext.fullName == report_tool.driver.fullName
+                        and ext.organization == report_tool.driver.organization
+                    ),
+                    None,
+                )
+                if existing_extension is None:
+                    self_run.tool.extensions.append(report_tool.driver)
+                else:
+                    existing_extension.rules.extend(report_tool.driver.rules)
+
+        if self_run.results is None:
+            self_run.results = []
+        self_run.results.extend(report_results)
+        if self_run.invocations is None:
+            self_run.invocations = []
+        self_run.invocations.extend(report_invocations)
+        self.runs = [self_run]
+
         self.inlineExternalProperties.extend(sarif_report.inlineExternalProperties)
         if sarif_report.properties.tags is not None:
             if self.properties.tags is None:
                 self.properties.tags = []
             self.properties.tags.extend(sarif_report.properties.tags)
-        if self.runs is None or len(self.runs) == 0:
-            self.runs = sarif_report.runs
-        else:
-            if self.runs[0].results is None:
-                self.runs[0].results = []
-            self.runs[0].results.extend(sarif_report.runs[0].results)
-            if self.runs[0].invocations is None:
-                self.runs[0].invocations = []
-            self.runs[0].invocations.extend(sarif_report.runs[0].invocations)
 
 
 Node.model_rebuild()

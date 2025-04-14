@@ -64,7 +64,6 @@ class ASHARPModel(BaseModel):
         SarifReport | None,
         Field(description="The SARIF formatted vulnerability report"),
     ] = SarifReport(
-        properties=PropertyBag(),
         runs=[
             Run(
                 tool=Tool(
@@ -75,7 +74,43 @@ class ASHARPModel(BaseModel):
                         organization="Amazon Web Services",
                         downloadUri=ASH_REPO_URL,
                         informationUri=ASH_DOCS_URL,
-                    )
+                    ),
+                    extensions=[
+                        # Tool(
+                        #     driver=ToolComponent(
+                        #         name="Bandit",
+                        #         organization="PyCQA",
+                        #         version=version("bandit"),
+                        #         language="Python",
+                        #         rules=[
+                        #             ReportingDescriptor(
+                        #                 id="B101",
+                        #                 shortDescription="Assert used",
+                        #                 fullDescription="Use of assert detected. The enclosed code will be removed when compiling to optimized byte code.",
+                        #                 properties=PropertyBag(
+                        #                     tags=["security", "bandit", "B101"]
+                        #                 ),
+                        #             ),
+                        #             ReportingDescriptor(
+                        #                 id="B103",
+                        #                 shortDescription="Assert always true",
+                        #                 fullDescription="Assert always true",
+                        #                 properties=PropertyBag(
+                        #                     tags=["security", "bandit", "B103"]
+                        #                 ),
+                        #             ),
+                        #         ],
+                        #     ),
+                        # ),
+                        # Tool(
+                        #     driver=ToolComponent(
+                        #         name="Checkov",
+                        #         organization="Bridgecrew",
+                        #         version=version("checkov"),
+                        #         language="all",
+                        #     ),
+                        # ),
+                    ],
                 ),
                 results=[],
                 invocations=[],
