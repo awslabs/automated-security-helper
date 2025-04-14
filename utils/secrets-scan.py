@@ -10,12 +10,18 @@ def scan_secrets(
         debug: bool = False
 ):
     secrets = SecretsCollection()
-    for item in os.walk(path):
-        for file in item[2]:
-            # Use settings from a baseline if it is provided, otherwise use the default settings
-            with settings.configure_settings_from_baseline(filename=baseline) if baseline else settings.default_settings():
+    settings_context = settings.default_settings()
+    # Use settings from a baseline if it is provided, otherwise the default settings will be used
+    if baseline:
+        baseline_file = os.path.abspath(baseline)
+        with open(baseline_file, 'r') as f:
+            baseline = json.load(f)
+            settings_context = settings.transient_settings(config=baseline)
+            f.close()
+    with settings_context:
+        for item in os.walk(path):
+            for file in item[2]:
                 secrets.scan_files(os.path.join(item[0], file))
-
     # Prints out scan results. Discovered secret values are hashed to avoid exposing them
     print(json.dumps(secrets.json(), indent=2))
 
