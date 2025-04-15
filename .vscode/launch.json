@@ -1,6 +1,13 @@
 {
   "configurations": [
     {
+      "console": "integratedTerminal",
+      "name": "Python Debugger: Current File",
+      "program": "${file}",
+      "request": "launch",
+      "type": "debugpy"
+    },
+    {
       "args": [
         "--source-dir",
         "${workspaceFolder}",

@@ -123,7 +123,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets"
             )
             with default_settings():
-                self._secrets_collection.scan_files(filenames=scannable)
+                self._secrets_collection.scan_files(scannable)
 
             self._post_scan(target=target)
 
@@ -214,9 +214,20 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
                 ]
             )
+            with open(results_file, "w") as fp:
+                report_str = sarif_report.model_dump_json()
+                fp.write(report_str)
 
             return sarif_report
 
         except Exception as e:
             # Check if there are useful error details
-            raise ScannerError(f"Checkov scan failed: {str(e)}")
+            raise ScannerError(f"{self.__class__.__name__} failed: {str(e)}")
+
+
+if __name__ == "__main__":
+    scanner = DetectSecretsScanner(
+        source_dir=Path.cwd(),
+        output_dir=Path.cwd().joinpath("ash_output"),
+    )
+    scanner.scan(target=Path.cwd())

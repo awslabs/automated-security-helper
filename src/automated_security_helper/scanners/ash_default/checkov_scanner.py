@@ -124,6 +124,8 @@ class CheckovScannerConfig(ScannerPluginConfigBase):
 class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     """CheckovScanner implements IaC scanning using Checkov."""
 
+    check_conf: str = "NOT_PROVIDED"
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = CheckovScannerConfig()
