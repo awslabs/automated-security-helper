@@ -89,7 +89,8 @@ RUN git clone https://github.com/awslabs/git-secrets.git && \
 RUN python3 -m pip install --no-cache-dir \
     bandit \
     nbconvert \
-    jupyterlab
+    jupyterlab \
+    detect-secrets
 
 #
 # YAML (Checkov, cfn-nag)

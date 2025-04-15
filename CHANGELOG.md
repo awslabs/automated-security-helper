@@ -30,6 +30,12 @@
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
+## v2.1.0
+
+### Features
+
+- `git-secrets` has been replaced with the Python module `detect-secrets` as the secrets scanning tool for `ash`. This change allows for more types of secrets to be scanned and for additional customization that is not available with `git-secrets`. `detect-secrets` results are output in JSON format in the `ash` scan report. The `ash` docs include information on modifying `detect-secrets` settings with `ash`. For more information, refer to the `detect-secrets` README, which is available in their [Git repository](https://github.com/Yelp/detect-secrets).
+
 ## v2.0.1
 
 ### What's Changed

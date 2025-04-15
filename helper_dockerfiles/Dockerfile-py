@@ -3,7 +3,7 @@ FROM --platform=linux/amd64 public.ecr.aws/bitnami/python:3.11
 
 # Instal prerequisites
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir bandit nbconvert jupyterlab
+    pip install --no-cache-dir bandit nbconvert jupyterlab detect-secrets
 
 #
 # Make sure the default dirs are initialized

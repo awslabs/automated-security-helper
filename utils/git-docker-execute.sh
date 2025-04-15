@@ -63,46 +63,8 @@ fi;
 tree ${_TREE_FLAGS} "${_ASH_SOURCE_DIR}" >> "${REPORT_PATH}" 2>&1
 echo "<<<<<< end tree ${_TREE_FLAGS} result <<<<<<" >> "${REPORT_PATH}"
 
-#
-# There is no need to run the --install.  Furthermore if --install is
-# run then any existing commit-msg, pre-commit, and prepare-commit-msg
-# hooks which are already set up for the repo will be overwritten by
-# the git secrets hooks.
-#
-# git secrets --install -f >/dev/null 2>&1 && \
-
-
-
 if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != "true" ]; then
   echo "Not in a git repository - skipping git checks" >>"${REPORT_PATH}"
-else
-
-  #
-  # Configure the repo to check for AWS secrets
-  #
-  git secrets --register-aws >>"${REPORT_PATH}" 2>&1
-
-  #
-  # List the Git secrets configuration
-  #
-  echo "git config --local --get-regexp \"^secrets\\..*\$\" output:" >>"${REPORT_PATH}" 2>&1
-  git config --local --get-regexp "^secrets\..*$" >>"${REPORT_PATH}" 2>&1
-
-  echo ">>>>>> begin git secrets --scan result >>>>>>" >> "${REPORT_PATH}"
-  git secrets --scan >> "${REPORT_PATH}" 2>&1
-  GRC=$?
-  RC=$(bumprc $RC $GRC)
-  echo "<<<<<< end git secrets --scan result <<<<<<" >> "${REPORT_PATH}"
-
-  #
-  # TODO: Consider adding in a longer scan of the history as well.  Comment out for now.
-  #
-  # echo ">>>>>> begin git secrets --scan-history result >>>>>>" >> "${REPORT_PATH}"
-  # git secrets --scan-history >> "${REPORT_PATH}" 2>&1
-  # GRC=$?
-  # RC=$(bumprc $RC $GRC)
-  # echo "<<<<<< end git secrets --scan-history result <<<<<<" >> "${REPORT_PATH}
-
 fi
 
 # cd back to the original SOURCE_DIR in case path changed during scan
