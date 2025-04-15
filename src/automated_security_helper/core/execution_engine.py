@@ -55,7 +55,7 @@ class ScanExecutionEngine:
         # in from the Orchestrator. This allows ASH users to specify the scanners via CLI
         # at runtime for a more focused scan (e.g. during finding remediation where
         # there is only a single scanner failing, isolating scans to just that scanner will allow quicker retesting until passing and a full scan can be )
-        enabled_scanners: Optional[List[str]] = None,
+        enabled_scanners: Optional[List[str]] = [],
         strategy: Optional[ExecutionStrategy] = ExecutionStrategy.PARALLEL,
         asharp_model: Optional[ASHARPModel] = None,
         config: Optional[ASHConfig] = None,
@@ -87,7 +87,8 @@ class ScanExecutionEngine:
         self._strategy = strategy
         self.show_progress = show_progress
         self._initialized = False  # Track initialization state
-        # self._enabled_scanners = enabled_scanners  # None means all enabled
+        self._init_enabled_scanners = enabled_scanners  # None means all enabled
+        self._enabled_scanners = []
 
         # Initialize basic configuration
 
@@ -160,8 +161,8 @@ class ScanExecutionEngine:
                     for s in enabled_from_config
                     if isinstance(s, str)
                     and (
-                        len(enabled_scanners) == 0
-                        or s.lower().strip() in enabled_scanners
+                        len(self._init_enabled_scanners) == 0
+                        or s.lower().strip() in self._init_enabled_scanners
                     )
                 ]
             )
@@ -298,7 +299,7 @@ class ScanExecutionEngine:
             ASH_LOGGER.info("Initializing execution engine")
             if config is not None:
                 self._config = config
-            if not self._config:
+            if not self._config or self._config is None:
                 self._config = ASHConfig(
                     project_name="ASH Default Project Config",
                 )

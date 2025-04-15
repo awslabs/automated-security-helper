@@ -19,17 +19,12 @@ def mock_scanner_results() -> Dict[str, Any]:
 
 
 def test_execution_engine_wraps_results(
-    tmp_path: Path, mock_scanner_results: Dict[str, Any]
+    mock_scanner_plugin, tmp_path: Path, mock_scanner_results: Dict[str, Any]
 ):
     """Test that ExecutionEngine properly wraps scanner results."""
     engine = ScanExecutionEngine()
 
-    # Mock scanner plugin that returns our test results
-    class MockScanner:
-        def scan(self):
-            return mock_scanner_results
-
-    result = engine._execute_scanner((MockScanner(), None))
+    result = engine._execute_scanner("mock", mock_scanner_plugin(), None)
 
     assert "container" in result
     assert isinstance(result, ScanResultsContainer)

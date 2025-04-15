@@ -15,9 +15,4 @@ def get_default_config():
         )
         return ASHConfig.from_file(config_env_var)
 
-    return ASHConfig(
-        project_name="automated-security-helper",
-        output_dir="ash_output",
-        fail_on_findings=True,
-        ignore_paths=["tests/**"],
-    )
+    return ASHConfig()

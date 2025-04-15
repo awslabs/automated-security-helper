@@ -21,6 +21,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.config.ash_config import ASHConfig
+from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -88,6 +89,8 @@ class PluginRegistry(BaseModel):
         # plugin namespace.
         if config is not None:
             self.config = config
+        if self.config is None:
+            self.config = get_default_config()
         if package is None:
             package = f"automated_security_helper.{plug_type}s"
             ASH_LOGGER.debug(

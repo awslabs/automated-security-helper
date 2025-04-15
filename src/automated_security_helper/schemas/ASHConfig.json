@@ -1218,6 +1218,7 @@
       "type": "array"
     },
     "project_name": {
+      "default": "ash-target",
       "description": "Name of the project being scanned",
       "title": "Project Name",
       "type": "string"
@@ -1316,9 +1317,6 @@
       "type": "string"
     }
   },
-  "required": [
-    "project_name"
-  ],
   "title": "ASHConfig",
   "type": "object"
 }

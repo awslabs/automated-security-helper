@@ -47,7 +47,8 @@ def scan(
         ),
     ] = Path.cwd().joinpath("ash_output").as_posix(),
     config: Annotated[
-        str, typer.Option(help="The path to the configuration file")
+        str,
+        typer.Option(help="The path to the configuration file", envvar="ASH_CONFIG"),
     ] = None,
     verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,

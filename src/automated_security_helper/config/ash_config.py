@@ -120,7 +120,9 @@ class ASHConfig(BaseModel):
     )
 
     # Project information
-    project_name: Annotated[str, Field(description="Name of the project being scanned")]
+    project_name: Annotated[
+        str, Field(description="Name of the project being scanned")
+    ] = "ash-target"
 
     # Build configuration
     build: Annotated[

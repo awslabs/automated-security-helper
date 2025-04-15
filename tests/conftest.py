@@ -188,6 +188,18 @@ def sample_vulnerability(sample_scanner, sample_location):
 
 
 class MockScannerPlugin(ScannerPluginBase[ScannerPluginConfigBase]):
+    config: ScannerPluginConfigBase = ScannerPluginConfigBase(
+        name="mock_scanner",
+        enabled=True,
+    )
+
+    def model_post_init(self, context):
+        self.config = ScannerPluginConfigBase(
+            name="mock_scanner",
+            enabled=True,
+        )
+        return super().model_post_init(context)
+
     def validate(self):
         return True
 

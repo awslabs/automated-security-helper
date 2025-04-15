@@ -252,32 +252,36 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                 cwd=self.source_dir.as_posix(),
                 # env=os.environ.copy(),
             )
+            # Default to 1 if it doesn't exist, something went wrong during execution
+            self.exit_code = result.returncode or 1
+
+            # Process stdout
+            if result.stdout:
+                for line in result.stdout.splitlines():
+                    self._output.append(line)
+                    # ASH_LOGGER.debug(line)
+                if results_dir is not None:
+                    with open(
+                        Path(results_dir).joinpath(
+                            f"{self.__class__.__name__}.stdout.log"
+                        ),
+                        "w",
+                    ) as stdout_file:
+                        stdout_file.write(result.stdout)
+            # Process stderr
+            if result.stderr:
+                for line in result.stderr.splitlines():
+                    self._errors.append(line)
+                    # ASH_LOGGER.debug(line)
+                if results_dir is not None:
+                    with open(
+                        Path(results_dir).joinpath(
+                            f"{self.__class__.__name__}.stderr.log"
+                        ),
+                        "w",
+                    ) as stderr_file:
+                        stderr_file.write(result.stderr)
         except Exception as e:
             self.errors.append(str(e))
             ASH_LOGGER.warning(f"({self.config.name}) Error running {command}: {e}")
-
-        # Default to 1 if it doesn't exist, something went wrong during execution
-        self.exit_code = result.returncode or 1
-
-        # Process stdout
-        if result.stdout:
-            for line in result.stdout.splitlines():
-                self._output.append(line)
-                # ASH_LOGGER.debug(line)
-            if results_dir is not None:
-                with open(
-                    Path(results_dir).joinpath(f"{self.__class__.__name__}.stdout.log"),
-                    "w",
-                ) as stdout_file:
-                    stdout_file.write(result.stdout)
-        # Process stderr
-        if result.stderr:
-            for line in result.stderr.splitlines():
-                self._errors.append(line)
-                # ASH_LOGGER.debug(line)
-            if results_dir is not None:
-                with open(
-                    Path(results_dir).joinpath(f"{self.__class__.__name__}.stderr.log"),
-                    "w",
-                ) as stderr_file:
-                    stderr_file.write(result.stderr)
+            self.exit_code = 1
