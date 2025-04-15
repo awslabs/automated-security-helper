@@ -53,7 +53,7 @@ scanners:
       skip_path:
         - path: "test_data"
           reason: This is test data that is used during unit testing only and is not part of the core application.
-  git-secrets:
+  detect-secrets:
     enabled: true
   npm-audit:
     enabled: true

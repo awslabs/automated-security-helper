@@ -237,22 +237,27 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         except Exception as e:
             ASH_LOGGER.debug(e)
 
-        ASH_LOGGER.debug(f"({self.config.name}) Running: {command}")
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            shell=False,
-            check=False,
-            cwd=self.source_dir.as_posix(),
-            # env=os.environ.copy(),
-        )
-
-        self.exit_code = result.returncode
-
         # Store output and errors in class variables
         self._output = []
         self._errors = []
+
+        ASH_LOGGER.debug(f"({self.config.name}) Running: {command}")
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                shell=False,
+                check=False,
+                cwd=self.source_dir.as_posix(),
+                # env=os.environ.copy(),
+            )
+        except Exception as e:
+            self.errors.append(str(e))
+            ASH_LOGGER.warning(f"({self.config.name}) Error running {command}: {e}")
+
+        # Default to 1 if it doesn't exist, something went wrong during execution
+        self.exit_code = result.returncode or 1
 
         # Process stdout
         if result.stdout:

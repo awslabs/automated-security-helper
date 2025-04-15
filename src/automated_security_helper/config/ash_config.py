@@ -11,7 +11,6 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.config.scanner_types import (
     CfnNagScannerConfig,
-    GitSecretsScannerConfig,
     NpmAuditScannerConfig,
     SemgrepScannerConfig,
     GrypeScannerConfig,
@@ -28,6 +27,9 @@ from automated_security_helper.scanners.ash_default.checkov_scanner import (
 )
 from automated_security_helper.scanners.ash_default.custom_scanner import (
     CustomScannerConfig,
+)
+from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
+    DetectSecretsScannerConfig,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -70,7 +72,7 @@ class ScannerConfigSegment(BaseModel):
         extra="allow",
     )
 
-    __pydantic_extra__: Dict[str, CustomScannerConfig] = {}
+    __pydantic_extra__: Dict[str, Any | CustomScannerConfig] = {}
 
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
@@ -86,10 +88,13 @@ class ScannerConfigSegment(BaseModel):
     checkov: Annotated[
         CheckovScannerConfig, Field(description="Configure the options for Checkov")
     ] = CheckovScannerConfig()
-    git_secrets: Annotated[
-        GitSecretsScannerConfig,
-        Field(description="Configure the options for GitSecrets", alias="git-secrets"),
-    ] = GitSecretsScannerConfig()
+    detect_secrets: Annotated[
+        DetectSecretsScannerConfig,
+        Field(
+            description="Configure the options for DetectSecrets",
+            alias="detect-secrets",
+        ),
+    ] = DetectSecretsScannerConfig()
     grype: Annotated[
         GrypeScannerConfig, Field(description="Configure the options for Grype")
     ] = GrypeScannerConfig()
@@ -222,7 +227,7 @@ class ASHConfig(BaseModel):
             | CdkNagScannerConfig
             | CfnNagScannerConfig
             | CheckovScannerConfig
-            | GitSecretsScannerConfig
+            | DetectSecretsScannerConfig
             | GrypeScannerConfig
             | NpmAuditScannerConfig
             | SemgrepScannerConfig

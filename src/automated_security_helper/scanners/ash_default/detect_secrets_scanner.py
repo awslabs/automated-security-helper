@@ -1,0 +1,222 @@
+"""Module containing the Checkov security scanner implementation."""
+
+from importlib.metadata import version
+from pathlib import Path
+from typing import Annotated, List, Literal
+
+from pydantic import Field
+from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+)
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactContent,
+    ArtifactLocation,
+    Invocation,
+    Kind,
+    Level,
+    Location,
+    Message,
+    PhysicalLocation,
+    PropertyBag,
+    Region,
+    Result,
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
+)
+from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.normalizers import get_normalized_filename
+
+from detect_secrets import SecretsCollection
+from detect_secrets.settings import default_settings
+
+
+class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
+    # Add any custom options that need to be surfaced to users here.
+    pass
+
+
+class DetectSecretsScannerConfig(ScannerPluginConfigBase):
+    name: Literal["detect-secrets"] = "detect-secrets"
+    enabled: bool = True
+    options: Annotated[
+        DetectSecretsScannerConfigOptions,
+        Field(description="Configure detect-secrets scanner"),
+    ] = DetectSecretsScannerConfigOptions()
+
+
+class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
+    """DetectSecretsScanner implements SECRET scanning using detect-secrets."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = DetectSecretsScannerConfig()
+        self.command = "detect-secrets"
+        self.tool_version = version("detect-secrets")
+        super().model_post_init(context)
+
+        self._secrets_collection = SecretsCollection()
+
+    def validate(self) -> bool:
+        """Validate the scanner configuration and requirements.
+
+        Returns:
+            True if validation passes, False otherwise
+
+        Raises:
+            ScannerError: If validation fails
+        """
+        # detect-secrets is a dependency of this Python module, if the Python import got
+        # this far then we know we're in a valid runtime for this scanner.
+        return True
+
+    def _process_config_options(self):
+        # Add any additional config option parsing here, if necessary
+        # For Python-based scanners, this typically won't be needed as we will access
+        # the configuration directly from the self.config object.
+        return super()._process_config_options()
+
+    def scan(
+        self,
+        target: Path,
+        config: DetectSecretsScannerConfig | None = None,
+    ) -> SarifReport:
+        """Execute detect-secrets scan and return results.
+
+        Args:
+            target: Path to scan
+
+        Returns:
+            SarifReport containing the scan findings and metadata
+
+        Raises:
+            ScannerError: If the scan fails or results cannot be parsed
+        """
+        try:
+            self._pre_scan(
+                target=target,
+                options=self.config.options,
+            )
+        except ScannerError as exc:
+            raise exc
+        ASH_LOGGER.debug(f"self.config: {self.config}")
+        ASH_LOGGER.debug(f"config: {config}")
+
+        try:
+            # Set up target path for scan results for target path
+            normalized_file_name = get_normalized_filename(str_to_normalize=target)
+            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            results_file = target_results_dir.joinpath("results_sarif.sarif")
+            results_file.parent.mkdir(exist_ok=True, parents=True)
+
+            # Find all files to scan from the scan set
+            scannable = scan_set(
+                source=self.source_dir,
+                output=self.output_dir,
+            )
+            ASH_LOGGER.debug(
+                f"Found {len(scannable)} files in scan set to scan with detect-secrets"
+            )
+            with default_settings():
+                self._secrets_collection.scan_files(filenames=scannable)
+
+            self._post_scan(target=target)
+
+            # Populate the Results list with findings from the scan
+            results: List[Result] = []
+            for filename, detections in self._secrets_collection.data.items():
+                for finding in detections:
+                    results.append(
+                        Result(
+                            # Adjust as needed to capture findings from scanner as
+                            # SARIF Result objects. Reference the current CDK Nag
+                            # Scanner/Wrapper for examples on custom SARIF structure.
+                            ruleId="SECRET-DETECTED",
+                            properties=PropertyBag(
+                                tags=[
+                                    "detect-secrets",
+                                    "secret",
+                                    "security",
+                                ],
+                            ),
+                            level=Level.error,
+                            kind=Kind.fail,
+                            message=Message(
+                                text=f"Secret detected on file '{filename}'"
+                            ),
+                            analysisTarget=ArtifactLocation(
+                                uri=target.as_posix(),
+                            ),
+                            locations=[
+                                Location(
+                                    id=1,
+                                    physicalLocation=PhysicalLocation(
+                                        artifactLocation=ArtifactLocation(
+                                            uri=Path(filename)
+                                            .absolute()
+                                            .relative_to(Path.cwd())
+                                            .as_posix(),
+                                        ),
+                                        region=Region(
+                                            startLine=1,
+                                            endLine=1,
+                                            snippet=ArtifactContent(
+                                                text=None  # Replace with snippet if relevant
+                                            ),
+                                        ),
+                                    ),
+                                )
+                            ],
+                        )
+                    )
+            sarif_tool: Tool = Tool(
+                driver=ToolComponent(
+                    name="detect-secrets",
+                    fullName="yelp/detect-secrets",
+                    organization="Yelp",
+                    version=self.tool_version,
+                    informationUri="https://github.com/Yelp/detect-secrets",
+                    downloadUri="https://github.com/Yelp/detect-secrets",
+                    rules=[],
+                )
+            )
+            sarif_invocation: Invocation = Invocation(
+                commandLine="ash-detect-secrets-scanner",
+                arguments=[
+                    "--target",
+                    target.as_posix(),
+                    "--scanner",
+                ],
+                startTimeUtc=self.start_time,
+                endTimeUtc=self.end_time,
+                executionSuccessful=True,
+                exitCode=self.exit_code,
+                exitCodeDescription="\n".join(self.errors),
+                workingDirectory=ArtifactLocation(
+                    uri=target.as_posix(),
+                ),
+                properties=PropertyBag(
+                    tool=sarif_tool,
+                ),
+            )
+            sarif_report = SarifReport(
+                runs=[
+                    Run(
+                        tool=sarif_tool,
+                        invocations=[sarif_invocation],
+                        results=results,
+                        version=self.tool_version,
+                    )
+                ]
+            )
+
+            return sarif_report
+
+        except Exception as e:
+            # Check if there are useful error details
+            raise ScannerError(f"Checkov scan failed: {str(e)}")

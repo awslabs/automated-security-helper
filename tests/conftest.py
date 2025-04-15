@@ -13,7 +13,6 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.scanner_types import (
     CfnNagScannerConfig,
-    GitSecretsScannerConfig,
     NpmAuditScannerConfig,
     SemgrepScannerConfig,
     GrypeScannerConfig,
@@ -21,12 +20,18 @@ from automated_security_helper.config.scanner_types import (
     CustomScannerConfig,
 )
 
+from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.models.core import (
     ExportFormat,
     Location,
     Scanner,
+    ToolArgs,
+    ToolExtraArg,
 )
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
 from automated_security_helper.models.security_vulnerability import (
     SecurityVulnerability,
 )
@@ -41,6 +46,17 @@ from automated_security_helper.scanners.ash_default.cdk_nag_scanner import (
 from automated_security_helper.scanners.ash_default.checkov_scanner import (
     CheckovScannerConfig,
 )
+from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
+    DetectSecretsScannerConfig,
+    DetectSecretsScannerConfigOptions,
+)
+from automated_security_helper.schemas.sarif_schema_model import (
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
+)
+from automated_security_helper.utils.get_ash_version import get_ash_version
 
 
 TEST_DIR = Path(__file__).parent.joinpath("pytest-temp")
@@ -171,6 +187,37 @@ def sample_vulnerability(sample_scanner, sample_location):
     )
 
 
+class MockScannerPlugin(ScannerPluginBase[ScannerPluginConfigBase]):
+    def validate(self):
+        return True
+
+    def scan(self, target, config=None, *args, **kwargs):
+        return SarifReport(
+            runs=[
+                Run(
+                    tool=Tool(
+                        driver=ToolComponent(
+                            name="ASH Aggregated Results",
+                            fullName="awslabs/automated-security-helper",
+                            version=get_ash_version(),
+                            organization="Amazon Web Services",
+                            downloadUri=ASH_REPO_URL,
+                            informationUri=ASH_DOCS_URL,
+                        ),
+                        extensions=[],
+                    ),
+                    results=[],
+                    invocations=[],
+                )
+            ],
+        )
+
+
+@pytest.fixture
+def mock_scanner_plugin():
+    return MockScannerPlugin
+
+
 @pytest.fixture
 def ash_config() -> ASHConfig:
     """Create a test ASHConfig object based on default ash.yaml settings."""
@@ -185,29 +232,37 @@ def ash_config() -> ASHConfig:
                 ]
             },
             custom_scanners=[
-                ScannerPluginBase(
-                    name="trivy-sast",
+                MockScannerPlugin(
+                    config=ScannerPluginConfigBase(
+                        name="trivy-sast",
+                    ),
                     command="trivy",
-                    args=["fs", "--format", "sarif"],
-                    output_format="sarif",
-                    output_stream="stdout",
-                    get_tool_version_command=[
-                        "trivy",
-                        "--version",
-                    ],
-                    format_arg="--format",
-                    format_arg_value="sarif",
-                    format_arg_position="before_args",
-                    scan_path_arg_position="after_args",
-                    invocation_mode="directory",
-                    type="SAST",
+                    args=ToolArgs(
+                        format_arg="--format",
+                        format_arg_value="sarif",
+                        extra_args=[
+                            ToolExtraArg(
+                                key="fs",
+                                value=None,
+                            )
+                        ],
+                    ),
                 ),
-                ScannerPluginBase(
-                    name="trivy-sbom",
+                MockScannerPlugin(
+                    config=ScannerPluginConfigBase(
+                        name="trivy-sbom",
+                    ),
                     command="trivy",
-                    args=["fs", "--format", "cyclonedx"],
-                    output_format="cyclonedx",
-                    output_stream="stdout",
+                    args=ToolArgs(
+                        format_arg="--format",
+                        format_arg_value="cyclonedx",
+                        extra_args=[
+                            ToolExtraArg(
+                                key="fs",
+                                value=None,
+                            )
+                        ],
+                    ),
                 ),
             ],
         ),
@@ -220,10 +275,10 @@ def ash_config() -> ASHConfig:
         },
         no_cleanup=True,
         output_formats=[
-            ExportFormat.HTML,
-            ExportFormat.JUNITXML,
-            ExportFormat.SARIF,
-            ExportFormat.CYCLONEDX,
+            ExportFormat.HTML.value,
+            ExportFormat.JUNITXML.value,
+            ExportFormat.SARIF.value,
+            ExportFormat.CYCLONEDX.value,
         ],
         severity_threshold="ALL",
         scanners=ScannerConfigSegment(
@@ -242,22 +297,24 @@ def ash_config() -> ASHConfig:
             ),
             cfn_nag=CfnNagScannerConfig(),
             checkov=CheckovScannerConfig(),
-            git_secrets=GitSecretsScannerConfig(
-                options=ScannerOptionsBase(enabled=True),
+            detect_secrets=DetectSecretsScannerConfig(
+                options=DetectSecretsScannerConfigOptions(enabled=True),
             ),
             grype=GrypeScannerConfig(),
             npm_audit=NpmAuditScannerConfig(),
             semgrep=SemgrepScannerConfig(),
             trivy_sast=CustomScannerConfig(
                 name="trivy-sast",
+                options=ScannerOptionsBase(enabled=True),
+                enabled=True,
                 type="SAST",
-                custom=ScannerOptionsBase(enabled=True),
             ),
             syft=SyftScannerConfig(),
             trivy_sbom=CustomScannerConfig(
                 name="trivy-sbom",
+                options=ScannerOptionsBase(enabled=True),
+                enabled=True,
                 type="SBOM",
-                custom=ScannerOptionsBase(enabled=True),
             ),
         ),
     )

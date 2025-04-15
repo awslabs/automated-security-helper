@@ -285,6 +285,7 @@
             "frameworks": [
               "all"
             ],
+            "skip_frameworks": [],
             "skip_path": []
           },
           "description": "Configure Checkov scanner"
@@ -374,6 +375,53 @@
           "title": "Frameworks",
           "type": "array"
         },
+        "skip_frameworks": {
+          "default": [],
+          "description": "Specific frameworks to exclude with Checkov. Defaults to none.",
+          "items": {
+            "enum": [
+              "all",
+              "ansible",
+              "argo_workflows",
+              "arm",
+              "azure_pipelines",
+              "bicep",
+              "bitbucket_pipelines",
+              "cdk",
+              "circleci_pipelines",
+              "cloudformation",
+              "dockerfile",
+              "github_configuration",
+              "github_actions",
+              "gitlab_configuration",
+              "gitlab_ci",
+              "bitbucket_configuration",
+              "helm",
+              "json",
+              "yaml",
+              "kubernetes",
+              "kustomize",
+              "openapi",
+              "sca_package",
+              "sca_image",
+              "secrets",
+              "serverless",
+              "terraform",
+              "terraform_json",
+              "terraform_plan",
+              "sast",
+              "sast_python",
+              "sast_java",
+              "sast_javascript",
+              "sast_typescript",
+              "sast_golang",
+              "3d_policy"
+            ],
+            "type": "string"
+          },
+          "title": "Skip Frameworks",
+          "type": "array"
+        },
         "skip_path": {
           "default": [],
           "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
@@ -432,45 +480,33 @@
       "title": "CustomScannerConfigOptions",
       "type": "object"
     },
-    "GitSecretsScannerConfig": {
+    "DetectSecretsScannerConfig": {
       "additionalProperties": true,
-      "description": "Git Secrets scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
         "name": {
-          "const": "git-secrets",
-          "default": "git-secrets",
+          "const": "detect-secrets",
+          "default": "detect-secrets",
           "title": "Name",
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
+          "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
           "default": {},
-          "description": "Enable Git Secrets scanner"
-        },
-        "type": {
-          "default": "SECRETS",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
+          "description": "Configure detect-secrets scanner"
         }
       },
-      "title": "GitSecretsScannerConfig",
+      "title": "DetectSecretsScannerConfig",
+      "type": "object"
+    },
+    "DetectSecretsScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "DetectSecretsScannerConfigOptions",
       "type": "object"
     },
     "GrypeScannerConfig": {
@@ -578,7 +614,12 @@
     },
     "ScannerConfigSegment": {
       "additionalProperties": {
-        "$ref": "#/$defs/CustomScannerConfig"
+        "anyOf": [
+          {},
+          {
+            "$ref": "#/$defs/CustomScannerConfig"
+          }
+        ]
       },
       "properties": {
         "bandit": {
@@ -636,20 +677,20 @@
               "frameworks": [
                 "all"
               ],
+              "skip_frameworks": [],
               "skip_path": []
             }
           },
           "description": "Configure the options for Checkov"
         },
-        "git-secrets": {
-          "$ref": "#/$defs/GitSecretsScannerConfig",
+        "detect-secrets": {
+          "$ref": "#/$defs/DetectSecretsScannerConfig",
           "default": {
             "enabled": true,
-            "name": "git-secrets",
-            "options": {},
-            "type": "SECRETS"
+            "name": "detect-secrets",
+            "options": {}
           },
-          "description": "Configure the options for GitSecrets"
+          "description": "Configure the options for DetectSecrets"
         },
         "grype": {
           "$ref": "#/$defs/GrypeScannerConfig",
@@ -1225,14 +1266,14 @@
             "frameworks": [
               "all"
             ],
+            "skip_frameworks": [],
             "skip_path": []
           }
         },
-        "git-secrets": {
+        "detect-secrets": {
           "enabled": true,
-          "name": "git-secrets",
-          "options": {},
-          "type": "SECRETS"
+          "name": "detect-secrets",
+          "options": {}
         },
         "grype": {
           "enabled": true,

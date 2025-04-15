@@ -54,6 +54,7 @@ sarif-tools = "^3.0.4"
 rich = "^13.5.3"
 semgrep = "^1.116.0"
 typer = "^0.15.2"
+detect-secrets = "^1.5.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.2"
@@ -62,6 +63,7 @@ pytest-mock = "^3.14.0"
 mypy = "^1.15.0"
 types-pyyaml = "^6.0.12.20250402"
 vulture = "^2.14"
+datamodel-code-generator = "*"
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]

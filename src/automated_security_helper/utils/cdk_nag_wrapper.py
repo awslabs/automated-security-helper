@@ -329,7 +329,10 @@ def run_cdk_nag_against_cfn_template(
                         id=1,
                         physicalLocation=PhysicalLocation(
                             artifactLocation=ArtifactLocation(
-                                uri=line.resource_id,
+                                uri=Path(template_path)
+                                .absolute()
+                                .relative_to(Path.cwd())
+                                .as_posix(),
                             ),
                             region=Region(
                                 startLine=1,

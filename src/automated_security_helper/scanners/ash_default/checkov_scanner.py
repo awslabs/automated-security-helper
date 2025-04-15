@@ -105,6 +105,12 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
             description="Specific frameworks to include with Checkov. Defaults to `all`."
         ),
     ] = ["all"]
+    skip_frameworks: Annotated[
+        List[CheckFrameworks],
+        Field(
+            description="Specific frameworks to exclude with Checkov. Defaults to none."
+        ),
+    ] = []
 
 
 class CheckovScannerConfig(ScannerPluginConfigBase):
@@ -149,7 +155,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         return True
 
     def _process_config_options(self):
-        # Bandit config path
+        # Checkov config path
         possible_config_paths = [
             item
             for item in [
@@ -174,6 +180,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             self.args.extra_args.append(ToolExtraArg(key="--output", value=item))
         for item in self.config.options.frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
+        for item in self.config.options.skip_frameworks:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--skip-framework", value=item)
+            )
         for item in self.config.options.skip_path:
             ASH_LOGGER.debug(
                 f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"

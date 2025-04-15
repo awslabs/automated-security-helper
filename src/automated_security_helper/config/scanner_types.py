@@ -56,23 +56,6 @@ class NpmAuditScannerConfig(ScannerPluginConfigBase):
     ] = ScannerOptionsBase()
 
 
-class GitSecretsScannerConfig(ScannerPluginConfigBase):
-    """Git Secrets scanner configuration."""
-
-    name: Literal["git-secrets"] = "git-secrets"
-    enabled: Annotated[
-        bool,
-        Field(
-            description="Whether the custom scanner is enabled.",
-        ),
-    ] = True
-    type: SCANNER_TYPES = "SECRETS"
-    options: Annotated[
-        ScannerOptionsBase,
-        Field(description="Enable Git Secrets scanner"),
-    ] = ScannerOptionsBase()
-
-
 class SemgrepScannerConfig(ScannerPluginConfigBase):
     """Semgrep SAST scanner configuration."""
 
