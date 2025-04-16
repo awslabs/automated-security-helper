@@ -14,6 +14,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Region,
     Result,
 )
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 
 # noqa
 os.environ["JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION"] = "1"
@@ -80,9 +81,7 @@ class WrapperStack(Stack):
         # Get the relative path to use as the logical ID
         # CDK will replace path separators with
         try:
-            logical_id = (
-                Path(template_path).absolute().relative_to(Path.cwd()).as_posix()
-            )
+            logical_id = get_shortest_name(input=template_path)
         except ValueError:
             logical_id = Path(template_path).as_posix()
         CfnInclude(
@@ -168,7 +167,7 @@ def run_cdk_nag_against_cfn_template(
             Path.cwd().joinpath("ash_output").joinpath("scanners").joinpath("cdknag")
         )
     try:
-        clean_template_filename = Path(template_path).relative_to(Path.cwd()).as_posix()
+        clean_template_filename = get_shortest_name(input=template_path)
     except ValueError as e:
         ASH_LOGGER.debug(f"Could not get relative path to template: {e}")
         clean_template_filename = Path(template_path).as_posix()
@@ -272,9 +271,7 @@ def run_cdk_nag_against_cfn_template(
 
             resource_log_id = line.resource_id.split("/")[-1]
 
-            cfn_file_rel_path = (
-                Path(template_path).absolute().relative_to(Path.cwd()).as_posix()
-            )
+            cfn_file_rel_path = get_shortest_name(input=template_path)
             cfn_resource = [
                 item
                 for resource_id, item in model.Resources.items()
@@ -329,10 +326,7 @@ def run_cdk_nag_against_cfn_template(
                         id=1,
                         physicalLocation=PhysicalLocation(
                             artifactLocation=ArtifactLocation(
-                                uri=Path(template_path)
-                                .absolute()
-                                .relative_to(Path.cwd())
-                                .as_posix(),
+                                uri=get_shortest_name(input=template_path),
                             ),
                             region=Region(
                                 startLine=1,

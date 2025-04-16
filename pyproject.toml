@@ -64,6 +64,12 @@ mypy = "^1.15.0"
 types-pyyaml = "^6.0.12.20250402"
 vulture = "^2.14"
 datamodel-code-generator = "*"
+lazydocs = "^0.4.8"
+mkdocs = "^1.6.1"
+mkdocs-material = "^9.6.11"
+mkdocs-awesome-pages-plugin = "^2.10.1"
+pymdown-extensions = "^10.14.3"
+mkdocstrings = {extras = ["python"], version = "^0.29.1"}
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]

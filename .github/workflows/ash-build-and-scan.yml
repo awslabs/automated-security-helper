@@ -185,11 +185,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+          cache: 'poetry'
+
+      - name: Install Poetry
+        run: |
+          pipx install poetry==2.1.2
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
 
       - name: Install dependencies
         run: pip install -r requirements.txt

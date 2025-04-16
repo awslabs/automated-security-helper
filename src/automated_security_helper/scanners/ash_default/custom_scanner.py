@@ -44,6 +44,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
@@ -153,7 +154,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
                         artifacts=[
                             Artifact(
                                 location=ArtifactLocation(
-                                    uri=target.as_posix(),
+                                    uri=get_shortest_name(input=target),
                                 )
                             )
                         ],
@@ -167,7 +168,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
                                 exitCode=self.exit_code,
                                 exitCodeDescription="\n".join(self.errors),
                                 workingDirectory=ArtifactLocation(
-                                    uri=target.as_posix(),
+                                    uri=get_shortest_name(input=target),
                                 ),
                                 properties=PropertyBag(
                                     tool=tool,
@@ -207,7 +208,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
                     tool=tool,
                     timestamp=datetime.now().isoformat(),
                     projectRoot=ArtifactLocation(
-                        uri=target.as_posix(),
+                        uri=get_shortest_name(input=target),
                     ),
                     ashVersion=get_ash_version(),
                     scannerConfig=self.config.model_dump(),

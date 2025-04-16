@@ -168,7 +168,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                     Path(results_file).as_posix()
                     if results_file is not None
                     else (
-                        self.results_file.as_posix()
+                        Path(self.results_file).as_posix()
                         if self.results_file is not None
                         else None
                     )
@@ -249,7 +249,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                 text=True,
                 shell=False,
                 check=False,
-                cwd=self.source_dir.as_posix(),
+                cwd=Path(self.source_dir).as_posix(),
                 # env=os.environ.copy(),
             )
             # Default to 1 if it doesn't exist, something went wrong during execution
