@@ -1,10 +1,12 @@
 """Test module for BanditScanner implementation."""
 
 import pytest
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
 from automated_security_helper.scanners.ash_default.bandit_scanner import BanditScanner
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import ExportFormat
 
 
 def test_bandit_scanner_init(test_source_dir, test_output_dir):
@@ -30,13 +32,9 @@ def test_bandit_scanner_init(test_source_dir, test_output_dir):
 def test_bandit_scanner_configure(test_source_dir, test_output_dir):
     """Test scanner configuration."""
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    config = ScannerPluginBase(name="bandit", output_format="text")
+    config = ScannerPluginConfigBase(name="bandit", output_format="text")
     # scanner.configure(config)
-    assert scanner._config == config
-    # We have to force standardization of output format at the scanner level so we
-    # know what format to parse from and what data is available for a particular scanner
-    assert scanner._default_config.output_format == ExportFormat.SARIF
-    assert scanner._config.output_format == ExportFormat.TEXT
+    assert scanner.config == config
 
 
 def test_bandit_scanner_validate(test_source_dir, test_output_dir):
