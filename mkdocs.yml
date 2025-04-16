@@ -14,6 +14,9 @@ nav:
   - Documentation:
     - Getting started:
       - Prerequisites: docs/prerequisites.md
+    - Development:
+      - API: docs/development/api/README.md
+      - Customization: docs/development/customization/workflow.md
     - Support Matrix: docs/support.md
   - Tutorials:
     - Running ASH locally: tutorials/running-ash-locally.md
@@ -59,15 +62,21 @@ theme:
 markdown_extensions:
   - admonition
   - pymdownx.emoji:
-      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_index: !!python/name:pymdownx.emoji.twemoji
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 
 plugins:
     - search
     - awesome-pages
+    - autorefs
+    - mkdocstrings

@@ -4,21 +4,21 @@
 from pathlib import Path
 import re
 
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
+
 
 def get_normalized_filename(str_to_normalize: str | Path) -> str:
     """Returns a normalized filename for the given string.
 
     Args:
-        str_to_normalize (str): The string to normalize.
+        str_to_normalize (str | Path): The string to normalize.
 
     Returns:
         str: The normalized filename.
     """
     if isinstance(str_to_normalize, Path):
-        try:
-            str_to_normalize = str_to_normalize.absolute().relative_to(Path.cwd())
-        finally:
-            str_to_normalize = str_to_normalize.as_posix()
+        str_to_normalize = get_shortest_name(input=str_to_normalize)
+
     str_to_normalize = str_to_normalize.replace("/", "__").replace(".", "__")
 
     normalized = re.sub(

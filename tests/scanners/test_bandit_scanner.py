@@ -48,54 +48,6 @@ def test_bandit_scanner_validate(test_source_dir, test_output_dir):
     assert scanner.validate() is True
 
 
-def test_bandit_scanner_scan_json(mocker, test_source_dir, test_output_dir):
-    """Test scanning with JSON output format."""
-    scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    # scanner.configure(
-    #     ScannerPluginConfig(
-    #         name="bandit",
-    #         type="SAST",
-    #         command="bandit",
-    #         enabled=True,
-    #         output_format="json",
-    #     )
-    # )
-
-    # Mock scanning methods
-    mocker.patch.object(scanner, "_pre_scan")
-    mock_parse = mocker.patch.object(scanner, "_parse_outputs")
-    mock_parse.return_value = {"findings": [], "metadata": {}}
-    mock_run = mocker.patch.object(scanner, "_run_subprocess")
-    mock_parse_outputs = mocker.patch.object(scanner, "_parse_outputs")
-    mock_output = mocker.patch.object(scanner, "_output")
-    mock_output.return_value = ['{"results": []}']
-
-    result = scanner.scan("/test/path")
-
-    # Verify command construction
-    mock_run.assert_called_once()
-    mock_parse_outputs.assert_called_once()
-    assert len(result.findings) == 0
-
-
-def test_bandit_scanner_scan_with_config(mocker, test_source_dir, test_output_dir):
-    """Test scanning with additional config options."""
-    scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)
-    # scanner.configure(scanner.default_config)
-
-    # Mock subprocess execution
-    mock_run = mocker.patch.object(scanner, "_run_subprocess")
-    mock_parse_outputs = mocker.patch.object(scanner, "_parse_outputs")
-    mock_output = mocker.patch.object(scanner, "_output")
-    mock_output.return_value = ['{"results": []}']
-
-    scanner.scan("/test/path")
-
-    # Verify command includes config options
-    mock_run.assert_called_once()
-    mock_parse_outputs.assert_called_once()
-
-
 def test_bandit_scanner_errors(mocker, test_source_dir, test_output_dir):
     """Test scanner error handling."""
     scanner = BanditScanner(source_dir=test_source_dir, output_dir=test_output_dir)

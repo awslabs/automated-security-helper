@@ -32,9 +32,6 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.models.security_vulnerability import (
-    SecurityVulnerability,
-)
 from automated_security_helper.scanners.ash_default.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -172,19 +169,6 @@ def sample_scanner():
 def sample_location():
     """Create a sample location instance for testing."""
     return base_location()
-
-
-@pytest.fixture
-def sample_vulnerability(sample_scanner, sample_location):
-    """Create a sample vulnerability instance for testing."""
-    return SecurityVulnerability(
-        scanner=sample_scanner,
-        location=sample_location,
-        title="Test Vulnerability",
-        severity="HIGH",
-        description="A test vulnerability",
-        recommendation="Fix the vulnerability",
-    )
 
 
 class MockScannerPlugin(ScannerPluginBase[ScannerPluginConfigBase]):

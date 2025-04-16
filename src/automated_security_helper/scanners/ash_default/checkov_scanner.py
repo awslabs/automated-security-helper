@@ -23,6 +23,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     SarifReport,
 )
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
@@ -173,7 +174,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 self.args.extra_args.extend(
                     [
                         "--config-file",
-                        Path(conf_path).absolute().relative_to(Path.cwd()).as_posix(),
+                        get_shortest_name(input=conf_path),
                     ]
                 )
                 break

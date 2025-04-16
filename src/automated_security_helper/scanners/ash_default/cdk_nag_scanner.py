@@ -32,6 +32,7 @@ from automated_security_helper.utils.cdk_nag_wrapper import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -181,7 +182,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Process each template file
         failed_files = []
-        target_rel_path = Path(target).absolute().relative_to(Path.cwd()).as_posix()
+        target_rel_path = get_shortest_name(input=target)
 
         outdir = self.output_dir.joinpath("scanners").joinpath("cdk-nag")
         sarif_results: List[Result] = []
@@ -274,7 +275,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             exitCode=0,
                             exitCodeDescription="\n".join(self.errors),
                             workingDirectory=ArtifactLocation(
-                                uri=self.source_dir.as_posix(),
+                                uri=get_shortest_name(input=self.source_dir),
                             ),
                             properties=PropertyBag(
                                 tool=tool,
