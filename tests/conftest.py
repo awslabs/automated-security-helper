@@ -3,56 +3,27 @@
 import json
 from pathlib import Path
 import shutil
-import sys
 import pytest
-import yaml
-from automated_security_helper.config.ash_config import (
-    ASHConfig,
-    BuildConfig,
-    ScannerConfigSegment,
-)
-from automated_security_helper.config.scanner_types import (
-    CfnNagScannerConfig,
-    NpmAuditScannerConfig,
-    SemgrepScannerConfig,
-    GrypeScannerConfig,
-    SyftScannerConfig,
-    CustomScannerConfig,
-)
 
+# Core imports needed for basic fixtures
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.core import (
-    ExportFormat,
-    ToolArgs,
-    ToolExtraArg,
-)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.scanners.ash_default.bandit_scanner import (
-    BanditScannerConfig,
-)
-from automated_security_helper.scanners.ash_default.cdk_nag_scanner import (
-    CdkNagPacks,
-    CdkNagScannerConfig,
-    CdkNagScannerConfigOptions,
-)
-from automated_security_helper.scanners.ash_default.checkov_scanner import (
-    CheckovScannerConfig,
-)
-from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
-    DetectSecretsScannerConfig,
-    DetectSecretsScannerConfigOptions,
-)
-from automated_security_helper.schemas.sarif_schema_model import (
-    Run,
-    SarifReport,
-    Tool,
-    ToolComponent,
-)
 from automated_security_helper.utils.get_ash_version import get_ash_version
+
+
+# Lazy imports for specific fixtures
+def lazy_import(module_path, *names):
+    """Lazily import modules/objects when needed."""
+    import importlib
+
+    module = importlib.import_module(module_path)
+    if not names:
+        return module
+    return tuple(getattr(module, name) for name in names)
 
 
 TEST_DIR = Path(__file__).parent.joinpath("pytest-temp")
@@ -75,20 +46,19 @@ def sample_ash_model():
     return model
 
 
-def is_debugging():
-    return "debugpy" in sys.modules
+# def is_debugging():
+#     return "debugpy" in sys.modules
 
 
-# enable_stop_on_exceptions if the debugger is running during a test
-if is_debugging():
+# # enable_stop_on_exceptions if the debugger is running during a test
+# if is_debugging():
+#     @pytest.hookimpl(tryfirst=True)
+#     def pytest_exception_interact(call):
+#         raise call.excinfo.value
 
-    @pytest.hookimpl(tryfirst=True)
-    def pytest_exception_interact(call):
-        raise call.excinfo.value
-
-    @pytest.hookimpl(tryfirst=True)
-    def pytest_internalerror(excinfo):
-        raise excinfo.value
+#     @pytest.hookimpl(tryfirst=True)
+#     def pytest_internalerror(excinfo):
+#         raise excinfo.value
 
 
 @pytest.fixture
@@ -107,68 +77,133 @@ def test_output_dir() -> Path:
     return TEST_OUTPUT_DIR
 
 
-@pytest.fixture
-def sample_config():
-    return {
-        "scanners": {"bandit": {"type": "static", "config_file": "bandit.yaml"}},
-        "parsers": {"bandit": {"format": "json"}},
-    }
+# @pytest.fixture
+# def sample_config():
+#     return {
+#         "scanners": {"bandit": {"type": "static", "config_file": "bandit.yaml"}},
+#         "parsers": {"bandit": {"format": "json"}},
+#     }
 
 
-@pytest.fixture
-def config_file(ash_config: ASHConfig):
-    # Create a temporary config file
-    config_file = TEST_SOURCE_DIR.joinpath("ash.yaml")
-    with open(config_file, "w") as f:
-        yaml.dump(
-            ash_config.model_dump_json(),
-            f,
-        )
-    return config_file.as_posix()
-
-
-class MockScannerPlugin(ScannerPluginBase[ScannerPluginConfigBase]):
-    config: ScannerPluginConfigBase = ScannerPluginConfigBase(
-        name="mock_scanner",
-        enabled=True,
-    )
-
-    def model_post_init(self, context):
-        return super().model_post_init(context)
-
-    def validate(self):
-        return True
-
-    def scan(self, target, config=None, *args, **kwargs):
-        return SarifReport(
-            runs=[
-                Run(
-                    tool=Tool(
-                        driver=ToolComponent(
-                            name="ASH Aggregated Results",
-                            fullName="awslabs/automated-security-helper",
-                            version=get_ash_version(),
-                            organization="Amazon Web Services",
-                            downloadUri=ASH_REPO_URL,
-                            informationUri=ASH_DOCS_URL,
-                        ),
-                        extensions=[],
-                    ),
-                    results=[],
-                    invocations=[],
-                )
-            ],
-        )
+# @pytest.fixture
+# def config_file(ash_config: ASHConfig):
+#     # Create a temporary config file
+#     config_file = TEST_SOURCE_DIR.joinpath("ash.yaml")
+#     with open(config_file, "w") as f:
+#         yaml.dump(
+#             ash_config.model_dump_json(),
+#             f,
+#         )
+#     return config_file.as_posix()
 
 
 @pytest.fixture
 def mock_scanner_plugin():
+    from automated_security_helper.schemas.sarif_schema_model import (
+        SarifReport,
+        Run,
+        Tool,
+        ToolComponent,
+    )
+
+    class MockScannerPlugin(ScannerPluginBase[ScannerPluginConfigBase]):
+        config: ScannerPluginConfigBase = ScannerPluginConfigBase(
+            name="mock_scanner",
+            enabled=True,
+        )
+
+        def model_post_init(self, context):
+            return super().model_post_init(context)
+
+        def validate(self):
+            return True
+
+        def scan(self, target, config=None, *args, **kwargs):
+            return SarifReport(
+                runs=[
+                    Run(
+                        tool=Tool(
+                            driver=ToolComponent(
+                                name="ASH Aggregated Results",
+                                fullName="awslabs/automated-security-helper",
+                                version=get_ash_version(),
+                                organization="Amazon Web Services",
+                                downloadUri=ASH_REPO_URL,
+                                informationUri=ASH_DOCS_URL,
+                            ),
+                            extensions=[],
+                        ),
+                        results=[],
+                        invocations=[],
+                    )
+                ],
+            )
+
     return MockScannerPlugin
 
 
 @pytest.fixture
-def ash_config() -> ASHConfig:
+def ash_config(mock_scanner_plugin):
     """Create a test ASHConfig object based on default ash.yaml settings."""
+    # Lazy load required classes
+    ASHConfig, BuildConfig, ScannerConfigSegment = lazy_import(
+        "automated_security_helper.config.ash_config",
+        "ASHConfig",
+        "BuildConfig",
+        "ScannerConfigSegment",
+    )
+    CustomScannerConfig = lazy_import(
+        "automated_security_helper.config.scanner_types", "CustomScannerConfig"
+    )[0]
+    ExportFormat = lazy_import("automated_security_helper.models.core", "ExportFormat")[
+        0
+    ]
+    (
+        BanditScannerConfig,
+        CdkNagScannerConfig,
+        CdkNagScannerConfigOptions,
+        CdkNagPacks,
+        CheckovScannerConfig,
+        DetectSecretsScannerConfig,
+        DetectSecretsScannerConfigOptions,
+        GrypeScannerConfig,
+        NpmAuditScannerConfig,
+        SemgrepScannerConfig,
+        SyftScannerConfig,
+        CfnNagScannerConfig,
+    ) = (
+        lazy_import(
+            "automated_security_helper.scanners.ash_default.bandit_scanner",
+            "BanditScannerConfig",
+        )[0],
+        *lazy_import(
+            "automated_security_helper.scanners.ash_default.cdk_nag_scanner",
+            "CdkNagScannerConfig",
+            "CdkNagScannerConfigOptions",
+            "CdkNagPacks",
+        ),
+        *lazy_import(
+            "automated_security_helper.scanners.ash_default.checkov_scanner",
+            "CheckovScannerConfig",
+        ),
+        *lazy_import(
+            "automated_security_helper.scanners.ash_default.detect_secrets_scanner",
+            "DetectSecretsScannerConfig",
+            "DetectSecretsScannerConfigOptions",
+        ),
+        *lazy_import(
+            "automated_security_helper.config.scanner_types",
+            "GrypeScannerConfig",
+            "NpmAuditScannerConfig",
+            "SemgrepScannerConfig",
+            "SyftScannerConfig",
+            "CfnNagScannerConfig",
+        ),
+    )
+    ToolArgs, ToolExtraArg = lazy_import(
+        "automated_security_helper.models.core", "ToolArgs", "ToolExtraArg"
+    )
+
     scanners_with_special_chars = {
         "trivy-sast": CustomScannerConfig(
             name="trivy-sast",
@@ -192,7 +227,7 @@ def ash_config() -> ASHConfig:
                 ]
             },
             custom_scanners=[
-                MockScannerPlugin(
+                mock_scanner_plugin(
                     config=ScannerPluginConfigBase(
                         name="trivy-sast",
                     ),
@@ -208,7 +243,7 @@ def ash_config() -> ASHConfig:
                         ],
                     ),
                 ),
-                MockScannerPlugin(
+                mock_scanner_plugin(
                     config=ScannerPluginConfigBase(
                         name="trivy-sbom",
                     ),
