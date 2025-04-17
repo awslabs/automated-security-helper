@@ -23,7 +23,7 @@ class CSVReporterConfig(ReporterPluginConfigBase):
 class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
     """Formats results as CSV."""
 
-    def format(self, model: Any) -> str:
+    def report(self, model: Any) -> str:
         """Format ASH model as CSV string."""
         from automated_security_helper.models.asharp_model import ASHARPModel
 

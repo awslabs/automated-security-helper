@@ -2326,7 +2326,9 @@ class Run(BaseModel):
 
 
 class SarifReport(BaseModel):
-    model_config = ConfigDict(extra="forbid", use_enum_values=True)
+    model_config = ConfigDict(
+        extra="forbid", use_enum_values=True, serialize_by_alias=True
+    )
 
     field_schema: Optional[AnyUrl] = Field(
         AnyUrl(

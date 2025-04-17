@@ -261,7 +261,7 @@ def scan_set(
             if re.match(pattern=filter_pattern, string=file)
         ]
 
-    return ashscanset_list
+    return [item.strip() for item in ashscanset_list]
 
 
 def main() -> int:

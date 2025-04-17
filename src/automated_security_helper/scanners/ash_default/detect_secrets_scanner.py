@@ -1,6 +1,7 @@
 """Module containing the Checkov security scanner implementation."""
 
 from importlib.metadata import version
+import json
 from pathlib import Path
 from typing import Annotated, List, Literal
 
@@ -34,12 +35,16 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
 from detect_secrets import SecretsCollection
-from detect_secrets.settings import default_settings
+from detect_secrets.settings import default_settings, transient_settings
 
 
 class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
-    # Add any custom options that need to be surfaced to users here.
-    pass
+    baseline: Annotated[
+        Path | None,
+        Field(
+            description="Path to baseline file, relative to current source directory. Defaults to searching for `.detect-secrets.baseline` in the root of the source directory.",
+        ),
+    ] = None
 
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):
@@ -123,8 +128,18 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             ASH_LOGGER.debug(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets"
             )
-            with default_settings():
-                self._secrets_collection.scan_files(scannable)
+            if self.config.options.baseline is not None:
+                ASH_LOGGER.debug(f"Using baseline file: {self.config.options.baseline}")
+                with open(self.config.options.baseline, "r") as f:
+                    baseline_content = json.load(f)
+                    with transient_settings(config=baseline_content):
+                        self._secrets_collection.scan_files(*scannable)
+            else:
+                ASH_LOGGER.debug(
+                    f"Using default settings for {self.__class__.__name__}"
+                )
+                with default_settings():
+                    self._secrets_collection.scan_files(*scannable)
 
             self._post_scan(target=target)
 
@@ -148,7 +163,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             level=Level.error,
                             kind=Kind.fail,
                             message=Message(
-                                text=f"Secret detected on file '{filename}'"
+                                text=f"Secret of type '{finding.type}' detected in file '{filename}' at line {finding.line_number}"
                             ),
                             analysisTarget=ArtifactLocation(
                                 uri=get_shortest_name(input=target),
@@ -161,10 +176,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                             uri=get_shortest_name(input=target),
                                         ),
                                         region=Region(
-                                            startLine=1,
-                                            endLine=1,
+                                            startLine=finding.line_number,
+                                            endLine=finding.line_number,
                                             snippet=ArtifactContent(
-                                                text=None  # Replace with snippet if relevant
+                                                text=f"Secret of type {finding.type} detected"
                                             ),
                                         ),
                                     ),
@@ -208,7 +223,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         tool=sarif_tool,
                         invocations=[sarif_invocation],
                         results=results,
-                        version=self.tool_version,
                     )
                 ]
             )

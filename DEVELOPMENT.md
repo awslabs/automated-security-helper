@@ -9,12 +9,22 @@ This guide will help you set up your local development environment for the Autom
 
 ## Setting up Poetry
 
-1. Install Poetry on your system:
+1. Install Poetry on your system
+
+[Official instructions](https://python-poetry.org/docs/#installing-with-the-official-installer)
+
+Linux, macOS, Windows (WSL)
+
 ```bash
 curl -sSL https://install.python-poetry.org | python3 -
 ```
 
-2. Verify Poetry installation:
+```ps1
+(Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | py -
+```
+
+
+1. Verify Poetry installation:
 ```bash
 poetry --version
 ```
@@ -22,23 +32,27 @@ poetry --version
 ## Project Setup
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/awslabs/automated-security-helper.git
 cd automated-security-helper
 ```
 
 2. Install project dependencies:
+
 ```bash
 poetry install
 ```
+
 This command will:
 - Create a virtual environment
 - Install all dependencies from pyproject.toml
 - Set up the project in development mode
 
 3. Activate the virtual environment:
+
 ```bash
-poetry shell
+eval $(poetry env activate)
 ```
 
 ## Testing

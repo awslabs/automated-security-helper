@@ -34,6 +34,7 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
 class CdkNagPacks(BaseModel):
@@ -184,7 +185,12 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         failed_files = []
         target_rel_path = get_shortest_name(input=target)
 
-        outdir = self.output_dir.joinpath("scanners").joinpath("cdk-nag")
+        scan_dir_name = get_normalized_filename(str_to_normalize=target)
+        outdir = (
+            self.output_dir.joinpath("scanners")
+            .joinpath("cdk-nag")
+            .joinpath(scan_dir_name)
+        )
         sarif_results: List[Result] = []
         for cfn_file in cfn_files:
             try:
@@ -312,3 +318,29 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         #         tool_name="cdk-nag",
         #     ),
         # )
+
+
+if __name__ == "__main__":
+    ASH_LOGGER.debug("Running cdk-nag via __main__")
+    scanner = CdkNagScanner(
+        config=CdkNagScannerConfig(
+            options=CdkNagScannerConfigOptions(
+                nag_packs=CdkNagPacks(
+                    AwsSolutionsChecks=True,
+                    HIPAASecurityChecks=True,
+                    NIST80053R4Checks=True,
+                    NIST80053R5Checks=True,
+                    PCIDSS321Checks=True,
+                )
+            )
+        )
+    )
+    report = scanner.scan(target=Path("."))
+
+    print(
+        report.model_dump_json(
+            indent=2,
+            by_alias=True,
+            exclude_unset=True,
+        )
+    )
