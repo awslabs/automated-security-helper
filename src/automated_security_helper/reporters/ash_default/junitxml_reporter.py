@@ -14,17 +14,6 @@ from automated_security_helper.config.ash_config import ASHConfig
 import defusedxml
 import warnings
 
-with warnings.catch_warnings():
-    defusedxml.defuse_stdlib()  # Defuse stdlib before importing any XML libs
-
-from junitparser import (  # noqa: E402
-    Error,
-    JUnitXml,
-    Skipped,
-    TestCase,
-    TestSuite,
-)
-
 
 class JUnitXMLReporterConfigOptions(ReporterOptionsBase):
     pass
@@ -40,7 +29,8 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
     """Formats results as JUnitXML."""
 
     def model_post_init(self, context):
-        defusedxml.defuse_stdlib()
+        with warnings.catch_warnings():
+            defusedxml.defuse_stdlib()
         return super().model_post_init(context)
 
     def format(self, model: Any) -> str:
@@ -53,6 +43,14 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
+
+        from junitparser import (
+            Error,
+            JUnitXml,
+            Skipped,
+            TestCase,
+            TestSuite,
+        )
 
         report = JUnitXml(name="ASH Scan Report")
         ash_config: ASHConfig = ASHConfig.model_validate(model.ash_config)
