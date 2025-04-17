@@ -4913,6 +4913,7 @@ class CycloneDXReport(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         use_enum_values=True,
+        serialize_by_alias=True,
     )
 
     field_schema: Optional[str] = Field(

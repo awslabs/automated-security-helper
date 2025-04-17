@@ -70,6 +70,7 @@ mkdocs-material = "^9.6.11"
 mkdocs-awesome-pages-plugin = "^2.10.1"
 pymdown-extensions = "^10.14.3"
 mkdocstrings = {extras = ["python"], version = "^0.29.1"}
+mkdocs-autorefs = "^1.4.1"
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]

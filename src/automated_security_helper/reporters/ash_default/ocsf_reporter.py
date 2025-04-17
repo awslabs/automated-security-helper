@@ -21,10 +21,10 @@ class OCSFReporterConfig(ReporterPluginConfigBase):
 
 
 class OCSFReporter(ReporterPluginBase[OCSFReporterConfig]):
-    """Formats results as Amazon Security Finding Format (OCSF)."""
+    """Formats results as Open Cybersecurity Schema Framework (OCSF) format."""
 
     def format(self, model: Any) -> str:
-        """Format ASH model in Amazon Security Finding Format (OCSF)."""
+        """Format ASH model in Open Cybersecurity Schema Framework (OCSF) format."""
         from automated_security_helper.models.asharp_model import ASHARPModel
 
         if not isinstance(model, ASHARPModel):
