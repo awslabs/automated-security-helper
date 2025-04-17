@@ -56,6 +56,7 @@ class ConverterPluginBase(BaseModel, Generic[T]):
         if config:
             self.config = config
 
+    ### Methods that require implementation by plugins.
     @abstractmethod
     def validate(self) -> bool:
         """Validate converter configuration and requirements."""

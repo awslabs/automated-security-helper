@@ -22,7 +22,7 @@ class JSONReporterConfig(ReporterPluginConfigBase):
 class JSONReporter(ReporterPluginBase[JSONReporterConfig]):
     """Formats results as JSON."""
 
-    def format(self, model: Any) -> str:
+    def report(self, model: Any) -> str:
         """Format ASH model as JSON string."""
         from automated_security_helper.models.asharp_model import ASHARPModel
 

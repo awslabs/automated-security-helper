@@ -116,19 +116,15 @@ def sample_config():
 
 
 @pytest.fixture
-def config_file(test_source_dir):
+def config_file(ash_config: ASHConfig):
     # Create a temporary config file
-    with open(test_source_dir.joinpath("config.yaml"), "w") as f:
+    config_file = TEST_SOURCE_DIR.joinpath("ash.yaml")
+    with open(config_file, "w") as f:
         yaml.dump(
-            {
-                "scanners": {
-                    "bandit": {"type": "static", "config_file": "bandit.yaml"}
-                },
-                "parsers": {"bandit": {"format": "json"}},
-            },
+            ash_config.model_dump_json(),
             f,
         )
-        return f.name
+    return config_file.as_posix()
 
 
 class MockScannerPlugin(ScannerPluginBase[ScannerPluginConfigBase]):

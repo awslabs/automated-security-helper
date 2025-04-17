@@ -22,7 +22,7 @@ class TextReporterConfig(ReporterPluginConfigBase):
 class TextReporter(ReporterPluginBase[TextReporterConfig]):
     """Formats results as text."""
 
-    def format(self, model: Any) -> str:
+    def report(self, model: Any) -> str:
         """Format ASH model as text string."""
         from automated_security_helper.models.asharp_model import ASHARPModel
 

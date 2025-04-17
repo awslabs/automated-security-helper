@@ -33,7 +33,7 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
             defusedxml.defuse_stdlib()
         return super().model_post_init(context)
 
-    def format(self, model: Any) -> str:
+    def report(self, model: Any) -> str:
         """Format ASH model in JUnitXML.
 
         Creates a test suite for each finding type, with individual findings as test cases.

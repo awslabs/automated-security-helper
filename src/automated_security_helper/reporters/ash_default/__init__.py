@@ -11,6 +11,7 @@ from automated_security_helper.reporters.ash_default.json_reporter import JSONRe
 from automated_security_helper.reporters.ash_default.junitxml_reporter import (
     JUnitXMLReporter,
 )
+from automated_security_helper.reporters.ash_default.ocsf_reporter import OCSFReporter
 from automated_security_helper.reporters.ash_default.sarif_reporter import SARIFReporter
 from automated_security_helper.reporters.ash_default.spdx_reporter import SPDXReporter
 from automated_security_helper.reporters.ash_default.text_reporter import TextReporter
@@ -23,6 +24,7 @@ __all__ = [
     "HTMLReporter",
     "JSONReporter",
     "JUnitXMLReporter",
+    "OCSFReporter",
     "SARIFReporter",
     "SPDXReporter",
     "TextReporter",

@@ -22,9 +22,6 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs
-from automated_security_helper.models.core import (
-    Location,
-)
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
@@ -33,6 +30,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Artifact,
     ArtifactLocation,
     Invocation,
+    Location,
     Message,
     PhysicalLocation,
     PropertyBag,

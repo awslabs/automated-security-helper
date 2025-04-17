@@ -9,11 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
-from automated_security_helper.schemas.data_interchange import (
-    ReportMetadata,
-)
 from typing import Annotated, List, Dict, Any, Optional, Union
-from automated_security_helper.models.core import ExportFormat, Scanner
+from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Run,
@@ -25,6 +22,72 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 
 __all__ = ["ASHARPModel"]
+
+
+class ReportMetadata(BaseModel):
+    """Metadata for security reports."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+        json_encoders={
+            datetime: lambda v: v.isoformat(),
+            ExportFormat: lambda v: str(v),
+        },
+    )
+
+    report_id: Annotated[
+        str,
+        Field(
+            min_length=1,
+            pattern=r"^[A-Za-z][\/\.\w-]+$",
+            description="Unique identifier for the report",
+        ),
+    ] = None
+    generated_at: Annotated[str, Field()] = None
+    project_name: Annotated[
+        str, Field(min_length=1, description="Name of the project being scanned")
+    ] = None
+    tool_version: Annotated[
+        str, Field(min_length=1, description="Version of the security tool")
+    ] = None
+    description: Annotated[
+        str, Field(min_length=1, description="Description of the tool/scan")
+    ] = None
+    summary_stats: Annotated[
+        Dict[str, int],
+        Field(description="Summary statistics (e.g., count by severity)"),
+    ] = {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+
+    @field_validator("project_name")
+    @classmethod
+    def validate_non_empty_str(cls, v: str, info) -> str:
+        """Validate string fields are not empty."""
+        v = v.strip()
+        if not v:
+            raise ValueError(f"{info.field_name} cannot be empty")
+        return v
+
+    @field_validator("generated_at")
+    @classmethod
+    def validate_datetime(cls, v: Union[str, datetime] = None) -> str:
+        """Validate that value is timestamp or, if empty, set to current datetime"""
+        if not v:
+            v = datetime.now(timezone.utc)
+        if isinstance(v, str):
+            v = datetime.fromisoformat(v.strip())
+        return v.isoformat(timespec="seconds")
+
+    def model_post_init(self, context):
+        super().model_post_init(context)
+        default_timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        if not self.generated_at:
+            self.generated_at = default_timestamp
+        if not self.report_id:
+            self.report_id = (
+                f"ASH-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            )
 
 
 # from automated_security_helper.models.aggregation import (
@@ -210,18 +273,6 @@ class ASHARPModel(BaseModel):
     #         description=scanner_dict_copy["description"],
     #     )
 
-    @property
-    def scanners(self) -> List[Scanner]:
-        """Get scanners as Scanner objects for backward compatibility.
-
-        Returns:
-            List[Scanner]: List of Scanner objects converted from scanners_used data.
-                Returns empty list if no scanners are defined.
-        """
-        if not hasattr(self, "_scanners"):
-            self._scanners = []
-        return self._scanners.copy()  # Return copy to prevent modification
-
     @classmethod
     def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "ASHARPModel":
         """Parse JSON data into an ASHARPModel instance.
@@ -288,10 +339,10 @@ class ASHARPModel(BaseModel):
 
         return cls.from_json(json_data)
 
-    def format(
+    def report(
         self, output_formats: List[ExportFormat], output_dir: Path | None = None
     ) -> str:
-        """Format ASH model using specified formatter."""
+        """Format ASH model using specified reporter."""
         from automated_security_helper.reporters.ash_default import (
             ASFFReporter,
             CSVReporter,
@@ -305,33 +356,33 @@ class ASHARPModel(BaseModel):
             YAMLReporter,
         )
 
-        formatters = {
-            "asff": {"formatter": ASFFReporter(), "ext": "asff"},
-            "csv": {"formatter": CSVReporter(), "ext": "csv"},
-            "cyclonedx": {"formatter": CycloneDXReporter(), "ext": "cdx.json"},
-            "html": {"formatter": HTMLReporter(), "ext": "html"},
-            "json": {"formatter": JSONReporter(), "ext": "json"},
-            "junitxml": {"formatter": JUnitXMLReporter(), "ext": "junit.xml"},
-            "sarif": {"formatter": SARIFReporter(), "ext": "sarif"},
-            "spdx": {"formatter": SPDXReporter(), "ext": "spdx.json"},
-            "text": {"formatter": TextReporter(), "ext": "txt"},
-            "yaml": {"formatter": YAMLReporter(), "ext": "yaml"},
+        reporters = {
+            "asff": {"reporter": ASFFReporter(), "ext": "asff"},
+            "csv": {"reporter": CSVReporter(), "ext": "csv"},
+            "cyclonedx": {"reporter": CycloneDXReporter(), "ext": "cdx.json"},
+            "html": {"reporter": HTMLReporter(), "ext": "html"},
+            "json": {"reporter": JSONReporter(), "ext": "json"},
+            "junitxml": {"reporter": JUnitXMLReporter(), "ext": "junit.xml"},
+            "sarif": {"reporter": SARIFReporter(), "ext": "sarif"},
+            "spdx": {"reporter": SPDXReporter(), "ext": "spdx.json"},
+            "text": {"reporter": TextReporter(), "ext": "txt"},
+            "yaml": {"reporter": YAMLReporter(), "ext": "yaml"},
         }
         for fmt in output_formats:
-            if f"{fmt.value}" not in formatters:
+            if f"{fmt.value}" not in reporters:
                 raise ValueError(f"Unsupported output format: {fmt}")
 
-            formatted = formatters[fmt.value]["formatter"].format(self)
+            formatted = reporters[fmt.value]["reporter"].report(self)
             if formatted is None:
                 ASH_LOGGER.error(
-                    f"Failed to format report with {fmt.value} formatter, returned empty string"
+                    f"Failed to format report with {fmt.value} reporter, returned empty string"
                 )
             if output_dir is None:
                 return formatted
             else:
                 output_dir = Path(output_dir)
                 output_dir.mkdir(parents=True, exist_ok=True)
-                output_filename = f"ash.{formatters[fmt.value]['ext']}"
+                output_filename = f"ash.{reporters[fmt.value]['ext']}"
                 output_file = output_dir.joinpath(output_filename)
                 with open(output_file, "w") as f:
                     ASH_LOGGER.info(f"Writing {fmt.value} report to {output_file}")
