@@ -1,11 +1,11 @@
 """Common test fixtures for ASHARP tests."""
 
+import json
 from pathlib import Path
 import shutil
 import sys
 import pytest
 import yaml
-from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.config.ash_config import (
     ASHConfig,
     BuildConfig,
@@ -21,19 +21,15 @@ from automated_security_helper.config.scanner_types import (
 )
 
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
+from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.core import (
     ExportFormat,
-    Location,
-    Scanner,
     ToolArgs,
     ToolExtraArg,
 )
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
-)
-from automated_security_helper.models.security_vulnerability import (
-    SecurityVulnerability,
 )
 from automated_security_helper.scanners.ash_default.bandit_scanner import (
     BanditScannerConfig,
@@ -65,6 +61,18 @@ if TEST_DIR.exists():
 TEST_DIR.mkdir(parents=True, exist_ok=True)
 TEST_SOURCE_DIR = TEST_DIR.joinpath("source")
 TEST_OUTPUT_DIR = TEST_DIR.joinpath("ash_output")
+TEST_DATA_DIR = TEST_DIR.parent.joinpath("test_data")
+
+
+@pytest.fixture
+def sample_ash_model():
+    sample_aggregated_results = TEST_DATA_DIR.joinpath("outputs").joinpath(
+        "ash_aggregated_results.json"
+    )
+    with open(sample_aggregated_results, "r") as f:
+        sample_aggregated_results = json.loads(f.read())
+    model = ASHARPModel(**sample_aggregated_results)
+    return model
 
 
 def is_debugging():
@@ -123,70 +131,6 @@ def config_file(test_source_dir):
         return f.name
 
 
-@pytest.fixture
-def base_location():
-    """Create a base location instance for testing."""
-    return Location(file_path="/path/to/file", start_line=10, end_line=5)
-
-
-@pytest.fixture
-def base_scanner():
-    """Create a base scanner instance for testing."""
-    return Scanner(name="base_scanner", version="1.0.0", type="SAST")
-
-
-@pytest.fixture
-def container_scanner():
-    """Create a container scanner instance."""
-    return Scanner(
-        name="container_scanner",
-        version="1.0.0",
-        type="CONTAINER",
-    )
-
-
-@pytest.fixture
-def dependency_scanner():
-    """Create a dependency scanner instance."""
-    return Scanner(
-        name="dependency_scanner",
-        version="1.0.0",
-        type="DEPENDENCY",
-    )
-
-
-@pytest.fixture
-def iac_scanner():
-    """Create an IAC scanner instance."""
-    return Scanner(name="iac_scanner", version="1.0.0", type="IAC")
-
-
-# Legacy fixtures for backward compatibility
-@pytest.fixture
-def sample_scanner():
-    """Create a sample scanner instance for testing."""
-    return base_scanner()
-
-
-@pytest.fixture
-def sample_location():
-    """Create a sample location instance for testing."""
-    return base_location()
-
-
-@pytest.fixture
-def sample_vulnerability(sample_scanner, sample_location):
-    """Create a sample vulnerability instance for testing."""
-    return SecurityVulnerability(
-        scanner=sample_scanner,
-        location=sample_location,
-        title="Test Vulnerability",
-        severity="HIGH",
-        description="A test vulnerability",
-        recommendation="Fix the vulnerability",
-    )
-
-
 class MockScannerPlugin(ScannerPluginBase[ScannerPluginConfigBase]):
     config: ScannerPluginConfigBase = ScannerPluginConfigBase(
         name="mock_scanner",
@@ -194,10 +138,6 @@ class MockScannerPlugin(ScannerPluginBase[ScannerPluginConfigBase]):
     )
 
     def model_post_init(self, context):
-        self.config = ScannerPluginConfigBase(
-            name="mock_scanner",
-            enabled=True,
-        )
         return super().model_post_init(context)
 
     def validate(self):
@@ -233,6 +173,18 @@ def mock_scanner_plugin():
 @pytest.fixture
 def ash_config() -> ASHConfig:
     """Create a test ASHConfig object based on default ash.yaml settings."""
+    scanners_with_special_chars = {
+        "trivy-sast": CustomScannerConfig(
+            name="trivy-sast",
+            enabled=True,
+            type="SAST",
+        ),
+        "trivy-sbom": CustomScannerConfig(
+            name="trivy-sbom",
+            enabled=True,
+            type="SBOM",
+        ),
+    }
     conf = ASHConfig(
         project_name="automated-security-helper",
         build=BuildConfig(
@@ -315,19 +267,8 @@ def ash_config() -> ASHConfig:
             grype=GrypeScannerConfig(),
             npm_audit=NpmAuditScannerConfig(),
             semgrep=SemgrepScannerConfig(),
-            trivy_sast=CustomScannerConfig(
-                name="trivy-sast",
-                options=ScannerOptionsBase(enabled=True),
-                enabled=True,
-                type="SAST",
-            ),
             syft=SyftScannerConfig(),
-            trivy_sbom=CustomScannerConfig(
-                name="trivy-sbom",
-                options=ScannerOptionsBase(enabled=True),
-                enabled=True,
-                type="SBOM",
-            ),
+            **scanners_with_special_chars,
         ),
     )
     return conf

@@ -30,6 +30,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
@@ -173,17 +174,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                 text=f"Secret detected on file '{filename}'"
                             ),
                             analysisTarget=ArtifactLocation(
-                                uri=target.as_posix(),
+                                uri=get_shortest_name(input=target),
                             ),
                             locations=[
                                 Location(
                                     id=1,
                                     physicalLocation=PhysicalLocation(
                                         artifactLocation=ArtifactLocation(
-                                            uri=Path(filename)
-                                            .absolute()
-                                            .relative_to(Path.cwd())
-                                            .as_posix(),
+                                            uri=get_shortest_name(input=target),
                                         ),
                                         region=Region(
                                             startLine=1,
@@ -212,7 +210,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 commandLine="ash-detect-secrets-scanner",
                 arguments=[
                     "--target",
-                    target.as_posix(),
+                    get_shortest_name(input=target),
                     "--scanner",
                 ],
                 startTimeUtc=self.start_time,
@@ -221,7 +219,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 exitCode=self.exit_code,
                 exitCodeDescription="\n".join(self.errors),
                 workingDirectory=ArtifactLocation(
-                    uri=target.as_posix(),
+                    uri=get_shortest_name(input=target),
                 ),
                 properties=PropertyBag(
                     tool=sarif_tool,

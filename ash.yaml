@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=./src/automated_security_helper/schemas/ASHConfig.json
 project_name: automated-security-helper
 build:
-  mode: ASH_MODE_ONLINE
+  build_mode: ONLINE
   custom_scanners: []
 fail_on_findings: true
 ignore_paths:

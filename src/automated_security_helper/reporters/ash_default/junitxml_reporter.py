@@ -12,16 +12,7 @@ from automated_security_helper.config.ash_config import ASHConfig
 
 
 import defusedxml
-
-defusedxml.defuse_stdlib()  # Defuse stdlib before importing any XML libs
-
-from junitparser import (  # noqa: E402
-    Error,
-    JUnitXml,
-    Skipped,
-    TestCase,
-    TestSuite,
-)
+import warnings
 
 
 class JUnitXMLReporterConfigOptions(ReporterOptionsBase):
@@ -38,7 +29,8 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
     """Formats results as JUnitXML."""
 
     def model_post_init(self, context):
-        defusedxml.defuse_stdlib()
+        with warnings.catch_warnings():
+            defusedxml.defuse_stdlib()
         return super().model_post_init(context)
 
     def format(self, model: Any) -> str:
@@ -52,6 +44,14 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
+        from junitparser import (
+            Error,
+            JUnitXml,
+            Skipped,
+            TestCase,
+            TestSuite,
+        )
+
         report = JUnitXml(name="ASH Scan Report")
         ash_config: ASHConfig = ASHConfig.model_validate(model.ash_config)
         test_suite = TestSuite(
@@ -63,9 +63,9 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
             for result in model.sarif.runs[0].results:
                 # Create test case name from SARIF result details
                 test_name = (
-                    f"{result.message.root} [{result.ruleId}]"
+                    f"{result.message.root.text} [{result.ruleId}]"
                     if result.ruleId
-                    else result.message.root
+                    else result.message.root.text
                 )
                 test_case = TestCase(
                     name=test_name,
@@ -75,19 +75,21 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 # Add failure details for failed findings
                 if result.level == "error" or result.kind == "fail":
                     test_case.result = [
-                        Error(message=result.message.root, type_="error")
+                        Error(message=result.message.root.text, type_="error")
                     ]
                 elif result.level == "warning":
                     test_case.result = [
-                        Error(message=result.message.root, type_="warning")
+                        Error(message=result.message.root.text, type_="warning")
                     ]
                 elif result.kind not in ["notApplicable", "informational"]:
-                    test_case.result = [Skipped(message=result.message.root)]
+                    test_case.result = [Skipped(message=result.message.root.text)]
 
                 # Add additional metadata in system-out
                 metadata = []
                 if hasattr(result, "properties") and result.properties is not None:
-                    for key, value in result.properties.model_dump().items():
+                    for key, value in result.properties.model_dump(
+                        by_alias=True
+                    ).items():
                         metadata.append(f"{key}: {value}")
                 if metadata:
                     test_case.system_out = "\n".join(metadata)

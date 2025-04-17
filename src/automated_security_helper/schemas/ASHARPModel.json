@@ -1366,13 +1366,6 @@
       "title": "BaselineState",
       "type": "string"
     },
-    "BomFormat": {
-      "enum": [
-        "CycloneDX"
-      ],
-      "title": "BomFormat",
-      "type": "string"
-    },
     "BomLink": {
       "anyOf": [
         {
@@ -3458,10 +3451,11 @@
           "title": "Annotations"
         },
         "bomFormat": {
-          "$ref": "#/$defs/BomFormat",
+          "const": "CycloneDX",
           "default": "CycloneDX",
           "description": "Specifies the format of the BOM. This helps to identify the file as CycloneDX since BOMs do not have a filename convention, nor does JSON schema support namespaces. This value must be \"CycloneDX\".",
-          "title": "BOM Format"
+          "title": "BOM Format",
+          "type": "string"
         },
         "components": {
           "anyOf": [

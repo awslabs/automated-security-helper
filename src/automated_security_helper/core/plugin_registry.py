@@ -25,7 +25,7 @@ from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class PluginType(Enum):
+class PluginType(str, Enum):
     converter = "converter"
     scanner = "scanner"
     reporter = "reporter"

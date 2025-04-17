@@ -32,6 +32,7 @@ from automated_security_helper.utils.cdk_nag_wrapper import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -149,7 +150,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
-                config = config.model_dump()
+                config = config.model_dump(by_alias=True)
             self.config = CdkNagScannerConfig(**config)
         ASH_LOGGER.debug(f"({self.config.name}) config: {config}")
 
@@ -181,7 +182,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Process each template file
         failed_files = []
-        target_rel_path = Path(target).absolute().relative_to(Path.cwd()).as_posix()
+        target_rel_path = get_shortest_name(input=target)
 
         outdir = self.output_dir.joinpath("scanners").joinpath("cdk-nag")
         sarif_results: List[Result] = []
@@ -193,7 +194,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 )
                 nag_packs = config_options.nag_packs
                 if isinstance(config_options.nag_packs, CdkNagPacks):
-                    nag_packs = nag_packs.model_dump()
+                    nag_packs = nag_packs.model_dump(by_alias=True)
 
                 nag_result_dict = run_cdk_nag_against_cfn_template(
                     template_path=cfn_file,
@@ -274,7 +275,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             exitCode=0,
                             exitCodeDescription="\n".join(self.errors),
                             workingDirectory=ArtifactLocation(
-                                uri=self.source_dir.as_posix(),
+                                uri=get_shortest_name(input=self.source_dir),
                             ),
                             properties=PropertyBag(
                                 tool=tool,

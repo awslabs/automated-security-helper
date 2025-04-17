@@ -54,7 +54,7 @@ class ScannerFactory:
                     continue
 
                 # Try to find matching scanner class
-                scanner_class = CustomScanner(**scanner.model_dump())
+                scanner_class = CustomScanner(**scanner.model_dump(by_alias=True))
                 self.register_scanner(scanner.config.name, scanner_class)
                 ASH_LOGGER.debug(
                     f"Registered build-time scanner {scanner.config.name} with class {scanner_class}"
@@ -63,7 +63,9 @@ class ScannerFactory:
                 ASH_LOGGER.warning(
                     f"Could not register build-time scanner {scanner.config.name}: {str(e)}"
                 )
-        for scanner_name, scanner_config in self.config.scanners.model_dump().items():
+        for scanner_name, scanner_config in self.config.scanners.model_dump(
+            by_alias=True
+        ).items():
             try:
                 self.default_scanners.add(scanner_name)
                 if scanner_name in self._scanners:
@@ -210,7 +212,7 @@ class ScannerFactory:
 
         return instance
 
-    def get_scanner_class(self, scanner_name: str) -> Type[ScannerPluginBase]:
+    def get_scanner_class(self, scanner_name: str) -> ScannerPluginBase:
         """Get the scanner class for a given name.
 
         Args:
@@ -230,8 +232,8 @@ class ScannerFactory:
         elif scanner_name not in self._scanners:
             self.register_scanner(scanner_name, known_scanners[scanner_name])
         scanner = self._scanners[scanner_name]
-        if not isinstance(scanner, type):
-            raise TypeError("Stored scanner must be a class")
+        if isinstance(scanner, Callable):
+            scanner = scanner()
         return scanner
 
     def available_scanners(self) -> Dict[str, Type[ScannerPluginBase]]:

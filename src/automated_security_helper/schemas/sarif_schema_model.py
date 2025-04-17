@@ -15,11 +15,11 @@ from typing import Dict, List, Literal, Optional, Union
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, RootModel
 
 
-class Version(Enum):
+class Version(str, Enum):
     field_2_1_0 = "2.1.0"
 
 
-class Role(Enum):
+class Role(str, Enum):
     analysisTarget = "analysisTarget"
     attachment = "attachment"
     responseFile = "responseFile"
@@ -45,14 +45,14 @@ class Role(Enum):
     debugOutputFile = "debugOutputFile"
 
 
-class Level(Enum):
+class Level(str, Enum):
     none = "none"
     note = "note"
     warning = "warning"
     error = "error"
 
 
-class Kind(Enum):
+class Kind(str, Enum):
     notApplicable = "notApplicable"
     pass_ = "pass"  # nosec - False positive, not a hardcoded password
     fail = "fail"
@@ -61,36 +61,36 @@ class Kind(Enum):
     informational = "informational"
 
 
-class BaselineState(Enum):
+class BaselineState(str, Enum):
     new = "new"
     unchanged = "unchanged"
     updated = "updated"
     absent = "absent"
 
 
-class ColumnKind(Enum):
+class ColumnKind(str, Enum):
     utf16CodeUnits = "utf16CodeUnits"
     unicodeCodePoints = "unicodeCodePoints"
 
 
-class Kind1(Enum):
+class Kind1(str, Enum):
     inSource = "inSource"
     external = "external"
 
 
-class State(Enum):
+class State(str, Enum):
     accepted = "accepted"
     underReview = "underReview"
     rejected = "rejected"
 
 
-class Importance(Enum):
+class Importance(str, Enum):
     important = "important"
     essential = "essential"
     unimportant = "unimportant"
 
 
-class Content(Enum):
+class Content(str, Enum):
     localizedData = "localizedData"
     nonLocalizedData = "nonLocalizedData"
 
@@ -2326,9 +2326,7 @@ class Run(BaseModel):
 
 
 class SarifReport(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
+    model_config = ConfigDict(extra="forbid", use_enum_values=True)
 
     field_schema: Optional[AnyUrl] = Field(
         AnyUrl(
@@ -2336,6 +2334,8 @@ class SarifReport(BaseModel):
         ),
         alias="$schema",
         description="The URI of the JSON schema corresponding to the version.",
+        serialization_alias="$schema",
+        validation_alias="$schema",
     )
     version: Literal["2.1.0"] = Field(
         "2.1.0", description="The SARIF format version of this log file."

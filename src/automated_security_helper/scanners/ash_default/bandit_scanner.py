@@ -26,6 +26,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     SarifReport,
 )
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
@@ -249,7 +250,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                         exitCode=self.exit_code,
                         exitCodeDescription="\n".join(self.errors),
                         workingDirectory=ArtifactLocation(
-                            uri=target.as_posix(),
+                            uri=get_shortest_name(input=target),
                         ),
                         properties=PropertyBag(
                             tool=sarif_report.runs[0].tool,

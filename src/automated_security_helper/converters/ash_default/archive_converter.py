@@ -96,7 +96,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             normalized_archive_file = get_normalized_filename(archive_file)
             target_path = self.work_dir.joinpath(normalized_archive_file)
             ASH_LOGGER.debug(
-                f"Extracting {archive_file} contents to target_path: {target_path.as_posix()}"
+                f"Extracting {archive_file} contents to target_path: {Path(target_path).as_posix()}"
             )
             # Extract ZIP to target path after inspecting members
             if archive_file.endswith(".zip") and zipfile.is_zipfile(archive_file):
