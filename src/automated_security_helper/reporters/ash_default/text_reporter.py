@@ -29,4 +29,4 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
-        return yaml.dump(model.model_dump(), indent=2)
+        return yaml.dump(model.model_dump(by_alias=True), indent=2)

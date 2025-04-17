@@ -24,7 +24,7 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class ExecutionStrategy(Enum):
+class ExecutionStrategy(str, Enum):
     """Strategy for executing scanners."""
 
     SEQUENTIAL = "sequential"
@@ -460,13 +460,15 @@ class ScanExecutionEngine:
             if hasattr(scanner_config, "model_dump") and callable(
                 scanner_config.model_dump
             ):
-                scanner_config = scanner_config.model_dump()
+                scanner_config = scanner_config.model_dump(by_alias=True)
 
             if scanner_config_override is not None:
                 if hasattr(scanner_config_override, "model_dump") and callable(
                     scanner_config_override.model_dump
                 ):
-                    scanner_config_override = scanner_config_override.model_dump()
+                    scanner_config_override = scanner_config_override.model_dump(
+                        by_alias=True
+                    )
                 ASH_LOGGER.debug(f"({scanner_name}) scanner_config: {scanner_config}")
                 ASH_LOGGER.debug(
                     f"({scanner_name}) scanner_config_override: {scanner_config_override}"

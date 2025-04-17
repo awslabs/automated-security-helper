@@ -21,12 +21,12 @@ app = typer.Typer(
 )
 
 
-class Strategy(Enum):
+class Strategy(str, Enum):
     parallel = "parallel"
     sequential = "sequential"
 
 
-class AshBuildTarget(Enum):
+class AshBuildTarget(str, Enum):
     default = "default"
     ci = "ci"
 
@@ -58,27 +58,6 @@ def scan(
             help="Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage."
         ),
     ] = False,
-    no_build: Annotated[
-        bool,
-        typer.Option(help="Only run the container image, do not rebuild it."),
-    ] = False,
-    no_run: Annotated[
-        bool,
-        typer.Option(help="Only build the container image, do not run scans"),
-    ] = False,
-    build_target: Annotated[
-        AshBuildTarget,
-        typer.Option(
-            help="Specify build target for container image (e.g. 'ci' for elevated access)",
-        ),
-    ] = AshBuildTarget.default.value,
-    oci_runner: Annotated[
-        str,
-        typer.Option(
-            help="Specify OCI runner to use (e.g. 'docker', 'finch')",
-            envvar="OCI_RUNNER",
-        ),
-    ] = os.environ.get("OCI_RUNNER", None),
     strategy: Annotated[
         Strategy,
         typer.Option(help="Whether to run scanners in parallel or sequential"),
@@ -112,6 +91,33 @@ def scan(
             ExportFormat.JUNITXML,
         ]
     ],
+    # region: Container mgmt
+    build: Annotated[
+        bool,
+        typer.Option(
+            help="Build the container image. Use --no-build to skip a rebuild of an existing image."
+        ),
+    ] = True,
+    run: Annotated[
+        bool,
+        typer.Option(
+            help="Run a scan using the container image. Use --no-run to skip the scan and only build the ASH container image."
+        ),
+    ] = True,
+    build_target: Annotated[
+        AshBuildTarget,
+        typer.Option(
+            help="Specify build target for container image (e.g. 'ci' for elevated access)",
+        ),
+    ] = AshBuildTarget.default.value,
+    oci_runner: Annotated[
+        str,
+        typer.Option(
+            help="Specify OCI runner to use (e.g. 'docker', 'finch')",
+            envvar="OCI_RUNNER",
+        ),
+    ] = os.environ.get("OCI_RUNNER", None),
+    # endregion
 ):
     """Main entry point."""
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
@@ -159,7 +165,7 @@ def scan(
         # Execute scan
         results = orchestrator.execute_scan()
         if isinstance(results, ASHARPModel):
-            content = results.model_dump_json(indent=2)
+            content = results.model_dump_json(indent=2, by_alias=True)
         else:
             content = json.dumps(results, indent=2, default=str)
 

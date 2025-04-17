@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import Enum
 
 
-class Schema(Enum):
+class Schema(str, Enum):
     field_0BSD = "0BSD"
     field_3D_Slicer_1_0 = "3D-Slicer-1.0"
     AAL = "AAL"

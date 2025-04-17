@@ -216,7 +216,7 @@ class ASHConfig(BaseModel):
     def save(self, config_path: Path):
         """Save configuration to a file."""
         with open(config_path, "w") as f:
-            yaml.safe_dump(self.model_dump(), f, indent=2)
+            yaml.safe_dump(self.model_dump(by_alias=True), f, indent=2)
 
     def get_scanners(self) -> Dict[str, Any]:
         """Get a dictionary of scanners and their corresponding configurations."""
@@ -235,8 +235,15 @@ class ASHConfig(BaseModel):
             | SemgrepScannerConfig
             | SyftScannerConfig
         )
-        for scanner in self.scanners.model_dump().values():
-            scanner_configs[scanner.name] = scanner
+        for scanner in self.scanners.model_dump(by_alias=True).values():
+            sname = (
+                scanner.name
+                if hasattr(scanner, "name")
+                else scanner["name"]
+                if isinstance(scanner, dict)
+                else None
+            )
+            scanner_configs[sname] = scanner
 
         return scanner_configs
 
@@ -264,7 +271,7 @@ class ASHConfig(BaseModel):
         #             found = item
         #             break
         if plugin_type == "scanner":
-            item_dict = self.scanners.model_dump()
+            item_dict = self.scanners.model_dump(by_alias=True)
             key_map = {}
             for item_name, item in item_dict.items():
                 if found is not None:
@@ -289,7 +296,7 @@ class ASHConfig(BaseModel):
                 found = item_dict[key_map[plugin_name]]
             # else:
             #     item: ScannerPluginConfigBase
-            #     for item_name, item in self.scanners.model_dump().items():
+            #     for item_name, item in self.scanners.model_dump(by_alias=True).items():
             #         if isinstance(item, dict):
             #             item = ScannerPluginConfigBase(**item)
             #         possible = list(

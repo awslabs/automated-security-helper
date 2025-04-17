@@ -211,7 +211,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
                         uri=get_shortest_name(input=target),
                     ),
                     ashVersion=get_ash_version(),
-                    scannerConfig=self.config.model_dump(),
+                    scannerConfig=self.config.model_dump(by_alias=True),
                     scannerResults=scanner_results,
                     scannerErrors=[
                         Message(
