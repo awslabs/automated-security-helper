@@ -1,6 +1,7 @@
 """Module containing the Checkov security scanner implementation."""
 
 from importlib.metadata import version
+import json
 from pathlib import Path
 from typing import Annotated, List, Literal
 
@@ -33,12 +34,16 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
 from detect_secrets import SecretsCollection
-from detect_secrets.settings import default_settings
+from detect_secrets.settings import default_settings, transient_settings
 
 
 class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
-    # Add any custom options that need to be surfaced to users here.
-    pass
+    baseline_file: Annotated[
+        str,
+        Field(
+            description="Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory.",
+        ),
+    ] = "NOT_PROVIDED"
 
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):
@@ -60,6 +65,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         self.tool_version = version("detect-secrets")
         super().model_post_init(context)
 
+        #self.config.options.scan_settings = default_settings()
         self._secrets_collection = SecretsCollection()
 
     def validate(self) -> bool:
@@ -76,9 +82,26 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         return True
 
     def _process_config_options(self):
-        # Add any additional config option parsing here, if necessary
-        # For Python-based scanners, this typically won't be needed as we will access
-        # the configuration directly from the self.config object.
+        # Check detect-secrets baseline path
+        possible_baseline_paths = [
+            item
+            for item in [
+                self.config.options.baseline_file,
+                ".secrets.baseline",
+            ]
+            if item is not None
+        ]
+
+        for baseline_path in possible_baseline_paths:
+            if Path(baseline_path).exists():
+                abs_baseline_path = Path(baseline_path).absolute().relative_to(Path.cwd()).as_posix()
+                with open(abs_baseline_path, 'r') as f:
+                    baseline = json.load(f)
+                    self.config.options.scan_settings = transient_settings(config=baseline)
+                    f.close()
+            else:
+                self.config.options.scan_settings = default_settings()
+
         return super()._process_config_options()
 
     def scan(
@@ -122,7 +145,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             ASH_LOGGER.debug(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets"
             )
-            with default_settings():
+            with self.config.options.scan_settings:
                 self._secrets_collection.scan_files(scannable)
 
             self._post_scan(target=target)
