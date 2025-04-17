@@ -278,7 +278,7 @@ def run_cdk_nag_against_cfn_template(
                 if resource_id == resource_log_id
             ][0]
             cfn_resource_dict = {
-                "Resources": {resource_log_id: cfn_resource.model_dump()}
+                "Resources": {resource_log_id: cfn_resource.model_dump(by_alias=True)}
             }
             finding = Result(
                 properties=PropertyBag(
@@ -335,7 +335,9 @@ def run_cdk_nag_against_cfn_template(
                                     text=dump_yaml(
                                         {
                                             "Resources": {
-                                                resource_log_id: cfn_resource.model_dump()
+                                                resource_log_id: cfn_resource.model_dump(
+                                                    by_alias=True
+                                                )
                                             }
                                         }
                                     )

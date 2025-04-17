@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 
 from pydantic import AnyUrl, BaseModel, ConfigDict, EmailStr, Field, RootModel
 
 from . import spdx
 
 
-class BomFormat(Enum):
+class BomFormat(str, Enum):
     CycloneDX = "CycloneDX"
 
 
@@ -74,7 +74,7 @@ class BomLink(RootModel):
     root: Union[BomLinkDocumentType, BomLinkElementType] = Field(..., title="BOM-Link")
 
 
-class Phase(Enum):
+class Phase(str, Enum):
     design = "design"
     pre_build = "pre-build"
     build = "build"
@@ -136,7 +136,7 @@ class OrganizationalContact(BaseModel):
     )
 
 
-class Type(Enum):
+class Type(str, Enum):
     application = "application"
     framework = "framework"
     library = "library"
@@ -152,13 +152,13 @@ class Type(Enum):
     cryptographic_asset = "cryptographic-asset"
 
 
-class Scope(Enum):
+class Scope(str, Enum):
     required = "required"
     optional = "optional"
     excluded = "excluded"
 
 
-class Encoding(Enum):
+class Encoding(str, Enum):
     base64 = "base64"
 
 
@@ -185,7 +185,7 @@ class Attachment(BaseModel):
     )
 
 
-class HashAlg(Enum):
+class HashAlg(str, Enum):
     MD5 = "MD5"
     SHA_1 = "SHA-1"
     SHA_256 = "SHA-256"
@@ -210,7 +210,7 @@ class HashContent(RootModel):
     )
 
 
-class LicenseType(Enum):
+class LicenseType(str, Enum):
     academic = "academic"
     appliance = "appliance"
     client_access = "client-access"
@@ -229,7 +229,7 @@ class LicenseType(Enum):
     other = "other"
 
 
-class LicenseAcknowledgementEnumeration(Enum):
+class LicenseAcknowledgementEnumeration(str, Enum):
     declared = "declared"
     concluded = "concluded"
 
@@ -242,7 +242,7 @@ class LicenseChoice(RootModel):
     )
 
 
-class Type1(Enum):
+class Type1(str, Enum):
     unofficial = "unofficial"
     monkey = "monkey"
     backport = "backport"
@@ -262,7 +262,7 @@ class Diff(BaseModel):
     )
 
 
-class Type2(Enum):
+class Type2(str, Enum):
     defect = "defect"
     enhancement = "enhancement"
     security = "security"
@@ -340,7 +340,7 @@ class IdentifiableAction(BaseModel):
     )
 
 
-class Type3(Enum):
+class Type3(str, Enum):
     vcs = "vcs"
     issue_tracker = "issue-tracker"
     website = "website"
@@ -408,7 +408,7 @@ class Dependency(BaseModel):
     )
 
 
-class DataFlowDirection(Enum):
+class DataFlowDirection(str, Enum):
     inbound = "inbound"
     outbound = "outbound"
     bi_directional = "bi-directional"
@@ -517,7 +517,7 @@ class Callstack(BaseModel):
     )
 
 
-class AggregateType(Enum):
+class AggregateType(str, Enum):
     complete = "complete"
     incomplete = "incomplete"
     incomplete_first_party_only = "incomplete_first_party_only"
@@ -601,7 +601,7 @@ class Cwe(RootModel):
     )
 
 
-class Severity(Enum):
+class Severity(str, Enum):
     critical = "critical"
     high = "high"
     medium = "medium"
@@ -611,7 +611,7 @@ class Severity(Enum):
     unknown = "unknown"
 
 
-class ScoreMethod(Enum):
+class ScoreMethod(str, Enum):
     CVSSv2 = "CVSSv2"
     CVSSv3 = "CVSSv3"
     CVSSv31 = "CVSSv31"
@@ -621,7 +621,7 @@ class ScoreMethod(Enum):
     other = "other"
 
 
-class ImpactAnalysisState(Enum):
+class ImpactAnalysisState(str, Enum):
     resolved = "resolved"
     resolved_with_pedigree = "resolved_with_pedigree"
     exploitable = "exploitable"
@@ -630,7 +630,7 @@ class ImpactAnalysisState(Enum):
     not_affected = "not_affected"
 
 
-class ImpactAnalysisJustification(Enum):
+class ImpactAnalysisJustification(str, Enum):
     code_not_present = "code_not_present"
     code_not_reachable = "code_not_reachable"
     requires_configuration = "requires_configuration"
@@ -705,7 +705,7 @@ class ProofOfConcept(BaseModel):
     )
 
 
-class ResponseEnum(Enum):
+class ResponseEnum(str, Enum):
     can_not_fix = "can_not_fix"
     will_not_fix = "will_not_fix"
     update = "update"
@@ -742,7 +742,7 @@ class Analysis(BaseModel):
     )
 
 
-class AffectedStatus(Enum):
+class AffectedStatus(str, Enum):
     affected = "affected"
     unaffected = "unaffected"
     unknown = "unknown"
@@ -779,7 +779,7 @@ class Range(RootModel):
     )
 
 
-class Type4(Enum):
+class Type4(str, Enum):
     supervised = "supervised"
     unsupervised = "unsupervised"
     reinforcement_learning = "reinforcement-learning"
@@ -824,7 +824,7 @@ class InputOutputMLParameters(BaseModel):
     )
 
 
-class Type5(Enum):
+class Type5(str, Enum):
     source_code = "source-code"
     configuration = "configuration"
     dataset = "dataset"
@@ -955,7 +955,7 @@ class DataClassification(RootModel):
     )
 
 
-class Activity(Enum):
+class Activity(str, Enum):
     design = "design"
     data_collection = "data-collection"
     data_preparation = "data-preparation"
@@ -967,7 +967,7 @@ class Activity(Enum):
     other = "other"
 
 
-class Unit(Enum):
+class Unit(str, Enum):
     kWh = "kWh"
 
 
@@ -980,7 +980,7 @@ class EnergyMeasure(BaseModel):
     unit: Unit = Field(..., description="Unit of energy.", title="Unit")
 
 
-class Unit1(Enum):
+class Unit1(str, Enum):
     tCO2eq = "tCO2eq"
 
 
@@ -995,7 +995,7 @@ class Co2Measure(BaseModel):
     unit: Unit1 = Field(..., description="Unit of carbon dioxide (CO2).", title="Unit")
 
 
-class EnergySource(Enum):
+class EnergySource(str, Enum):
     coal = "coal"
     oil = "oil"
     natural_gas = "natural-gas"
@@ -1071,7 +1071,7 @@ class Command(BaseModel):
     )
 
 
-class AccessMode(Enum):
+class AccessMode(str, Enum):
     read_only = "read-only"
     read_write = "read-write"
     read_write_once = "read-write-once"
@@ -1079,7 +1079,7 @@ class AccessMode(Enum):
     write_only = "write-only"
 
 
-class Mode(Enum):
+class Mode(str, Enum):
     filesystem = "filesystem"
     block = "block"
 
@@ -1128,14 +1128,14 @@ class Volume(BaseModel):
     )
 
 
-class Type6(Enum):
+class Type6(str, Enum):
     manual = "manual"
     api = "api"
     webhook = "webhook"
     scheduled = "scheduled"
 
 
-class Type7(Enum):
+class Type7(str, Enum):
     artifact = "artifact"
     attestation = "attestation"
     log = "log"
@@ -1166,7 +1166,7 @@ class Condition(BaseModel):
     )
 
 
-class TaskType(Enum):
+class TaskType(str, Enum):
     copy = "copy"
     clone = "clone"
     lint = "lint"
@@ -1197,7 +1197,7 @@ class Parameter(BaseModel):
     )
 
 
-class FieldModel(Enum):
+class FieldModel(str, Enum):
     group = "group"
     name = "name"
     version = "version"
@@ -1209,7 +1209,7 @@ class FieldModel(Enum):
     hash = "hash"
 
 
-class Technique(Enum):
+class Technique(str, Enum):
     source_code_analysis = "source-code-analysis"
     binary_analysis = "binary-analysis"
     manifest_analysis = "manifest-analysis"
@@ -1307,7 +1307,7 @@ class Level(BaseModel):
     )
 
 
-class Algorithm(Enum):
+class Algorithm(str, Enum):
     RS256 = "RS256"
     RS384 = "RS384"
     RS512 = "RS512"
@@ -1324,7 +1324,7 @@ class Algorithm(Enum):
     HS512 = "HS512"
 
 
-class KeyType(Enum):
+class KeyType(str, Enum):
     EC = "EC"
     OKP = "OKP"
     RSA = "RSA"
@@ -1338,14 +1338,14 @@ class PublicKey(BaseModel):
     kty: KeyType
 
 
-class AssetType(Enum):
+class AssetType(str, Enum):
     algorithm = "algorithm"
     certificate = "certificate"
     protocol = "protocol"
     related_crypto_material = "related-crypto-material"
 
 
-class Primitive(Enum):
+class Primitive(str, Enum):
     drbg = "drbg"
     mac = "mac"
     block_cipher = "block-cipher"
@@ -1363,7 +1363,7 @@ class Primitive(Enum):
     unknown = "unknown"
 
 
-class ExecutionEnvironment(Enum):
+class ExecutionEnvironment(str, Enum):
     software_plain_ram = "software-plain-ram"
     software_encrypted_ram = "software-encrypted-ram"
     software_tee = "software-tee"
@@ -1372,7 +1372,7 @@ class ExecutionEnvironment(Enum):
     unknown = "unknown"
 
 
-class ImplementationPlatform(Enum):
+class ImplementationPlatform(str, Enum):
     generic = "generic"
     x86_32 = "x86_32"
     x86_64 = "x86_64"
@@ -1389,7 +1389,7 @@ class ImplementationPlatform(Enum):
     unknown = "unknown"
 
 
-class CertificationLevelEnum(Enum):
+class CertificationLevelEnum(str, Enum):
     none = "none"
     fips140_1_l1 = "fips140-1-l1"
     fips140_1_l2 = "fips140-1-l2"
@@ -1421,7 +1421,7 @@ class CertificationLevelEnum(Enum):
     unknown = "unknown"
 
 
-class Mode1(Enum):
+class Mode1(str, Enum):
     cbc = "cbc"
     ecb = "ecb"
     ccm = "ccm"
@@ -1433,7 +1433,7 @@ class Mode1(Enum):
     unknown = "unknown"
 
 
-class Padding(Enum):
+class Padding(str, Enum):
     pkcs5 = "pkcs5"
     pkcs7 = "pkcs7"
     pkcs1v15 = "pkcs1v15"
@@ -1443,7 +1443,7 @@ class Padding(Enum):
     unknown = "unknown"
 
 
-class CryptoFunction(Enum):
+class CryptoFunction(str, Enum):
     generate = "generate"
     keygen = "keygen"
     encrypt = "encrypt"
@@ -1569,7 +1569,7 @@ class CertificateProperties(BaseModel):
     )
 
 
-class Type10(Enum):
+class Type10(str, Enum):
     private_key = "private-key"
     public_key = "public-key"
     secret_key = "secret-key"  # nosec - False positive, not a hardcoded password
@@ -1591,7 +1591,7 @@ class Type10(Enum):
     unknown = "unknown"
 
 
-class State(Enum):
+class State(str, Enum):
     pre_activation = "pre-activation"
     active = "active"
     suspended = "suspended"
@@ -1600,7 +1600,7 @@ class State(Enum):
     destroyed = "destroyed"
 
 
-class Type11(Enum):
+class Type11(str, Enum):
     tls = "tls"
     ssh = "ssh"
     ipsec = "ipsec"
@@ -4912,11 +4912,17 @@ class Formula(BaseModel):
 class CycloneDXReport(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        use_enum_values=True,
     )
 
-    field_schema: Optional[str] = Field(None, alias="$schema")
-    bomFormat: BomFormat = Field(
-        BomFormat.CycloneDX,
+    field_schema: Optional[str] = Field(
+        None,
+        alias="$schema",
+        serialization_alias="$schema",
+        validation_alias="$schema",
+    )
+    bomFormat: Literal["CycloneDX"] = Field(
+        "CycloneDX",
         description='Specifies the format of the BOM. This helps to identify the file as CycloneDX since BOMs do not have a filename convention, nor does JSON schema support namespaces. This value must be "CycloneDX".',
         title="BOM Format",
     )

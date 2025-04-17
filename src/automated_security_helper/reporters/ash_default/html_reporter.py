@@ -46,85 +46,85 @@ class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
         metadata_section = self._format_metadata(model.metadata)
 
         template = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>ASH Results</title>
-            <style>
-                body {{
-                    font-family: Arial, sans-serif;
-                    line-height: 1.6;
-                    margin: 0;
-                    padding: 20px;
-                    background: #f5f5f5;
-                }}
-                .container {{
-                    max-width: 1200px;
-                    margin: 0 auto;
-                    background: white;
-                    padding: 20px;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                }}
-                h1, h2, h3 {{
-                    color: #333;
-                    margin-top: 20px;
-                }}
-                .summary-box {{
-                    background: #f8f9fa;
-                    border: 1px solid #dee2e6;
-                    border-radius: 4px;
-                    padding: 15px;
-                    margin: 10px 0;
-                }}
-                .severity-error {{ color: #dc3545; }}
-                .severity-warning {{ color: #fd7e14; }}
-                .severity-note {{ color: #ffc107; }}
-                .severity-none {{ color: #28a745; }}
-                table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin: 15px 0;
-                }}
-                th, td {{
-                    padding: 12px;
-                    text-align: left;
-                    border: 1px solid #dee2e6;
-                }}
-                th {{
-                    background: #f8f9fa;
-                    font-weight: bold;
-                }}
-                tr:nth-child(even) {{
-                    background: #f8f9fa;
-                }}
-                .metadata-item {{
-                    margin: 10px 0;
-                    padding: 10px;
-                    background: #f8f9fa;
-                    border-radius: 4px;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>Security Scan Results</h1>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ASH Results</title>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        h1, h2, h3 {{
+            color: #333;
+            margin-top: 20px;
+        }}
+        .summary-box {{
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+        }}
+        .severity-error {{ color: #dc3545; }}
+        .severity-warning {{ color: #fd7e14; }}
+        .severity-note {{ color: #ffc107; }}
+        .severity-none {{ color: #28a745; }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }}
+        th, td {{
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #dee2e6;
+        }}
+        th {{
+            background: #f8f9fa;
+            font-weight: bold;
+        }}
+        tr:nth-child(even) {{
+            background: #f8f9fa;
+        }}
+        .metadata-item {{
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Security Scan Results</h1>
 
-                <h2>Summary</h2>
-                <div class="summary-box">
-                    {severity_summary}
-                    {type_summary}
-                </div>
+        <h2>Summary</h2>
+        <div class="summary-box">
+            {severity_summary}
+            {type_summary}
+        </div>
 
-                <h2>Detailed Findings</h2>
-                {findings_table}
+        <h2>Detailed Findings</h2>
+        {findings_table}
 
-                <h2>Scan Metadata</h2>
-                {metadata_section}
-            </div>
-        </body>
-        </html>
-        """
+        <h2>Scan Metadata</h2>
+        {metadata_section}
+    </div>
+</body>
+</html>
+"""
 
         return template
 
@@ -226,7 +226,7 @@ class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     def _format_metadata(self, metadata) -> str:
         """Format the metadata section."""
-        metadata_dict = metadata.model_dump()
+        metadata_dict = metadata.model_dump(by_alias=True)
         formatted = "<div class='metadata-section'>"
 
         for key, value in metadata_dict.items():

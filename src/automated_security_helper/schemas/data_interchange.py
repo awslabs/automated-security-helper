@@ -219,7 +219,7 @@ class SecurityReport(DataInterchange):
         elif format == ExportFormat.YAML:
             import yaml
 
-            return yaml.dump(self.model_dump())
+            return yaml.dump(self.model_dump(by_alias=True))
         elif format == ExportFormat.CSV:
             # Basic CSV export of findings
             import csv
@@ -249,7 +249,7 @@ class SecurityReport(DataInterchange):
             </html>
             """
         elif format == ExportFormat.DICT:
-            return self.model_dump()
+            return self.model_dump(by_alias=True)
 
         raise ValueError(f"Unsupported export format: {format}")
 

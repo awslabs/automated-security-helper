@@ -46,7 +46,7 @@ junitparser = "^3.2.0"
 jupyterlab = "^4.3.6"
 nbconvert = "^7.16.6"
 pathspec = "^0.12.1"
-pydantic = "^2.11.1"
+pydantic = {extras = ["email"], version = "^2.11.3"}
 pytest = "^8.3.5"
 python = "^3.10"
 regex = "^2024.5.15"
@@ -88,7 +88,7 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-rA -l --cov-report term-missing --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
+addopts = "--cov-report term-missing --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
 
 [build-system]
 requires = ["poetry-core"]

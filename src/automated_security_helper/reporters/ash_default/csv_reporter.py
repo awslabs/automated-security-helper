@@ -29,6 +29,7 @@ class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
 
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
+
         output = StringIO()
         writer = csv.writer(output)
 

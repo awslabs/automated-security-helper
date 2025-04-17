@@ -11,13 +11,12 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 
 
-def test_html_reporter_with_sarif_results():
+def test_html_reporter_with_sarif_results(sample_ash_model: ASHARPModel):
     """Test that the HTML reporter correctly formats SARIF results."""
     # Create a test ASHARPModel with SARIF results
-    model = ASHARPModel()
 
     # Add some test results to the SARIF report
-    model.sarif.runs[0].results = [
+    sample_ash_model.sarif.runs[0].results = [
         Result(
             ruleId="TEST001",
             level="error",
@@ -48,7 +47,7 @@ def test_html_reporter_with_sarif_results():
 
     # Format the report
     reporter = HTMLReporter()
-    html_output = reporter.format(model)
+    html_output = reporter.format(sample_ash_model)
 
     # Verify the output contains expected elements
     assert "Security Scan Results" in html_output

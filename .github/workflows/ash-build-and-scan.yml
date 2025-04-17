@@ -185,6 +185,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -194,12 +198,14 @@ jobs:
 
       - name: Install Poetry
         run: |
-          pipx install poetry==2.1.2
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: poetry install
 
       - name: Deploy documentation
-        run: mkdocs gh-deploy --clean --force
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: poetry run mkdocs gh-deploy --clean --force

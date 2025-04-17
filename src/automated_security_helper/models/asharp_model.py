@@ -263,17 +263,19 @@ class ASHARPModel(BaseModel):
         # Save aggregated results as JSON
         json_path = output_dir.joinpath("ash_aggregated_results.json")
         with open(json_path, "w") as f:
-            json.dump(self.model_dump(), f, indent=2, default=str)
+            json.dump(self.model_dump(by_alias=True), f, indent=2, default=str)
 
         # Save model.sarif as ash.sarif (JSON formatted SARIF report)
         json_path = output_dir.joinpath("ash.sarif")
         with open(json_path, "w") as f:
-            json.dump(self.sarif.model_dump(), f, indent=2, default=str)
+            json.dump(self.sarif.model_dump(by_alias=True), f, indent=2, default=str)
 
         # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
         json_path = output_dir.joinpath("ash.cdx.json")
         with open(json_path, "w") as f:
-            json.dump(self.cyclonedx.model_dump(), f, indent=2, default=str)
+            json.dump(
+                self.cyclonedx.model_dump(by_alias=True), f, indent=2, default=str
+            )
 
     @classmethod
     def load_model(cls, json_path: Path) -> Optional["ASHARPModel"]:

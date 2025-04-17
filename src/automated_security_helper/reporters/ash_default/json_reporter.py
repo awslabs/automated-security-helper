@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import json
 from typing import Any, Literal
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -25,5 +24,9 @@ class JSONReporter(ReporterPluginBase[JSONReporterConfig]):
 
     def format(self, model: Any) -> str:
         """Format ASH model as JSON string."""
-        if hasattr(model, "__dict__") and model.__dict__:
-            return json.dumps(model.__dict__, default=str)
+        from automated_security_helper.models.asharp_model import ASHARPModel
+
+        if not isinstance(model, ASHARPModel):
+            raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
+
+        return model.model_dump_json(by_alias=True)

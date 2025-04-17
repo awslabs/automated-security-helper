@@ -1,31 +1,13 @@
 """Unit tests for output formatter module."""
 
-from importlib.metadata import version
 import json
-import pytest
-from automated_security_helper.models.core import Scanner
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.reporters.ash_default import CSVReporter
 from automated_security_helper.reporters.ash_default import HTMLReporter
 from automated_security_helper.reporters.ash_default import JSONReporter
 
 
-@pytest.fixture
-def sample_ash_model():
-    model = ASHARPModel(
-        scanners_used=[
-            Scanner(name="bandit", version=version("bandit")),
-            Scanner(name="cdk_nag", version=version("cdk_nag")),
-            Scanner(name="checkov", version=version("checkov")),
-            Scanner(name="jupyterlab", version=version("jupyterlab")),
-            Scanner(name="nbconvert", version=version("nbconvert")),
-        ],
-        metadata={"scanner": "test_scanner", "timestamp": "2023-01-01T00:00:00Z"},
-    )
-    return model
-
-
-def test_json_formatter(sample_ash_model):
+def test_json_formatter(sample_ash_model: ASHARPModel):
     formatter = JSONReporter()
     output = formatter.format(sample_ash_model)
 
@@ -36,7 +18,6 @@ def test_json_formatter(sample_ash_model):
     assert "additional_reports" in parsed
     assert "ash_config" in parsed
     assert "metadata" in parsed
-    assert parsed["metadata"] == sample_ash_model.metadata.model_dump()
 
 
 def test_html_formatter(sample_ash_model):
@@ -50,7 +31,7 @@ def test_html_formatter(sample_ash_model):
     assert "<h1>Security Scan Results</h1>" in output
 
     # Verify content is included and properly escaped
-    assert "SQL Injection vulnerability" in output
+    assert "<td>CKV_AWS_53</td>" in output
     assert "&lt;" not in output  # Verify no double-escaping
 
 

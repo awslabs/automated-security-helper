@@ -223,7 +223,7 @@ class ToolExtraArg(BaseModel):
     value: str | int | float | bool | None = None
 
 
-class ExportFormat(Enum):
+class ExportFormat(str, Enum):
     """Supported export formats."""
 
     TEXT = "text"

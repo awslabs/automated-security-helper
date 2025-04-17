@@ -150,7 +150,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
-                config = config.model_dump()
+                config = config.model_dump(by_alias=True)
             self.config = CdkNagScannerConfig(**config)
         ASH_LOGGER.debug(f"({self.config.name}) config: {config}")
 
@@ -194,7 +194,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 )
                 nag_packs = config_options.nag_packs
                 if isinstance(config_options.nag_packs, CdkNagPacks):
-                    nag_packs = nag_packs.model_dump()
+                    nag_packs = nag_packs.model_dump(by_alias=True)
 
                 nag_result_dict = run_cdk_nag_against_cfn_template(
                     template_path=cfn_file,
