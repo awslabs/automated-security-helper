@@ -1,5 +1,6 @@
 """Module containing the ReporterPlugin base class."""
 
+from abc import abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generic, List, TypeVar
@@ -8,7 +9,7 @@ from typing_extensions import Self
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from automated_security_helper.base.plugin_config import PluginConfigBase
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.models.asharp_model import ASHARPModel
 
 
 class ReporterPluginConfigBase(PluginConfigBase):
@@ -59,27 +60,18 @@ class ReporterPluginBase(BaseModel, Generic[T]):
         if config:
             self._config = config
 
-    def validate(self) -> bool:
-        """Validate reporter configuration and requirements."""
-        return True
-
-    def _pre_convert(self, target: Path | str) -> None:
+    def _pre_report(self) -> None:
         self.start_time = datetime.now(timezone.utc)
-        if not Path(target).exists():
-            ASH_LOGGER.error(f"Target {target} does not exist.")
-            raise
 
-    def _post_convert(self, target: Path | str) -> None:
-        if not Path(target).exists():
-            ASH_LOGGER.error(f"Target {target} does not exist.")
-            raise
+    def _post_report(self) -> None:
         self.end_time = datetime.now(timezone.utc)
 
-    def convert(self, target: Path | str) -> List[Path]:
-        """Execute the reporter on the target prior to scans.
+    ### Methods that require implementation by plugins.
+    @abstractmethod
+    def report(self, model: ASHARPModel) -> str | None:
+        """Execute the reporter against the aggregated ASHARPModel.
 
-        Returns the list of Path objects emitted by the `convert()` operation.
+        Returns a string containing the report or the response from the remote
+        receiving the report.
         """
-        self._pre_convert(target)
-
-        self._post_convert(target)
+        pass

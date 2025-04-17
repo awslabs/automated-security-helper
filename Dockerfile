@@ -134,10 +134,6 @@ RUN mkdir -p /src && \
     mkdir -p /out && \
     mkdir -p /ash/utils
 
-#
-# Install CDK Nag stub dependencies
-#
-COPY ./utils/cdk-nag-scan /ash/utils/cdk-nag-scan/
 # Limit memory size available for Node to prevent segmentation faults during npm install
 ENV NODE_OPTIONS=--max_old_space_size=512
 

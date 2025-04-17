@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
-from automated_security_helper.schemas.data_interchange import SecurityReport
+from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -77,51 +78,6 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         )
 
         return super().model_post_init(context)
-
-    @abstractmethod
-    def validate(self) -> bool:
-        """Validate scanner configuration.
-
-        Returns:
-            bool: True if validation passes
-        """
-        raise NotImplementedError(
-            f"{self.__class__.__name__}.validate() not implemented"
-        )
-
-    @abstractmethod
-    def scan(
-        self,
-        target: Path,
-        config: T | ScannerPluginConfigBase = None,
-        *args,
-        **kwargs,
-    ) -> Any:
-        """Execute scanner against a target.
-
-        Args:
-            *args: Variable length argument list
-            **kwargs: Arbitrary keyword arguments
-
-        Returns:
-            SecurityReport: Full scan results
-
-        Raises:
-            ScannerError: if scanning failed for any reason
-        """
-        raise NotImplementedError(f"{self.__class__.__name__}.scan() not implemented")
-
-    def _build_security_report(self, scan_results: Any) -> SecurityReport:
-        """Build security report from scan results.
-
-        Args:
-            scan_results: Raw scan results to process
-
-        Returns:
-            SecurityReport: Processed scan results
-        """
-        report = SecurityReport()
-        return report
 
     def _process_config_options(self) -> None:
         """By default, returns False to indicate that the scanner did not perform any
@@ -237,10 +193,6 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         except Exception as e:
             ASH_LOGGER.debug(e)
 
-        # Store output and errors in class variables
-        self._output = []
-        self._errors = []
-
         ASH_LOGGER.debug(f"({self.config.name}) Running: {command}")
         try:
             result = subprocess.run(
@@ -258,7 +210,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             # Process stdout
             if result.stdout:
                 for line in result.stdout.splitlines():
-                    self._output.append(line)
+                    self.output.append(line)
                     # ASH_LOGGER.debug(line)
                 if results_dir is not None:
                     with open(
@@ -271,7 +223,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             # Process stderr
             if result.stderr:
                 for line in result.stderr.splitlines():
-                    self._errors.append(line)
+                    self.errors.append(line)
                     # ASH_LOGGER.debug(line)
                 if results_dir is not None:
                     with open(
@@ -285,3 +237,35 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             self.errors.append(str(e))
             ASH_LOGGER.warning(f"({self.config.name}) Error running {command}: {e}")
             self.exit_code = 1
+
+    ### Methods that require implementation by plugins.
+    @abstractmethod
+    def validate(self) -> bool:
+        """Validate scanner configuration.
+
+        Returns:
+            bool: True if validation passes
+        """
+        pass
+
+    @abstractmethod
+    def scan(
+        self,
+        target: Path,
+        config: T | ScannerPluginConfigBase = None,
+        *args,
+        **kwargs,
+    ) -> Any | SarifReport | CycloneDXReport:
+        """Execute scanner against a target.
+
+        Args:
+            *args: Variable length argument list
+            **kwargs: Arbitrary keyword arguments
+
+        Returns:
+            Any | SarifReport | CycloneDxReport: Full scan results
+
+        Raises:
+            ScannerError: if scanning failed for any reason
+        """
+        pass

@@ -23,7 +23,7 @@ class YAMLReporterConfig(ReporterPluginConfigBase):
 class YAMLReporter(ReporterPluginBase[YAMLReporterConfig]):
     """Formats results as YAML."""
 
-    def format(self, model: Any) -> str:
+    def report(self, model: Any) -> str:
         """Format ASH model as YAML string."""
         from automated_security_helper.models.asharp_model import ASHARPModel
 

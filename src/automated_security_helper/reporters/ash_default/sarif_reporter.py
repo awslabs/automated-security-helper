@@ -21,7 +21,7 @@ class SARIFReporterConfig(ReporterPluginConfigBase):
 class SARIFReporter(ReporterPluginBase[SARIFReporterConfig]):
     """Formats results as SARIF."""
 
-    def format(self, model: Any) -> str:
+    def report(self, model: Any) -> str:
         """Format ASH model in SARIF."""
         from automated_security_helper.models.asharp_model import ASHARPModel
 

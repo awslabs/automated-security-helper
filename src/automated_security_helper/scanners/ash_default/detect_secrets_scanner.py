@@ -182,7 +182,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             level=Level.error,
                             kind=Kind.fail,
                             message=Message(
-                                text=f"Secret detected on file '{filename}'"
+                                text=f"Secret of type '{finding.type}' detected in file '{filename}' at line {finding.line_number}"
                             ),
                             analysisTarget=ArtifactLocation(
                                 uri=get_shortest_name(input=target),
@@ -195,10 +195,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                             uri=get_shortest_name(input=target),
                                         ),
                                         region=Region(
-                                            startLine=1,
-                                            endLine=1,
+                                            startLine=finding.line_number,
+                                            endLine=finding.line_number,
                                             snippet=ArtifactContent(
-                                                text=None  # Replace with snippet if relevant
+                                                text=f"Secret of type {finding.type} detected"
                                             ),
                                         ),
                                     ),
@@ -242,7 +242,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         tool=sarif_tool,
                         invocations=[sarif_invocation],
                         results=results,
-                        version=self.tool_version,
                     )
                 ]
             )

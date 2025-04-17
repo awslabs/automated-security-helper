@@ -283,7 +283,7 @@ class ASHScanOrchestrator(BaseModel):
                     description="ASH execution engine returned no results!"
                 )
             else:
-                asharp_model_results.format(
+                asharp_model_results.report(
                     output_formats=self.output_formats,
                     output_dir=self.output_dir,
                 )

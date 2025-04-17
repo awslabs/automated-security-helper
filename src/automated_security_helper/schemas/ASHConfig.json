@@ -496,7 +496,9 @@
         },
         "options": {
           "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
-          "default": {},
+          "default": {
+            "baseline": null
+          },
           "description": "Configure detect-secrets scanner"
         }
       },
@@ -505,7 +507,22 @@
     },
     "DetectSecretsScannerConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "properties": {
+        "baseline": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to baseline file, relative to current source directory. Defaults to searching for `.detect-secrets.baseline` in the root of the source directory.",
+          "title": "Baseline"
+        }
+      },
       "title": "DetectSecretsScannerConfigOptions",
       "type": "object"
     },
@@ -688,7 +705,9 @@
           "default": {
             "enabled": true,
             "name": "detect-secrets",
-            "options": {}
+            "options": {
+              "baseline": null
+            }
           },
           "description": "Configure the options for DetectSecrets"
         },
@@ -1274,7 +1293,9 @@
         "detect-secrets": {
           "enabled": true,
           "name": "detect-secrets",
-          "options": {}
+          "options": {
+            "baseline": null
+          }
         },
         "grype": {
           "enabled": true,

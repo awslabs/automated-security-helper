@@ -266,3 +266,27 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         except Exception as e:
             # Check if there are useful error details
             raise ScannerError(f"Bandit scan failed: {str(e)}")
+
+
+if __name__ == "__main__":
+    ASH_LOGGER.debug("Running Bandit via __main__")
+    scanner = BanditScanner(
+        config=BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                confidence_level="all",
+                severity_level="all",
+                ignore_nosec=False,
+                excluded_paths=[],
+                additional_formats=[],
+            )
+        )
+    )
+    report = scanner.scan(target=Path("."))
+
+    print(
+        report.model_dump_json(
+            indent=2,
+            by_alias=True,
+            exclude_unset=True,
+        )
+    )

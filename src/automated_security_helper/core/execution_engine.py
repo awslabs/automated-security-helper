@@ -416,7 +416,7 @@ class ScanExecutionEngine:
             scanner_tuple: Tuple containing (scanner_name, target)
 
         Returns:
-            ScanResultsContainer: Dictionary containing SecurityReport and raw results
+            ScanResultsContainer: Dictionary containing scan results
 
         Raises:
             ScannerError: If scanner execution fails

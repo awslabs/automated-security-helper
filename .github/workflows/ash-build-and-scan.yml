@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - '*'
+  workflow_dispatch: {}
 permissions:
   actions: read
   checks: write
@@ -164,17 +165,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+          cache: 'poetry'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: poetry install
 
       - name: Build documentation
-        run: mkdocs build --clean
+        run: poetry run mkdocs build --clean
 
   deploy-docs:
     name: Deploy documentation
@@ -207,5 +220,4 @@ jobs:
         run: poetry install
 
       - name: Deploy documentation
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: poetry run mkdocs gh-deploy --clean --force
