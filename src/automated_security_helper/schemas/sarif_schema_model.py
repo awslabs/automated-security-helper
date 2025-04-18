@@ -2357,11 +2357,19 @@ class SarifReport(BaseModel):
         description="Key/value pairs that provide additional information about the log file.",
     )
 
-    def merge_sarif_report(self, sarif_report: "SarifReport"):
+    def merge_sarif_report(
+        self,
+        sarif_report: "SarifReport",
+        include_invocation: bool = True,
+        include_driver: bool = True,
+        include_rules: bool = True,
+    ):
         report_run = sarif_report.runs[0]
         report_tool = report_run.tool
         report_invocations = report_run.invocations
         report_results = report_run.results
+        if self.runs is None:
+            self.runs = []
 
         self_run = self.runs[0] if self.runs is not None else None
         if self_run is None:
@@ -2372,27 +2380,35 @@ class SarifReport(BaseModel):
                 self_run.tool.extensions = [report_tool.driver]
             else:
                 # Check if report_tool.driver.name already exists in self_run.tool.extensions
-                existing_extension = next(
-                    (
-                        ext
-                        for ext in self_run.tool.extensions
-                        if ext.name == report_tool.driver.name
-                        and ext.fullName == report_tool.driver.fullName
-                        and ext.organization == report_tool.driver.organization
-                    ),
-                    None,
-                )
-                if existing_extension is None:
-                    self_run.tool.extensions.append(report_tool.driver)
-                else:
-                    existing_extension.rules.extend(report_tool.driver.rules)
+                if include_driver:
+                    existing_extension = next(
+                        (
+                            ext
+                            for ext in self_run.tool.extensions
+                            if ext.name == report_tool.driver.name
+                            and ext.fullName == report_tool.driver.fullName
+                            and ext.organization == report_tool.driver.organization
+                        ),
+                        None,
+                    )
+                    if existing_extension is None:
+                        self_run.tool.extensions.append(report_tool.driver)
+                    else:
+                        if include_rules:
+                            existing_extension.rules.extend(report_tool.driver.rules)
 
         if self_run.results is None:
             self_run.results = []
         self_run.results.extend(report_results)
-        if self_run.invocations is None:
-            self_run.invocations = []
-        self_run.invocations.extend(report_invocations)
+        if self_run.invocations is None or len(self_run.invocations) == 0:
+            # Include by default if it doesn't have
+            # any invocations or doesn't exist yet
+            self_run.invocations = [report_invocations]
+        else:
+            # Otherwise, include the invocation unless
+            # told explicitly not to (default is to include)
+            if include_invocation:
+                self_run.invocations.extend(report_invocations)
         self.runs = [self_run]
 
         self.inlineExternalProperties.extend(sarif_report.inlineExternalProperties)

@@ -145,7 +145,6 @@ COPY ./pyproject.toml /ash/pyproject.toml
 RUN python3 -m pip install *.whl && rm *.whl
 
 COPY ./utils/*.* /ash/utils/
-COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
 
 #

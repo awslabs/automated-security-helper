@@ -211,7 +211,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             try:
                 self._pre_scan(
                     target=target,
-                    options=self.config.options,
+                    config=config,
                 )
             except ScannerError as exc:
                 raise exc

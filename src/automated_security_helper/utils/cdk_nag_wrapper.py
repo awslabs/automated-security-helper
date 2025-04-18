@@ -2,6 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import inspect
+import re
+import shutil
+import json
+from pathlib import Path
+from typing import Dict, List, Literal
 
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
@@ -14,112 +20,14 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Region,
     Result,
 )
+from automated_security_helper.utils.cfn_template_model import (
+    CloudFormationTemplateModel,
+    get_model_from_template,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-
-# noqa
-os.environ["JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION"] = "1"
-# noqa
-os.environ["JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION"] = "1"
-
-import inspect
-import re
-import shutil
-
-from pydantic import BaseModel, ConfigDict, Field
-from cfn_tools import load_yaml, dump_yaml
-
 from automated_security_helper.schemas.sarif_schema_model import Location
-
-import cdk_nag
-import json
-from pathlib import Path
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from cfn_tools import dump_yaml
 from automated_security_helper.utils.log import ASH_LOGGER
-
-from aws_cdk import (
-    App,
-    Aspects,
-    Stack,
-)
-from aws_cdk.cloudformation_include import (
-    CfnInclude,
-)
-
-from constructs import Construct
-
-
-class CloudFormationResource(BaseModel):
-    model_config = ConfigDict(
-        extra="allow",
-        validate_assignment=True,
-        validate_default=True,
-    )
-
-    Type: Annotated[str, Field(pattern=r"^([a-zA-Z0-9:]+)$")]
-    Properties: Dict[str, Any]
-
-
-class CloudFormationTemplateModel(BaseModel):
-    model_config = ConfigDict(
-        extra="allow",
-        validate_assignment=True,
-        validate_default=True,
-    )
-
-    AWSTemplateFormatVersion: Optional[Literal["2010-09-09"] | None] = None
-    Resources: Dict[str, CloudFormationResource]
-
-
-class WrapperStack(Stack):
-    def __init__(
-        self,
-        scope: Construct | None = None,
-        id: str | None = None,
-        template_path: Path | None = None,
-    ):
-        super().__init__(scope, id)
-        # Get the relative path to use as the logical ID
-        # CDK will replace path separators with
-        try:
-            logical_id = get_shortest_name(input=template_path)
-        except ValueError:
-            logical_id = Path(template_path).as_posix()
-        CfnInclude(
-            self,
-            id=logical_id,
-            template_file=Path(template_path).as_posix(),
-        )
-
-
-def get_model_from_template(
-    template_path: Path | None = None,
-) -> CloudFormationTemplateModel | None:
-    if template_path is None:
-        return None
-
-    with open(template_path, "r") as f:
-        template = load_yaml(f.read())
-
-    try:
-        res = CloudFormationTemplateModel.model_validate(template)
-    except Exception:
-        # ASH_LOGGER.debug(f"Error validating template: {e}")
-        # ASH_LOGGER.debug(f"Error validating template: {e}")
-        return None
-    return res
-
-
-# Enumerate all classes in `cdk_nag`, identify any that extend `NagPack`
-def get_nag_packs():
-    nag_packs = {}
-    for item in dir(cdk_nag):
-        # get class from cdk_nag
-        pack = getattr(cdk_nag, item)
-        if inspect.isclass(pack) and issubclass(pack, cdk_nag.NagPack):
-            nag_packs[item] = {
-                "packType": pack,
-            }
-    return nag_packs
 
 
 class CdkNagWrapperResponse:
@@ -152,6 +60,51 @@ def run_cdk_nag_against_cfn_template(
     stack_name: str = "ASHCDKNagScanner",
 ) -> CdkNagWrapperResponse | None:
     results: Dict[str, List[dict]] = {}
+
+    os.environ["JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION"] = "1"
+    os.environ["JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION"] = "1"
+    import cdk_nag
+    from aws_cdk import (
+        App,
+        Aspects,
+        Stack,
+    )
+    from aws_cdk.cloudformation_include import (
+        CfnInclude,
+    )
+    from constructs import Construct
+
+    class WrapperStack(Stack):
+        def __init__(
+            self,
+            scope: Construct | None = None,
+            id: str | None = None,
+            template_path: Path | None = None,
+        ):
+            super().__init__(scope, id)
+            # Get the relative path to use as the logical ID
+            # CDK will replace path separators with
+            try:
+                logical_id = get_shortest_name(input=template_path)
+            except ValueError:
+                logical_id = Path(template_path).as_posix()
+            CfnInclude(
+                self,
+                id=logical_id,
+                template_file=Path(template_path).as_posix(),
+            )
+
+    # Enumerate all classes in `cdk_nag`, identify any that extend `NagPack`
+    def get_nag_packs():
+        nag_packs = {}
+        for item in dir(cdk_nag):
+            # get class from cdk_nag
+            pack = getattr(cdk_nag, item)
+            if inspect.isclass(pack) and issubclass(pack, cdk_nag.NagPack):
+                nag_packs[item] = {
+                    "packType": pack,
+                }
+        return nag_packs
 
     model = get_model_from_template(template_path)
     if model is None:

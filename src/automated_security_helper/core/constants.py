@@ -2,10 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from typing import Literal
+from pathlib import Path
 
 
 ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
 ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
+
+ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
 
 KNOWN_SCANNABLE_EXTENSIONS = [
     # JavaScript and TypeScript ecosystem

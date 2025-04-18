@@ -7,7 +7,7 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Annotated, Any, Generic, List, Optional, TypeVar
+from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
 import shutil
 import subprocess
 from abc import abstractmethod
@@ -146,14 +146,20 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             target: Target to scan
             options: Optional scanner-specific options
         """
-        self.results_dir.mkdir(parents=True, exist_ok=True)
-        if not Path(target).exists():
-            raise ScannerError(f"Target {target} does not exist!")
-
         self.start_time = datetime.now(timezone.utc)
         ASH_LOGGER.debug(
             f"Starting {self.config.name or self.__class__.__name__} scan of {target}"
         )
+        ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
+        if config is not None:
+            if hasattr(config, "model_dump") and callable(config.model_dump):
+                config = config.model_dump(by_alias=True)
+            self.config = self.config.__class__.model_validate(config)
+        ASH_LOGGER.debug(f"({self.config.name}) config: {config}")
+
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        if not Path(target).exists():
+            raise ScannerError(f"Target {target} does not exist!")
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
         if self.results_dir:
@@ -176,8 +182,12 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         )
 
     def _run_subprocess(
-        self, command: List[str], results_dir: str | Path = None
-    ) -> None:
+        self,
+        command: List[str],
+        results_dir: str | Path = None,
+        stdout_preference: Literal["return", "write", "both", "none"] = "write",
+        stderr_preference: Literal["return", "write", "both", "none"] = "write",
+    ) -> Dict[str, str]:
         """Run a subprocess with the given command.
 
         Args:
@@ -209,10 +219,8 @@ class ScannerPluginBase(BaseModel, Generic[T]):
 
             # Process stdout
             if result.stdout:
-                for line in result.stdout.splitlines():
-                    self.output.append(line)
-                    # ASH_LOGGER.debug(line)
-                if results_dir is not None:
+                self.output.extend(result.stdout.splitlines())
+                if results_dir is not None and stdout_preference in ["write", "both"]:
                     with open(
                         Path(results_dir).joinpath(
                             f"{self.__class__.__name__}.stdout.log"
@@ -222,10 +230,8 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                         stdout_file.write(result.stdout)
             # Process stderr
             if result.stderr:
-                for line in result.stderr.splitlines():
-                    self.errors.append(line)
-                    # ASH_LOGGER.debug(line)
-                if results_dir is not None:
+                self.errors.extend(result.stderr.splitlines())
+                if results_dir is not None and stderr_preference in ["write", "both"]:
                     with open(
                         Path(results_dir).joinpath(
                             f"{self.__class__.__name__}.stderr.log"
@@ -233,9 +239,18 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                         "w",
                     ) as stderr_file:
                         stderr_file.write(result.stderr)
+
+            response = {}
+            if stdout_preference in ["return", "both"]:
+                response["stdout"] = result.stdout
+            if stderr_preference in ["return", "both"]:
+                response["stderr"] = result.stderr
+            return response
+
         except Exception as e:
             self.errors.append(str(e))
-            ASH_LOGGER.warning(f"({self.config.name}) Error running {command}: {e}")
+            # show full stack trace in warning
+            ASH_LOGGER.debug(f"({self.config.name}) Error running {command}: {e}")
             self.exit_code = 1
 
     ### Methods that require implementation by plugins.

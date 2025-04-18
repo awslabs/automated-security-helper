@@ -144,41 +144,41 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
-                options=self.config.options,
+                config=config,
             )
         except ScannerError as exc:
             raise exc
-        ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
-        if config is not None:
-            if hasattr(config, "model_dump") and callable(config.model_dump):
-                config = config.model_dump(by_alias=True)
-            self.config = CdkNagScannerConfig(**config)
-        ASH_LOGGER.debug(f"({self.config.name}) config: {config}")
+        # ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
+        # if config is not None:
+        #     if hasattr(config, "model_dump") and callable(config.model_dump):
+        #         config = config.model_dump(by_alias=True)
+        #     self.config = CdkNagScannerConfig(**config)
+        # ASH_LOGGER.debug(f"({self.config.name}) config: {config}")
 
         # Find all JSON/YAML files to scan from the scan set
-        cfn_files = scan_set(
+        scannable = scan_set(
             source=self.source_dir,
             output=self.output_dir,
             # filter_pattern=r"\.(yaml|yml|json)$",
         )
         ASH_LOGGER.debug(
-            f"Found {len(cfn_files)} files in scan set. Checking for possible CloudFormation templates"
+            f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"
         )
-        cfn_files = [
+        scannable = [
             f.strip()
-            for f in cfn_files
+            for f in scannable
             if (
                 f.strip().endswith(".json")
                 or f.strip().endswith(".yaml")
                 or f.strip().endswith(".yml")
             )
         ]
-        joined_files = "\n- ".join(cfn_files)
+        joined_files = "\n- ".join(scannable)
         ASH_LOGGER.debug(
-            f"Found {len(cfn_files)} possible CloudFormation templates:\n- {joined_files}"
+            f"Found {len(scannable)} possible CloudFormation templates:\n- {joined_files}"
         )
 
-        if len(cfn_files) == 0:
+        if len(scannable) == 0:
             raise ScannerError(f"No CloudFormation templates found in {target}")
 
         # Process each template file
@@ -192,7 +192,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             .joinpath(scan_dir_name)
         )
         sarif_results: List[Result] = []
-        for cfn_file in cfn_files:
+        for cfn_file in scannable:
             try:
                 # Run CDK synthesis for this file
                 config_options: CdkNagScannerConfigOptions = (
@@ -323,6 +323,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 if __name__ == "__main__":
     ASH_LOGGER.debug("Running cdk-nag via __main__")
     scanner = CdkNagScanner(
+        source_dir=Path.cwd(),
+        output_dir=Path.cwd().joinpath("ash_output"),
         config=CdkNagScannerConfig(
             options=CdkNagScannerConfigOptions(
                 nag_packs=CdkNagPacks(
@@ -333,9 +335,9 @@ if __name__ == "__main__":
                     PCIDSS321Checks=True,
                 )
             )
-        )
+        ),
     )
-    report = scanner.scan(target=Path("."))
+    report = scanner.scan(target=scanner.source_dir)
 
     print(
         report.model_dump_json(

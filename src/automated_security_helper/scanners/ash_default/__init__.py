@@ -6,6 +6,7 @@ from automated_security_helper.scanners.ash_default.checkov_scanner import (
     CheckovScanner,
 )
 from automated_security_helper.scanners.ash_default.cdk_nag_scanner import CdkNagScanner
+from automated_security_helper.scanners.ash_default.cfn_nag_scanner import CfnNagScanner
 from automated_security_helper.scanners.ash_default.custom_scanner import CustomScanner
 from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
     DetectSecretsScanner,
@@ -15,6 +16,7 @@ __all__ = [
     "BanditScanner",
     "CheckovScanner",
     "CdkNagScanner",
+    "CfnNagScanner",
     "CustomScanner",
     "DetectSecretsScanner",
 ]
