@@ -35,7 +35,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
 from detect_secrets import SecretsCollection
-from detect_secrets.settings import transient_settings
+from detect_secrets.settings import transient_settings, default_settings
 from detect_secrets.core.plugins.util import get_mapping_from_secret_type_to_class
 
 
@@ -99,7 +99,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ]
 
         for baseline_path in possible_baseline_paths:
-            if not bool(self.config.options.scan_settings):
+            if bool(self.config.options.scan_settings):
                 pass
             elif Path(baseline_path).exists():
                 abs_baseline_path = Path(baseline_path).absolute().relative_to(Path.cwd()).as_posix()
@@ -148,6 +148,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
+            self._resolve_arguments(target=target,results_file=target_results_dir)
 
             # Find all files to scan from the scan set
             scannable = scan_set(
@@ -158,7 +159,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets"
             )
             with transient_settings(self.config.options.scan_settings):
-                self._secrets_collection.scan_files(scannable)
+            #with default_settings():
+                self._secrets_collection.scan_files(*scannable)
 
             self._post_scan(target=target)
 
