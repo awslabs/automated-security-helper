@@ -171,11 +171,11 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         for conf_path in possible_config_paths:
             if Path(conf_path).exists():
-                self.args.extra_args.extend(
-                    [
-                        "--config-file",
-                        get_shortest_name(input=conf_path),
-                    ]
+                self.args.extra_args.append(
+                    ToolExtraArg(
+                        key="--config-file",
+                        value=get_shortest_name(input=conf_path),
+                    )
                 )
                 break
 
