@@ -159,7 +159,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets"
             )
             with transient_settings(self.config.options.scan_settings):
-            #with default_settings():
                 self._secrets_collection.scan_files(*scannable)
 
             self._post_scan(target=target)
