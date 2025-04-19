@@ -2,12 +2,12 @@ name: ASH - Core Pipeline
 on:
   push:
     branches:
-      - '*'
+      - "*"
     tags:
-      - '*'
+      - "*"
   pull_request:
     branches:
-      - '*'
+      - "*"
   workflow_dispatch: {}
 permissions:
   actions: read
@@ -16,6 +16,7 @@ permissions:
   id-token: write
   security-events: write
   pull-requests: write
+  statuses: write
 env:
   PYTHON_VERSION: "3.12"
 jobs:
@@ -30,7 +31,15 @@ jobs:
     env:
       IMG_NAME: ${{ github.repository }}
       ARCH: ubuntu-latest
-      SUMMARY_FILE: 'ASH Scan Result Summary - ubuntu-latest.md'
+      SUMMARY_FILE: "ASH Scan Result Summary - ubuntu-latest.md"
+    permissions:
+      actions: read
+      checks: write
+      contents: write
+      id-token: write
+      security-events: read
+      pull-requests: write
+      statuses: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -154,7 +163,7 @@ jobs:
         if: success() || failure() # always run even if the previous step fails
         continue-on-error: true
         with:
-          report_paths: '**/*.junit.xml'
+          report_paths: "**/*.junit.xml"
           include_passed: true
           update_check: true
           check_name: ASH Scan JUnit Test Report
@@ -180,7 +189,20 @@ jobs:
     name: Run unit tests
     needs: []
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
+
+    permissions:
+      actions: read
+      checks: write
+      contents: write
+      id-token: write
+      security-events: read
+      pull-requests: write
+      statuses: write
+    if: >-
+      github.event_name == 'pull_request' ||
+      (
+        github.event_name == 'push' && github.ref != 'refs/heads/main'
+      )
 
     steps:
       - uses: actions/checkout@v4
@@ -194,7 +216,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'poetry'
+          cache: "poetry"
 
       - name: Install Poetry
         run: |
@@ -214,7 +236,7 @@ jobs:
         if: success() || failure() # always run even if the previous step fails
         continue-on-error: true
         with:
-          report_paths: '**/pytest.junit.xml'
+          report_paths: "**/pytest.junit.xml"
           include_passed: true
           update_check: true
           check_name: PyTest JUnit Test Report
@@ -223,15 +245,14 @@ jobs:
         uses: irongut/CodeCoverageSummary@v1.3.0
         continue-on-error: true
         with:
-          filename: 'test-results/pytest.coverage.xml'
+          filename: "test-results/pytest.coverage.xml"
           badge: true
           format: markdown
           hide_branch_rate: false
           hide_complexity: false
           indicators: true
           output: both
-          thresholds: '50 75'
-
+          thresholds: "50 75"
 
   build-docs:
     name: Build documentation
@@ -251,7 +272,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'poetry'
+          cache: "poetry"
 
       - name: Install Poetry
         run: |
@@ -284,7 +305,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'poetry'
+          cache: "poetry"
 
       - name: Install Poetry
         run: |

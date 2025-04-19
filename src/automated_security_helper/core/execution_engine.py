@@ -632,9 +632,11 @@ class ScanExecutionEngine:
         elif isinstance(results.raw_results, CycloneDXReport):
             self._asharp_model.cyclonedx = results.raw_results
         else:
-            self._asharp_model.additional_reports[results.scanner_name] = (
-                results.raw_results
-            )
+            if results.scanner_name not in self._asharp_model.additional_reports:
+                self._asharp_model.additional_reports[results.scanner_name] = {}
+            self._asharp_model.additional_reports[results.scanner_name][
+                results.target_type
+            ] = results.raw_results
 
         # Update ASHARPModel with scanner results
         # for scanner_name, data in results.items():
