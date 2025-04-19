@@ -163,29 +163,13 @@ class ColoredFormatter(logging.Formatter):
 
 
 # Custom logger class with multiple destinations
-class ColoredLogger(logging.getLoggerClass()):
-    VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
-    DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
-
+class ASHLogger(logging.getLoggerClass()):
     def __init__(
         self,
         name: str,
-        output_dir: Path | None = None,
         level: str | int | None = None,
     ):
-        super().__init__(name=name, level=logging.INFO)
-
-        if level is None or level > 15:
-            self.COLOR_FORMAT = formatter_message(self.DEFAULT_FORMAT, True)
-        else:
-            self.COLOR_FORMAT = formatter_message(self.VERBOSE_FORMAT, True)
-
-        color_formatter = ColoredFormatter(self.COLOR_FORMAT)
-
-        console = logging.StreamHandler()
-        console.setFormatter(color_formatter)
-
-        self.addHandler(console)
+        super().__init__(name=name, level=level if level is not None else logging.INFO)
 
     def verbose(self, msg, *args, **kws):
         self._log(logging._nameToLevel.get("VERBOSE", 15), msg, args, **kws)
@@ -194,7 +178,7 @@ class ColoredLogger(logging.getLoggerClass()):
         self._log(logging._nameToLevel.get("TRACE", 5), msg, args, **kws)
 
 
-# logging.setLoggerClass(ColoredLogger)
+# logging.setLoggerClass(ASHLogger)
 
 
 class Color:
@@ -257,7 +241,7 @@ class Color:
 
 def get_logger(
     name: str = "ash", level: str | int | None = None, output_dir: Path | None = None
-):
+) -> ASHLogger:
     VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
     DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
 
@@ -268,6 +252,9 @@ def get_logger(
             "Log level set to: %s",
             logging._levelToName[level] if isinstance(level, int) else level,
         )
+    elif logger.level is None or logger.level == 0:
+        logger.setLevel(logging.INFO)
+        logger.info("Log level set to: INFO")
 
     handler = logging.StreamHandler()
     if logger.level is None or logger.level > 15:
@@ -325,6 +312,7 @@ def get_logger(
             )
         )
         logger.addHandler(file_handler)
+
     return logger
 
 

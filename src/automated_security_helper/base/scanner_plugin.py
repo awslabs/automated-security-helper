@@ -147,7 +147,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             options: Optional scanner-specific options
         """
         self.start_time = datetime.now(timezone.utc)
-        ASH_LOGGER.debug(
+        ASH_LOGGER.verbose(
             f"Starting {self.config.name or self.__class__.__name__} scan of {target}"
         )
         ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
@@ -177,7 +177,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         """
         self.end_time = datetime.now(timezone.utc)
 
-        ASH_LOGGER.debug(
+        ASH_LOGGER.verbose(
             f"{self.config.name} scan of {target} completed in {(self.end_time - self.start_time).total_seconds()} seconds"
         )
 

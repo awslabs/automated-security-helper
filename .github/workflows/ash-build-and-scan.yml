@@ -152,7 +152,16 @@ jobs:
         if: success() || failure() # always run even if the previous step fails
         continue-on-error: true
         with:
-          report_paths: '**/ash.junit.xml'
+          report_paths: ash_output/ash.junit.xml
+
+      - name: Upload ASH SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: true
+        with:
+          sarif_file: ash_output/ash_sarif.sarif
+          # Optional category for the results
+          # Used to differentiate multiple results for one commit
+          category: ash
 
       - name: Collect ash_output artifact
         uses: actions/upload-artifact@v4
