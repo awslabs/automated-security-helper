@@ -72,7 +72,7 @@ jobs:
           set +e
 
           # Run ASH against itself
-          ./ash --source-dir $(pwd) --output-dir ash_output --build-target ci --config ./ash.yaml --no-progress --verbose | \
+          ./ash --source-dir $(pwd) --output-dir ash_output --build-target ci --strategy sequential --config ./ash.yaml --verbose | \
               tee ash_stdout.txt
 
           # cat the output contents to build the summary markdown
@@ -82,7 +82,7 @@ jobs:
 
           # Write the summary markdown to a file
           cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
-          ## ASH Scan Output - ${{ env.ARCH }} - ${{ matrix.runner }}
+          ## ASH Scan Output
 
           \`\`\`bash
           $ cat ash_stdout.txt
