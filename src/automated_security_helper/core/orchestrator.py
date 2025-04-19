@@ -293,7 +293,7 @@ class ASHScanOrchestrator(BaseModel):
 
                 ASH_LOGGER.info("ASH scan completed successfully!")
             if not self.config.no_cleanup:
-                ASH_LOGGER.info("Cleaning up working directory...")
+                ASH_LOGGER.verbose("Cleaning up working directory...")
                 shutil.rmtree(self.work_dir)
                 # ASH_LOGGER.info("Cleaning up scanners directory...")
                 # shutil.rmtree(self.output_dir.joinpath("scanners"))

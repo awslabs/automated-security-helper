@@ -13,12 +13,9 @@ ignore_paths:
   - .mypy_cache
 output_formats:
   - sarif
-  - html
-  - json
-  - csv
   - junitxml
   - cyclonedx
-  - text
+  - html
 severity_threshold: ALL
 scanners:
   bandit:

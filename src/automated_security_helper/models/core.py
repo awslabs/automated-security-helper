@@ -8,31 +8,6 @@ from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
 
 
-class FileInvocationConfig(BaseModel):
-    """Configuration for file scanning."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    include: Annotated[
-        List[str],
-        Field(
-            description="List of file patterns to include. Defaults to an empty list, which includes all files.",
-            examples=[
-                "**/*",
-            ],
-        ),
-    ] = []
-    exclude: Annotated[
-        List[str],
-        Field(
-            description="List of file patterns to exclude. Defaults to an empty list, which excludes no files.",
-            examples=[
-                "tests/",
-            ],
-        ),
-    ] = []
-
-
 class ToolExtraArg(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str

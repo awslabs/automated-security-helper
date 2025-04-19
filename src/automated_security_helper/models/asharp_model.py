@@ -399,24 +399,30 @@ class ASHARPModel(BaseModel):
             "yaml": {"reporter": YAMLReporter(), "ext": "yaml"},
         }
         for fmt in output_formats:
-            if f"{fmt.value}" not in reporters:
-                raise ValueError(f"Unsupported output format: {fmt}")
+            try:
+                if f"{fmt.value}" not in reporters:
+                    raise ValueError(f"Unsupported output format: {fmt}")
 
-            formatted = reporters[fmt.value]["reporter"].report(self)
-            if formatted is None:
+                formatted = reporters[fmt.value]["reporter"].report(self)
+                if formatted is None:
+                    ASH_LOGGER.error(
+                        f"Failed to format report with {fmt.value} reporter, returned empty string"
+                    )
+                if output_dir is None:
+                    return formatted
+                else:
+                    output_dir = Path(output_dir)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    output_filename = f"ash.{reporters[fmt.value]['ext']}"
+                    output_file = output_dir.joinpath(output_filename)
+                    with open(output_file, "w") as f:
+                        ASH_LOGGER.info(f"Writing {fmt.value} report to {output_file}")
+                        f.write(formatted)
+            except Exception as e:
                 ASH_LOGGER.error(
-                    f"Failed to format report with {fmt.value} reporter, returned empty string"
+                    f"Failed to format report with {fmt.value} reporter: {e}"
                 )
-            if output_dir is None:
-                return formatted
-            else:
-                output_dir = Path(output_dir)
-                output_dir.mkdir(parents=True, exist_ok=True)
-                output_filename = f"ash.{reporters[fmt.value]['ext']}"
-                output_file = output_dir.joinpath(output_filename)
-                with open(output_file, "w") as f:
-                    ASH_LOGGER.info(f"Writing {fmt.value} report to {output_file}")
-                    f.write(formatted)
+                continue
 
 
 if __name__ == "__main__":
