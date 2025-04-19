@@ -217,7 +217,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         sarif_report.merge_sarif_report(
                             sarif_report=file_sarif,
                             include_invocation=False,
-                            include_driver=True,
+                            include_driver=False,
                             # CFN Nag includes the full rule list regardless if there were
                             # results matching the rule ID.
                             # Since `include_driver=True`, it will include the rule list

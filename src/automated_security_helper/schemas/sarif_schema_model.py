@@ -2381,11 +2381,14 @@ class SarifReport(BaseModel):
             cleaned_run = json.loads(report_run.model_dump_json())
             self_run = Run(**cleaned_run)
         else:
-            if self_run.tool.extensions is None or len(self_run.tool.extensions) == 0:
-                self_run.tool.extensions = [report_tool.driver]
-            else:
-                # Check if report_tool.driver.name already exists in self_run.tool.extensions
-                if include_driver:
+            if include_driver:
+                if (
+                    self_run.tool.extensions is None
+                    or len(self_run.tool.extensions) == 0
+                ):
+                    self_run.tool.extensions = [report_tool.driver]
+                else:
+                    # Check if report_tool.driver.name already exists in self_run.tool.extensions
                     existing_extension = next(
                         (
                             ext
@@ -2408,7 +2411,7 @@ class SarifReport(BaseModel):
         if self_run.invocations is None or len(self_run.invocations) == 0:
             # Include by default if it doesn't have
             # any invocations or doesn't exist yet
-            self_run.invocations = [report_invocations]
+            self_run.invocations = report_invocations
         else:
             # Otherwise, include the invocation unless
             # told explicitly not to (default is to include)
