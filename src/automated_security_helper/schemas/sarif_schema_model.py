@@ -2327,13 +2327,13 @@ class Run(BaseModel):
 
 class SarifReport(BaseModel):
     model_config = ConfigDict(
-        extra="forbid", use_enum_values=True, serialize_by_alias=True
+        extra="forbid",
+        use_enum_values=True,
+        serialize_by_alias=True,
     )
 
-    field_schema: Optional[AnyUrl] = Field(
-        AnyUrl(
-            "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
-        ),
+    field_schema: str = Field(
+        "https://raw.githubusercontent.com/microsoft/sarif-python-om/refs/heads/main/sarif-schema-2.1.0.json",
         alias="$schema",
         description="The URI of the JSON schema corresponding to the version.",
         serialization_alias="$schema",

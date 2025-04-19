@@ -12709,19 +12709,10 @@
       "additionalProperties": false,
       "properties": {
         "$schema": {
-          "anyOf": [
-            {
-              "format": "uri",
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+          "default": "https://raw.githubusercontent.com/microsoft/sarif-python-om/refs/heads/main/sarif-schema-2.1.0.json",
           "description": "The URI of the JSON schema corresponding to the version.",
-          "title": "$Schema"
+          "title": "$Schema",
+          "type": "string"
         },
         "inlineExternalProperties": {
           "anyOf": [
@@ -17333,7 +17324,7 @@
         }
       ],
       "default": {
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "$schema": "https://raw.githubusercontent.com/microsoft/sarif-python-om/refs/heads/main/sarif-schema-2.1.0.json",
         "inlineExternalProperties": [],
         "properties": {
           "tags": []

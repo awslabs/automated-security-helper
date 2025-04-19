@@ -1,11 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import json
 from typing import Any, Literal
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.utils.clean_dict import clean_dict
 
 
 class SARIFReporterConfigOptions(ReporterOptionsBase):
@@ -28,4 +30,14 @@ class SARIFReporter(ReporterPluginBase[SARIFReporterConfig]):
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
-        return model.sarif.model_dump_json()
+        clean_sarif = clean_dict(
+            input=model.sarif.model_dump(
+                by_alias=True,
+                exclude_unset=True,
+                exclude_none=True,
+                exclude_defaults=True,
+                round_trip=True,
+                mode="json",
+            )
+        )
+        return json.dumps(clean_sarif, default=str)

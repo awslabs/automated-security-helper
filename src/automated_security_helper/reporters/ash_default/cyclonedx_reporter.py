@@ -28,4 +28,9 @@ class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
-        return model.cyclonedx.model_dump_json(by_alias=True)
+        return model.cyclonedx.model_dump_json(
+            by_alias=True,
+            exclude_defaults=True,
+            exclude_none=True,
+            exclude_unset=True,
+        )

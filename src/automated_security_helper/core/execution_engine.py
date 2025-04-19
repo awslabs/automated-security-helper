@@ -397,6 +397,7 @@ class ScanExecutionEngine:
                 output_dir = getattr(self._config, "output_dir", None)
                 if output_dir:
                     output_path = Path(output_dir)
+                    ASH_LOGGER.verbose(f"Saving ASHARPModel to {output_path}")
                     self._asharp_model.save_model(output_path)
 
             return self._asharp_model

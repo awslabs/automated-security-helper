@@ -314,18 +314,48 @@ class ASHARPModel(BaseModel):
         # Save aggregated results as JSON
         json_path = output_dir.joinpath("ash_aggregated_results.json")
         with open(json_path, "w") as f:
-            json.dump(self.model_dump(by_alias=True), f, indent=2, default=str)
+            f.write(
+                self.model_dump_json(
+                    by_alias=True,
+                    exclude_unset=True,
+                    exclude_none=True,
+                    exclude_defaults=True,
+                    round_trip=True,
+                )
+            )
+            # json.dump(self.model_dump(by_alias=True), f, indent=2, default=str)
 
         # Save model.sarif as ash.sarif (JSON formatted SARIF report)
-        json_path = output_dir.joinpath("ash.sarif")
-        with open(json_path, "w") as f:
-            json.dump(self.sarif.model_dump(by_alias=True), f, indent=2, default=str)
+        # json_path = output_dir.joinpath("ash_clean.sarif")
+        # clean_sarif = clean_dict(
+        #     input=self.sarif.model_dump(
+        #         by_alias=True,
+        #         exclude_unset=True,
+        #         exclude_none=True,
+        #         exclude_defaults=True,
+        #         round_trip=True,
+        #         mode="json",
+        #     )
+        # )
+        # with open(json_path, "w") as f:
+        #     json.dump(
+        #         clean_sarif,
+        #         f,
+        #         indent=2,
+        #         default=str,
+        #     )
 
         # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
         json_path = output_dir.joinpath("ash.cdx.json")
         with open(json_path, "w") as f:
-            json.dump(
-                self.cyclonedx.model_dump(by_alias=True), f, indent=2, default=str
+            f.write(
+                self.cyclonedx.model_dump_json(
+                    by_alias=True,
+                    exclude_unset=True,
+                    exclude_none=True,
+                    exclude_defaults=True,
+                    round_trip=True,
+                )
             )
 
     @classmethod
