@@ -369,9 +369,7 @@ class ASHARPModel(BaseModel):
 
         return cls.from_json(json_data)
 
-    def report(
-        self, output_format: ExportFormat, output_dir: Path | None = None
-    ) -> Path:
+    def report(self, output_format: str, output_dir: Path | None = None) -> Path:
         """Format ASH model using specified reporter."""
         from automated_security_helper.reporters.ash_default import (
             ASFFReporter,
@@ -399,29 +397,27 @@ class ASHARPModel(BaseModel):
             "yaml": {"reporter": YAMLReporter(), "ext": "yaml"},
         }
         try:
-            if f"{output_format.value}" not in reporters:
+            if output_format not in reporters:
                 raise ValueError(f"Unsupported output format: {output_format}")
 
-            formatted = reporters[output_format.value]["reporter"].report(self)
+            formatted = reporters[output_format]["reporter"].report(self)
             if formatted is None:
                 ASH_LOGGER.error(
-                    f"Failed to format report with {output_format.value} reporter, returned empty string"
+                    f"Failed to format report with {output_format} reporter, returned empty string"
                 )
             if output_dir is None:
                 return formatted
             else:
                 output_dir = Path(output_dir)
                 output_dir.mkdir(parents=True, exist_ok=True)
-                output_filename = f"ash.{reporters[output_format.value]['ext']}"
+                output_filename = f"ash.{reporters[output_format]['ext']}"
                 output_file = output_dir.joinpath(output_filename)
-                ASH_LOGGER.info(
-                    f"Writing {output_format.value} report to {output_file}"
-                )
+                ASH_LOGGER.info(f"Writing {output_format} report to {output_file}")
                 output_file.write_text(formatted)
                 return output_file
         except Exception as e:
             ASH_LOGGER.error(
-                f"Failed to format report with {output_format.value} reporter: {e}"
+                f"Failed to format report with {output_format} reporter: {e}"
             )
 
 
