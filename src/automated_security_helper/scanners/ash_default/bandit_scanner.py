@@ -224,6 +224,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
             results_file = target_results_dir.joinpath("bandit.sarif")
             Path(results_file).parent.mkdir(exist_ok=True, parents=True)
+            self.config.options.excluded_paths.extend(global_ignore_paths)
 
             final_args = self._resolve_arguments(
                 target=target, results_file=results_file

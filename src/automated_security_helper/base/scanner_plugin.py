@@ -73,7 +73,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         # Ensure paths are Path objects
         self.source_dir = Path(str(self.source_dir))
         self.output_dir = Path(str(self.output_dir))
-        self.work_dir = self.output_dir.joinpath("work")
+        self.work_dir = self.output_dir.joinpath("temp")
         self.results_dir = self.output_dir.joinpath("scanners").joinpath(
             self.config.name
         )

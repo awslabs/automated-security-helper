@@ -35,12 +35,6 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
             description="Path to Grype configuration file, relative to current source directory. Defaults to searching for `.grype.yaml` and `.grype.yml` in the root of the source directory.",
         ),
     ] = None
-    skip_path: Annotated[
-        List[IgnorePathWithReason],
-        Field(
-            description='Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.',
-        ),
-    ] = []
 
 
 class GrypeScannerConfig(ScannerPluginConfigBase):
@@ -103,17 +97,6 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                     )
                 )
                 break
-
-        for item in self.config.options.skip_path:
-            ASH_LOGGER.debug(
-                f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
-            )
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--exclude",
-                    value=item.path,
-                )
-            )
 
         return super()._process_config_options()
 

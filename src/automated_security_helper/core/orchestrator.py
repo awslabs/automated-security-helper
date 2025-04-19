@@ -156,7 +156,7 @@ class ASHScanOrchestrator(BaseModel):
                 f"Creating output directory if it does not exist: {self.output_dir}"
             )
             self.output_dir.mkdir(parents=True, exist_ok=True)
-            for working_dir in ["reports", "scanners", "work"]:
+            for working_dir in ["reports", "scanners", "temp"]:
                 path_working_dir = self.output_dir.joinpath(working_dir)
                 if path_working_dir.exists():
                     ASH_LOGGER.verbose(

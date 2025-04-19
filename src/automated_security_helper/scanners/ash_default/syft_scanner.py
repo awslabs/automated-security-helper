@@ -29,7 +29,7 @@ class SyftScannerConfigOptions(ScannerOptionsBase):
             description="Path to Syft configuration file, relative to current source directory. Defaults to searching for `.syft.yaml` and `.syft.yml` in the root of the source directory.",
         ),
     ] = None
-    skip_path: Annotated[
+    exclude: Annotated[
         List[IgnorePathWithReason],
         Field(
             description='Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.',
@@ -116,16 +116,16 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         #     self.args.extra_args.append(
         #         ToolExtraArg(key="--skip-framework", value=item)
         #     )
-        # for item in self.config.options.skip_path:
-        #     ASH_LOGGER.debug(
-        #         f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
-        #     )
-        #     self.args.extra_args.append(
-        #         ToolExtraArg(
-        #             key="--skip-path",
-        #             value=item.path,
-        #         )
-        #     )
+        for item in self.config.options.exclude:
+            ASH_LOGGER.debug(
+                f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
+            )
+            self.args.extra_args.append(
+                ToolExtraArg(
+                    key="--skip-path",
+                    value=item.path,
+                )
+            )
 
         return super()._process_config_options()
 
@@ -160,6 +160,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             normalized_file_name = get_normalized_filename(str_to_normalize=target)
             target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
             results_file = target_results_dir.joinpath("syft.cdx.json")
+            self.config.options.exclude.extend(global_ignore_paths)
 
             self.args = ToolArgs(
                 format_arg="--output",

@@ -44,7 +44,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
     def model_post_init(self, context):
         self.work_dir = (
-            self.output_dir.joinpath("work").joinpath("converters").joinpath("archive")
+            self.output_dir.joinpath("temp").joinpath("converters").joinpath("archive")
         )
         if self.config is None:
             self.config = ArchiveConverterConfig()

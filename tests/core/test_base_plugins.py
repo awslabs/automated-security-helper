@@ -57,7 +57,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter(source_dir=source, output_dir=output)
         assert converter.source_dir == source
         assert converter.output_dir == output
-        assert converter.work_dir == output.joinpath("work")
+        assert converter.work_dir == output.joinpath("temp")
 
     def test_setup_paths_string_conversion(self):
         """Test setup_paths converts string paths to Path objects."""
@@ -235,7 +235,7 @@ class TestScannerPlugin:
         scanner = self.DummyScanner(config=config, source_dir=tmp_path)
         assert scanner.source_dir == tmp_path
         assert scanner.output_dir == tmp_path.joinpath("ash_output")
-        assert scanner.work_dir == scanner.output_dir.joinpath("work")
+        assert scanner.work_dir == scanner.output_dir.joinpath("temp")
         assert scanner.results_dir == scanner.output_dir.joinpath("scanners").joinpath(
             config.name
         )

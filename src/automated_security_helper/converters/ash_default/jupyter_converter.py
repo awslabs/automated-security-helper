@@ -45,7 +45,7 @@ class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfi
 
     def model_post_init(self, context):
         self.work_dir = (
-            self.output_dir.joinpath("work").joinpath("converters").joinpath("jupyter")
+            self.output_dir.joinpath("temp").joinpath("converters").joinpath("jupyter")
         )
         self.tool_version = version("nbconvert")
         if self.config is None:

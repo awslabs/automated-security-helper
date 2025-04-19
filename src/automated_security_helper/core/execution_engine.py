@@ -92,7 +92,12 @@ class ScanExecutionEngine:
         self._strategy = strategy
         self.show_progress = show_progress
         self._initialized = False  # Track initialization state
-        self._init_enabled_scanners = enabled_scanners  # None means all enabled
+        self._init_enabled_scanners = [
+            subitem.strip()
+            for item in enabled_scanners
+            if item is not None
+            for subitem in item.split(",")
+        ]
         self._enabled_scanners = []
         self._global_ignore_paths = global_ignore_paths
         self._queue = multiprocessing.Queue()
@@ -107,7 +112,7 @@ class ScanExecutionEngine:
             # Convert and validate output directory
             if output_dir:
                 self.output_dir = Path(output_dir)
-                self.work_dir = self.output_dir / "work"
+                self.work_dir = self.output_dir / "temp"
                 self.work_dir.mkdir(parents=True, exist_ok=True)
             else:
                 self.output_dir = None
@@ -314,7 +319,7 @@ class ScanExecutionEngine:
                         scanner_config_instance = scanner_config()
                         if (
                             hasattr(scanner_config_instance.config, "enabled")
-                            and scanner_config_instance.config.enabled
+                            and bool(scanner_config_instance.config.enabled)
                             and (
                                 len(self._init_enabled_scanners) == 0
                                 or scanner_name.lower().strip()

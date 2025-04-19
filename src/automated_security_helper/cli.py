@@ -142,7 +142,7 @@ def scan(
         orchestrator = ASHScanOrchestrator(
             source_dir=source_dir,
             output_dir=output_dir,
-            work_dir=output_dir.joinpath("work"),
+            work_dir=output_dir.joinpath("temp"),
             scan_output_format=[
                 ExportFormat.HTML,
                 ExportFormat.JSON,
