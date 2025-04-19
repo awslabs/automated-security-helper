@@ -291,7 +291,11 @@ class TestScannerPlugin:
         scanner = self.DummyScanner(config=config)
         test_file = tmp_path.joinpath("test.txt")
         test_file.touch()
-        scanner._pre_scan(test_file, config, target_type="source")
+        scanner._pre_scan(
+            test_file,
+            target_type="source",
+            config=config,
+        )
         scanner.scan(test_file, target_type="source")
         scanner._post_scan(
             test_file,
