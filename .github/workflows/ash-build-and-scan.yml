@@ -20,17 +20,17 @@ env:
   PYTHON_VERSION: "3.12"
 jobs:
   build:
-    strategy:
-      matrix:
-        runner:
-          # - macos-14 # Docker support on this runner is not working yet, still no options for ARM in hosted :-(
-          - ubuntu-latest
-    name: ASH Build & Scan - ${{ matrix.runner }}
-    runs-on: ${{ matrix.runner }}
+    # strategy:
+    #   matrix:
+    #     runner:
+    #       # - macos-14 # Docker support on this runner is not working yet, still no options for ARM in hosted :-(
+    #       - ubuntu-latest
+    name: ASH - Build & Scan
+    runs-on: ubuntu-latest
     env:
       IMG_NAME: ${{ github.repository }}
-      ARCH: ${{ matrix.runner == 'ubuntu-latest' && 'amd64' || 'arm64' }}
-      SUMMARY_FILE: 'ASH Scan Result Summary - ${{ matrix.runner }}.md'
+      ARCH: ubuntu-latest
+      SUMMARY_FILE: 'ASH Scan Result Summary - ubuntu-latest.md'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
