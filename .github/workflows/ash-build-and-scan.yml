@@ -71,15 +71,23 @@ jobs:
           # Disable exit on error
           set +e
 
+          tree .
+
           # Run ASH against itself
-          ./ash --source-dir $(pwd) --output-dir ash_output --build-target ci --strategy sequential --config ./ash.yaml --verbose | \
+          ./ash \
+            --source-dir $(pwd) \
+            --output-dir ash_output \
+            --build-target ci \
+            --strategy sequential \
+            --config ./ash.yaml \
+            --verbose | \
               tee ash_stdout.txt
 
           # cat the output contents to build the summary markdown
           # strip out the color codes from the output
           ASH_STDOUT=$(cat ash_stdout.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-          ls -alhr ash_output
-          ASH_AGG_RESULTS=$(cat ash_output/ash_aggregated_results.json | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+          # ASH_AGG_RESULTS=$(cat ash_output/ash_aggregated_results.json | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+          ASH_AGG_RESULTS=$(tree ash_output)
 
           # Write the summary markdown to a file
           cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
@@ -94,10 +102,10 @@ jobs:
           # <details>
           #   <summary>Show ash_aggregated_results.json</summary>
 
-          #   \`\`\`bash
-          #   ${ASH_AGG_RESULTS}
-          #   \`\`\`
-          # </details>
+            \`\`\`bash
+            ${ASH_AGG_RESULTS}
+            \`\`\`
+          </details>
           EOF
 
           # Write the summary markdown to the GITHUB_OUTPUT
@@ -153,13 +161,13 @@ jobs:
         if: success() || failure() # always run even if the previous step fails
         continue-on-error: true
         with:
-          report_paths: ash_output/ash.junit.xml
+          report_paths: '**/*.junit.xml'
 
       - name: Upload ASH SARIF file
         uses: github/codeql-action/upload-sarif@v3
         continue-on-error: true
         with:
-          sarif_file: ash_output/ash_sarif.sarif
+          sarif_file: ash_output/ash.sarif
           # Used to differentiate multiple results for one commit
           category: ash
 
