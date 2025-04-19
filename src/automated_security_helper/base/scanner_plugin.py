@@ -326,8 +326,9 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     def scan(
         self,
         target: Path,
-        config: T | ScannerPluginConfigBase = None,
+        target_type: Literal["source", "temp"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
+        config: T | ScannerPluginConfigBase = None,
         *args,
         **kwargs,
     ) -> Any | SarifReport | CycloneDXReport:

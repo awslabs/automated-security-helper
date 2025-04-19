@@ -92,7 +92,7 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "--cov-report term-missing --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
+addopts = "--cov-report xml:test-results/pytest.coverage.xml --cov-report term-missing --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
 asyncio_default_fixture_loop_scope = "module"
 
 [build-system]

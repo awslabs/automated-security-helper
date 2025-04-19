@@ -104,7 +104,7 @@ async def test_bandit_scanner_scan(bandit_scanner, test_source_dir):
 
     Path(test_source_dir).mkdir(parents=True, exist_ok=True)
     Path(test_source_dir).joinpath("test.py").touch()
-    result = bandit_scanner.scan(test_source_dir)
+    result = bandit_scanner.scan(test_source_dir, target_type="source")
     assert result is not None
 
 
@@ -113,7 +113,7 @@ def test_bandit_scanner_scan_error(bandit_scanner, mock_subprocess_run):
     mock_subprocess_run.side_effect = Exception("Scan failed")
 
     with pytest.raises(ScannerError) as exc_info:
-        bandit_scanner.scan(Path("/nonexistent"))
+        bandit_scanner.scan(Path("/nonexistent"), target_type="source")
     assert "Bandit scan failed" in str(exc_info.value)
 
 

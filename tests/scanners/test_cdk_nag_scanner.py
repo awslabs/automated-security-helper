@@ -104,7 +104,7 @@ def test_cdk_nag_scanner_scan(cdk_nag_scanner, mock_run_cdk_nag, tmp_path):
     }
     mock_run_cdk_nag.return_value = mock_results
 
-    result = cdk_nag_scanner.scan(target_dir)
+    result = cdk_nag_scanner.scan(target_dir, target_type="source")
 
     assert result is not None
     assert len(result.runs) == 1
@@ -126,7 +126,7 @@ def test_cdk_nag_scanner_no_templates(cdk_nag_scanner, tmp_path):
     target_dir = tmp_path / "target"
     target_dir.mkdir()
 
-    sarif_report = cdk_nag_scanner.scan(target_dir)
+    sarif_report = cdk_nag_scanner.scan(target_dir, target_type="source")
 
     assert len(sarif_report.runs[0].results) == 5
 
@@ -143,7 +143,7 @@ def test_cdk_nag_scanner_invalid_template(cdk_nag_scanner, mock_run_cdk_nag, tmp
 
     mock_run_cdk_nag.return_value = None  # Simulate invalid template
 
-    result = cdk_nag_scanner.scan(target_dir)
+    result = cdk_nag_scanner.scan(target_dir, target_type="source")
     assert result is not None
     ASH_LOGGER.warning(result.runs[0].results)
     assert len(result.runs[0].results) == 0
@@ -240,7 +240,7 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 """)
-    result = cdk_nag_scanner.scan(target_dir)
+    result = cdk_nag_scanner.scan(target_dir, target_type="source")
 
     assert result is not None
     assert len(result.runs[0].results) == 14

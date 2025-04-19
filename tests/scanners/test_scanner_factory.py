@@ -80,9 +80,16 @@ class TestScannerFactory:
         with pytest.raises(ValueError, match="Unable to determine scanner class"):
             factory.create_scanner("test", None, test_source_dir, test_output_dir)
 
-    def test_scanner_factory_type_lookup(self, ash_config):
+    def test_scanner_factory_type_lookup(
+        self, ash_config, test_source_dir, test_output_dir
+    ):
         """Test lookup of scanner classes by name."""
-        factory = ScannerFactory(config=ash_config)
+        factory = ScannerFactory(
+            config=ash_config,
+            source_dir=test_source_dir,
+            output_dir=test_output_dir,
+            registered_scanner_plugins=[],
+        )
 
         # Test valid lookups
         assert (

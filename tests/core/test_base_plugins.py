@@ -1,5 +1,6 @@
 """Tests for base plugin classes."""
 
+from typing import List, Literal
 import pytest
 from pathlib import Path
 from datetime import datetime
@@ -16,7 +17,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
     ScannerError,
 )
-from automated_security_helper.models.core import ToolArgs, ToolExtraArg
+from automated_security_helper.models.core import (
+    IgnorePathWithReason,
+    ToolArgs,
+    ToolExtraArg,
+)
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models.asharp_model import ASHARPModel
 
@@ -207,7 +212,15 @@ class TestScannerPlugin:
         def validate(self) -> bool:
             return True
 
-        def scan(self, target: Path, config=None, *args, **kwargs):
+        def scan(
+            self,
+            target: Path,
+            target_type: Literal["source", "temp"],
+            global_ignore_paths: List[IgnorePathWithReason] = [],
+            config=None,
+            *args,
+            **kwargs,
+        ):
             self.output.append("hello world")
             return SarifReport(runs=[])
 
@@ -279,7 +292,7 @@ class TestScannerPlugin:
         test_file = tmp_path.joinpath("test.txt")
         test_file.touch()
         scanner._pre_scan(test_file, config)
-        scanner.scan(test_file)
+        scanner.scan(test_file, target_type="source")
         scanner._post_scan(test_file)
         assert scanner.end_time is not None
 
@@ -291,7 +304,7 @@ class TestScannerPlugin:
             command="echo",
             args=ToolArgs(extra_args=[ToolExtraArg(key="hello", value="world")]),
         )
-        scanner.scan(test_source_dir)
+        scanner.scan(test_source_dir, target_type="source")
         assert scanner.exit_code == 0
         assert len(scanner.output) > 0
 

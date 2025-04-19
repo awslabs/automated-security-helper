@@ -282,7 +282,7 @@ if __name__ == "__main__":
             )
         )
     )
-    report = scanner.scan(target=Path("."))
+    report = scanner.scan(target=Path("."), target_type="source")
 
     print(
         report.model_dump_json(

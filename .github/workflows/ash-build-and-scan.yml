@@ -156,6 +156,8 @@ jobs:
         with:
           report_paths: '**/*.junit.xml'
           include_passed: true
+          update_check: true
+          check_name: ASH Scan JUnit Test Report
 
       - name: Upload ASH SARIF file
         uses: github/codeql-action/upload-sarif@v3
@@ -214,6 +216,21 @@ jobs:
         with:
           report_paths: '**/pytest.junit.xml'
           include_passed: true
+          update_check: true
+          check_name: PyTest JUnit Test Report
+
+      - name: Code Coverage Report
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        continue-on-error: true
+        with:
+          filename: 'test-results/pytest.coverage.xml'
+          badge: true
+          format: markdown
+          hide_branch_rate: false
+          hide_complexity: false
+          indicators: true
+          output: both
+          thresholds: '50 75'
 
 
   build-docs:

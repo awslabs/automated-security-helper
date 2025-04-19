@@ -18,8 +18,7 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 @pytest.fixture
 def custom_scanner():
     """Create a CustomScanner instance for testing."""
-    scanner = CustomScanner()
-    scanner.command = "custom-scan"  # Set a command for testing
+    scanner = CustomScanner(command="custom-scan")
     return scanner
 
 
@@ -34,31 +33,33 @@ def mock_subprocess_run():
 def test_custom_scanner_init(custom_scanner):
     """Test CustomScanner initialization."""
     assert custom_scanner.command == "custom-scan"
-    assert custom_scanner.tool_type == "CUSTOM"
+    assert custom_scanner.tool_type == "UNKNOWN"
     assert isinstance(custom_scanner.config, CustomScannerConfig)
 
 
 def test_custom_scanner_validate(custom_scanner):
     """Test CustomScanner validation."""
+    custom_scanner.command = "python"
     assert custom_scanner.validate() is True
 
 
 def test_custom_scanner_no_command():
     """Test CustomScanner with no command specified."""
-    scanner = CustomScanner()
-    result = scanner.scan(Path("/test"))
-    assert result is None
+    with pytest.raises(ScannerError) as exc_info:
+        CustomScanner()
+        assert "(custom) Command not provided for custom scanner!" in exc_info
 
 
 def test_custom_scanner_configure():
     """Test CustomScanner configuration."""
     scanner = CustomScanner(
+        command="custom-scan",
         config=CustomScannerConfig(
             name="test-scanner",
             enabled=True,
             type="CUSTOM",
             options=CustomScannerConfigOptions(),
-        )
+        ),
     )
     assert scanner.config.name == "test-scanner"
     assert scanner.config.enabled is True
@@ -84,7 +85,7 @@ async def test_custom_scanner_scan(custom_scanner, mock_subprocess_run, tmp_path
     }
     custom_scanner.output = [json.dumps(mock_results)]
 
-    result = custom_scanner.scan(target_dir)
+    result = custom_scanner.scan(target_dir, target_type="source")
 
     assert result is not None
     assert len(result.runs) == 1
@@ -107,7 +108,7 @@ def test_custom_scanner_scan_error(custom_scanner, mock_subprocess_run):
     custom_scanner.errors = ["Error details"]
 
     with pytest.raises(ScannerError) as exc_info:
-        custom_scanner.scan(Path("/nonexistent"))
+        custom_scanner.scan(Path("/nonexistent"), target_type="source")
     assert "Target /nonexistent does not exist!" in str(exc_info.value)
 
 
@@ -120,7 +121,7 @@ def test_custom_scanner_with_empty_results(custom_scanner, tmp_path):
     mock_results = {"results": []}
     custom_scanner.output = [json.dumps(mock_results)]
 
-    result = custom_scanner.scan(target_dir)
+    result = custom_scanner.scan(target_dir, target_type="source")
 
     assert result is not None
     assert len(result.runs) == 1
@@ -135,7 +136,7 @@ def test_custom_scanner_sarif_metadata(custom_scanner, tmp_path):
     mock_results = {"results": []}
     custom_scanner.output = [json.dumps(mock_results)]
 
-    result = custom_scanner.scan(target_dir)
+    result = custom_scanner.scan(target_dir, target_type="source")
 
     # Verify SARIF metadata
     assert result.properties.ashVersion == get_ash_version()
@@ -170,7 +171,7 @@ def test_custom_scanner_with_multiple_findings(custom_scanner, tmp_path):
     }
     custom_scanner.output = [json.dumps(mock_results)]
 
-    result = custom_scanner.scan(target_dir)
+    result = custom_scanner.scan(target_dir, target_type="source")
 
     assert result is not None
     assert len(result.runs[0].results) == 2
