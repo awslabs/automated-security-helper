@@ -48,7 +48,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter()
         assert converter.source_dir == Path(".")
         assert converter.output_dir == Path("ash_output")
-        assert converter.work_dir == Path("ash_output/work")
+        assert converter.work_dir == Path("ash_output/temp")
 
     def test_setup_paths_custom(self):
         """Test setup_paths with custom values."""
