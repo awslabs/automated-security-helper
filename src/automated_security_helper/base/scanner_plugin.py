@@ -99,16 +99,18 @@ class ScannerPluginBase(BaseModel, Generic[T]):
 
         ASH_LOGGER._log(
             level,
-            f"([yellow]{self.config.name or self.__class__.__name__}[/yellow]{tt})\t{'\n'.join(msg)}",
+            f"([yellow]{self.config.name or self.__class__.__name__}[/yellow]{tt})"
+            + "\t"
+            + "\n".join(msg),
             args=(),
         )
         if level == logging.ERROR or append_to_stream == "stderr":
             self.errors.append(
-                f"({self.config.name or self.__class__.__name__}) {'\n'.join(msg)}"
+                f"({self.config.name or self.__class__.__name__}) " + "\n".join(msg)
             )
         elif append_to_stream == "stdout":
             self.output.append(
-                f"({self.config.name or self.__class__.__name__}) {'\n'.join(msg)}"
+                f"({self.config.name or self.__class__.__name__}) " + "\n".join(msg)
             )
 
     def _process_config_options(self) -> None:
