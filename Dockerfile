@@ -206,9 +206,6 @@ RUN adduser --disabled-password --disabled-login \
 RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out /deps && \
     chmod 750 -R ${ASHUSER_HOME} /src /out /deps
 
-# Setting default WORKDIR to ${ASHUSER_HOME}
-WORKDIR ${ASHUSER_HOME}
-
 USER ${UID}:${GID}
 
 #
@@ -223,4 +220,4 @@ HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD type ash || exit 1
 
 ENTRYPOINT [ ]
-CMD [ "ashv3", "--verbose", "--source", "/src", "--output","/out", "--strategy", "sequential", "--scanners", "bandit,cdknag" ]
+CMD [ "ashv3" ]

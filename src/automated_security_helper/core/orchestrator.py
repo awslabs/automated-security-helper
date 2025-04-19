@@ -164,16 +164,13 @@ class ASHScanOrchestrator(BaseModel):
             self.output_dir = self.source_dir.joinpath("ash_output")
         elif not isinstance(self.output_dir, Path):
             self.output_dir = Path(self.output_dir)
-
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        if not self.config.no_cleanup and self.output_dir.joinpath("scanners").exists():
-            shutil.rmtree(self.output_dir.joinpath("scanners"))
 
         self.work_dir = self.output_dir.joinpath("work")
         if self.work_dir is None:
             self.work_dir = self.output_dir.joinpath("work")
 
-        if self.work_dir.exists():
+        if not self.config.no_cleanup and self.work_dir.exists():
             shutil.rmtree(self.work_dir)
 
         self.work_dir.mkdir(parents=True, exist_ok=True)

@@ -70,7 +70,7 @@ CheckFrameworks = Literal[
 
 class CheckovScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
-        str,
+        Path | str | None,
         Field(
             description="Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
         ),

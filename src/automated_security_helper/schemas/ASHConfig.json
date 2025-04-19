@@ -321,10 +321,21 @@
           "type": "array"
         },
         "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
           "description": "Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
-          "title": "Config File",
-          "type": "string"
+          "title": "Config File"
         },
         "frameworks": {
           "default": [
@@ -510,10 +521,21 @@
       "additionalProperties": true,
       "properties": {
         "baseline_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
           "description": "Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
-          "title": "Baseline File",
-          "type": "string"
+          "title": "Baseline File"
         },
         "scan_settings": {
           "additionalProperties": {

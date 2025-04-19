@@ -41,7 +41,7 @@ from detect_secrets.core.plugins.util import get_mapping_from_secret_type_to_cla
 
 class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
     baseline_file: Annotated[
-        str,
+        Path | str | None,
         Field(
             description="Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
         ),
@@ -103,7 +103,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # Look through each baseline file path to see if it exists and configure
         # the scan settings according to the first baseline file found
         for baseline_path in possible_baseline_paths:
-            ASH_LOGGER.info(Path(baseline_path).absolute())
+            ASH_LOGGER.verbose(
+                f"Checking for detect-secrets config @ {Path(baseline_path).absolute()}"
+            )
             if bool(self.config.options.scan_settings):
                 pass
             elif Path(baseline_path).absolute().exists():
@@ -111,7 +113,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 with open(abs_baseline_path, "r") as f:
                     self.config.options.scan_settings = json.load(f)
                     f.close()
-                ASH_LOGGER.debug(
+                ASH_LOGGER.verbose(
                     f"Custom settings identified: {self.config.options.scan_settings}"
                 )
                 break
