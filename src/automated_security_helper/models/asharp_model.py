@@ -308,8 +308,9 @@ class ASHARPModel(BaseModel):
 
     def save_model(self, output_dir: Path) -> None:
         """Save ASHARPModel as JSON alongside aggregated results."""
-        if not output_dir.exists():
-            output_dir.mkdir(parents=True)
+        from automated_security_helper.config.ash_config import ASHConfig
+
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Save aggregated results as JSON
         json_path = output_dir.joinpath("ash_aggregated_results.json")
@@ -357,6 +358,26 @@ class ASHARPModel(BaseModel):
                     round_trip=True,
                 )
             )
+
+        ash_config: ASHConfig = self.ash_config
+
+        for fmt in ash_config.output_formats:
+            outfile = self.report(
+                output_format=fmt,
+                output_dir=output_dir,
+            )
+            if outfile is None:
+                ASH_LOGGER.warning(f"Failed to generate output for format {fmt}")
+            elif isinstance(outfile, Path) and not outfile.exists():
+                ASH_LOGGER.warning(
+                    f"Output file {outfile} does not exist for format {fmt}"
+                )
+            elif isinstance(outfile, Path) and outfile.exists():
+                ASH_LOGGER.verbose(f"Generated output for format {fmt} at {outfile}")
+            else:
+                ASH_LOGGER.verbose(
+                    f"Unexpected response when formatting {fmt}: {outfile}"
+                )
 
     @classmethod
     def load_model(cls, json_path: Path) -> Optional["ASHARPModel"]:

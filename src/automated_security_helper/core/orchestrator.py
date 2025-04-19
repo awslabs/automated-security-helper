@@ -285,24 +285,28 @@ class ASHScanOrchestrator(BaseModel):
                 asharp_model_results = ASHARPModel(
                     description="ASH execution engine returned no results!"
                 )
-            else:
-                for fmt in self.config.output_formats:
-                    outfile = asharp_model_results.report(
-                        output_format=fmt,
-                        output_dir=self.output_dir,
-                    )
-                    if outfile is None:
-                        ASH_LOGGER.warning(
-                            f"Failed to generate output for format {fmt}"
-                        )
-                    elif isinstance(outfile, Path) and not outfile.exists():
-                        ASH_LOGGER.warning(
-                            f"Output file {outfile} does not exist for format {fmt}"
-                        )
-                    else:
-                        ASH_LOGGER.verbose(
-                            f"Generated output for format {fmt} at {outfile}"
-                        )
+                # else:
+                #     for fmt in self.config.output_formats:
+                #         outfile = asharp_model_results.report(
+                #             output_format=fmt,
+                #             output_dir=self.output_dir,
+                #         )
+                #         if outfile is None:
+                #             ASH_LOGGER.warning(
+                #                 f"Failed to generate output for format {fmt}"
+                #             )
+                #         elif isinstance(outfile, Path) and not outfile.exists():
+                #             ASH_LOGGER.warning(
+                #                 f"Output file {outfile} does not exist for format {fmt}"
+                #             )
+                #         elif isinstance(outfile, Path) and outfile.exists():
+                #             ASH_LOGGER.verbose(
+                #                 f"Generated output for format {fmt} at {outfile}"
+                #             )
+                #         else:
+                #             ASH_LOGGER.verbose(
+                #                 f"Unexpected response when formatting {fmt}: {outfile}"
+                #             )
 
                 ASH_LOGGER.info("ASH scan completed successfully!")
             if not self.config.no_cleanup:

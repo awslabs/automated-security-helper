@@ -12,10 +12,9 @@ ignore_paths:
   - .pytest_cache
   - .mypy_cache
 output_formats:
-  - sarif
   - junitxml
-  - cyclonedx
   - html
+  - sarif
 severity_threshold: ALL
 scanners:
   bandit:
