@@ -415,9 +415,8 @@ class ASHARPModel(BaseModel):
                     output_dir.mkdir(parents=True, exist_ok=True)
                     output_filename = f"ash.{reporters[fmt.value]['ext']}"
                     output_file = output_dir.joinpath(output_filename)
-                    with open(output_file, "w") as f:
-                        ASH_LOGGER.info(f"Writing {fmt.value} report to {output_file}")
-                        f.write(formatted)
+                    ASH_LOGGER.info(f"Writing {fmt.value} report to {output_file}")
+                    output_file.write_text(formatted)
             except Exception as e:
                 ASH_LOGGER.error(
                     f"Failed to format report with {fmt.value} reporter: {e}"
