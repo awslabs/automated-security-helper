@@ -78,6 +78,7 @@ jobs:
           # cat the output contents to build the summary markdown
           # strip out the color codes from the output
           ASH_STDOUT=$(cat ash_stdout.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+          ls -alhr ash_output
           ASH_AGG_RESULTS=$(cat ash_output/ash_aggregated_results.json | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
 
           # Write the summary markdown to a file
@@ -90,13 +91,13 @@ jobs:
           ${ASH_STDOUT}
           \`\`\`
 
-          <details>
-            <summary>Show ash_aggregated_results.json</summary>
+          # <details>
+          #   <summary>Show ash_aggregated_results.json</summary>
 
-            \`\`\`bash
-            ${ASH_AGG_RESULTS}
-            \`\`\`
-          </details>
+          #   \`\`\`bash
+          #   ${ASH_AGG_RESULTS}
+          #   \`\`\`
+          # </details>
           EOF
 
           # Write the summary markdown to the GITHUB_OUTPUT
