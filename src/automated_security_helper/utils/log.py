@@ -1,5 +1,6 @@
 import json
 import logging
+from rich.logging import RichHandler
 from pathlib import Path
 
 
@@ -242,29 +243,54 @@ class Color:
 def get_logger(
     name: str = "ash", level: str | int | None = None, output_dir: Path | None = None
 ) -> ASHLogger:
-    VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
-    DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
+    # VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
+    # DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
 
     logger = logging.getLogger(name)
     if level is not None:
         logger.setLevel(level)
-        logger.debug(
-            "Log level set to: %s",
-            logging._levelToName[level] if isinstance(level, int) else level,
-        )
     elif logger.level is None or logger.level == 0:
         logger.setLevel(logging.INFO)
-        logger.info("Log level set to: INFO")
 
-    handler = logging.StreamHandler()
-    if logger.level is None or logger.level > 15:
-        COLOR_FORMAT = formatter_message(DEFAULT_FORMAT, True)
+    logger._log(
+        15,
+        f"Log level set to: {logging._levelToName[level] if isinstance(level, int) else level}",
+        args=(),
+    )
+
+    logger.verbose("Logger initialized: %s", name)
+    logger.verbose(
+        "Logger effective level: %s",
+        logging._levelToName[logger.getEffectiveLevel() or 0],
+    )
+
+    SHOW_DEBUG_INFO = logging._levelToName[logger.getEffectiveLevel() or 0] != "INFO"
+    logger.info("Show debug info: %s", SHOW_DEBUG_INFO)
+    if SHOW_DEBUG_INFO:
+        handler = RichHandler(
+            show_level=True,
+            enable_link_path=True,
+            rich_tracebacks=True,
+            show_path=True,
+            tracebacks_show_locals=True,
+        )
     else:
-        COLOR_FORMAT = formatter_message(VERBOSE_FORMAT, True)
+        handler = RichHandler(
+            show_level=True,
+            enable_link_path=False,
+            show_path=False,
+            tracebacks_show_locals=False,
+            show_time=False,
+            rich_tracebacks=True,
+        )
+    # if logger.level is None or logger.level > 15:
+    #     COLOR_FORMAT = formatter_message(DEFAULT_FORMAT, True)
+    # else:
+    #     COLOR_FORMAT = formatter_message(VERBOSE_FORMAT, True)
 
-    color_formatter = ColoredFormatter(COLOR_FORMAT)
+    # color_formatter = ColoredFormatter(COLOR_FORMAT)
 
-    handler.setFormatter(color_formatter)
+    handler.setFormatter(logging.Formatter("%(message)s"))
 
     # if logger.level == logging.DEBUG:
     #     formatter_str = "[%(asctime)s] [%(name)s] [%(filename)s:%(lineno)d] %(levelname)s: %(message)s"
@@ -295,19 +321,21 @@ def get_logger(
 
         # Create file handler for logging to a file (log all five levels)
         file_handler = logging.FileHandler(log_file.as_posix())
-        logger.info("Logging to file: %s", log_file.as_posix())
+        logger.verbose("Logging to file: %s", log_file.as_posix())
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(
             JsonFormatter(
                 {
+                    "timestamp": "asctime",
                     "level": "levelname",
+                    "filename": "filename",
+                    "lineno": "lineno",
                     "message": "message",
                     "loggerName": "name",
                     "processName": "processName",
                     "processID": "process",
                     "threadName": "threadName",
                     "threadID": "thread",
-                    "timestamp": "asctime",
                 }
             )
         )
@@ -316,10 +344,6 @@ def get_logger(
     return logger
 
 
-ASH_LOGGER = get_logger(
+ASH_LOGGER = logging.getLogger(
     name="ash",
-    # Default to debug when running scripts that only import ASH_LOGGER
-    # Otherwise if running through orchestrator.py, use level passed in from caller with
-    # default of INFO
-    # level=logging.DEBUG,
 )

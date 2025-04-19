@@ -67,7 +67,7 @@
           "default": [],
           "description": "List of excluded paths and their corresponding reason to exclude from scanning",
           "items": {
-            "$ref": "#/$defs/PathExclusionEntry"
+            "$ref": "#/$defs/IgnorePathWithReason"
           },
           "title": "Excluded Paths",
           "type": "array"
@@ -437,7 +437,7 @@
           "default": [],
           "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
           "items": {
-            "$ref": "#/$defs/PathExclusionEntry"
+            "$ref": "#/$defs/IgnorePathWithReason"
           },
           "title": "Skip Path",
           "type": "array"
@@ -597,6 +597,27 @@
       "title": "GrypeScannerConfig",
       "type": "object"
     },
+    "IgnorePathWithReason": {
+      "description": "Represents a path exclusion entry.",
+      "properties": {
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "IgnorePathWithReason",
+      "type": "object"
+    },
     "NpmAuditScannerConfig": {
       "additionalProperties": true,
       "description": "JS/TS Dependency scanner configuration.",
@@ -636,27 +657,6 @@
         }
       },
       "title": "NpmAuditScannerConfig",
-      "type": "object"
-    },
-    "PathExclusionEntry": {
-      "description": "Represents a path exclusion entry.",
-      "properties": {
-        "path": {
-          "description": "Path or pattern to exclude",
-          "title": "Path",
-          "type": "string"
-        },
-        "reason": {
-          "description": "Reason for exclusion",
-          "title": "Reason",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path",
-        "reason"
-      ],
-      "title": "PathExclusionEntry",
       "type": "object"
     },
     "ReporterPluginConfigBase": {
@@ -1247,13 +1247,13 @@
       "title": "Fail On Findings",
       "type": "boolean"
     },
-    "ignore_paths": {
+    "global_ignore_paths": {
       "default": [],
-      "description": "List of paths to ignore during scanning",
+      "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
       "items": {
-        "type": "string"
+        "$ref": "#/$defs/IgnorePathWithReason"
       },
-      "title": "Ignore Paths",
+      "title": "Global Ignore Paths",
       "type": "array"
     },
     "max_concurrent_scanners": {

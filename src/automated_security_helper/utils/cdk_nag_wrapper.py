@@ -151,6 +151,9 @@ def run_cdk_nag_against_cfn_template(
         template_path=template_path,
     )
 
+    with open(template_path, "r") as f:
+        template_lines = f.readlines()
+
     # loggers: Sequence[MemoryLogger] = [MemoryLogger()]
     for pack in nag_packs:
         ASH_LOGGER.debug(f"Adding nag pack '{pack}'")
@@ -230,6 +233,16 @@ def run_cdk_nag_against_cfn_template(
                 for resource_id, item in model.Resources.items()
                 if resource_id == resource_log_id
             ][0]
+            # Get location in `template_lines` of line number and column
+            # number of the resource_log_id
+            resource_line = None
+            resource_column = None
+            for i, line_str in enumerate(template_lines):
+                if resource_log_id in line_str:
+                    resource_line = i
+                    resource_column = line_str.index(resource_log_id)
+                    break
+
             cfn_resource_dict = {
                 "Resources": {resource_log_id: cfn_resource.model_dump(by_alias=True)}
             }
@@ -282,8 +295,10 @@ def run_cdk_nag_against_cfn_template(
                                 uri=get_shortest_name(input=template_path),
                             ),
                             region=Region(
-                                startLine=1,
-                                endLine=1,
+                                startLine=(resource_line or 1),
+                                endLine=(resource_line or 1),
+                                startColumn=(resource_column or 1),
+                                endColumn=(resource_column or 1) + len(resource_log_id),
                                 snippet=ArtifactContent(
                                     text=dump_yaml(
                                         {

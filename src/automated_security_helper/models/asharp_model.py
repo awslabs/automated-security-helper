@@ -131,7 +131,7 @@ class ASHARPModel(BaseModel):
             Run(
                 tool=Tool(
                     driver=ToolComponent(
-                        name="ASH Aggregated Results",
+                        name="AWS Labs - Automated Security Helper",
                         fullName="awslabs/automated-security-helper",
                         version=get_ash_version(),
                         organization="Amazon Web Services",

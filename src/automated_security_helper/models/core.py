@@ -48,7 +48,7 @@ class ScanStatistics(BaseModel):
     ] = 0.0
 
 
-class PathExclusionEntry(BaseModel):
+class IgnorePathWithReason(BaseModel):
     """Represents a path exclusion entry."""
 
     path: Annotated[str, Field(..., description="Path or pattern to exclude")]

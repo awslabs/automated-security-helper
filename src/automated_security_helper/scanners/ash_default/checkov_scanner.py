@@ -10,7 +10,7 @@ from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
-    PathExclusionEntry,
+    IgnorePathWithReason,
     ToolExtraArg,
 )
 from automated_security_helper.base.scanner_plugin import (
@@ -76,7 +76,7 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     skip_path: Annotated[
-        List[PathExclusionEntry],
+        List[IgnorePathWithReason],
         Field(
             description='Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.',
         ),

@@ -16,6 +16,7 @@ from automated_security_helper.config.scanner_types import (
     GrypeScannerConfig,
     SyftScannerConfig,
 )
+from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.reporters.ash_default.asff_reporter import (
     ASFFReporterConfig,
 )
@@ -213,9 +214,11 @@ class ASHConfig(BaseModel):
         ),
     ] = True
 
-    ignore_paths: Annotated[
-        List[str],
-        Field(description="List of paths to ignore during scanning"),
+    global_ignore_paths: Annotated[
+        List[IgnorePathWithReason],
+        Field(
+            description="Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'."
+        ),
     ] = []
 
     output_dir: Annotated[

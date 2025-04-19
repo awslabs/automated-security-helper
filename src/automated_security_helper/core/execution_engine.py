@@ -519,9 +519,9 @@ class ScanExecutionEngine:
                 )
                 raw_results = {"error": str(e)}
             finally:
-                # ASH_LOGGER.debug(
-                #     f"{scanner_plugin.__class__.__name__} raw_results: {raw_results}"
-                # )
+                ASH_LOGGER.debug(
+                    f"{scanner_plugin.__class__.__name__} raw_results: {raw_results}"
+                )
                 container.raw_results = raw_results
 
                 if raw_results is not None:
@@ -561,16 +561,17 @@ class ScanExecutionEngine:
                 f"[cyan]({scanner_name}) Scanning {target_type} dir...", total=100
             )
 
-            results = self._execute_scanner(
-                scanner_name=scanner_name,
-                scanner_plugin=scanner_plugin,
-                scan_target=scan_target,
-                target_type=target_type,
-            )
-            self._process_results(results)
-            progress.update(task, completed=100)
-            if self._progress:
-                self._progress.increment()
+            try:
+                progress.advance(task)
+                results = self._execute_scanner(
+                    scanner_name=scanner_name,
+                    scanner_plugin=scanner_plugin,
+                    scan_target=scan_target,
+                    target_type=target_type,
+                )
+                self._process_results(results)
+            finally:
+                progress.update(task, completed=100)
 
     def _execute_parallel(self, progress: Progress) -> None:
         """Execute scanners in parallel and update ASHARPModel."""

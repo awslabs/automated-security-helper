@@ -10,7 +10,7 @@ from automated_security_helper.scanners.ash_default.bandit_scanner import (
     BanditScannerConfigOptions,
 )
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import PathExclusionEntry
+from automated_security_helper.models.core import IgnorePathWithReason
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def test_bandit_scanner_configure():
             confidence_level="high",
             severity_level="medium",
             ignore_nosec=True,
-            excluded_paths=[PathExclusionEntry(path="tests/*", reason="Test files")],
+            excluded_paths=[IgnorePathWithReason(path="tests/*", reason="Test files")],
         )
     )
     scanner.configure(config)
@@ -87,8 +87,8 @@ def test_process_config_options_with_config_files(
 def test_process_config_options_exclusions(bandit_scanner):
     """Test processing of exclusion options."""
     bandit_scanner.config.options.excluded_paths = [
-        PathExclusionEntry(path="tests/*", reason="Test files"),
-        PathExclusionEntry(path="venv/*", reason="Virtual environment"),
+        IgnorePathWithReason(path="tests/*", reason="Test files"),
+        IgnorePathWithReason(path="venv/*", reason="Virtual environment"),
     ]
     bandit_scanner._process_config_options()
 

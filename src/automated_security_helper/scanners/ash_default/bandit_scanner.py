@@ -10,7 +10,7 @@ from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
-    PathExclusionEntry,
+    IgnorePathWithReason,
     ToolExtraArg,
 )
 from automated_security_helper.base.scanner_plugin import (
@@ -47,7 +47,7 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = False
     excluded_paths: Annotated[
-        List[PathExclusionEntry],
+        List[IgnorePathWithReason],
         Field(
             description="List of excluded paths and their corresponding reason to exclude from scanning"
         ),

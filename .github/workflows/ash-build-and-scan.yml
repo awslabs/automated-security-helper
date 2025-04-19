@@ -78,7 +78,7 @@ jobs:
             --source-dir $(pwd) \
             --output-dir ash_output \
             --build-target ci \
-            --strategy sequential \
+            --strategy parallel \
             --config ./ash.yaml \
             --verbose | \
               tee ash_stdout.txt
@@ -91,16 +91,8 @@ jobs:
 
           # Write the summary markdown to a file
           cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
-          ## ASH Scan Output
-
-          \`\`\`bash
-          $ cat ash_stdout.txt
-
-          ${ASH_STDOUT}
-          \`\`\`
-
-          # <details>
-          #   <summary>Show ash_aggregated_results.json</summary>
+          <details>
+            <summary>ASH Scan Artifact Tree</summary>
 
             \`\`\`bash
             ${ASH_AGG_RESULTS}

@@ -10,7 +10,7 @@ from automated_security_helper.scanners.ash_default.checkov_scanner import (
     CheckovScannerConfigOptions,
 )
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import PathExclusionEntry
+from automated_security_helper.models.core import IgnorePathWithReason
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def test_checkov_scanner_configure():
         config=CheckovScannerConfig(
             options=CheckovScannerConfigOptions(
                 config_file=".checkov.yaml",
-                skip_path=[PathExclusionEntry(path="tests/*", reason="Test files")],
+                skip_path=[IgnorePathWithReason(path="tests/*", reason="Test files")],
                 frameworks=["terraform", "cloudformation"],
                 skip_frameworks=["secrets"],
                 additional_formats=["json", "junitxml"],
@@ -113,8 +113,8 @@ def test_process_config_options_frameworks(checkov_scanner):
 def test_process_config_options_skip_paths(checkov_scanner):
     """Test processing of skip path options."""
     checkov_scanner.config.options.skip_path = [
-        PathExclusionEntry(path="tests/*", reason="Test files"),
-        PathExclusionEntry(path="venv/*", reason="Virtual environment"),
+        IgnorePathWithReason(path="tests/*", reason="Test files"),
+        IgnorePathWithReason(path="venv/*", reason="Virtual environment"),
     ]
     checkov_scanner._process_config_options()
 

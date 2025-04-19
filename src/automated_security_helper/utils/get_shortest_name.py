@@ -18,6 +18,6 @@ def get_shortest_name(input: str | Path):
         cwd_posix = cwd.absolute().as_posix()
         if input_posix.startswith(cwd_posix) and input_posix != cwd_posix:
             # If input starts with the cwd, update it to the relative path
-            input = in_path.relative_to(cwd)
+            input = in_path.absolute().relative_to(cwd)
     finally:
         return Path(input).as_posix()

@@ -27,7 +27,7 @@ Resources:
             Effect: Deny
             Principal: '*'
             Action: s3:*
-            Resource: 
+            Resource:
               - !Sub '${S3Bucket2.Arn}/*'
               - !GetAtt S3Bucket2.Arn
             Condition:
@@ -61,7 +61,7 @@ Resources:
             Effect: Deny
             Principal: '*'
             Action: s3:*
-            Resource: 
+            Resource:
               - !Sub '${S3Bucket3.Arn}/*'
               - !GetAtt S3Bucket3.Arn
             Condition:
