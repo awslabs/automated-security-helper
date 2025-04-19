@@ -159,7 +159,9 @@ def scan(
             ),
             no_cleanup=no_cleanup,
             output_formats=output_formats,
-            show_progress=progress,
+            show_progress=progress
+            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+            not in ["YES", "1", "TRUE"],
         )
 
         # Execute scan

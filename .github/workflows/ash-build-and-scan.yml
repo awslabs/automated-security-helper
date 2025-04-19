@@ -72,7 +72,7 @@ jobs:
           set +e
 
           # Run ASH against itself
-          ./ash --source-dir $(pwd) --output-dir ash_output --build-target ci --debug | \
+          ./ash --source-dir $(pwd) --output-dir ash_output --build-target ci --config ./ash.yaml --no-progress --verbose | \
               tee ash_stdout.txt
 
           # cat the output contents to build the summary markdown
@@ -159,7 +159,6 @@ jobs:
         continue-on-error: true
         with:
           sarif_file: ash_output/ash_sarif.sarif
-          # Optional category for the results
           # Used to differentiate multiple results for one commit
           category: ash
 

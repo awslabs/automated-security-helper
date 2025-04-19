@@ -162,6 +162,11 @@ ENV _ASH_EXEC_MODE="local"
 #
 ENV PATH="$PATH:/ash"
 
+#
+# Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
+#
+ENV ASH_IN_CONTAINER="YES"
+
 
 # CI stage -- any customizations specific to CI platform compatibility should be added
 # in this stage if it is not applicable to ASH outside of CI usage
