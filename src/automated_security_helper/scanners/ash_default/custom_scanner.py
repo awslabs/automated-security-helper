@@ -112,6 +112,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
+                target_type=target_type,
                 config=config,
             )
         except ScannerError as exc:
@@ -138,7 +139,10 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
             results = scanner_results.get("results", {})
             ASH_LOGGER.debug(f"({scanner_name}) Found {len(results)} results")
 
-            self._post_scan(target=target)
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
 
             tool = Tool(
                 driver=ToolComponent(

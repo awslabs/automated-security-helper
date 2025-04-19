@@ -214,6 +214,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             try:
                 self._pre_scan(
                     target=target,
+                    target_type=target_type,
                     config=config,
                 )
             except ScannerError as exc:
@@ -234,6 +235,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
             self._post_scan(
                 target=target,
+                target_type=target_type,
             )
 
             bandit_results = {}

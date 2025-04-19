@@ -137,6 +137,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
+                target_type=target_type,
                 config=config,
             )
         except ScannerError as exc:
@@ -244,7 +245,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     failed_files.append((cfn_file, str(e)))
                     continue
 
-            self._post_scan(target=target)
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
 
             sarif_invocation: Invocation = Invocation(
                 commandLine="ash-CFN Nag-scanner",

@@ -138,6 +138,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
+                target_type=target_type,
                 config=config,
             )
         except ScannerError as exc:
@@ -157,7 +158,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 results_dir=target_results_dir,
             )
 
-            self._post_scan(target=target)
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
 
             grype_results = {}
             Path(results_file).parent.mkdir(exist_ok=True, parents=True)

@@ -148,6 +148,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
+                target_type=target_type,
                 config=config,
             )
         except ScannerError as exc:
@@ -227,7 +228,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     ASH_LOGGER.warning(f"Error scanning {cfn_file}: {e}")
                 failed_files.append((cfn_file, str(e)))
 
-        self._post_scan(target=target)
+        self._post_scan(
+            target=target,
+            target_type=target_type,
+        )
         # Create SARIF report
         rules: List[ReportingDescriptor] = []
         rule_map = {}

@@ -156,6 +156,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
+                target_type=target_type,
                 config=config,
             )
         except ScannerError as exc:
@@ -184,7 +185,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 ASH_LOGGER.debug(f"Settings: {settings}")
                 self._secrets_collection.scan_files(*scannable)
 
-            self._post_scan(target=target)
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
 
             # Populate the Results list with findings from the scan
             results: List[Result] = []

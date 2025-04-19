@@ -170,6 +170,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     def _pre_scan(
         self,
         target: Path,
+        target_type: Literal["source", "temp"],
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
@@ -181,10 +182,6 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             options: Optional scanner-specific options
         """
         self.start_time = datetime.now(timezone.utc)
-        if target.as_posix() == ".":
-            target_type = "source"
-        else:
-            target_type = "temp"
 
         self._scanner_log(
             "Starting scan",
@@ -219,6 +216,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     def _post_scan(
         self,
         target: Path,
+        target_type: Literal["source", "temp"],
     ) -> None:
         """Perform pre-scan setup.
 
@@ -227,11 +225,6 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             options: Optional scanner-specific options
         """
         self.end_time = datetime.now(timezone.utc)
-
-        if target.as_posix() == ".":
-            target_type = "source"
-        else:
-            target_type = "temp"
 
         ec_color = "bold green" if self.exit_code == 0 else "bold red"
         self._scanner_log(

@@ -271,7 +271,7 @@ class TestScannerPlugin:
         config = self.DummyConfig()
         scanner = self.DummyScanner(config=config)
         with pytest.raises(ScannerError):
-            scanner._pre_scan(Path("nonexistent.txt"))
+            scanner._pre_scan(Path("nonexistent.txt"), target_type="temp")
 
     def test_pre_scan_creates_dirs(self, tmp_path):
         """Test _pre_scan creates necessary directories."""
@@ -281,7 +281,7 @@ class TestScannerPlugin:
         )
         test_file = tmp_path.joinpath("test.txt")
         test_file.touch()
-        scanner._pre_scan(test_file)
+        scanner._pre_scan(test_file, target_type="temp")
         assert scanner.work_dir.exists()
         assert scanner.results_dir.exists()
 
@@ -291,9 +291,12 @@ class TestScannerPlugin:
         scanner = self.DummyScanner(config=config)
         test_file = tmp_path.joinpath("test.txt")
         test_file.touch()
-        scanner._pre_scan(test_file, config)
+        scanner._pre_scan(test_file, config, target_type="source")
         scanner.scan(test_file, target_type="source")
-        scanner._post_scan(test_file)
+        scanner._post_scan(
+            test_file,
+            target_type="source",
+        )
         assert scanner.end_time is not None
 
     def test_run_subprocess_success(self, test_source_dir):
