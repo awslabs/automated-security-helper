@@ -2372,7 +2372,15 @@ class SarifReport(BaseModel):
         report_run = sarif_report.runs[0]
         report_tool = report_run.tool
         report_invocations = report_run.invocations
-        report_results = report_run.results
+        report_results = []
+        for res in report_run.results:
+            clean_result = res.model_dump(
+                # Remove `ruleIndex`, since we're reordering rules. RuleId should
+                # correctly correlate results to associated rules in our set of scanners
+                # without it.
+                exclude=["ruleIndex"]
+            )
+            report_results.append(Result(**clean_result))
         if self.runs is None:
             self.runs = []
 
@@ -2403,7 +2411,14 @@ class SarifReport(BaseModel):
                         self_run.tool.extensions.append(report_tool.driver)
                     else:
                         if include_rules:
-                            existing_extension.rules.extend(report_tool.driver.rules)
+                            # Add rules if the rule.id doesn't already exist in existing_extension.rules
+                            cur_rule_id_hash = {
+                                rule.id: rule
+                                for rule in (existing_extension.rules or [])
+                            }
+                            for rule in report_tool.driver.rules:
+                                if rule.id not in cur_rule_id_hash:
+                                    existing_extension.rules.append(rule)
 
         if self_run.results is None:
             self_run.results = []

@@ -207,9 +207,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             message=Message(
                                 text=f"Secret of type '{finding.type}' detected in file '{filename}' at line {finding.line_number}"
                             ),
-                            analysisTarget=ArtifactLocation(
-                                uri=get_shortest_name(input=filename),
-                            ),
                             locations=[
                                 Location(
                                     id=1,
