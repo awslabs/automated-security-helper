@@ -1,6 +1,8 @@
 import json
 import logging
+import os
 from rich.logging import RichHandler
+from rich.console import Console
 from pathlib import Path
 
 
@@ -266,6 +268,11 @@ def get_logger(
 
     SHOW_DEBUG_INFO = logging._levelToName[logger.getEffectiveLevel() or 0] != "INFO"
     logger.info("Show debug info: %s", SHOW_DEBUG_INFO)
+    custom_console_params = (
+        {"console": Console(width=255)}
+        if os.environ.get("ASH_IN_CONTAINER", "NO").upper() in ["YES", "1", "TRUE"]
+        else {}
+    )
     if SHOW_DEBUG_INFO:
         handler = RichHandler(
             show_level=True,
@@ -273,6 +280,7 @@ def get_logger(
             rich_tracebacks=True,
             show_path=True,
             tracebacks_show_locals=True,
+            **custom_console_params,
         )
     else:
         handler = RichHandler(
@@ -282,6 +290,7 @@ def get_logger(
             tracebacks_show_locals=False,
             show_time=False,
             rich_tracebacks=True,
+            **custom_console_params,
         )
     # if logger.level is None or logger.level > 15:
     #     COLOR_FORMAT = formatter_message(DEFAULT_FORMAT, True)

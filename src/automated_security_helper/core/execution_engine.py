@@ -326,6 +326,25 @@ class ScanExecutionEngine:
         ASH_LOGGER.debug("Entering: ScanExecutionEngine.run_prepare_phase()")
         self.ensure_initialized(config=config)
 
+        converters = self._plugin_registry.get_plugin(plugin_type=PluginType.converter)
+        converted_paths = []
+        if converters is not None and isinstance(converters, dict):
+            for converter_name, converter_config in converters.items():
+                ASH_LOGGER.debug(
+                    f"Running converter {converter_name} with config {converter_config}"
+                )
+                converter = converter_config.plugin_class(
+                    source_dir=self.source_dir,
+                    output_dir=self.output_dir,
+                )
+                out = converter.convert()
+                if out:
+                    ASH_LOGGER.debug(f"Converter {converter_name} returned: {out}")
+                    if isinstance(out, list):
+                        converted_paths.extend(out)
+                    else:
+                        converted_paths.append(out)
+
         pass
 
     def run_scan_phase(self, config: Optional[ASHConfig] = None) -> ASHARPModel:

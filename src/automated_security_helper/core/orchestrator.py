@@ -276,6 +276,8 @@ class ASHScanOrchestrator(BaseModel):
 
             # Execute scanners with validated config
             try:
+                prepare_output = self.execution_engine.run_prepare_phase(config)
+                ASH_LOGGER.verbose(f"Converted scannable paths: {prepare_output}")
                 asharp_model_results = self.execution_engine.run_scan_phase(config)
                 ASH_LOGGER.debug("Scan execution completed successfully")
             except Exception as e:
