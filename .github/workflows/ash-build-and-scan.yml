@@ -78,7 +78,7 @@ jobs:
           # cat the output contents to build the summary markdown
           # strip out the color codes from the output
           ASH_STDOUT=$(cat ash_stdout.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-          ASH_AGG_RESULTS=$(cat ash_output/aggregated_results.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+          ASH_AGG_RESULTS=$(cat ash_output/ash_aggregated_results.json | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
 
           # Write the summary markdown to a file
           cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
@@ -91,7 +91,7 @@ jobs:
           \`\`\`
 
           <details>
-            <summary>Show aggregated_results.txt</summary>
+            <summary>Show ash_aggregated_results.json</summary>
 
             \`\`\`bash
             ${ASH_AGG_RESULTS}
@@ -147,10 +147,17 @@ jobs:
           path: ash_stdout.txt
           if-no-files-found: error
 
+      - name: Publish JUnit Test Report
+        uses: mikepenz/action-junit-report@v5
+        if: success() || failure() # always run even if the previous step fails
+        continue-on-error: true
+        with:
+          report_paths: '**/ash.junit.xml'
+
       - name: Collect ash_output artifact
         uses: actions/upload-artifact@v4
         if: always()
-        continue-on-error: false
+        continue-on-error: true
         with:
           name: ash_output
           path: ash_output
