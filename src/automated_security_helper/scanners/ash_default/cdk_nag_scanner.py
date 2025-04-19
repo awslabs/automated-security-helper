@@ -221,8 +221,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         self._post_scan(target=target)
         # Create SARIF report
         rules: List[ReportingDescriptor] = []
+        rule_map = {}
         for result in sarif_results:
+            if result.ruleId in rule_map:
+                continue
+            rule_map[result.ruleId] = result
+
             finding_props = result.properties.model_extra.get("cdk_nag_finding", {})
+
             rules.append(
                 ReportingDescriptor(
                     id=result.ruleId,
