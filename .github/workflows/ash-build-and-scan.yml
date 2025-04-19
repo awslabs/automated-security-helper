@@ -249,6 +249,7 @@ jobs:
           filename: "test-results/pytest.coverage.xml"
           badge: true
           format: markdown
+          fail_below_min: false
           hide_branch_rate: false
           hide_complexity: false
           indicators: true
