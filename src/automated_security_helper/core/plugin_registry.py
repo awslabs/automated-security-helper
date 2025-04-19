@@ -3,7 +3,7 @@ import importlib
 import inspect
 import json
 import pkgutil
-from typing import Annotated, Dict
+from typing import Annotated, Dict, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -64,18 +64,18 @@ class PluginRegistry(BaseModel):
 
     def model_post_init(self, context):
         ASH_LOGGER.info("Discovering ASH plugins...")
-        for plug_type in [e.name for e in PluginType]:
-            self.registered_plugins[plug_type] = self.discover_plugins(
-                plug_type=plug_type
+        for plugin_type in [e.name for e in PluginType]:
+            self.registered_plugins[plugin_type] = self.discover_plugins(
+                plug_type=plugin_type
             )
             reg_log = "\n\n- ".join(
                 [
                     f"{plug_name}: {json.dumps(plug, default=str)}"
-                    for plug_name, plug in self.registered_plugins[plug_type].items()
+                    for plug_name, plug in self.registered_plugins[plugin_type].items()
                 ]
             )
             ASH_LOGGER.debug(
-                f"Registered {len(self.registered_plugins[plug_type])} {plug_type} plugins:\n\n- {reg_log}"
+                f"Registered {len(self.registered_plugins[plugin_type])} {plugin_type} plugins:\n\n- {reg_log}"
             )
         return super().model_post_init(context)
 
@@ -126,20 +126,15 @@ class PluginRegistry(BaseModel):
                 )
                 and member.__module__ == module_name,
             ):
+                if _name == "CustomScanner":
+                    ASH_LOGGER.debug(
+                        f"Skipping CustomScanner class -- this class needs to be customized before use: {plugin_module_full_name}.{_name}"
+                    )
+                    continue
                 plugin_name = _name
                 obj_mro = inspect.getmro(obj)
                 if plugin_name in state_dict:
                     ASH_LOGGER.debug(f"Skipping duplicate plugin: {plugin_name}")
-                    continue
-                elif plugin_name.endswith("Config"):
-                    ASH_LOGGER.debug(
-                        f"Skipping non-plugin class: {plugin_name} in module: {plugin_module_full_name}. Config classes are not plugins."
-                    )
-                    continue
-                elif plugin_name.endswith("ConfigOptions"):
-                    ASH_LOGGER.debug(
-                        f"Skipping non-plugin class: {plugin_name} in module: {plugin_module_full_name}. Config options classes are not plugins."
-                    )
                     continue
                 elif "scanner" in plug_type and ScannerPluginBase not in obj_mro:
                     ASH_LOGGER.debug(
@@ -196,7 +191,9 @@ class PluginRegistry(BaseModel):
         return state_dict
 
     def get_plugin(
-        self, plugin_type: PluginType, plugin_name: str = None
+        self,
+        plugin_type: Literal["scanner", "converter", "reporter"],
+        plugin_name: str = None,
     ) -> RegisteredPlugin | Dict[str, RegisteredPlugin] | None:
         """Get a plugin by name or get all plugins for a specific type."""
         ptype = plugin_type if isinstance(plugin_type, str) else plugin_type.value

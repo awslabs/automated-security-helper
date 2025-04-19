@@ -4,6 +4,7 @@ from importlib.metadata import version
 import json
 import logging
 from pathlib import Path
+import shutil
 from typing import Annotated, Dict, List, Literal
 
 from pydantic import Field
@@ -142,7 +143,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         """
         # Bandit is a direct dependency of this Python package. If the Python import
         # reached this point then we know we're in a valid runtime for this scanner.
-        return True
+        return shutil.which(self.command) is not None
 
     def _process_config_options(self):
         # Bandit config path
@@ -194,6 +195,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "temp"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: BanditScannerConfig | None = None,
     ) -> SarifReport:
         """Execute Bandit scan and return results.
@@ -237,7 +240,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             with open(results_file, "r") as f:
                 bandit_results = json.load(f)
             try:
-                sarif_report = SarifReport.model_validate(bandit_results)
+                sarif_report: SarifReport = SarifReport.model_validate(bandit_results)
                 sarif_report.runs[0].invocations = [
                     Invocation(
                         commandLine=final_args[0],

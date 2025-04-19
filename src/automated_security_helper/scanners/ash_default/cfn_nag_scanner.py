@@ -2,7 +2,8 @@
 
 import logging
 from pathlib import Path
-from typing import Annotated, Literal
+import shutil
+from typing import Annotated, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -12,7 +13,11 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import ToolArgs, ToolExtraArg
+from automated_security_helper.models.core import (
+    IgnorePathWithReason,
+    ToolArgs,
+    ToolExtraArg,
+)
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
@@ -103,7 +108,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        return self.tool_version is not None
+        return shutil.which(self.command) is not None
 
     def _process_config_options(self):
         # Add any additional config option parsing here, if necessary
@@ -114,6 +119,8 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "temp"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: CfnNagScannerConfig | None = None,
     ) -> SarifReport:
         """Execute CFN Nag scan and return results.
@@ -146,8 +153,8 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
             # Find all files to scan from the scan set
             scannable = scan_set(
-                source=self.source_dir,
-                output=self.output_dir,
+                source=target,
+                output=self.output_dir if target == self.source_dir else self.work_dir,
                 # filter_pattern=r"\.(yaml|yml|json)$",
             )
             ASH_LOGGER.debug(
@@ -164,11 +171,17 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             ]
             joined_files = "\n- ".join(scannable)
             ASH_LOGGER.debug(
-                f"Found {len(scannable)} possible CloudFormation templates:\n- {joined_files}"
+                f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}"
             )
 
             if len(scannable) == 0:
-                raise ScannerError(f"No CloudFormation templates found in {target}")
+                self._scanner_log(
+                    f"No JSON/YAML files found in {target_type} directory to scan. Exiting.",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
+                return
 
             # Process each template file
             failed_files = []

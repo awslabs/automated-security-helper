@@ -1,8 +1,10 @@
 import json
 import logging
 import os
+from typing import Literal
 from rich.logging import RichHandler
 from rich.console import Console
+from rich.theme import Theme
 from pathlib import Path
 
 
@@ -243,20 +245,25 @@ class Color:
 
 
 def get_logger(
-    name: str = "ash", level: str | int | None = None, output_dir: Path | None = None
+    name: str = "ash",
+    level: str | int | None = None,
+    output_dir: Path | None = None,
+    log_format: Literal["JSONL", "TABULAR", "BOTH"] = "TABULAR",
 ) -> ASHLogger:
     # VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
     # DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
 
-    logger = logging.getLogger(name)
+    logger: ASHLogger = logging.getLogger(name)
+    # Explicit set the root logger level to TRACE/5
+    # (root logger sets the lowest level depth for all attached handlers)
+    logger.setLevel(logging._nameToLevel.get("TRACE", 5))
+    level_param = {}
     if level is not None:
-        logger.setLevel(level)
-    elif logger.level is None or logger.level == 0:
-        logger.setLevel(logging.INFO)
+        level_param = {"level": level}
 
     logger._log(
         15,
-        f"Log level set to: {logging._levelToName[level] if isinstance(level, int) else level}",
+        msg=f"Log level set to: {logging._levelToName[level] if isinstance(level, int) else level}",
         args=(),
     )
 
@@ -269,17 +276,41 @@ def get_logger(
     SHOW_DEBUG_INFO = logging._levelToName[logger.getEffectiveLevel() or 0] != "INFO"
     logger.info("Show debug info: %s", SHOW_DEBUG_INFO)
     custom_console_params = (
-        {"console": Console(width=255)}
+        {
+            "console": Console(
+                width=150,
+                theme=Theme(
+                    {
+                        "logging.level.verbose": "magenta",
+                        "logging.level.warning": "yellow",
+                        "logging.level.trace": "green",
+                    }
+                ),
+            )
+        }
         if os.environ.get("ASH_IN_CONTAINER", "NO").upper() in ["YES", "1", "TRUE"]
-        else {}
+        else {
+            "console": Console(
+                theme=Theme(
+                    {
+                        "logging.level.verbose": "magenta",
+                        "logging.level.warning": "yellow",
+                        "logging.level.trace": "green",
+                    }
+                )
+            )
+        }
     )
     if SHOW_DEBUG_INFO:
         handler = RichHandler(
             show_level=True,
             enable_link_path=True,
             rich_tracebacks=True,
-            show_path=True,
+            show_path=os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+            not in ["YES", "1", "TRUE"],
             tracebacks_show_locals=True,
+            markup=True,
+            **level_param,
             **custom_console_params,
         )
     else:
@@ -290,6 +321,8 @@ def get_logger(
             tracebacks_show_locals=False,
             show_time=False,
             rich_tracebacks=True,
+            markup=True,
+            **level_param,
             **custom_console_params,
         )
     # if logger.level is None or logger.level > 15:
@@ -324,31 +357,47 @@ def get_logger(
         # # Determine log path/file name; create output_dir if necessary
         # now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-        log_file = Path(output_dir).joinpath(f"{name}.log.jsonl")
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        log_file.touch(exist_ok=True)
+        # Create JSONLines/JSONL file handler for logging to a file (log all five levels)
+        if log_format in ["JSONL", "BOTH"]:
+            jsonl_log_file = Path(output_dir).joinpath(f"{name}.log.jsonl")
+            jsonl_log_file.parent.mkdir(parents=True, exist_ok=True)
+            jsonl_log_file.touch(exist_ok=True)
 
-        # Create file handler for logging to a file (log all five levels)
-        file_handler = logging.FileHandler(log_file.as_posix())
-        logger.verbose("Logging to file: %s", log_file.as_posix())
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(
-            JsonFormatter(
-                {
-                    "timestamp": "asctime",
-                    "level": "levelname",
-                    "filename": "filename",
-                    "lineno": "lineno",
-                    "message": "message",
-                    "loggerName": "name",
-                    "processName": "processName",
-                    "processID": "process",
-                    "threadName": "threadName",
-                    "threadID": "thread",
-                }
+            jsonl_file_handler = logging.FileHandler(jsonl_log_file.as_posix())
+            logger.verbose("Logging to JSONL file: %s", jsonl_log_file.as_posix())
+            jsonl_file_handler.setLevel(logging.DEBUG)
+            jsonl_file_handler.setFormatter(
+                JsonFormatter(
+                    {
+                        "timestamp": "asctime",
+                        "level": "levelname",
+                        "filename": "filename",
+                        "lineno": "lineno",
+                        "message": "message",
+                        "loggerName": "name",
+                        "processName": "processName",
+                        "processID": "process",
+                        "threadName": "threadName",
+                        "threadID": "thread",
+                    }
+                )
             )
-        )
-        logger.addHandler(file_handler)
+            logger.addHandler(jsonl_file_handler)
+        # Create tabular file handler for logging to a file (log all five levels)
+        if log_format in ["TABULAR", "BOTH"]:
+            tab_log_file = Path(output_dir).joinpath(f"{name}.log")
+            tab_log_file.parent.mkdir(parents=True, exist_ok=True)
+            tab_log_file.touch(exist_ok=True)
+
+            tab_file_handler = logging.FileHandler(tab_log_file.as_posix())
+            logger.verbose("Logging to tabular file: %s", tab_log_file.as_posix())
+            tab_file_handler.setLevel(logging.DEBUG)
+            tab_file_handler.setFormatter(
+                logging.Formatter(
+                    fmt="%(asctime)s\t%(levelname)s\t%(filename)s:%(lineno)d\t%(message)s "
+                )
+            )
+            logger.addHandler(tab_file_handler)
 
     return logger
 

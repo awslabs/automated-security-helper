@@ -1,6 +1,7 @@
 """Module containing the CDK Nag security scanner implementation."""
 
 from importlib.metadata import version
+import logging
 from typing import Annotated, List, Literal
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.models.core import IgnorePathWithReason
 
 
 class CdkNagPacks(BaseModel):
@@ -128,6 +130,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "temp"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: CdkNagScannerConfig | None = None,
     ) -> SarifReport:
         """Scan the target and return findings.
@@ -151,9 +155,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Find all JSON/YAML files to scan from the scan set
         scannable = scan_set(
-            source=self.source_dir,
-            output=self.output_dir,
-            # filter_pattern=r"\.(yaml|yml|json)$",
+            source=self.work_dir if target_type == "temp" else self.source_dir,
+            output=self.work_dir if target_type == "temp" else self.output_dir,
         )
         ASH_LOGGER.debug(
             f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"
@@ -171,7 +174,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         ASH_LOGGER.debug(f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}")
 
         if len(scannable) == 0:
-            raise ScannerError(f"No JSON/YAML files found in {target}")
+            self._scanner_log(
+                f"No JSON/YAML files found in {target_type} directory to scan. Exiting.",
+                target_type=target_type,
+                level=logging.WARNING,
+                append_to_stream="stderr",
+            )
+            return
 
         # Process each template file
         failed_files = []

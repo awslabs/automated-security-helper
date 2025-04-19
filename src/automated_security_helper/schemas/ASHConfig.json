@@ -1241,6 +1241,15 @@
       "title": "Converters",
       "type": "object"
     },
+    "external_reports_to_include": {
+      "default": [],
+      "description": "List of external reports to include in the final report. These can be SARIF, CycloneDX, or CDK synth paths that have produced NagReport CSVs or JSON files.",
+      "items": {
+        "type": "string"
+      },
+      "title": "External Reports To Include",
+      "type": "array"
+    },
     "fail_on_findings": {
       "default": true,
       "description": "Whether to exit with non-zero code if findings are detected",

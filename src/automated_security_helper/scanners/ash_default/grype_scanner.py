@@ -1,6 +1,5 @@
-"""Module containing the Checkov security scanner implementation."""
+"""Module containing the Grype security scanner implementation."""
 
-from importlib.metadata import version
 import json
 from pathlib import Path
 import shutil
@@ -29,51 +28,11 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
-CheckFrameworks = Literal[
-    "all",
-    "ansible",
-    "argo_workflows",
-    "arm",
-    "azure_pipelines",
-    "bicep",
-    "bitbucket_pipelines",
-    "cdk",
-    "circleci_pipelines",
-    "cloudformation",
-    "dockerfile",
-    "github_configuration",
-    "github_actions",
-    "gitlab_configuration",
-    "gitlab_ci",
-    "bitbucket_configuration",
-    "helm",
-    "json",
-    "yaml",
-    "kubernetes",
-    "kustomize",
-    "openapi",
-    "sca_package",
-    "sca_image",
-    "secrets",
-    "serverless",
-    "terraform",
-    "terraform_json",
-    "terraform_plan",
-    "sast",
-    "sast_python",
-    "sast_java",
-    "sast_javascript",
-    "sast_typescript",
-    "sast_golang",
-    "3d_policy",
-]
-
-
-class CheckovScannerConfigOptions(ScannerOptionsBase):
+class GrypeScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
         Field(
-            description="Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
+            description="Path to Grype configuration file, relative to current source directory. Defaults to searching for `.grype.yaml` and `.grype.yml` in the root of the source directory.",
         ),
     ] = None
     skip_path: Annotated[
@@ -82,63 +41,30 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
             description='Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.',
         ),
     ] = []
-    additional_formats: Annotated[
-        List[
-            Literal[
-                "cli",
-                "csv",
-                "cyclonedx",
-                "cyclonedx_json",
-                "json",
-                "junitxml",
-                "github_failed_only",
-                "gitlab_sast",
-                "sarif",
-                "spdx",
-            ]
-        ],
-        Field(
-            description="List of additional formats to output. Defaults to including CycloneDX JSON"
-        ),
-    ] = ["cyclonedx_json"]
-    frameworks: Annotated[
-        List[CheckFrameworks],
-        Field(
-            description="Specific frameworks to include with Checkov. Defaults to `all`."
-        ),
-    ] = ["all"]
-    skip_frameworks: Annotated[
-        List[CheckFrameworks],
-        Field(
-            description="Specific frameworks to exclude with Checkov. Defaults to none."
-        ),
-    ] = []
 
 
-class CheckovScannerConfig(ScannerPluginConfigBase):
-    name: Literal["checkov"] = "checkov"
+class GrypeScannerConfig(ScannerPluginConfigBase):
+    name: Literal["grype"] = "grype"
     enabled: bool = True
     options: Annotated[
-        CheckovScannerConfigOptions, Field(description="Configure Checkov scanner")
-    ] = CheckovScannerConfigOptions()
+        GrypeScannerConfigOptions, Field(description="Configure Grype scanner")
+    ] = GrypeScannerConfigOptions()
 
 
-class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
-    """CheckovScanner implements IaC scanning using Checkov."""
+class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
+    """GrypeScanner implements IaC scanning using Grype."""
 
     check_conf: str = "NOT_PROVIDED"
 
     def model_post_init(self, context):
         if self.config is None:
-            self.config = CheckovScannerConfig()
-        self.command = "checkov"
-        self.tool_type = "IAC"
-        self.tool_version = version("checkov")
+            self.config = GrypeScannerConfig()
+        self.command = "grype"
         self.args = ToolArgs(
             format_arg="--output",
             format_arg_value="sarif",
-            output_arg="--output-file-path",
-            scan_path_arg="--directory",
+            output_arg="--file",
+            scan_path_arg=None,
             extra_args=[
                 # ToolExtraArg(key="--skip-framework", value="cloudformation"),
             ],
@@ -154,18 +80,16 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # Checkov is a dependency this Python module, if the Python import got
-        # this far then we know we're in a valid runtime for this scanner.
         return shutil.which(self.command) is not None
 
     def _process_config_options(self):
-        # Checkov config path
+        # Grype config path
         possible_config_paths = [
             item
             for item in [
                 self.config.options.config_file,
-                ".checkov.yaml",
-                ".checkov.yml",
+                ".grype.yaml",
+                ".grype.yml",
             ]
             if item is not None
         ]
@@ -180,21 +104,13 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 )
                 break
 
-        for item in self.config.options.additional_formats:
-            self.args.extra_args.append(ToolExtraArg(key="--output", value=item))
-        for item in self.config.options.frameworks:
-            self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
-        for item in self.config.options.skip_frameworks:
-            self.args.extra_args.append(
-                ToolExtraArg(key="--skip-framework", value=item)
-            )
         for item in self.config.options.skip_path:
             ASH_LOGGER.debug(
                 f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
             )
             self.args.extra_args.append(
                 ToolExtraArg(
-                    key="--skip-path",
+                    key="--exclude",
                     value=item.path,
                 )
             )
@@ -206,9 +122,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         target: Path,
         target_type: Literal["source", "temp"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
-        config: CheckovScannerConfig | None = None,
+        config: GrypeScannerConfig | None = None,
     ) -> SarifReport:
-        """Execute Checkov scan and return results.
+        """Execute Grype scan and return results.
 
         Args:
             target: Path to scan
@@ -234,9 +150,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             results_file.parent.mkdir(exist_ok=True, parents=True)
             final_args = self._resolve_arguments(
                 target=target,
-                # We want to use the parent here, not the results_file, as Checkov is expecting the output
-                # directory and not the file name.
-                results_file=target_results_dir,
+                results_file=results_file,
             )
             self._run_subprocess(
                 command=final_args,
@@ -245,12 +159,12 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
             self._post_scan(target=target)
 
-            checkov_results = {}
+            grype_results = {}
             Path(results_file).parent.mkdir(exist_ok=True, parents=True)
             with open(results_file, "r") as f:
-                checkov_results = json.load(f)
+                grype_results = json.load(f)
             try:
-                sarif_report: SarifReport = SarifReport.model_validate(checkov_results)
+                sarif_report: SarifReport = SarifReport.model_validate(grype_results)
                 sarif_report.runs[0].invocations = [
                     Invocation(
                         commandLine=final_args[0],
@@ -272,10 +186,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 ASH_LOGGER.warning(
                     f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}"
                 )
-                sarif_report = checkov_results
+                sarif_report = grype_results
 
             return sarif_report
 
         except Exception as e:
             # Check if there are useful error details
-            raise ScannerError(f"Checkov scan failed: {str(e)}")
+            raise ScannerError(f"Grype scan failed: {str(e)}")

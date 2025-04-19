@@ -34,6 +34,7 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.models.core import IgnorePathWithReason
 
 from detect_secrets import SecretsCollection
 from detect_secrets.settings import transient_settings
@@ -104,7 +105,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # Look through each baseline file path to see if it exists and configure
         # the scan settings according to the first baseline file found
         for baseline_path in possible_baseline_paths:
-            ASH_LOGGER.verbose(
+            ASH_LOGGER.debug(
                 f"Checking for detect-secrets config @ {Path(baseline_path).absolute()}"
             )
             if bool(self.config.options.scan_settings):
@@ -137,6 +138,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "temp"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: DetectSecretsScannerConfig | None = None,
     ) -> SarifReport:
         """Execute detect-secrets scan and return results.
@@ -170,8 +173,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             # Find all files to scan from the scan set
             scannable = scan_set(
-                source=self.source_dir,
-                output=self.output_dir,
+                source=target,
+                output=self.output_dir if target == self.source_dir else self.work_dir,
+                # filter_pattern=r"\.(yaml|yml|json)$",
             )
             ASH_LOGGER.debug(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets"

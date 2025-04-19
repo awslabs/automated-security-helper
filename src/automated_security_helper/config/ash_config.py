@@ -221,6 +221,13 @@ class ASHConfig(BaseModel):
         ),
     ] = []
 
+    external_reports_to_include: Annotated[
+        List[str],
+        Field(
+            description="List of external reports to include in the final report. These can be SARIF, CycloneDX, or CDK synth paths that have produced NagReport CSVs or JSON files.",
+        ),
+    ] = []
+
     output_dir: Annotated[
         str,
         Field(description="Directory to store scan outputs"),

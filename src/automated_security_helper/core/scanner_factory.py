@@ -88,13 +88,9 @@ class ScannerFactory:
                     f"Registered config scanner {scanner_name} with class {scanner_class}"
                 )
             except ValueError as e:
-                ASH_LOGGER.warning(
-                    f"Could not register config scanner {scanner_name} due to ValueError: {str(e)}"
-                )
+                ASH_LOGGER.warning(e)
             except Exception as e:
-                ASH_LOGGER.error(
-                    f"Error registering config scanner {scanner_name} due to Exception: {str(e)}"
-                )
+                ASH_LOGGER.error(e)
 
     def _register_default_scanners(self) -> None:
         """Register all available scanner plugins.

@@ -66,8 +66,6 @@ class SyftScannerConfig(ScannerPluginConfigBase):
 class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     """SyftScanner implements IaC scanning using Syft."""
 
-    check_conf: str = "NOT_PROVIDED"
-
     def model_post_init(self, context):
         if self.config is None:
             self.config = SyftScannerConfig()
@@ -134,6 +132,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "temp"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: SyftScannerConfig | None = None,
     ) -> CycloneDXReport:
         """Execute Syft scan and return results.
@@ -168,6 +168,20 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     ToolExtraArg(key="--base-path", value=self.source_dir.as_posix()),
                 ],
             )
+            conf: SyftScannerConfig = self.config
+            opts: SyftScannerConfigOptions = conf.options
+            for out in opts.additional_outputs:
+                out_ext = "txt"
+                if "json" in out:
+                    out_ext = "json"
+                elif "xml" in out:
+                    out_ext = "xml"
+                self.args.extra_args.append(
+                    ToolExtraArg(
+                        key="--output",
+                        value=f"{out}={results_file.as_posix()}.{out}.{out_ext}",
+                    )
+                )
 
             final_args = self._resolve_arguments(
                 target=target,

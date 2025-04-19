@@ -6,9 +6,13 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from rich.progress import Progress
+
+from rich.progress import (
+    Progress,
+)
 
 from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
+from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
@@ -60,6 +64,7 @@ class ScanExecutionEngine:
         asharp_model: Optional[ASHARPModel] = None,
         config: Optional[ASHConfig] = None,
         show_progress: bool = True,
+        global_ignore_paths: List[IgnorePathWithReason] = [],
     ):
         """Initialize the execution engine.
 
@@ -89,6 +94,8 @@ class ScanExecutionEngine:
         self._initialized = False  # Track initialization state
         self._init_enabled_scanners = enabled_scanners  # None means all enabled
         self._enabled_scanners = []
+        self._global_ignore_paths = global_ignore_paths
+        self._queue = multiprocessing.Queue()
 
         # Initialize basic configuration
 
@@ -137,8 +144,10 @@ class ScanExecutionEngine:
             ),
         )
 
+        self.ensure_initialized(config=config)
+
         self._registered_scanners = {}
-        enabled_from_config = []
+        self._enabled_from_config = []
         for key, val in self._scanner_factory.available_scanners().items():
             val_instance = val()
             ASH_LOGGER.debug(
@@ -153,28 +162,11 @@ class ScanExecutionEngine:
                 ASH_LOGGER.debug(
                     f"Scanner {key} is enabled via config, adding to enabled scanner list"
                 )
-                enabled_from_config.append(key)
+                self._enabled_from_config.append(key)
 
-        # Normalize and store enabled scanner names
-        self._enabled_scanners = sorted(
-            set(
-                [
-                    s.lower().strip()
-                    for s in enabled_from_config
-                    if isinstance(s, str)
-                    and (
-                        len(self._init_enabled_scanners) == 0
-                        or s.lower().strip() in self._init_enabled_scanners
-                    )
-                ]
-            )
-        )
-        registered_names = sorted(set(self._registered_scanners.keys()))
-        ASH_LOGGER.info(f"Registered scanners: {registered_names}")
-        ASH_LOGGER.info(f"Enabled scanners: {self._enabled_scanners}")
-
-        # Mark initialization as complete
-        self._initialized = True
+        # Get all enabled scanners from SAST and SBOM configurations using helper
+        scanner_configs = self._scanner_factory.available_scanners()
+        ASH_LOGGER.debug(f"Scanner configs: {scanner_configs}")
 
     def get_scanner(
         self, scanner_name: str, check_enabled: bool = True
@@ -214,77 +206,11 @@ class ScanExecutionEngine:
             scanner = self._scanner_factory.create_scanner(
                 scanner_name=lookup_name,
                 source_dir=self.source_dir,
-                output_dir=self.output_dir,
+                output_dir=self.w,
             )
             return scanner
         except ValueError as e:
             raise ValueError(f"Scanner {lookup_name} could not be created: {str(e)}")
-
-        #     # Scanner is considered enabled if:
-        #     # 1. Empty enabled list and scanner is registered
-        #     # 2. Non-empty enabled list and scanner or its base name is in it
-        #     if len(self._enabled_scanners) == 0:
-        #         enabled = lookup_name in self._scanners or (
-        #             base_name and base_name in self._scanners
-        #         )
-        #     else:
-        #         enabled = lookup_name in self._enabled_scanners or (
-        #             base_name and base_name in self._enabled_scanners
-        #         )
-
-        #     if not enabled:
-        #         msg = (
-        #             "No scanners enabled"
-        #             if len(self._enabled_scanners) == 0
-        #             else f"Scanner {scanner_name} not enabled"
-        #         )
-        #         ASH_LOGGER.warning(msg)
-        #         # raise ValueError(msg)
-
-        # # Prepare name variations to try
-        # names_to_try = [lookup_name]
-
-        # # Add base name without 'scanner' suffix to try
-        # if lookup_name.endswith("scanner"):
-        #     base_name = lookup_name[:-7].strip()
-        #     if base_name:
-        #         names_to_try.append(base_name)
-
-        # # Try each possible name
-        # for name in names_to_try:
-        #     # Check registered scanners
-        #     if name in self._scanners:
-        #         scanner_fn = self._scanners[name]
-        #         try:
-        #             scanner = scanner_fn(
-        #                 source_dir=self.source_dir,
-        #                 output_dir=self.output_dir,
-        #                 logger=ASH_LOGGER,
-        #             )
-        #             return scanner
-        #         except (TypeError, ValueError):
-        #             # If that fails, try without paths
-        #             return scanner_fn()
-
-        #     # Fall back to factory if not already registered
-        # for fallback_name in names_to_try:
-        #     if fallback_name in self._scanner_factory._scanners:
-        #         scanner_class = self._scanner_factory._scanners[fallback_name]
-        #         try:
-        #             self.register_scanner(fallback_name, scanner_class)
-        #             scanner_fn = self._scanners[fallback_name]
-        #             return scanner_fn(
-        #                 source_dir=self.source_dir,
-        #                 output_dir=self.output_dir,
-        #                 logger=ASH_LOGGER,
-        #             )
-        #         except Exception as e:
-        #             ASH_LOGGER.warning(
-        #                 f"Failed to register scanner {fallback_name} from factory: {str(e)}"
-        #             )
-        #             continue
-
-        # raise ValueError(f"Scanner '{scanner_name}' not registered")
 
     def ensure_initialized(self, config: Optional[ASHConfig] = None) -> None:
         """Ensure scanner factory and scanners are properly initialized.
@@ -367,7 +293,6 @@ class ScanExecutionEngine:
 
         # Reset state for new execution
         self._completed_scanners = []
-        self._queue = multiprocessing.Queue()
         self._scan_results = {}
 
         # Execute scanners based on mode
@@ -380,25 +305,56 @@ class ScanExecutionEngine:
             scanner_configs = self._scanner_factory.available_scanners()
             ASH_LOGGER.debug(f"Scanner configs: {scanner_configs}")
 
+            final_enabled_scanners = set()
             # Process SAST and SBOM scanners
             if scanner_configs:
                 for scanner_name, scanner_config in scanner_configs.items():
                     if scanner_config:
                         # Add scanner to execution queue with default target
                         scanner_config_instance = scanner_config()
-                        if "cdk" in scanner_name:
-                            ASH_LOGGER.debug(
-                                f"(scanner_name: {scanner_name}) scanner_config_instance: {scanner_config_instance} scanner_config: {scanner_config_instance}"
+                        if (
+                            hasattr(scanner_config_instance.config, "enabled")
+                            and scanner_config_instance.config.enabled
+                            and (
+                                len(self._init_enabled_scanners) == 0
+                                or scanner_name.lower().strip()
+                                in self._init_enabled_scanners
                             )
-                        self._queue.put(
-                            (scanner_name, scanner_config(), self.source_dir, "source")
-                        )
-                        self._queue.put(
-                            (scanner_name, scanner_config(), self.work_dir, "temp")
-                        )
-                        enabled_scanners.add(scanner_name)
+                        ):
+                            if "cdk" in scanner_name:
+                                ASH_LOGGER.debug(
+                                    f"(scanner_name: {scanner_name}) scanner_config_instance: {scanner_config_instance} scanner_config: {scanner_config_instance}"
+                                )
+                            self._queue.put(
+                                (
+                                    scanner_name,
+                                    scanner_config_instance,
+                                    self.source_dir,
+                                    "source",
+                                )
+                            )
+                            self._queue.put(
+                                (
+                                    scanner_name,
+                                    scanner_config_instance,
+                                    self.work_dir,
+                                    "temp",
+                                )
+                            )
+                            final_enabled_scanners.add(scanner_name)
+
+            # Normalize and store enabled scanner names
+            registered_names = sorted(set(self._registered_scanners.keys()))
+            ASH_LOGGER.info(
+                f"[yellow]Registered scanners[/yellow] : {registered_names}"
+            )
+            self._enabled_scanners = sorted(self._enabled_from_config)
+            ASH_LOGGER.info(
+                f"[bold green]Enabled scanners[/bold green]    : {list(sorted(final_enabled_scanners))}"
+            )
 
             # Initialize progress tracker for execution
+            # with Live(table, refresh_per_second=4):
             with Progress(
                 auto_refresh=self.show_progress,
                 disable=not self.show_progress,
@@ -529,18 +485,30 @@ class ScanExecutionEngine:
                     raw_results = scanner_plugin.scan(
                         target=scan_target,
                         config=scanner_config,
+                        target_type=target_type,
+                        global_ignore_paths=self._global_ignore_paths,
                     )
                 else:
                     ASH_LOGGER.warning(f"{scanner_config.name} is not enabled!")
             except Exception as e:
-                ASH_LOGGER.error(
-                    f"Failed to execute {scanner_config.name or scanner_plugin.__class__.__name__} scanner: {e}"
-                )
-                raw_results = {"error": str(e)}
+                err_str = f"Failed to execute {scanner_config.name or scanner_plugin.__class__.__name__} scanner: {e}"
+                ASH_LOGGER.error(err_str)
+                raw_results = {
+                    "errors": [
+                        err_str,
+                        *scanner_plugin.errors,
+                    ],
+                    "output": scanner_plugin.output,
+                }
             finally:
                 ASH_LOGGER.debug(
                     f"{scanner_plugin.__class__.__name__} raw_results: {raw_results}"
                 )
+                if raw_results is None:
+                    raw_results = {
+                        "errors": scanner_plugin.errors or [],
+                        "output": scanner_plugin.output or [],
+                    }
                 container.raw_results = raw_results
 
                 if raw_results is not None:

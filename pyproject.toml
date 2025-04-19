@@ -46,7 +46,6 @@ checkov = "^3.2.395"
 constructs = "^10.4.2"
 defusedxml = "^0.7.1"
 junitparser = "^3.2.0"
-jupyterlab = "^4.3.6"
 nbconvert = "^7.16.6"
 pathspec = "^0.12.1"
 pydantic = {extras = ["email"], version = "^2.11.3"}

@@ -77,9 +77,10 @@ jobs:
           ./ash \
             --source-dir $(pwd) \
             --output-dir ash_output \
-            --build-target ci \
+            --config ./.ash.yaml \
             --strategy parallel \
-            --config ./ash.yaml \
+            --no-cleanup \
+            --build-target ci \
             --verbose | \
               tee ash_stdout.txt
 

@@ -19,7 +19,7 @@ from automated_security_helper.core.execution_engine import (
 from automated_security_helper.config.ash_config import ASHConfig
 from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.core import ExportFormat
+from automated_security_helper.models.core import ExportFormat, IgnorePathWithReason
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -74,6 +74,14 @@ class ASHScanOrchestrator(BaseModel):
     no_cleanup: Annotated[
         bool, Field(False, description="Keep work directory after scan")
     ]
+
+    global_ignore_paths: Annotated[
+        List[IgnorePathWithReason],
+        Field(
+            description="Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'."
+        ),
+    ] = []
+
     metadata: Annotated[
         Dict[str, Any],
         Field(default_factory=dict, description="Additional metadata for the scan"),
@@ -130,21 +138,10 @@ class ASHScanOrchestrator(BaseModel):
             enabled_scanners=self.enabled_scanners,
             config=self.config,
             show_progress=self.show_progress,
+            global_ignore_paths=self.global_ignore_paths,
         )
 
-        ASH_LOGGER.info("Identifying non-ignored files to include in scans")
-        self.scan_set = scan_set(
-            source=self.source_dir,
-            output=self.output_dir,
-            debug=self.debug,
-        )
-        ASH_LOGGER.info(
-            f"Found {len(self.scan_set)} files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan."
-        )
-
-        ASH_LOGGER.info(
-            "ASH Orchestrator and ScanExecutionEngine initialized, ready to start next phase."
-        )
+        ASH_LOGGER.info("ASH Orchestrator and ScanExecutionEngine initialized")
         return super().model_post_init(context)
 
     def ensure_directories(self):
@@ -158,46 +155,15 @@ class ASHScanOrchestrator(BaseModel):
             ASH_LOGGER.debug(
                 f"Creating output directory if it does not exist: {self.output_dir}"
             )
-            try:
-                self.output_dir.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                ASH_LOGGER.error(f"Failed to create output directory: {str(e)}")
-                raise ASHValidationError(f"Failed to create output directory: {str(e)}")
-
-            for working_dir in ["reports", "scanners"]:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            for working_dir in ["reports", "scanners", "work"]:
                 path_working_dir = self.output_dir.joinpath(working_dir)
                 if path_working_dir.exists():
                     ASH_LOGGER.verbose(
                         f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
                     )
                     shutil.rmtree(path_working_dir)
-
-            # Create work directory if it doesn't exist or if no_cleanup is True
-            ASH_LOGGER.debug(
-                f"Creating work directory if it does not exist: {self.work_dir}"
-            )
-            if self.work_dir.exists():
-                # Remove existing work dir if no_cleanup is True to ensure clean state
-                if self.work_dir.exists() and self.no_cleanup:
-                    try:
-                        shutil.rmtree(self.work_dir)
-                    except PermissionError as e:
-                        ASH_LOGGER.error(
-                            f"Permission error removing work directory: {str(e)}"
-                        )
-                        raise ASHValidationError(
-                            f"Failed to clean work directory: {str(e)}"
-                        )
-                    except Exception as e:
-                        ASH_LOGGER.error(f"Error removing work directory: {str(e)}")
-                        raise ASHValidationError(
-                            f"Failed to clean work directory: {str(e)}"
-                        )
-            try:
-                self.work_dir.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                ASH_LOGGER.error(f"Failed to create work directory: {str(e)}")
-                raise ASHValidationError(f"Failed to create work directory: {str(e)}")
+                path_working_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
             raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
@@ -254,10 +220,6 @@ class ASHScanOrchestrator(BaseModel):
         ASH_LOGGER.debug(f"Output formats: {self.scan_output_formats}")
 
         try:
-            # Ensure required directories exist
-            ASH_LOGGER.debug("Ensuring required directories exist")
-            self.ensure_directories()
-
             # Load and validate configuration
             ASH_LOGGER.debug("Loading and validating configuration")
             config = self._load_config()
@@ -276,8 +238,22 @@ class ASHScanOrchestrator(BaseModel):
 
             # Execute scanners with validated config
             try:
+                ASH_LOGGER.info("Identifying non-ignored files to include in scans")
+                self.source_scan_set = scan_set(
+                    source=self.source_dir,
+                    output=self.output_dir,
+                    debug=self.debug,
+                )
+                ASH_LOGGER.info(
+                    f"Found {len(self.source_scan_set)} files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified."
+                )
                 prepare_output = self.execution_engine.run_prepare_phase(config)
                 ASH_LOGGER.verbose(f"Converted scannable paths: {prepare_output}")
+                self.work_scan_set = scan_set(
+                    source=self.work_dir,
+                    output=self.work_dir,
+                    debug=self.debug,
+                )
                 asharp_model_results = self.execution_engine.run_scan_phase(config)
                 ASH_LOGGER.debug("Scan execution completed successfully")
             except Exception as e:
@@ -314,7 +290,7 @@ class ASHScanOrchestrator(BaseModel):
                 #             )
 
                 ASH_LOGGER.info("ASH scan completed successfully!")
-            if not self.config.no_cleanup:
+            if not self.no_cleanup:
                 ASH_LOGGER.verbose("Cleaning up working directory...")
                 shutil.rmtree(self.work_dir)
                 # ASH_LOGGER.info("Cleaning up scanners directory...")

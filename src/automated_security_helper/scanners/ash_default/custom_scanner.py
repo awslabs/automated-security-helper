@@ -7,11 +7,11 @@ This security scanner depends on a valid ScannerPluginConfig to be provided in t
 `build.custom_scanners` section of an ASHConfig instance or ASH configuration YAML/JSON file.
 """
 
-from importlib.metadata import version
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+import shutil
+from typing import Annotated, Any, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -21,7 +21,7 @@ from automated_security_helper.core.constants import (
     SCANNER_TYPES,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
@@ -70,8 +70,10 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
     def model_post_init(self, context):
         if self.config is None:
             self.config = CustomScannerConfig()
-        self.tool_type = "CUSTOM"
-        self.tool_version = version("checkov")
+        if self.command is None:
+            raise ScannerError(
+                f"({self.config.name or self.__class__.__name__}) Command not provided for custom scanner! If this is a Python based scanner, set the command property to `python` in your scanner properties to resolve this error."
+            )
         self.args = ToolArgs()
         super().model_post_init(context)
 
@@ -84,11 +86,13 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        return True
+        return shutil.which(self.command) is not None
 
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "temp"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: Any | CustomScannerConfig | None = None,
     ) -> SarifReport:
         """Execute Checkov scan and return results.

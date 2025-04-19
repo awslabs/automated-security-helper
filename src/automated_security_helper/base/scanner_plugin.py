@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
+import logging
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -79,6 +80,37 @@ class ScannerPluginBase(BaseModel, Generic[T]):
 
         return super().model_post_init(context)
 
+    def _scanner_log(
+        self,
+        *msg: str,
+        level: int | str = 15,
+        target_type: str = None,
+        append_to_stream: Literal["stderr", "stdout", "none"] = "none",
+    ):
+        """Log a message to the scanner's log file.
+
+        Args:
+            level: Log level
+            msg: Message to log
+        """
+        tt = None
+        if target_type is not None:
+            tt = f" @ [magenta]{target_type}[/magenta]"
+
+        ASH_LOGGER._log(
+            level,
+            f"([yellow]{self.config.name or self.__class__.__name__}[/yellow]{tt})\t{'\n'.join(msg)}",
+            args=(),
+        )
+        if level == logging.ERROR or append_to_stream == "stderr":
+            self.errors.append(
+                f"({self.config.name or self.__class__.__name__}) {'\n'.join(msg)}"
+            )
+        elif append_to_stream == "stdout":
+            self.output.append(
+                f"({self.config.name or self.__class__.__name__}) {'\n'.join(msg)}"
+            )
+
     def _process_config_options(self) -> None:
         """By default, returns False to indicate that the scanner did not perform any
         configuration option processing.
@@ -147,19 +179,36 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             options: Optional scanner-specific options
         """
         self.start_time = datetime.now(timezone.utc)
-        ASH_LOGGER.verbose(
-            f"Starting {self.config.name or self.__class__.__name__} scan of {target}"
+        if target.as_posix() == ".":
+            target_type = "source"
+        else:
+            target_type = "temp"
+
+        self._scanner_log(
+            "Starting scan",
+            target_type=target_type,
+            level=logging.INFO,
         )
-        ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
+        self._scanner_log(
+            f"self.config: {self.config}",
+            target_type=target_type,
+            level=logging.DEBUG,
+        )
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
                 config = config.model_dump(by_alias=True)
             self.config = self.config.__class__.model_validate(config)
-        ASH_LOGGER.debug(f"({self.config.name}) config: {config}")
+        self._scanner_log(
+            f"config: {config}",
+            target_type=target_type,
+            level=logging.DEBUG,
+        )
 
         self.results_dir.mkdir(parents=True, exist_ok=True)
         if not Path(target).exists():
-            raise ScannerError(f"Target {target} does not exist!")
+            raise ScannerError(
+                f"([yellow]{self.config.name or self.__class__.__name__}[/yellow] @ [magenta]{target_type}[/magenta]) Target {target} does not exist!"
+            )
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
         if self.results_dir:
@@ -177,8 +226,16 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         """
         self.end_time = datetime.now(timezone.utc)
 
-        ASH_LOGGER.verbose(
-            f"{self.config.name} scan of {target} completed in {(self.end_time - self.start_time).total_seconds()} seconds"
+        if target.as_posix() == ".":
+            target_type = "source"
+        else:
+            target_type = "temp"
+
+        ec_color = "bold green" if self.exit_code == 0 else "bold red"
+        self._scanner_log(
+            f"Scan completed in {(self.end_time - self.start_time).total_seconds()} seconds with an exit code of [{ec_color}]{self.exit_code}[/{ec_color}]",
+            target_type=target_type,
+            level=logging.INFO,
         )
 
     def _run_subprocess(
@@ -268,6 +325,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         self,
         target: Path,
         config: T | ScannerPluginConfigBase = None,
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         *args,
         **kwargs,
     ) -> Any | SarifReport | CycloneDXReport:

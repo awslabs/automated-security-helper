@@ -46,6 +46,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         self.work_dir = (
             self.output_dir.joinpath("work").joinpath("converters").joinpath("archive")
         )
+        if self.config is None:
+            self.config = ArchiveConverterConfig()
         return super().model_post_init(context)
 
     def validate(self):
@@ -94,8 +96,10 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         results: List[Path] = []
         for archive_file in archive_files:
             normalized_archive_file = get_normalized_filename(archive_file)
-            target_path = self.work_dir.joinpath(normalized_archive_file)
-            ASH_LOGGER.debug(
+            target_path = self.work_dir.joinpath(self.config.name).joinpath(
+                normalized_archive_file
+            )
+            ASH_LOGGER.verbose(
                 f"Extracting {archive_file} contents to target_path: {Path(target_path).as_posix()}"
             )
             # Extract ZIP to target path after inspecting members
