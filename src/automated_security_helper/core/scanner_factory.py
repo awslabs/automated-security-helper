@@ -217,30 +217,6 @@ class ScannerFactory:
 
         return instance
 
-    def get_scanner_class(self, scanner_name: str) -> ScannerPluginBase:
-        """Get the scanner class for a given name.
-
-        Args:
-            scanner_name: Name of scanner to retrieve (will be normalized)
-
-        Returns:
-            The scanner class
-
-        Raises:
-            ValueError: If scanner_name is not registered
-            TypeError: If stored value is not a scanner class
-        """
-        scanner_name = scanner_name
-        known_scanners = self.config.get_scanners()
-        if scanner_name not in self._scanners and scanner_name not in known_scanners:
-            raise ValueError("Unable to determine scanner class")
-        elif scanner_name not in self._scanners:
-            self.register_scanner(scanner_name, known_scanners[scanner_name])
-        scanner = self._scanners[scanner_name]
-        if isinstance(scanner, Callable):
-            scanner = scanner()
-        return scanner
-
     def available_scanners(self) -> Dict[str, Type[ScannerPluginBase]]:
         """Get dictionary of all registered scanners.
 

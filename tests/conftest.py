@@ -219,7 +219,7 @@ def ash_config(mock_scanner_plugin):
     conf = ASHConfig(
         project_name="automated-security-helper",
         build=BuildConfig(
-            mode="ASH_MODE_OFFLINE",
+            build_mode="ONLINE",
             tool_install_scripts={
                 "trivy": [
                     "wget https://github.com/aquasecurity/trivy/releases/download/v0.61.0/trivy_0.61.0_Linux-64bit.deb",
