@@ -18,6 +18,8 @@ class ScannerFactory:
     def __init__(
         self,
         config: ASHConfig = None,
+        source_dir: Path = None,
+        output_dir: Path = None,
         registered_scanner_plugins: Dict[str, RegisteredPlugin] = {},
     ) -> None:
         """Initialize the scanner factory with empty scanner registry.
@@ -31,6 +33,8 @@ class ScannerFactory:
             str, Union[Type[ScannerPluginBase], Callable[[], ScannerPluginBase]]
         ] = {}
         self._registered_scanner_plugins = registered_scanner_plugins
+        self.source_dir = source_dir
+        self.output_dir = output_dir
         self._register_default_scanners()
         self._register_config_scanners()
 
@@ -76,6 +80,8 @@ class ScannerFactory:
                 scanner_class = CustomScanner(
                     name=scanner_name,
                     config=scanner_config,
+                    source_dir=self.source_dir,
+                    output_dir=self.output_dir,
                 )
                 self.register_scanner(scanner_name, scanner_class)
                 ASH_LOGGER.debug(
@@ -104,7 +110,10 @@ class ScannerFactory:
                 self.register_scanner(scanner_name, scanner_class)
                 self.default_scanners.add(scanner_name)
                 if callable(scanner_class):
-                    scanner_class = scanner_class()
+                    scanner_class = scanner_class(
+                        source_dir=self.source_dir,
+                        output_dir=self.output_dir,
+                    )
                 self._scanners[scanner_name] = scanner_class
             except ValueError:
                 # Skip if scanner is already registered

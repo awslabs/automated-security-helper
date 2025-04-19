@@ -148,12 +148,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
-        # ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
-        # if config is not None:
-        #     if hasattr(config, "model_dump") and callable(config.model_dump):
-        #         config = config.model_dump(by_alias=True)
-        #     self.config = CdkNagScannerConfig(**config)
-        # ASH_LOGGER.debug(f"({self.config.name}) config: {config}")
 
         # Find all JSON/YAML files to scan from the scan set
         scannable = scan_set(
@@ -174,12 +168,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             )
         ]
         joined_files = "\n- ".join(scannable)
-        ASH_LOGGER.debug(
-            f"Found {len(scannable)} possible CloudFormation templates:\n- {joined_files}"
-        )
+        ASH_LOGGER.debug(f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}")
 
         if len(scannable) == 0:
-            raise ScannerError(f"No CloudFormation templates found in {target}")
+            raise ScannerError(f"No JSON/YAML files found in {target}")
 
         # Process each template file
         failed_files = []

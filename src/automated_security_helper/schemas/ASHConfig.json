@@ -281,7 +281,7 @@
             "additional_formats": [
               "cyclonedx_json"
             ],
-            "config_file": "NOT_PROVIDED",
+            "config_file": null,
             "frameworks": [
               "all"
             ],
@@ -321,7 +321,7 @@
           "type": "array"
         },
         "config_file": {
-          "default": "NOT_PROVIDED",
+          "default": null,
           "description": "Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
           "title": "Config File",
           "type": "string"
@@ -497,7 +497,8 @@
         "options": {
           "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
           "default": {
-            "baseline": null
+            "baseline_file": null,
+            "scan_settings": {}
           },
           "description": "Configure detect-secrets scanner"
         }
@@ -508,19 +509,26 @@
     "DetectSecretsScannerConfigOptions": {
       "additionalProperties": true,
       "properties": {
-        "baseline": {
-          "anyOf": [
-            {
-              "format": "path",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
+        "baseline_file": {
           "default": null,
-          "description": "Path to baseline file, relative to current source directory. Defaults to searching for `.detect-secrets.baseline` in the root of the source directory.",
-          "title": "Baseline"
+          "description": "Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
+          "title": "Baseline File",
+          "type": "string"
+        },
+        "scan_settings": {
+          "additionalProperties": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
+          "title": "Scan Settings",
+          "type": "object"
         }
       },
       "title": "DetectSecretsScannerConfigOptions",
@@ -690,7 +698,7 @@
               "additional_formats": [
                 "cyclonedx_json"
               ],
-              "config_file": "NOT_PROVIDED",
+              "config_file": null,
               "frameworks": [
                 "all"
               ],
@@ -706,7 +714,8 @@
             "enabled": true,
             "name": "detect-secrets",
             "options": {
-              "baseline": null
+              "baseline_file": null,
+              "scan_settings": {}
             }
           },
           "description": "Configure the options for DetectSecrets"
@@ -1282,7 +1291,7 @@
             "additional_formats": [
               "cyclonedx_json"
             ],
-            "config_file": "NOT_PROVIDED",
+            "config_file": null,
             "frameworks": [
               "all"
             ],
@@ -1294,7 +1303,8 @@
           "enabled": true,
           "name": "detect-secrets",
           "options": {
-            "baseline": null
+            "baseline_file": null,
+            "scan_settings": {}
           }
         },
         "grype": {

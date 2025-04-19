@@ -232,7 +232,8 @@ def get_logger(
         """Add a file handler for this logger with the specified `name` (and
         store the log file under `output_dir`)."""
         # Format for file log (use JSON Lines for easier indexing/querying)
-        fmt = '{"time": "%(asctime)s", "level": "%(levelname)s", "source": "%(filename)s:%(lineno)d", "message": "%(message)s"}'
+        # fmt = '{"time": "%(asctime)s", "level": "%(levelname)s", "source": "%(filename)s:%(lineno)d", "message": "%(message)s"}'
+        fmt = "%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s "
         json_formatter = logging.Formatter(fmt)
 
         # Determine log path/file name; create output_dir if necessary
@@ -240,9 +241,11 @@ def get_logger(
 
         log_file = Path(output_dir).joinpath(f"{name}.{now}.log")
         log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_file.touch(exist_ok=True)
 
         # Create file handler for logging to a file (log all five levels)
         file_handler = logging.FileHandler(log_file.as_posix())
+        logger.info("Logging to file: %s", log_file.as_posix())
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(json_formatter)
         logger.addHandler(file_handler)

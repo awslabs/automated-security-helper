@@ -45,13 +45,14 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
         ),
-    ] = "NOT_PROVIDED"
+    ] = None
     scan_settings: Annotated[
         dict[str, List[dict[str, str]]],
         Field(
             description="Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
-        )
+        ),
     ] = {}
+
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):
     name: Literal["detect-secrets"] = "detect-secrets"
@@ -101,29 +102,32 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
         # Look through each baseline file path to see if it exists and configure
         # the scan settings according to the first baseline file found
-        self.config.options.baseline_file = None
         for baseline_path in possible_baseline_paths:
             ASH_LOGGER.info(Path(baseline_path).absolute())
             if bool(self.config.options.scan_settings):
                 pass
             elif Path(baseline_path).absolute().exists():
                 abs_baseline_path = Path(baseline_path).absolute()
-                with open(abs_baseline_path, 'r') as f:
+                with open(abs_baseline_path, "r") as f:
                     self.config.options.scan_settings = json.load(f)
                     f.close()
-                ASH_LOGGER.debug(f"Custom settings identified: {self.config.options.scan_settings}")
+                ASH_LOGGER.debug(
+                    f"Custom settings identified: {self.config.options.scan_settings}"
+                )
                 break
 
         # If no existing baseline is identified then use all detect-secrets plugins
         # This is the same as using the default_settings function provided by detect-secrets
         if not bool(self.config.options.scan_settings):
             self.config.options.scan_settings = {
-                'plugins_used': [
-                    {'name': plugin_type.__name__}
+                "plugins_used": [
+                    {"name": plugin_type.__name__}
                     for plugin_type in get_mapping_from_secret_type_to_class().values()
                 ],
             }
-            ASH_LOGGER.debug(f"Default settings identified: {self.config.options.scan_settings}")
+            ASH_LOGGER.debug(
+                f"Default settings identified: {self.config.options.scan_settings}"
+            )
 
         return super()._process_config_options()
 
@@ -146,7 +150,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
-                options=self.config.options,
+                config=config,
             )
         except ScannerError as exc:
             raise exc
@@ -159,7 +163,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
-            self._resolve_arguments(target=target,results_file=target_results_dir)
+            self._resolve_arguments(target=target, results_file=target_results_dir)
 
             # Find all files to scan from the scan set
             scannable = scan_set(
@@ -170,6 +174,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets"
             )
             with transient_settings(self.config.options.scan_settings) as settings:
+                ASH_LOGGER.debug(f"Settings: {settings}")
                 self._secrets_collection.scan_files(*scannable)
 
             self._post_scan(target=target)

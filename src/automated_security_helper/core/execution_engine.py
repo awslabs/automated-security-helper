@@ -130,6 +130,8 @@ class ScanExecutionEngine:
         )
         self._scanner_factory = ScannerFactory(
             config=config,
+            source_dir=source_dir,
+            output_dir=output_dir,
             registered_scanner_plugins=self._plugin_registry.get_plugin(
                 plugin_type=PluginType.scanner
             ),
@@ -498,6 +500,7 @@ class ScanExecutionEngine:
             )
 
             # Execute scan
+            raw_results = None
             try:
                 if scanner_config.enabled:
                     ASH_LOGGER.debug(
@@ -638,7 +641,7 @@ class ScanExecutionEngine:
         elif isinstance(results.raw_results, ASHARPModel):
             self._asharp_model.merge_model(results.raw_results)
         elif isinstance(results.raw_results, CycloneDXReport):
-            self._asharp_model.sbom = results.raw_results
+            self._asharp_model.cyclonedx = results.raw_results
         else:
             self._asharp_model.additional_reports[results.scanner_name] = (
                 results.raw_results

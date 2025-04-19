@@ -130,12 +130,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
-                options=self.config.options,
+                config=config,
             )
         except ScannerError as exc:
             raise exc
-        ASH_LOGGER.debug(f"self.config: {self.config}")
-        ASH_LOGGER.debug(f"config: {config}")
 
         try:
             # Set up target path for scan results for target path
@@ -199,6 +197,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     continue
                 normalized_filename = get_normalized_filename(str_to_normalize=cfn_file)
                 results_file_dir = target_results_dir.joinpath(normalized_filename)
+                results_file_dir.mkdir(exist_ok=True, parents=True)
                 final_args = self._resolve_arguments(
                     target=cfn_file, results_file=results_file_dir
                 )
@@ -212,9 +211,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     file_sarif = SarifReport.model_validate_json(
                         json_data=proc_resp["stdout"]
                     )
-                    if sarif_report is None:
+                    if sarif_report is None and file_sarif is not None:
                         sarif_report = file_sarif
-                    else:
+                    elif file_sarif is not None:
                         sarif_report.merge_sarif_report(
                             sarif_report=file_sarif,
                             include_invocation=False,

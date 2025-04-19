@@ -215,8 +215,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 )
             except ScannerError as exc:
                 raise exc
-            ASH_LOGGER.debug(f"self.config: {self.config}")
-            ASH_LOGGER.debug(f"config: {config}")
 
             normalized_file_name = get_normalized_filename(str_to_normalize=target)
             target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)

@@ -74,7 +74,7 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
         ),
-    ] = "NOT_PROVIDED"
+    ] = None
     skip_path: Annotated[
         List[PathExclusionEntry],
         Field(
@@ -219,12 +219,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
-                options=self.config.options,
+                config=config,
             )
         except ScannerError as exc:
             raise exc
-        ASH_LOGGER.debug(f"self.config: {self.config}")
-        ASH_LOGGER.debug(f"config: {config}")
 
         try:
             normalized_file_name = get_normalized_filename(str_to_normalize=target)

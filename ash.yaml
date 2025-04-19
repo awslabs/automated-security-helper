@@ -42,7 +42,6 @@ scanners:
         PCIDSS321Checks: true
   cfn-nag:
     enabled: true
-    type: IAC
   checkov:
     enabled: true
     options:

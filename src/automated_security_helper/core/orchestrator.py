@@ -150,11 +150,17 @@ class ASHScanOrchestrator(BaseModel):
         ASH_LOGGER.verbose(f"Using output formats: {self.config.output_formats}")
         ASH_LOGGER.verbose("Setting up working directories")
         if self.source_dir is None:
+            ASH_LOGGER.verbose(
+                "No explicit source directory provided, using current working directory"
+            )
             self.source_dir = Path.cwd()
         elif not isinstance(self.source_dir, Path):
             self.source_dir = Path(self.source_dir)
 
         if self.output_dir is None:
+            ASH_LOGGER.verbose(
+                "No explicit output directory provided, using 'ash_output' within the source directory."
+            )
             self.output_dir = self.source_dir.joinpath("ash_output")
         elif not isinstance(self.output_dir, Path):
             self.output_dir = Path(self.output_dir)
