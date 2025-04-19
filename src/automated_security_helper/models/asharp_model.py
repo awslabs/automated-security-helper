@@ -253,26 +253,6 @@ class ASHARPModel(BaseModel):
     #     """Get findings that were in previous scan but not in current scan."""
     #     return self._trend_analyzer.get_resolved_findings(previous_scan, current_scan)
 
-    # def _convert_to_scanner(self, scanner_dict: Dict[str, str]) -> Scanner:
-    #     """Convert a scanner dictionary to Scanner object."""
-    #     # Ensure required fields with defaults
-    #     scanner_dict_copy = scanner_dict.copy()
-    #     required_fields = {
-    #         "type": "SAST",
-    #         "version": "1.0.0",
-    #         "description": "Security scanner",
-    #     }
-    #     for field, default in required_fields.items():
-    #         if field not in scanner_dict_copy:
-    #             scanner_dict_copy[field] = default
-
-    #     return Scanner(
-    #         name=scanner_dict_copy["name"],
-    #         version=scanner_dict_copy["version"],
-    #         type=scanner_dict_copy["type"],
-    #         description=scanner_dict_copy["description"],
-    #     )
-
     @classmethod
     def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "ASHARPModel":
         """Parse JSON data into an ASHARPModel instance.
@@ -310,61 +290,39 @@ class ASHARPModel(BaseModel):
         """Save ASHARPModel as JSON alongside aggregated results."""
         from automated_security_helper.config.ash_config import ASHConfig
 
-        output_dir.mkdir(parents=True, exist_ok=True)
+        report_dir = output_dir.joinpath("reports")
+        report_dir.mkdir(parents=True, exist_ok=True)
 
         # Save aggregated results as JSON
         json_path = output_dir.joinpath("ash_aggregated_results.json")
-        with open(json_path, "w") as f:
-            f.write(
-                self.model_dump_json(
-                    by_alias=True,
-                    exclude_unset=True,
-                    exclude_none=True,
-                    exclude_defaults=True,
-                    round_trip=True,
-                )
+        json_path.write_text(
+            self.model_dump_json(
+                by_alias=True,
+                exclude_unset=True,
+                exclude_none=True,
+                # exclude_defaults=True,
+                # round_trip=True,
             )
-            # json.dump(self.model_dump(by_alias=True), f, indent=2, default=str)
+        )
 
-        # Save model.sarif as ash.sarif (JSON formatted SARIF report)
-        # json_path = output_dir.joinpath("ash_clean.sarif")
-        # clean_sarif = clean_dict(
-        #     input=self.sarif.model_dump(
-        #         by_alias=True,
-        #         exclude_unset=True,
-        #         exclude_none=True,
-        #         exclude_defaults=True,
-        #         round_trip=True,
-        #         mode="json",
-        #     )
-        # )
-        # with open(json_path, "w") as f:
-        #     json.dump(
-        #         clean_sarif,
-        #         f,
-        #         indent=2,
-        #         default=str,
-        #     )
-
-        # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
+        # # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
         json_path = output_dir.joinpath("ash.cdx.json")
-        with open(json_path, "w") as f:
-            f.write(
-                self.cyclonedx.model_dump_json(
-                    by_alias=True,
-                    exclude_unset=True,
-                    exclude_none=True,
-                    exclude_defaults=True,
-                    round_trip=True,
-                )
+        json_path.write_text(
+            self.cyclonedx.model_dump_json(
+                by_alias=True,
+                exclude_unset=True,
+                exclude_none=True,
+                # exclude_defaults=True,
+                # round_trip=True,
             )
+        )
 
         ash_config: ASHConfig = self.ash_config
 
         for fmt in ash_config.output_formats:
             outfile = self.report(
                 output_format=fmt,
-                output_dir=output_dir,
+                output_dir=report_dir,
             )
             if outfile is None:
                 ASH_LOGGER.warning(f"Failed to generate output for format {fmt}")

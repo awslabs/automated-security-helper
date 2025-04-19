@@ -24,17 +24,17 @@ scanners:
       severity_level: all
       ignore_nosec: false
       excluded_paths:
-        - path: test_data
-          reason: this is my test data folder
+        - path: 'tests/test_data/**'
+          reason: This is test data that is used during unit testing only and is not part of the core application.
   cdk-nag:
     enabled: true
     options:
       nag_packs:
         AwsSolutionsChecks: true
-        HIPAASecurityChecks: true
-        NIST80053R4Checks: true
-        NIST80053R5Checks: true
-        PCIDSS321Checks: true
+        HIPAASecurityChecks: false
+        NIST80053R4Checks: false
+        NIST80053R5Checks: false
+        PCIDSS321Checks: false
   cfn-nag:
     enabled: true
   checkov:
@@ -45,7 +45,7 @@ scanners:
       additional_formats:
         - cyclonedx_json
       skip_path:
-        - path: test_data
+        - path: 'tests\/test_data\/.*'
           reason: This is test data that is used during unit testing only and is not part of the core application.
   detect-secrets:
     enabled: true

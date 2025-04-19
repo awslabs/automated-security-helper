@@ -12709,7 +12709,7 @@
       "additionalProperties": false,
       "properties": {
         "$schema": {
-          "default": "https://raw.githubusercontent.com/microsoft/sarif-python-om/refs/heads/main/sarif-schema-2.1.0.json",
+          "default": "https://json.schemastore.org/sarif-2.1.0.json",
           "description": "The URI of the JSON schema corresponding to the version.",
           "title": "$Schema",
           "type": "string"
@@ -17324,7 +17324,7 @@
         }
       ],
       "default": {
-        "$schema": "https://raw.githubusercontent.com/microsoft/sarif-python-om/refs/heads/main/sarif-schema-2.1.0.json",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "inlineExternalProperties": [],
         "properties": {
           "tags": []

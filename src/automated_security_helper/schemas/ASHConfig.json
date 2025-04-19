@@ -659,6 +659,44 @@
       "title": "PathExclusionEntry",
       "type": "object"
     },
+    "ReporterPluginConfigBase": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extension"
+        },
+        "name": {
+          "default": null,
+          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z][\\w-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ScannerOptionsBase",
+          "default": {},
+          "description": "Scanner options"
+        }
+      },
+      "title": "ReporterPluginConfigBase",
+      "type": "object"
+    },
     "ScannerConfigSegment": {
       "additionalProperties": {
         "anyOf": [
@@ -1239,28 +1277,32 @@
     },
     "output_formats": {
       "default": [
-        "text",
-        "yaml",
+        "asff",
+        "csv",
+        "cyclonedx",
+        "html",
         "json",
         "junitxml",
-        "html",
-        "cyclonedx",
-        "spdx",
+        "ocsf",
         "sarif",
-        "csv"
+        "spdx",
+        "text",
+        "yaml"
       ],
       "description": "Format for scanner results output",
       "items": {
         "enum": [
-          "text",
-          "yaml",
+          "asff",
+          "csv",
+          "cyclonedx",
+          "html",
           "json",
           "junitxml",
-          "html",
-          "cyclonedx",
-          "spdx",
+          "ocsf",
           "sarif",
-          "csv"
+          "spdx",
+          "text",
+          "yaml"
         ],
         "type": "string"
       },
@@ -1272,6 +1314,14 @@
       "description": "Name of the project being scanned",
       "title": "Project Name",
       "type": "string"
+    },
+    "reporters": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ReporterPluginConfigBase"
+      },
+      "default": {},
+      "title": "Reporters",
+      "type": "object"
     },
     "scanners": {
       "$ref": "#/$defs/ScannerConfigSegment",

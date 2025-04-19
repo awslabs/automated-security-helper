@@ -3,6 +3,7 @@
 from importlib.metadata import version
 import json
 from pathlib import Path
+import re
 from typing import Annotated, List, Literal
 
 from pydantic import Field
@@ -185,12 +186,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             results: List[Result] = []
             for filename, detections in self._secrets_collection.data.items():
                 for finding in detections:
+                    rule_id = re.sub(
+                        pattern=r"\W+", repl="-", string=finding.type
+                    ).upper()
                     results.append(
                         Result(
                             # Adjust as needed to capture findings from scanner as
                             # SARIF Result objects. Reference the current CDK Nag
                             # Scanner/Wrapper for examples on custom SARIF structure.
-                            ruleId="SECRET-DETECTED",
+                            ruleId=f"SECRET-{rule_id}",
                             properties=PropertyBag(
                                 tags=[
                                     "detect-secrets",
@@ -204,14 +208,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                 text=f"Secret of type '{finding.type}' detected in file '{filename}' at line {finding.line_number}"
                             ),
                             analysisTarget=ArtifactLocation(
-                                uri=get_shortest_name(input=target),
+                                uri=get_shortest_name(input=filename),
                             ),
                             locations=[
                                 Location(
                                     id=1,
                                     physicalLocation=PhysicalLocation(
                                         artifactLocation=ArtifactLocation(
-                                            uri=get_shortest_name(input=target),
+                                            uri=get_shortest_name(input=filename),
                                         ),
                                         region=Region(
                                             startLine=finding.line_number,

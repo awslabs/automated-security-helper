@@ -30,7 +30,7 @@ class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
 
         return model.cyclonedx.model_dump_json(
             by_alias=True,
-            exclude_defaults=True,
-            exclude_none=True,
             exclude_unset=True,
+            exclude_none=True,
+            # exclude_defaults=True,
         )

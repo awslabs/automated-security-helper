@@ -90,56 +90,6 @@ class ASHScanOrchestrator(BaseModel):
         ExportFormat.CYCLONEDX,
     ]
 
-    def ensure_directories(self):
-        """Ensure required directories exist in a thread-safe manner.
-
-        Creates work_dir if it doesn't exist or if no_cleanup
-        is True, and output_dir if it doesn't exist.
-        """
-        try:
-            # Create work directory if it doesn't exist or if no_cleanup is True
-            ASH_LOGGER.debug(
-                f"Creating work directory if it does not exist: {self.work_dir}"
-            )
-            if not self.work_dir.exists() or self.no_cleanup:
-                # Remove existing work dir if no_cleanup is True to ensure clean state
-                if self.work_dir.exists() and self.no_cleanup:
-                    try:
-                        shutil.rmtree(self.work_dir)
-                    except PermissionError as e:
-                        ASH_LOGGER.error(
-                            f"Permission error removing work directory: {str(e)}"
-                        )
-                        raise ASHValidationError(
-                            f"Failed to clean work directory: {str(e)}"
-                        )
-                    except Exception as e:
-                        ASH_LOGGER.error(f"Error removing work directory: {str(e)}")
-                        raise ASHValidationError(
-                            f"Failed to clean work directory: {str(e)}"
-                        )
-
-                try:
-                    self.work_dir.mkdir(parents=True, exist_ok=True)
-                except Exception as e:
-                    ASH_LOGGER.error(f"Failed to create work directory: {str(e)}")
-                    raise ASHValidationError(
-                        f"Failed to create work directory: {str(e)}"
-                    )
-
-            # Create output directory if it doesn't exist
-            ASH_LOGGER.debug(
-                f"Creating output directory if it does not exist: {self.output_dir}"
-            )
-            try:
-                self.output_dir.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                ASH_LOGGER.error(f"Failed to create output directory: {str(e)}")
-                raise ASHValidationError(f"Failed to create output directory: {str(e)}")
-        except Exception as e:
-            ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
-            raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
-
     def model_post_init(self, context):
         """Post initialization configuration."""
         super().model_post_init(context)
@@ -150,7 +100,7 @@ class ASHScanOrchestrator(BaseModel):
         ASH_LOGGER.verbose(f"Using output formats: {self.config.output_formats}")
         ASH_LOGGER.verbose("Setting up working directories")
         if self.source_dir is None:
-            ASH_LOGGER.verbose(
+            ASH_LOGGER.warning(
                 "No explicit source directory provided, using current working directory"
             )
             self.source_dir = Path.cwd()
@@ -164,16 +114,14 @@ class ASHScanOrchestrator(BaseModel):
             self.output_dir = self.source_dir.joinpath("ash_output")
         elif not isinstance(self.output_dir, Path):
             self.output_dir = Path(self.output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.work_dir = self.output_dir.joinpath("work")
-        if self.work_dir is None:
-            self.work_dir = self.output_dir.joinpath("work")
+        self.ensure_directories()
 
-        if not self.config.no_cleanup and self.work_dir.exists():
-            shutil.rmtree(self.work_dir)
-
-        self.work_dir.mkdir(parents=True, exist_ok=True)
+        for old_file in [
+            file for file in self.output_dir.glob("*.*") if "ash.log" not in file.name
+        ]:
+            ASH_LOGGER.debug(f"Removing old file: {old_file}")
+            old_file.unlink()
 
         self.execution_engine = ScanExecutionEngine(
             source_dir=self.source_dir,
@@ -198,6 +146,61 @@ class ASHScanOrchestrator(BaseModel):
             "ASH Orchestrator and ScanExecutionEngine initialized, ready to start next phase."
         )
         return super().model_post_init(context)
+
+    def ensure_directories(self):
+        """Ensure required directories exist in a thread-safe manner.
+
+        Creates work_dir if it doesn't exist or if no_cleanup
+        is True, and output_dir if it doesn't exist.
+        """
+        try:
+            # Create output directory if it doesn't exist
+            ASH_LOGGER.debug(
+                f"Creating output directory if it does not exist: {self.output_dir}"
+            )
+            try:
+                self.output_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                ASH_LOGGER.error(f"Failed to create output directory: {str(e)}")
+                raise ASHValidationError(f"Failed to create output directory: {str(e)}")
+
+            for working_dir in ["reports", "scanners"]:
+                path_working_dir = self.output_dir.joinpath(working_dir)
+                if path_working_dir.exists():
+                    ASH_LOGGER.verbose(
+                        f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
+                    )
+                    shutil.rmtree(path_working_dir)
+
+            # Create work directory if it doesn't exist or if no_cleanup is True
+            ASH_LOGGER.debug(
+                f"Creating work directory if it does not exist: {self.work_dir}"
+            )
+            if self.work_dir.exists():
+                # Remove existing work dir if no_cleanup is True to ensure clean state
+                if self.work_dir.exists() and self.no_cleanup:
+                    try:
+                        shutil.rmtree(self.work_dir)
+                    except PermissionError as e:
+                        ASH_LOGGER.error(
+                            f"Permission error removing work directory: {str(e)}"
+                        )
+                        raise ASHValidationError(
+                            f"Failed to clean work directory: {str(e)}"
+                        )
+                    except Exception as e:
+                        ASH_LOGGER.error(f"Error removing work directory: {str(e)}")
+                        raise ASHValidationError(
+                            f"Failed to clean work directory: {str(e)}"
+                        )
+            try:
+                self.work_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                ASH_LOGGER.error(f"Failed to create work directory: {str(e)}")
+                raise ASHValidationError(f"Failed to create work directory: {str(e)}")
+        except Exception as e:
+            ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
+            raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
 
     def _load_config(self) -> ASHConfig:
         """Load configuration from file or return default configuration."""

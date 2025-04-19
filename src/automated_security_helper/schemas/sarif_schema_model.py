@@ -2333,7 +2333,7 @@ class SarifReport(BaseModel):
     )
 
     field_schema: str = Field(
-        "https://raw.githubusercontent.com/microsoft/sarif-python-om/refs/heads/main/sarif-schema-2.1.0.json",
+        "https://json.schemastore.org/sarif-2.1.0.json",
         alias="$schema",
         description="The URI of the JSON schema corresponding to the version.",
         serialization_alias="$schema",
@@ -2356,6 +2356,11 @@ class SarifReport(BaseModel):
         default_factory=PropertyBag,
         description="Key/value pairs that provide additional information about the log file.",
     )
+
+    def model_post_init(self, context):
+        self.field_schema = "https://json.schemastore.org/sarif-2.1.0.json"
+        self.version = "2.1.0"
+        return super().model_post_init(context)
 
     def merge_sarif_report(
         self,

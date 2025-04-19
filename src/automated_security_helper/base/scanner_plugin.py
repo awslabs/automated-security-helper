@@ -9,7 +9,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
 import shutil
-import subprocess
+import subprocess  # nosec B404 - We are using `subprocess` explicitly to call CLI security scanning tools.
 from abc import abstractmethod
 from pathlib import Path
 
@@ -205,7 +205,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
 
         ASH_LOGGER.debug(f"({self.config.name}) Running: {command}")
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
                 command,
                 capture_output=True,
                 text=True,

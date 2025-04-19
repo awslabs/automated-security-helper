@@ -66,10 +66,6 @@ def scan(
         List[str],
         typer.Option(help="Specific scanner names to run. Defaults to all scanners."),
     ] = [],
-    no_cleanup: Annotated[
-        bool,
-        typer.Option(help="Keep working directory after scan completes"),
-    ] = False,
     progress: Annotated[
         bool,
         typer.Option(
@@ -91,6 +87,12 @@ def scan(
             ExportFormat.JUNITXML,
         ]
     ],
+    cleanup: Annotated[
+        bool,
+        typer.Option(
+            help="Clean up working directory after scan completes. Defaults to True. INFO: Scans will always clean up existing files in the output directory before a new scan starts. This parameter only affects the cleanup of the temporary work directory after a scan has completed, typically for inspection of temporary artifacts."
+        ),
+    ] = True,
     # region: Container mgmt
     build: Annotated[
         bool,
@@ -157,7 +159,7 @@ def scan(
                 if strategy == Strategy.parallel
                 else ExecutionStrategy.SEQUENTIAL
             ),
-            no_cleanup=no_cleanup,
+            no_cleanup=not cleanup,
             output_formats=output_formats,
             show_progress=progress
             and os.environ.get("ASH_IN_CONTAINER", "NO").upper()

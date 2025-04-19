@@ -31,7 +31,7 @@ def mock_secrets_collection():
                     PotentialSecret(
                         type="Base64 High Entropy String",
                         filename="test_file.py",
-                        secret="abcd1234",
+                        secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                         line_number=10,
                         is_secret=True,
                         is_verified=True,
@@ -143,7 +143,7 @@ def test_detect_secrets_scanner_sarif_output(
                 PotentialSecret(
                     type="Base64 High Entropy String",
                     filename="test_file.py",
-                    secret="abcd1234",
+                    secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                     line_number=10,
                     is_secret=True,
                     is_verified=True,
@@ -187,7 +187,7 @@ def test_detect_secrets_scanner_with_multiple_files(
                 PotentialSecret(
                     type="Secret1",
                     filename="test_file.py",
-                    secret="hash1",
+                    secret="hash1",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                     line_number=81,
                     is_secret=True,
                     is_verified=True,
@@ -199,7 +199,7 @@ def test_detect_secrets_scanner_with_multiple_files(
                 PotentialSecret(
                     type="AWSSecretKey",
                     filename="test_file.py",
-                    secret="1239491230230912",
+                    secret="1239491230230912",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                     line_number=4,
                     is_secret=True,
                     is_verified=True,

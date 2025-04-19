@@ -35,8 +35,8 @@ class SARIFReporter(ReporterPluginBase[SARIFReporterConfig]):
                 by_alias=True,
                 exclude_unset=True,
                 exclude_none=True,
-                exclude_defaults=True,
-                round_trip=True,
+                # exclude_defaults=True,
+                # round_trip=True,
                 mode="json",
             )
         )
