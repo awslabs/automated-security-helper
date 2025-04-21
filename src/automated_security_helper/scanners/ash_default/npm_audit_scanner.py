@@ -1,0 +1,434 @@
+"""Module containing the NPM Audit security scanner implementation."""
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+from typing import Annotated, Dict, List, Literal, Any
+
+from pydantic import Field
+from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.core import (
+    IgnorePathWithReason,
+)
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+)
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.schemas.sarif_schema_model import (
+    SarifReport,
+    Run,
+    Tool,
+    ToolComponent,
+    Result,
+    ArtifactLocation,
+    Location,
+    PhysicalLocation,
+    Region,
+    Message,
+    PropertyBag,
+    ReportingDescriptor,
+    Invocation,
+)
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
+
+
+class NpmAuditScannerConfigOptions(ScannerOptionsBase):
+    pass
+
+
+class NpmAuditScannerConfig(ScannerPluginConfigBase):
+    name: Literal["npm-audit"] = "npm-audit"
+    enabled: bool = True
+    options: Annotated[
+        NpmAuditScannerConfigOptions, Field(description="Configure NpmAudit scanner")
+    ] = NpmAuditScannerConfigOptions()
+
+
+class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
+    """NpmAuditScanner implements IaC scanning using `npm/yarn/pnpm audit` based on the lock files discovered in the source directory."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = NpmAuditScannerConfig()
+        self.command = "npm"
+        self.args = ToolArgs(
+            format_arg="--output",
+            format_arg_value="json",
+            output_arg="--file",
+            scan_path_arg=None,
+            extra_args=[],
+        )
+        super().model_post_init(context)
+
+    def validate(self) -> bool:
+        """Validate the scanner configuration and requirements.
+
+        Returns:
+            True if validation passes, False otherwise
+
+        Raises:
+            ScannerError: If validation fails
+        """
+        return shutil.which(self.command) is not None
+
+    def _process_config_options(self):
+        return super()._process_config_options()
+
+    def _find_package_files(self, target: Path) -> List[Path]:
+        """Find package.json and package-lock.json files in the target directory.
+
+        Args:
+            target: Path to scan
+
+        Returns:
+            List of paths to package files
+        """
+        package_files = []
+
+        # Look for package.json files
+        for root, _, files in os.walk(target):
+            if "package.json" in files:
+                package_path = Path(root) / "package.json"
+                package_files.append(package_path)
+
+                # Check if there's a corresponding package-lock.json
+                lock_path = Path(root) / "package-lock.json"
+                if lock_path.exists():
+                    package_files.append(lock_path)
+
+                # Check for yarn.lock
+                yarn_lock_path = Path(root) / "yarn.lock"
+                if yarn_lock_path.exists():
+                    package_files.append(yarn_lock_path)
+
+                # Check for pnpm-lock.yaml
+                pnpm_lock_path = Path(root) / "pnpm-lock.yaml"
+                if pnpm_lock_path.exists():
+                    package_files.append(pnpm_lock_path)
+
+        return package_files
+
+    def _convert_npm_audit_to_sarif(
+        self, npm_audit_results: Dict[str, Any], target_path: Path
+    ) -> SarifReport:
+        """Convert npm audit results to SARIF format.
+
+        Args:
+            npm_audit_results: npm audit results in JSON format
+            target_path: Path to the scanned directory
+
+        Returns:
+            SarifReport: SARIF report containing the scan findings
+        """
+        # Create the basic SARIF structure
+        tool_component = ToolComponent(
+            name="npm-audit",
+            version="1.0.0",
+            informationUri="https://docs.npmjs.com/cli/v8/commands/npm-audit",
+            rules=[],
+        )
+
+        # Create a dictionary to track unique rules
+        rules_dict = {}
+
+        # Create results list for SARIF
+        results = []
+
+        # Process vulnerabilities
+        if "vulnerabilities" in npm_audit_results:
+            for pkg_name, vuln_info in npm_audit_results["vulnerabilities"].items():
+                # Get severity
+                severity = vuln_info.get("severity", "moderate")
+
+                # Map npm severity to SARIF level
+                level_map = {
+                    "critical": "error",
+                    "high": "error",
+                    "moderate": "warning",
+                    "low": "note",
+                    "info": "note",
+                }
+                level = level_map.get(severity, "warning")
+
+                # Process each vulnerability path
+                via_items = vuln_info.get("via", [])
+                if not isinstance(via_items, list):
+                    via_items = [via_items]
+
+                for via in via_items:
+                    # Skip if it's just a string reference to another package
+                    if isinstance(via, str):
+                        continue
+
+                    # Extract vulnerability details
+                    vuln_id = (
+                        via.get("url", "").split("/")[-1]
+                        if via.get("url")
+                        else f"npm-{pkg_name}"
+                    )
+                    title = via.get("title", f"Vulnerability in {pkg_name}")
+                    description = f"Vulnerability in {pkg_name}: {title}"
+
+                    # Create a rule for this vulnerability if it doesn't exist
+                    if vuln_id not in rules_dict:
+                        rule = ReportingDescriptor(
+                            id=vuln_id,
+                            name=f"npm-audit-{vuln_id}",
+                            shortDescription=Message(text=title),
+                            fullDescription=Message(text=description),
+                            helpUri=via.get("url", ""),
+                            properties=PropertyBag(
+                                tags=["security", "npm-audit", severity],
+                                security_severity=via.get("cvss", {}).get("score", 0),
+                            ),
+                        )
+                        rules_dict[vuln_id] = rule
+
+                    # Find the package location
+                    package_locations = []
+                    for node_path in vuln_info.get("nodes", []):
+                        # Convert node_modules path to a file location
+                        rel_path = node_path.replace("node_modules/", "")
+                        package_locations.append(rel_path)
+
+                    # Create a result for this vulnerability
+                    for pkg_location in package_locations:
+                        result = Result(
+                            ruleId=vuln_id,
+                            level=level,
+                            message=Message(
+                                text=f"{title} in {pkg_name} {vuln_info.get('range', '*')}. {via.get('url', '')}"
+                            ),
+                            locations=[
+                                Location(
+                                    physicalLocation=PhysicalLocation(
+                                        artifactLocation=ArtifactLocation(
+                                            uri=f"node_modules/{pkg_location}/package.json"
+                                        ),
+                                        region=Region(startLine=1, startColumn=1),
+                                    )
+                                )
+                            ],
+                            properties=PropertyBag(
+                                package_name=pkg_name,
+                                installed_version=vuln_info.get("range", "*"),
+                                vulnerable_versions=vuln_info.get("range", "*"),
+                                recommendation=f"Update {pkg_name} to a non-vulnerable version",
+                                severity=severity,
+                                cwe=via.get("cwe", []),
+                                cvss=via.get("cvss", {}),
+                                fix_available=vuln_info.get("fixAvailable", False),
+                            ),
+                        )
+                        results.append(result)
+
+        # Add all rules to the tool component
+        tool_component.rules = list(rules_dict.values())
+
+        # Create the SARIF report
+        sarif_report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=tool_component),
+                    results=results,
+                    invocations=[
+                        Invocation(
+                            commandLine="npm audit --json",
+                            executionSuccessful=True,
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target_path)
+                            ),
+                        )
+                    ],
+                    properties=PropertyBag(
+                        metrics=npm_audit_results.get("metadata", {}).get(
+                            "vulnerabilities", {}
+                        )
+                    ),
+                )
+            ],
+        )
+
+        return sarif_report
+
+    def scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
+        config: NpmAuditScannerConfig | None = None,
+    ) -> SarifReport:
+        """Execute NpmAudit scan and return results.
+
+        Args:
+            target: Path to scan
+            target_type: Type of target (source or converted)
+            global_ignore_paths: List of paths to ignore
+            config: Scanner configuration
+
+        Returns:
+            SarifReport containing the scan findings and metadata
+
+        Raises:
+            ScannerError: If the scan fails or results cannot be parsed
+        """
+        try:
+            self._pre_scan(
+                target=target,
+                target_type=target_type,
+                config=config,
+            )
+        except ScannerError as exc:
+            raise exc
+
+        try:
+            target_results_dir = self.results_dir.joinpath(target_type)
+            results_file = target_results_dir.joinpath("results.json")
+            results_file.parent.mkdir(exist_ok=True, parents=True)
+
+            # Find package files
+            package_files = self._find_package_files(target)
+
+            if not package_files:
+                ASH_LOGGER.info(f"No package.json files found in {target}")
+                # Return empty SARIF report
+                return SarifReport(
+                    version="2.1.0",
+                    runs=[
+                        Run(
+                            tool=Tool(
+                                driver=ToolComponent(
+                                    name="npm-audit",
+                                    version="1.0.0",
+                                    informationUri="https://docs.npmjs.com/cli/v8/commands/npm-audit",
+                                )
+                            ),
+                            results=[],
+                            invocations=[
+                                Invocation(
+                                    commandLine="npm audit --json",
+                                    executionSuccessful=True,
+                                    workingDirectory=ArtifactLocation(
+                                        uri=get_shortest_name(input=target)
+                                    ),
+                                )
+                            ],
+                        )
+                    ],
+                )
+
+            # Run npm audit for each package.json file
+            all_results = {}
+            for package_file in package_files:
+                if "package.json" in package_file.name:
+                    package_dir = package_file.parent
+                    ASH_LOGGER.info(f"Running npm audit in {package_dir}")
+
+                    try:
+                        # Run npm audit
+                        cmd = ["npm", "audit", "--json"]
+                        result = subprocess.run(
+                            cmd,
+                            cwd=package_dir,
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                        )
+
+                        # npm audit returns non-zero exit code when vulnerabilities are found
+                        # but we still want to process the output
+                        if result.stdout:
+                            try:
+                                audit_results = json.loads(result.stdout)
+                                # Merge results
+                                if not all_results:
+                                    all_results = audit_results
+                                else:
+                                    # Merge vulnerabilities
+                                    if "vulnerabilities" in audit_results:
+                                        all_results.setdefault(
+                                            "vulnerabilities", {}
+                                        ).update(audit_results["vulnerabilities"])
+                                    # Update metadata
+                                    if "metadata" in audit_results:
+                                        for key, value in audit_results[
+                                            "metadata"
+                                        ].items():
+                                            if key in all_results.get("metadata", {}):
+                                                if isinstance(value, dict):
+                                                    all_results["metadata"][key].update(
+                                                        value
+                                                    )
+                                                elif isinstance(value, (int, float)):
+                                                    all_results["metadata"][key] += (
+                                                        value
+                                                    )
+                                            else:
+                                                all_results.setdefault("metadata", {})[
+                                                    key
+                                                ] = value
+                            except json.JSONDecodeError:
+                                ASH_LOGGER.warning(
+                                    f"Failed to parse npm audit output for {package_dir}"
+                                )
+                    except Exception as e:
+                        ASH_LOGGER.warning(
+                            f"Failed to run npm audit in {package_dir}: {str(e)}"
+                        )
+
+            # Save the combined results
+            if all_results:
+                with open(results_file, "w") as f:
+                    json.dump(all_results, f, indent=2)
+
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
+
+            # Convert npm audit results to SARIF
+            if all_results:
+                sarif_report = self._convert_npm_audit_to_sarif(all_results, target)
+
+                # Save SARIF report
+                sarif_file = target_results_dir.joinpath("results_sarif.sarif")
+                with open(sarif_file, "w") as f:
+                    f.write(sarif_report.model_dump_json(indent=2))
+
+                return sarif_report
+            else:
+                # Return empty SARIF report
+                return SarifReport(
+                    version="2.1.0",
+                    runs=[
+                        Run(
+                            tool=Tool(
+                                driver=ToolComponent(
+                                    name="npm-audit",
+                                    version="1.0.0",
+                                    informationUri="https://docs.npmjs.com/cli/v8/commands/npm-audit",
+                                )
+                            ),
+                            results=[],
+                            invocations=[
+                                Invocation(
+                                    commandLine="npm audit --json",
+                                    executionSuccessful=True,
+                                    workingDirectory=ArtifactLocation(
+                                        uri=get_shortest_name(input=target)
+                                    ),
+                                )
+                            ],
+                        )
+                    ],
+                )
+
+        except Exception as e:
+            # Check if there are useful error details
+            raise ScannerError(f"NpmAudit scan failed: {str(e)}")

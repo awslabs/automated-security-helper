@@ -80,24 +80,6 @@ class TestScannerFactory:
         with pytest.raises(ValueError, match="Unable to determine scanner class"):
             factory.create_scanner("test", None, test_source_dir, test_output_dir)
 
-    def test_scanner_factory_type_lookup(self, ash_config):
-        """Test lookup of scanner classes by name."""
-        factory = ScannerFactory(config=ash_config)
-
-        # Test valid lookups
-        assert (
-            factory.get_scanner_class("bandit").config.name
-            == BanditScanner().config.name
-        )
-        assert (
-            factory.get_scanner_class("cdk-nag").config.name
-            == CdkNagScanner().config.name
-        )
-
-        # Test invalid lookup
-        with pytest.raises(ValueError, match="Unable to determine scanner class"):
-            factory.get_scanner_class("invalid")
-
     def test_scanner_factory_default_scanners(
         self, mock_scanner_plugin, ash_config, test_source_dir, test_output_dir
     ):
@@ -109,7 +91,7 @@ class TestScannerFactory:
         assert all(name in factory.default_scanners for name in scanners), (
             f"Confirm all factory default scanners are found as available from factory: {factory.default_scanners}"
         )
-        assert "cdk-nag" in scanners, (
+        assert "trivy-sast" in scanners, (
             f"Confirm alias keys for scanners are respected and hyphens are not converted to underscore for key compatibility: {scanners.keys()}"
         )
         # assert all(

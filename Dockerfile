@@ -145,7 +145,6 @@ COPY ./pyproject.toml /ash/pyproject.toml
 RUN python3 -m pip install *.whl && rm *.whl
 
 COPY ./utils/*.* /ash/utils/
-COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
 COPY ./ash-multi /ash/ash
 
 #
@@ -162,6 +161,11 @@ ENV _ASH_EXEC_MODE="local"
 # Append /ash to PATH to allow calling `ash` directly
 #
 ENV PATH="$PATH:/ash"
+
+#
+# Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
+#
+ENV ASH_IN_CONTAINER="YES"
 
 
 # CI stage -- any customizations specific to CI platform compatibility should be added
@@ -207,9 +211,6 @@ RUN adduser --disabled-password --disabled-login \
 RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out /deps && \
     chmod 750 -R ${ASHUSER_HOME} /src /out /deps
 
-# Setting default WORKDIR to ${ASHUSER_HOME}
-WORKDIR ${ASHUSER_HOME}
-
 USER ${UID}:${GID}
 
 #
@@ -224,4 +225,4 @@ HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD type ash || exit 1
 
 ENTRYPOINT [ ]
-CMD [ "ashv3", "--verbose", "--source", "/src", "--output","/out", "--strategy", "sequential", "--scanners", "bandit,cdknag" ]
+CMD [ "ashv3" ]

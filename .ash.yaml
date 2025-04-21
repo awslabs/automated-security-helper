@@ -4,21 +4,26 @@ build:
   build_mode: ONLINE
   custom_scanners: []
 fail_on_findings: true
-ignore_paths:
-  - tests/test_data/**
-  - .venv
-  - .git
-  - .ruff
-  - .pytest_cache
-  - .mypy_cache
-output_dir: ash_output
+global_ignore_paths:
+  - path: 'tests/test_data'
+    reason: This is test data that is used during unit testing only and is not part of the core application.
+  - path: .venv
+    reason: This path contains .gitignore'd cache data used by dev/build tools.
+  - path: .git
+    reason: This path contains .gitignore'd cache data used by dev/build tools.
+  - path: .ruff
+    reason: This path contains .gitignore'd cache data used by dev/build tools.
+  - path: .pytest_cache
+    reason: This path contains .gitignore'd cache data used by dev/build tools.
+  - path: .mypy_cache
+    reason: This path contains .gitignore'd cache data used by dev/build tools.
 output_formats:
-  - sarif
-  - html
-  - json
-  - csv
   - junitxml
+  - html
+  - sarif
   - cyclonedx
+  - asff
+  - ocsf
   - text
 severity_threshold: ALL
 scanners:
@@ -28,9 +33,7 @@ scanners:
       confidence_level: all
       severity_level: all
       ignore_nosec: false
-      excluded_paths:
-        - path: test_data
-          reason: this is my test data folder
+      excluded_paths: []
   cdk-nag:
     enabled: true
     options:
@@ -42,7 +45,6 @@ scanners:
         PCIDSS321Checks: true
   cfn-nag:
     enabled: true
-    type: IAC
   checkov:
     enabled: true
     options:
@@ -50,9 +52,7 @@ scanners:
         - all
       additional_formats:
         - cyclonedx_json
-      skip_path:
-        - path: "test_data"
-          reason: This is test data that is used during unit testing only and is not part of the core application.
+      skip_path: []
   detect-secrets:
     enabled: true
   npm-audit:

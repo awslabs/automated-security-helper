@@ -1,5 +1,6 @@
 """Tests for base plugin classes."""
 
+from typing import List, Literal
 import pytest
 from pathlib import Path
 from datetime import datetime
@@ -16,7 +17,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
     ScannerError,
 )
-from automated_security_helper.models.core import ToolArgs, ToolExtraArg
+from automated_security_helper.models.core import (
+    IgnorePathWithReason,
+    ToolArgs,
+    ToolExtraArg,
+)
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.models.asharp_model import ASHARPModel
 
@@ -43,7 +48,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter()
         assert converter.source_dir == Path(".")
         assert converter.output_dir == Path("ash_output")
-        assert converter.work_dir == Path("ash_output/work")
+        assert converter.work_dir == Path("ash_output/converted")
 
     def test_setup_paths_custom(self):
         """Test setup_paths with custom values."""
@@ -52,7 +57,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter(source_dir=source, output_dir=output)
         assert converter.source_dir == source
         assert converter.output_dir == output
-        assert converter.work_dir == output.joinpath("work")
+        assert converter.work_dir == output.joinpath("converted")
 
     def test_setup_paths_string_conversion(self):
         """Test setup_paths converts string paths to Path objects."""
@@ -207,7 +212,15 @@ class TestScannerPlugin:
         def validate(self) -> bool:
             return True
 
-        def scan(self, target: Path, config=None, *args, **kwargs):
+        def scan(
+            self,
+            target: Path,
+            target_type: Literal["source", "converted"],
+            global_ignore_paths: List[IgnorePathWithReason] = [],
+            config=None,
+            *args,
+            **kwargs,
+        ):
             self.output.append("hello world")
             return SarifReport(runs=[])
 
@@ -222,7 +235,7 @@ class TestScannerPlugin:
         scanner = self.DummyScanner(config=config, source_dir=tmp_path)
         assert scanner.source_dir == tmp_path
         assert scanner.output_dir == tmp_path.joinpath("ash_output")
-        assert scanner.work_dir == scanner.output_dir.joinpath("work")
+        assert scanner.work_dir == scanner.output_dir.joinpath("converted")
         assert scanner.results_dir == scanner.output_dir.joinpath("scanners").joinpath(
             config.name
         )
@@ -258,7 +271,7 @@ class TestScannerPlugin:
         config = self.DummyConfig()
         scanner = self.DummyScanner(config=config)
         with pytest.raises(ScannerError):
-            scanner._pre_scan(Path("nonexistent.txt"))
+            scanner._pre_scan(Path("nonexistent.txt"), target_type="converted")
 
     def test_pre_scan_creates_dirs(self, tmp_path):
         """Test _pre_scan creates necessary directories."""
@@ -268,7 +281,7 @@ class TestScannerPlugin:
         )
         test_file = tmp_path.joinpath("test.txt")
         test_file.touch()
-        scanner._pre_scan(test_file)
+        scanner._pre_scan(test_file, target_type="converted")
         assert scanner.work_dir.exists()
         assert scanner.results_dir.exists()
 
@@ -278,9 +291,16 @@ class TestScannerPlugin:
         scanner = self.DummyScanner(config=config)
         test_file = tmp_path.joinpath("test.txt")
         test_file.touch()
-        scanner._pre_scan(test_file, config)
-        scanner.scan(test_file)
-        scanner._post_scan(test_file)
+        scanner._pre_scan(
+            test_file,
+            target_type="source",
+            config=config,
+        )
+        scanner.scan(test_file, target_type="source")
+        scanner._post_scan(
+            test_file,
+            target_type="source",
+        )
         assert scanner.end_time is not None
 
     def test_run_subprocess_success(self, test_source_dir):
@@ -291,7 +311,7 @@ class TestScannerPlugin:
             command="echo",
             args=ToolArgs(extra_args=[ToolExtraArg(key="hello", value="world")]),
         )
-        scanner.scan(test_source_dir)
+        scanner.scan(test_source_dir, target_type="source")
         assert scanner.exit_code == 0
         assert len(scanner.output) > 0
 

@@ -1,15 +1,16 @@
 from datetime import datetime, timezone
+import logging
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Annotated, Any, Generic, List, Optional, TypeVar
+from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
 import shutil
-import subprocess
+import subprocess  # nosec B404 - We are using `subprocess` explicitly to call CLI security scanning tools.
 from abc import abstractmethod
 from pathlib import Path
 
@@ -72,12 +73,47 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         # Ensure paths are Path objects
         self.source_dir = Path(str(self.source_dir))
         self.output_dir = Path(str(self.output_dir))
-        self.work_dir = self.output_dir.joinpath("work")
+        self.work_dir = self.output_dir.joinpath("converted")
         self.results_dir = self.output_dir.joinpath("scanners").joinpath(
             self.config.name
         )
 
         return super().model_post_init(context)
+
+    def _scanner_log(
+        self,
+        *msg: str,
+        level: int | str = 15,
+        target_type: str = None,
+        append_to_stream: Literal["stderr", "stdout", "none"] = "none",
+    ):
+        """Log a message to the scanner's log file.
+
+        Args:
+            *msg: Message to log
+            level: Log level
+            target_type: Target type (e.g. source, converted)
+            append_to_stream: Append to stdout or stderr stream
+        """
+        tt = None
+        if target_type is not None:
+            tt = f" @ [magenta]{target_type}[/magenta]"
+
+        ASH_LOGGER._log(
+            level,
+            f"([yellow]{self.config.name or self.__class__.__name__}[/yellow]{tt})"
+            + "\t"
+            + "\n".join(msg),
+            args=(),
+        )
+        if level == logging.ERROR or append_to_stream == "stderr":
+            self.errors.append(
+                f"({self.config.name or self.__class__.__name__}) " + "\n".join(msg)
+            )
+        elif append_to_stream == "stdout":
+            self.output.append(
+                f"({self.config.name or self.__class__.__name__}) " + "\n".join(msg)
+            )
 
     def _process_config_options(self) -> None:
         """By default, returns False to indicate that the scanner did not perform any
@@ -136,6 +172,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     def _pre_scan(
         self,
         target: Path,
+        target_type: Literal["source", "converted"],
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
@@ -146,14 +183,32 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             target: Target to scan
             options: Optional scanner-specific options
         """
-        self.results_dir.mkdir(parents=True, exist_ok=True)
-        if not Path(target).exists():
-            raise ScannerError(f"Target {target} does not exist!")
-
         self.start_time = datetime.now(timezone.utc)
-        ASH_LOGGER.debug(
-            f"Starting {self.config.name or self.__class__.__name__} scan of {target}"
+
+        self._scanner_log(
+            "Starting scan",
+            target_type=target_type,
+            level=logging.INFO,
         )
+        self._scanner_log(
+            f"self.config: {self.config}",
+            target_type=target_type,
+            level=logging.DEBUG,
+        )
+        if config is not None:
+            if hasattr(config, "model_dump") and callable(config.model_dump):
+                config = config.model_dump(by_alias=True)
+            self.config = self.config.__class__.model_validate(config)
+        self._scanner_log(
+            f"config: {config}",
+            target_type=target_type,
+            level=logging.DEBUG,
+        )
+
+        if not Path(target).exists():
+            raise ScannerError(
+                f"([yellow]{self.config.name or self.__class__.__name__}[/yellow] @ [magenta]{target_type}[/magenta]) Target {target} does not exist!"
+            )
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
         if self.results_dir:
@@ -162,6 +217,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     def _post_scan(
         self,
         target: Path,
+        target_type: Literal["source", "converted"],
     ) -> None:
         """Perform pre-scan setup.
 
@@ -171,13 +227,20 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         """
         self.end_time = datetime.now(timezone.utc)
 
-        ASH_LOGGER.debug(
-            f"{self.config.name} scan of {target} completed in {(self.end_time - self.start_time).total_seconds()} seconds"
+        ec_color = "bold green" if self.exit_code == 0 else "bold red"
+        self._scanner_log(
+            f"Scan completed in {(self.end_time - self.start_time).total_seconds()} seconds with an exit code of [{ec_color}]{self.exit_code}[/{ec_color}]",
+            target_type=target_type,
+            level=logging.INFO,
         )
 
     def _run_subprocess(
-        self, command: List[str], results_dir: str | Path = None
-    ) -> None:
+        self,
+        command: List[str],
+        results_dir: str | Path = None,
+        stdout_preference: Literal["return", "write", "both", "none"] = "write",
+        stderr_preference: Literal["return", "write", "both", "none"] = "write",
+    ) -> Dict[str, str]:
         """Run a subprocess with the given command.
 
         Args:
@@ -195,7 +258,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
 
         ASH_LOGGER.debug(f"({self.config.name}) Running: {command}")
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
                 command,
                 capture_output=True,
                 text=True,
@@ -209,10 +272,8 @@ class ScannerPluginBase(BaseModel, Generic[T]):
 
             # Process stdout
             if result.stdout:
-                for line in result.stdout.splitlines():
-                    self.output.append(line)
-                    # ASH_LOGGER.debug(line)
-                if results_dir is not None:
+                self.output.extend(result.stdout.splitlines())
+                if results_dir is not None and stdout_preference in ["write", "both"]:
                     with open(
                         Path(results_dir).joinpath(
                             f"{self.__class__.__name__}.stdout.log"
@@ -222,10 +283,8 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                         stdout_file.write(result.stdout)
             # Process stderr
             if result.stderr:
-                for line in result.stderr.splitlines():
-                    self.errors.append(line)
-                    # ASH_LOGGER.debug(line)
-                if results_dir is not None:
+                self.errors.extend(result.stderr.splitlines())
+                if results_dir is not None and stderr_preference in ["write", "both"]:
                     with open(
                         Path(results_dir).joinpath(
                             f"{self.__class__.__name__}.stderr.log"
@@ -233,9 +292,18 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                         "w",
                     ) as stderr_file:
                         stderr_file.write(result.stderr)
+
+            response = {}
+            if stdout_preference in ["return", "both"]:
+                response["stdout"] = result.stdout
+            if stderr_preference in ["return", "both"]:
+                response["stderr"] = result.stderr
+            return response
+
         except Exception as e:
             self.errors.append(str(e))
-            ASH_LOGGER.warning(f"({self.config.name}) Error running {command}: {e}")
+            # show full stack trace in warning
+            ASH_LOGGER.debug(f"({self.config.name}) Error running {command}: {e}")
             self.exit_code = 1
 
     ### Methods that require implementation by plugins.
@@ -252,6 +320,8 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: T | ScannerPluginConfigBase = None,
         *args,
         **kwargs,

@@ -1,6 +1,7 @@
 """Module containing the CDK Nag security scanner implementation."""
 
 from importlib.metadata import version
+import logging
 from typing import Annotated, List, Literal
 from pathlib import Path
 
@@ -34,7 +35,7 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.models.core import IgnorePathWithReason
 
 
 class CdkNagPacks(BaseModel):
@@ -128,6 +129,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: CdkNagScannerConfig | None = None,
     ) -> SarifReport:
         """Scan the target and return findings.
@@ -144,55 +147,48 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
-                options=self.config.options,
+                target_type=target_type,
+                config=config,
             )
         except ScannerError as exc:
             raise exc
-        ASH_LOGGER.debug(f"({self.config.name}) self.config: {self.config}")
-        if config is not None:
-            if hasattr(config, "model_dump") and callable(config.model_dump):
-                config = config.model_dump(by_alias=True)
-            self.config = CdkNagScannerConfig(**config)
-        ASH_LOGGER.debug(f"({self.config.name}) config: {config}")
 
         # Find all JSON/YAML files to scan from the scan set
-        cfn_files = scan_set(
-            source=self.source_dir,
-            output=self.output_dir,
-            # filter_pattern=r"\.(yaml|yml|json)$",
+        scannable = scan_set(
+            source=self.work_dir if target_type == "converted" else self.source_dir,
+            output=self.work_dir if target_type == "converted" else self.output_dir,
         )
         ASH_LOGGER.debug(
-            f"Found {len(cfn_files)} files in scan set. Checking for possible CloudFormation templates"
+            f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"
         )
-        cfn_files = [
+        scannable = [
             f.strip()
-            for f in cfn_files
+            for f in scannable
             if (
                 f.strip().endswith(".json")
                 or f.strip().endswith(".yaml")
                 or f.strip().endswith(".yml")
             )
         ]
-        joined_files = "\n- ".join(cfn_files)
-        ASH_LOGGER.debug(
-            f"Found {len(cfn_files)} possible CloudFormation templates:\n- {joined_files}"
-        )
+        joined_files = "\n- ".join(scannable)
+        ASH_LOGGER.debug(f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}")
 
-        if len(cfn_files) == 0:
-            raise ScannerError(f"No CloudFormation templates found in {target}")
+        if len(scannable) == 0:
+            self._scanner_log(
+                f"No JSON/YAML files found in {target_type} directory to scan. Exiting.",
+                target_type=target_type,
+                level=logging.WARNING,
+                append_to_stream="stderr",
+            )
+            return
 
         # Process each template file
         failed_files = []
         target_rel_path = get_shortest_name(input=target)
 
-        scan_dir_name = get_normalized_filename(str_to_normalize=target)
-        outdir = (
-            self.output_dir.joinpath("scanners")
-            .joinpath("cdk-nag")
-            .joinpath(scan_dir_name)
-        )
+        outdir = self.results_dir.joinpath(target_type)
         sarif_results: List[Result] = []
-        for cfn_file in cfn_files:
+        for cfn_file in scannable:
             try:
                 # Run CDK synthesis for this file
                 config_options: CdkNagScannerConfigOptions = (
@@ -226,11 +222,20 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     ASH_LOGGER.warning(f"Error scanning {cfn_file}: {e}")
                 failed_files.append((cfn_file, str(e)))
 
-        self._post_scan(target=target)
+        self._post_scan(
+            target=target,
+            target_type=target_type,
+        )
         # Create SARIF report
         rules: List[ReportingDescriptor] = []
+        rule_map = {}
         for result in sarif_results:
+            if result.ruleId in rule_map:
+                continue
+            rule_map[result.ruleId] = result
+
             finding_props = result.properties.model_extra.get("cdk_nag_finding", {})
+
             rules.append(
                 ReportingDescriptor(
                     id=result.ruleId,
@@ -323,6 +328,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 if __name__ == "__main__":
     ASH_LOGGER.debug("Running cdk-nag via __main__")
     scanner = CdkNagScanner(
+        source_dir=Path.cwd(),
+        output_dir=Path.cwd().joinpath("ash_output"),
         config=CdkNagScannerConfig(
             options=CdkNagScannerConfigOptions(
                 nag_packs=CdkNagPacks(
@@ -333,9 +340,9 @@ if __name__ == "__main__":
                     PCIDSS321Checks=True,
                 )
             )
-        )
+        ),
     )
-    report = scanner.scan(target=Path("."))
+    report = scanner.scan(target=scanner.source_dir)
 
     print(
         report.model_dump_json(

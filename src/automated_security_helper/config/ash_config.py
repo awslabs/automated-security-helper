@@ -16,6 +16,10 @@ from automated_security_helper.config.scanner_types import (
     GrypeScannerConfig,
     SyftScannerConfig,
 )
+from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.reporters.ash_default.asff_reporter import (
+    ASFFReporterConfig,
+)
 from automated_security_helper.scanners.ash_default.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -110,6 +114,27 @@ class ScannerConfigSegment(BaseModel):
     ] = SyftScannerConfig()
 
 
+class ReporterConfigSegment(BaseModel):
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        arbitrary_types_allowed=True,
+        use_enum_values=True,
+        extra="allow",
+    )
+
+    __pydantic_extra__: Dict[str, Any | ReporterPluginConfigBase] = {}
+
+    asff: Annotated[
+        ASFFReporterConfig,
+        Field(description="Configure the options for the ASFF reporter"),
+    ] = ASFFReporterConfig()
+
+    asff: Annotated[
+        ASFFReporterConfig,
+        Field(description="Configure the options for the ASFF reporter"),
+    ] = ASFFReporterConfig()
+
+
 class ASHConfig(BaseModel):
     """Main configuration model for Automated Security Helper."""
 
@@ -133,28 +158,32 @@ class ASHConfig(BaseModel):
     output_formats: Annotated[
         List[
             Literal[
-                "text",
-                "yaml",
+                "asff",
+                "csv",
+                "cyclonedx",
+                "html",
                 "json",
                 "junitxml",
-                "html",
-                "cyclonedx",
-                "spdx",
+                "ocsf",
                 "sarif",
-                "csv",
+                "spdx",
+                "text",
+                "yaml",
             ]
         ],
         Field(description="Format for scanner results output"),
     ] = [
-        "text",
-        "yaml",
+        "asff",
+        "csv",
+        "cyclonedx",
+        "html",
         "json",
         "junitxml",
-        "html",
-        "cyclonedx",
-        "spdx",
+        "ocsf",
         "sarif",
-        "csv",
+        "spdx",
+        "text",
+        "yaml",
     ]
 
     converters: Annotated[
@@ -172,6 +201,11 @@ class ASHConfig(BaseModel):
         Field(description="Scanner configurations by type"),
     ] = ScannerConfigSegment()
 
+    reporters: Annotated[
+        Dict[str, ReporterPluginConfigBase],
+        Field(),
+    ] = {}
+
     # General scan settings
     fail_on_findings: Annotated[
         bool,
@@ -180,9 +214,18 @@ class ASHConfig(BaseModel):
         ),
     ] = True
 
-    ignore_paths: Annotated[
+    global_ignore_paths: Annotated[
+        List[IgnorePathWithReason],
+        Field(
+            description="Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'."
+        ),
+    ] = []
+
+    external_reports_to_include: Annotated[
         List[str],
-        Field(description="List of paths to ignore during scanning"),
+        Field(
+            description="List of external reports to include in the final report. These can be SARIF, CycloneDX, or CDK synth paths that have produced NagReport CSVs or JSON files.",
+        ),
     ] = []
 
     output_dir: Annotated[

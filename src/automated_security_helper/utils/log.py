@@ -1,5 +1,10 @@
-from datetime import datetime, timezone
+import json
 import logging
+import os
+from typing import Literal
+from rich.logging import RichHandler
+from rich.console import Console
+from rich.theme import Theme
 from pathlib import Path
 
 
@@ -84,6 +89,69 @@ def formatter_message(message, use_color=True):
     return message
 
 
+class JsonFormatter(logging.Formatter):
+    """
+    Formatter that outputs JSON strings after parsing the LogRecord.
+
+    @param dict fmt_dict: Key: logging format attribute pairs. Defaults to {"message": "message"}.
+    @param str time_format: time.strftime() format string. Default: "%Y-%m-%dT%H:%M:%S"
+    @param str msec_format: Microsecond formatting. Appended at the end. Default: "%s.%03dZ"
+    """
+
+    def __init__(
+        self,
+        fmt_dict: dict = None,
+        time_format: str = "%Y-%m-%dT%H:%M:%S",
+        msec_format: str = "%s.%03dZ",
+    ):
+        self.fmt_dict = fmt_dict if fmt_dict is not None else {"message": "message"}
+        self.default_time_format = time_format
+        self.default_msec_format = msec_format
+        self.datefmt = None
+
+    def usesTime(self) -> bool:
+        """
+        Overwritten to look for the attribute in the format dict values instead of the fmt string.
+        """
+        return "asctime" in self.fmt_dict.values()
+
+    def formatMessage(self, record) -> dict:
+        """
+        Overwritten to return a dictionary of the relevant LogRecord attributes instead of a string.
+        KeyError is raised if an unknown attribute is provided in the fmt_dict.
+        """
+        return {
+            fmt_key: record.__dict__[fmt_val]
+            for fmt_key, fmt_val in self.fmt_dict.items()
+        }
+
+    def format(self, record) -> str:
+        """
+        Mostly the same as the parent's class method, the difference being that a dict is manipulated and dumped as JSON
+        instead of a string.
+        """
+        record.message = record.getMessage()
+
+        if self.usesTime():
+            record.asctime = self.formatTime(record, self.datefmt)
+
+        message_dict = self.formatMessage(record)
+
+        if record.exc_info:
+            # Cache the traceback text to avoid converting it multiple times
+            # (it's constant anyway)
+            if not record.exc_text:
+                record.exc_text = self.formatException(record.exc_info)
+
+        if record.exc_text:
+            message_dict["exc_info"] = record.exc_text
+
+        if record.stack_info:
+            message_dict["stack_info"] = self.formatStack(record.stack_info)
+
+        return json.dumps(message_dict, default=str)
+
+
 class ColoredFormatter(logging.Formatter):
     def __init__(self, msg, use_color=True):
         logging.Formatter.__init__(self, msg)
@@ -100,29 +168,13 @@ class ColoredFormatter(logging.Formatter):
 
 
 # Custom logger class with multiple destinations
-class ColoredLogger(logging.getLoggerClass()):
-    VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
-    DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
-
+class ASHLogger(logging.getLoggerClass()):
     def __init__(
         self,
         name: str,
-        output_dir: Path | None = None,
         level: str | int | None = None,
     ):
-        super().__init__(name=name, level=logging.INFO)
-
-        if level is None or level > 15:
-            self.COLOR_FORMAT = formatter_message(self.DEFAULT_FORMAT, True)
-        else:
-            self.COLOR_FORMAT = formatter_message(self.VERBOSE_FORMAT, True)
-
-        color_formatter = ColoredFormatter(self.COLOR_FORMAT)
-
-        console = logging.StreamHandler()
-        console.setFormatter(color_formatter)
-
-        self.addHandler(console)
+        super().__init__(name=name, level=level if level is not None else logging.INFO)
 
     def verbose(self, msg, *args, **kws):
         self._log(logging._nameToLevel.get("VERBOSE", 15), msg, args, **kws)
@@ -131,7 +183,7 @@ class ColoredLogger(logging.getLoggerClass()):
         self._log(logging._nameToLevel.get("TRACE", 5), msg, args, **kws)
 
 
-# logging.setLoggerClass(ColoredLogger)
+# logging.setLoggerClass(ASHLogger)
 
 
 class Color:
@@ -193,28 +245,100 @@ class Color:
 
 
 def get_logger(
-    name: str = "ash", level: str | int | None = None, output_dir: Path | None = None
-):
-    VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
-    DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
+    name: str = "ash",
+    level: str | int | None = None,
+    output_dir: Path | None = None,
+    log_format: Literal["JSONL", "TABULAR", "BOTH"] = "TABULAR",
+    show_progress: bool = True,
+    use_color: bool = True,
+) -> ASHLogger:
+    # VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
+    # DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
 
-    logger = logging.getLogger(name)
+    logger: ASHLogger = logging.getLogger(name)
+    # Explicit set the root logger level to TRACE/5
+    # (root logger sets the lowest level depth for all attached handlers)
+    logger.setLevel(logging._nameToLevel.get("TRACE", 5))
+    level_param = {}
     if level is not None:
-        logger.setLevel(level)
-        logger.debug(
-            "Log level set to: %s",
-            logging._levelToName[level] if isinstance(level, int) else level,
+        level_param = {"level": level}
+
+    logger._log(
+        15,
+        msg=f"Log level set to: {logging._levelToName[level] if isinstance(level, int) else level}",
+        args=(),
+    )
+
+    logger.verbose("Logger initialized: %s", name)
+    logger.verbose(
+        "Logger effective level: %s",
+        logging._levelToName[logger.getEffectiveLevel() or 0],
+    )
+
+    SHOW_DEBUG_INFO = logging._levelToName[logger.getEffectiveLevel() or 0] != "INFO"
+    logger.info("Show debug info: %s", SHOW_DEBUG_INFO)
+    custom_console_params = (
+        {
+            "console": Console(
+                width=150,
+                theme=Theme(
+                    {
+                        "logging.level.verbose": "magenta",
+                        "logging.level.warning": "yellow",
+                        "logging.level.trace": "green",
+                    }
+                ),
+                highlight=use_color,
+                color_system="auto" if use_color else None,
+            )
+        }
+        if os.environ.get("ASH_IN_CONTAINER", "NO").upper() in ["YES", "1", "TRUE"]
+        else {
+            "console": Console(
+                theme=Theme(
+                    {
+                        "logging.level.verbose": "magenta",
+                        "logging.level.warning": "yellow",
+                        "logging.level.trace": "green",
+                    }
+                ),
+                highlight=use_color,
+                color_system="auto" if use_color else None,
+            )
+        }
+    )
+    if SHOW_DEBUG_INFO:
+        handler = RichHandler(
+            show_level=True,
+            enable_link_path=True,
+            rich_tracebacks=True,
+            show_path=os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+            not in ["YES", "1", "TRUE"],
+            tracebacks_show_locals=True,
+            markup=True,
+            **level_param,
+            **custom_console_params,
         )
-
-    handler = logging.StreamHandler()
-    if logger.level is None or logger.level > 15:
-        COLOR_FORMAT = formatter_message(DEFAULT_FORMAT, True)
     else:
-        COLOR_FORMAT = formatter_message(VERBOSE_FORMAT, True)
+        handler = RichHandler(
+            show_level=True,
+            enable_link_path=False,
+            show_path=False,
+            tracebacks_show_locals=False,
+            show_time=False,
+            rich_tracebacks=True,
+            markup=True,
+            **level_param,
+            **custom_console_params,
+        )
+    # if logger.level is None or logger.level > 15:
+    #     COLOR_FORMAT = formatter_message(DEFAULT_FORMAT, True)
+    # else:
+    #     COLOR_FORMAT = formatter_message(VERBOSE_FORMAT, True)
 
-    color_formatter = ColoredFormatter(COLOR_FORMAT)
+    # color_formatter = ColoredFormatter(COLOR_FORMAT)
 
-    handler.setFormatter(color_formatter)
+    handler.setFormatter(logging.Formatter("%(message)s"))
 
     # if logger.level == logging.DEBUG:
     #     formatter_str = "[%(asctime)s] [%(name)s] [%(filename)s:%(lineno)d] %(levelname)s: %(message)s"
@@ -226,33 +350,64 @@ def get_logger(
     #     formatter = logging.Formatter(formatter_str)
     # handler.setFormatter(formatter)
 
-    if not logger.handlers:
+    if not logger.handlers and not show_progress:
         logger.addHandler(handler)
     if output_dir:
         """Add a file handler for this logger with the specified `name` (and
         store the log file under `output_dir`)."""
         # Format for file log (use JSON Lines for easier indexing/querying)
-        fmt = '{"time": "%(asctime)s", "level": "%(levelname)s", "source": "%(filename)s:%(lineno)d", "message": "%(message)s"}'
-        json_formatter = logging.Formatter(fmt)
+        # fmt = '{"time": "%(asctime)s", "level": "%(levelname)s", "source": "%(filename)s:%(lineno)d", "message": "%(message)s"}'
+        # fmt = "%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s "
+        # json_formatter = logging.Formatter(fmt)
 
-        # Determine log path/file name; create output_dir if necessary
-        now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        # # Determine log path/file name; create output_dir if necessary
+        # now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-        log_file = Path(output_dir).joinpath(f"{name}.{now}.log")
-        log_file.parent.mkdir(parents=True, exist_ok=True)
+        # Create JSONLines/JSONL file handler for logging to a file (log all five levels)
+        if log_format in ["JSONL", "BOTH"]:
+            jsonl_log_file = Path(output_dir).joinpath(f"{name}.log.jsonl")
+            jsonl_log_file.parent.mkdir(parents=True, exist_ok=True)
+            jsonl_log_file.touch(exist_ok=True)
 
-        # Create file handler for logging to a file (log all five levels)
-        file_handler = logging.FileHandler(log_file.as_posix())
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(json_formatter)
-        logger.addHandler(file_handler)
+            jsonl_file_handler = logging.FileHandler(jsonl_log_file.as_posix())
+            logger.verbose("Logging to JSONL file: %s", jsonl_log_file.as_posix())
+            jsonl_file_handler.setLevel(logging.DEBUG)
+            jsonl_file_handler.setFormatter(
+                JsonFormatter(
+                    {
+                        "timestamp": "asctime",
+                        "level": "levelname",
+                        "filename": "filename",
+                        "lineno": "lineno",
+                        "message": "message",
+                        "loggerName": "name",
+                        "processName": "processName",
+                        "processID": "process",
+                        "threadName": "threadName",
+                        "threadID": "thread",
+                    }
+                )
+            )
+            logger.addHandler(jsonl_file_handler)
+        # Create tabular file handler for logging to a file (log all five levels)
+        if log_format in ["TABULAR", "BOTH"]:
+            tab_log_file = Path(output_dir).joinpath(f"{name}.log")
+            tab_log_file.parent.mkdir(parents=True, exist_ok=True)
+            tab_log_file.touch(exist_ok=True)
+
+            tab_file_handler = logging.FileHandler(tab_log_file.as_posix())
+            logger.verbose("Logging to tabular file: %s", tab_log_file.as_posix())
+            tab_file_handler.setLevel(logging.DEBUG)
+            tab_file_handler.setFormatter(
+                logging.Formatter(
+                    fmt="%(asctime)s\t%(levelname)s\t%(filename)s:%(lineno)d\t%(message)s "
+                )
+            )
+            logger.addHandler(tab_file_handler)
+
     return logger
 
 
-ASH_LOGGER = get_logger(
+ASH_LOGGER = logging.getLogger(
     name="ash",
-    # Default to debug when running scripts that only import ASH_LOGGER
-    # Otherwise if running through orchestrator.py, use level passed in from caller with
-    # default of INFO
-    # level=logging.DEBUG,
 )

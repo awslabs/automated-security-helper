@@ -3,6 +3,7 @@
 
 """Module containing the JupyterScanner implementation."""
 
+from importlib.metadata import version
 from pathlib import Path
 from typing import Annotated, List, Literal
 from nbconvert import PythonExporter
@@ -18,7 +19,9 @@ from automated_security_helper.base.options import (
     ConverterOptionsBase,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
 class JupyterNotebookConverterConfigOptions(ConverterOptionsBase):
@@ -39,10 +42,17 @@ class JupyterNotebookConverterConfig(ConverterPluginConfigBase):
 class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfig]):
     """Converter implementation for Jupyter notebooks security scanning."""
 
+    config: JupyterNotebookConverterConfig = JupyterNotebookConverterConfig()
+
     def model_post_init(self, context):
         self.work_dir = (
-            self.output_dir.joinpath("work").joinpath("converters").joinpath("jupyter")
+            self.output_dir.joinpath("converted")
+            .joinpath("converters")
+            .joinpath("jupyter")
         )
+        self.tool_version = version("nbconvert")
+        if self.config is None:
+            self.config = JupyterNotebookConverterConfig()
         return super().model_post_init(context)
 
     def validate(self):
@@ -64,13 +74,20 @@ class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfi
             # filter_pattern=r"\.(ipynb)",
         )
         ipynb_files = [f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")]
-        ASH_LOGGER.debug(f"Found {len(ipynb_files)} .ipynb files in scan set.")
+        ASH_LOGGER.verbose(f"Found {len(ipynb_files)} .ipynb files in scan set.")
         py_exporter: PythonExporter = PythonExporter()
         results: List[Path] = []
         for ipynb_file in ipynb_files:
             ASH_LOGGER.debug(f"Converting {ipynb_file} to .py")
             # Convert to Python
-            py_file = self.work_dir.joinpath(ipynb_file).with_suffix(".py")
+            short_file_name = get_shortest_name(ipynb_file)
+            normalized_file_name = get_normalized_filename(short_file_name)
+            py_file = (
+                self.work_dir.joinpath(self.config.name)
+                .joinpath(normalized_file_name)
+                .joinpath(ipynb_file)
+                .with_suffix(".py")
+            )
             py_file.parent.mkdir(exist_ok=True, parents=True)
             (body, resources) = py_exporter.from_filename(
                 filename=ipynb_file,
@@ -79,7 +96,7 @@ class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfi
             ASH_LOGGER.debug(f"Converted file resources: {resources}")
             with open(py_file, "w") as f:
                 f.write(body)
-            ASH_LOGGER.debug(
+            ASH_LOGGER.verbose(
                 f"Successfully converted {ipynb_file} to {py_file.as_posix()}!"
             )
             results.append(Path(py_file))

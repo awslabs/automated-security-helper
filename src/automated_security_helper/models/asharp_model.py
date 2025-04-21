@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
-from typing import Annotated, List, Dict, Any, Optional, Union
+from typing import Annotated, Dict, Any, Optional, Union
 from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
@@ -131,7 +131,7 @@ class ASHARPModel(BaseModel):
             Run(
                 tool=Tool(
                     driver=ToolComponent(
-                        name="ASH Aggregated Results",
+                        name="AWS Labs - Automated Security Helper",
                         fullName="awslabs/automated-security-helper",
                         version=get_ash_version(),
                         organization="Amazon Web Services",
@@ -253,26 +253,6 @@ class ASHARPModel(BaseModel):
     #     """Get findings that were in previous scan but not in current scan."""
     #     return self._trend_analyzer.get_resolved_findings(previous_scan, current_scan)
 
-    # def _convert_to_scanner(self, scanner_dict: Dict[str, str]) -> Scanner:
-    #     """Convert a scanner dictionary to Scanner object."""
-    #     # Ensure required fields with defaults
-    #     scanner_dict_copy = scanner_dict.copy()
-    #     required_fields = {
-    #         "type": "SAST",
-    #         "version": "1.0.0",
-    #         "description": "Security scanner",
-    #     }
-    #     for field, default in required_fields.items():
-    #         if field not in scanner_dict_copy:
-    #             scanner_dict_copy[field] = default
-
-    #     return Scanner(
-    #         name=scanner_dict_copy["name"],
-    #         version=scanner_dict_copy["version"],
-    #         type=scanner_dict_copy["type"],
-    #         description=scanner_dict_copy["description"],
-    #     )
-
     @classmethod
     def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "ASHARPModel":
         """Parse JSON data into an ASHARPModel instance.
@@ -308,25 +288,54 @@ class ASHARPModel(BaseModel):
 
     def save_model(self, output_dir: Path) -> None:
         """Save ASHARPModel as JSON alongside aggregated results."""
-        if not output_dir.exists():
-            output_dir.mkdir(parents=True)
+        from automated_security_helper.config.ash_config import ASHConfig
+
+        report_dir = output_dir.joinpath("reports")
+        report_dir.mkdir(parents=True, exist_ok=True)
 
         # Save aggregated results as JSON
         json_path = output_dir.joinpath("ash_aggregated_results.json")
-        with open(json_path, "w") as f:
-            json.dump(self.model_dump(by_alias=True), f, indent=2, default=str)
-
-        # Save model.sarif as ash.sarif (JSON formatted SARIF report)
-        json_path = output_dir.joinpath("ash.sarif")
-        with open(json_path, "w") as f:
-            json.dump(self.sarif.model_dump(by_alias=True), f, indent=2, default=str)
-
-        # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
-        json_path = output_dir.joinpath("ash.cdx.json")
-        with open(json_path, "w") as f:
-            json.dump(
-                self.cyclonedx.model_dump(by_alias=True), f, indent=2, default=str
+        json_path.write_text(
+            self.model_dump_json(
+                by_alias=True,
+                exclude_unset=True,
+                exclude_none=True,
+                # exclude_defaults=True,
+                # round_trip=True,
             )
+        )
+
+        # # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
+        json_path = output_dir.joinpath("ash.cdx.json")
+        json_path.write_text(
+            self.cyclonedx.model_dump_json(
+                by_alias=True,
+                exclude_unset=True,
+                exclude_none=True,
+                # exclude_defaults=True,
+                # round_trip=True,
+            )
+        )
+
+        ash_config: ASHConfig = self.ash_config
+
+        for fmt in ash_config.output_formats:
+            outfile = self.report(
+                output_format=fmt,
+                output_dir=report_dir,
+            )
+            if outfile is None:
+                ASH_LOGGER.warning(f"Failed to generate output for format {fmt}")
+            elif isinstance(outfile, Path) and not outfile.exists():
+                ASH_LOGGER.warning(
+                    f"Output file {outfile} does not exist for format {fmt}"
+                )
+            elif isinstance(outfile, Path) and outfile.exists():
+                ASH_LOGGER.verbose(f"Generated output for format {fmt} at {outfile}")
+            else:
+                ASH_LOGGER.verbose(
+                    f"Unexpected response when formatting {fmt}: {outfile}"
+                )
 
     @classmethod
     def load_model(cls, json_path: Path) -> Optional["ASHARPModel"]:
@@ -339,9 +348,7 @@ class ASHARPModel(BaseModel):
 
         return cls.from_json(json_data)
 
-    def report(
-        self, output_formats: List[ExportFormat], output_dir: Path | None = None
-    ) -> str:
+    def report(self, output_format: str, output_dir: Path | None = None) -> Path:
         """Format ASH model using specified reporter."""
         from automated_security_helper.reporters.ash_default import (
             ASFFReporter,
@@ -368,25 +375,29 @@ class ASHARPModel(BaseModel):
             "text": {"reporter": TextReporter(), "ext": "txt"},
             "yaml": {"reporter": YAMLReporter(), "ext": "yaml"},
         }
-        for fmt in output_formats:
-            if f"{fmt.value}" not in reporters:
-                raise ValueError(f"Unsupported output format: {fmt}")
+        try:
+            if output_format not in reporters:
+                raise ValueError(f"Unsupported output format: {output_format}")
 
-            formatted = reporters[fmt.value]["reporter"].report(self)
+            formatted = reporters[output_format]["reporter"].report(self)
             if formatted is None:
                 ASH_LOGGER.error(
-                    f"Failed to format report with {fmt.value} reporter, returned empty string"
+                    f"Failed to format report with {output_format} reporter, returned empty string"
                 )
             if output_dir is None:
                 return formatted
             else:
                 output_dir = Path(output_dir)
                 output_dir.mkdir(parents=True, exist_ok=True)
-                output_filename = f"ash.{reporters[fmt.value]['ext']}"
+                output_filename = f"ash.{reporters[output_format]['ext']}"
                 output_file = output_dir.joinpath(output_filename)
-                with open(output_file, "w") as f:
-                    ASH_LOGGER.info(f"Writing {fmt.value} report to {output_file}")
-                    f.write(formatted)
+                ASH_LOGGER.info(f"Writing {output_format} report to {output_file}")
+                output_file.write_text(formatted)
+                return output_file
+        except Exception as e:
+            ASH_LOGGER.error(
+                f"Failed to format report with {output_format} reporter: {e}"
+            )
 
 
 if __name__ == "__main__":

@@ -4,13 +4,14 @@ from importlib.metadata import version
 import json
 import logging
 from pathlib import Path
+import shutil
 from typing import Annotated, Dict, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
-    PathExclusionEntry,
+    IgnorePathWithReason,
     ToolExtraArg,
 )
 from automated_security_helper.base.scanner_plugin import (
@@ -28,7 +29,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
 class BanditScannerConfigOptions(ScannerOptionsBase):
@@ -47,7 +47,7 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = False
     excluded_paths: Annotated[
-        List[PathExclusionEntry],
+        List[IgnorePathWithReason],
         Field(
             description="List of excluded paths and their corresponding reason to exclude from scanning"
         ),
@@ -142,7 +142,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         """
         # Bandit is a direct dependency of this Python package. If the Python import
         # reached this point then we know we're in a valid runtime for this scanner.
-        return True
+        return shutil.which(self.command) is not None
 
     def _process_config_options(self):
         # Bandit config path
@@ -194,6 +194,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: BanditScannerConfig | None = None,
     ) -> SarifReport:
         """Execute Bandit scan and return results.
@@ -211,17 +213,16 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             try:
                 self._pre_scan(
                     target=target,
-                    options=self.config.options,
+                    target_type=target_type,
+                    config=config,
                 )
             except ScannerError as exc:
                 raise exc
-            ASH_LOGGER.debug(f"self.config: {self.config}")
-            ASH_LOGGER.debug(f"config: {config}")
 
-            normalized_file_name = get_normalized_filename(str_to_normalize=target)
-            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            target_results_dir = Path(self.results_dir).joinpath(target_type)
             results_file = target_results_dir.joinpath("bandit.sarif")
             Path(results_file).parent.mkdir(exist_ok=True, parents=True)
+            self.config.options.excluded_paths.extend(global_ignore_paths)
 
             final_args = self._resolve_arguments(
                 target=target, results_file=results_file
@@ -233,13 +234,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
             self._post_scan(
                 target=target,
+                target_type=target_type,
             )
 
             bandit_results = {}
             with open(results_file, "r") as f:
                 bandit_results = json.load(f)
             try:
-                sarif_report = SarifReport.model_validate(bandit_results)
+                sarif_report: SarifReport = SarifReport.model_validate(bandit_results)
                 sarif_report.runs[0].invocations = [
                     Invocation(
                         commandLine=final_args[0],
@@ -281,7 +283,7 @@ if __name__ == "__main__":
             )
         )
     )
-    report = scanner.scan(target=Path("."))
+    report = scanner.scan(target=Path("."), target_type="source")
 
     print(
         report.model_dump_json(

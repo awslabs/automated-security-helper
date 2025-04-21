@@ -1,5 +1,6 @@
 """Module containing the ScanResultsContainer class for wrapping scanner results."""
 
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Dict, Literal
 
@@ -35,6 +36,11 @@ class ScanResultsContainer(BaseModel):
     ] = None
     target: Path | None = None
     target_type: str | None = None
+    exit_code: int = 0
+    finding_count: int = 0
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    duration: float | None = 0
     metadata: Dict[str, Any] = {}
     raw_results: Any | None = None
 

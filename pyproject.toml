@@ -25,12 +25,14 @@ classifiers = [
 
 packages = [
   {include = "automated_security_helper", from = "src"},
-  {include = "asharp", from = "src"},
+]
+include = [
+    { path = "src/automated_security_helper/assets", format = ["sdist", "wheel"] }
 ]
 
 [tool.poetry.scripts]
 asharp = 'asharp.asharp:main'
-ashv3 = "automated_security_helper.cli:app"
+ashv3 = "automated_security_helper.cli:ash_cli"
 schemagen = 'automated_security_helper.schemas.generate_schemas:main'
 get-scan-set = 'automated_security_helper.utils.get_scan_set:main'
 
@@ -43,7 +45,6 @@ checkov = "^3.2.395"
 constructs = "^10.4.2"
 defusedxml = "^0.7.1"
 junitparser = "^3.2.0"
-jupyterlab = "^4.3.6"
 nbconvert = "^7.16.6"
 pathspec = "^0.12.1"
 pydantic = {extras = ["email"], version = "^2.11.3"}
@@ -90,7 +91,7 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "--cov-report term-missing --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
+addopts = "--cov-report xml:test-results/pytest.coverage.xml --cov-report term-missing --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
 asyncio_default_fixture_loop_scope = "module"
 
 [build-system]

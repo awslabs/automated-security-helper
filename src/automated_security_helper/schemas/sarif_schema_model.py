@@ -2327,13 +2327,13 @@ class Run(BaseModel):
 
 class SarifReport(BaseModel):
     model_config = ConfigDict(
-        extra="forbid", use_enum_values=True, serialize_by_alias=True
+        extra="forbid",
+        use_enum_values=True,
+        serialize_by_alias=True,
     )
 
-    field_schema: Optional[AnyUrl] = Field(
-        AnyUrl(
-            "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
-        ),
+    field_schema: str = Field(
+        "https://json.schemastore.org/sarif-2.1.0.json",
         alias="$schema",
         description="The URI of the JSON schema corresponding to the version.",
         serialization_alias="$schema",
@@ -2357,42 +2357,81 @@ class SarifReport(BaseModel):
         description="Key/value pairs that provide additional information about the log file.",
     )
 
-    def merge_sarif_report(self, sarif_report: "SarifReport"):
+    def model_post_init(self, context):
+        self.field_schema = "https://json.schemastore.org/sarif-2.1.0.json"
+        self.version = "2.1.0"
+        return super().model_post_init(context)
+
+    def merge_sarif_report(
+        self,
+        sarif_report: "SarifReport",
+        include_invocation: bool = True,
+        include_driver: bool = True,
+        include_rules: bool = True,
+    ):
         report_run = sarif_report.runs[0]
         report_tool = report_run.tool
         report_invocations = report_run.invocations
-        report_results = report_run.results
+        report_results = []
+        for res in report_run.results:
+            clean_result = res.model_dump(
+                # Remove `ruleIndex`, since we're reordering rules. RuleId should
+                # correctly correlate results to associated rules in our set of scanners
+                # without it.
+                exclude=["ruleIndex"]
+            )
+            report_results.append(Result(**clean_result))
+        if self.runs is None:
+            self.runs = []
 
         self_run = self.runs[0] if self.runs is not None else None
         if self_run is None:
             cleaned_run = json.loads(report_run.model_dump_json())
             self_run = Run(**cleaned_run)
         else:
-            if self_run.tool.extensions is None or len(self_run.tool.extensions) == 0:
-                self_run.tool.extensions = [report_tool.driver]
-            else:
-                # Check if report_tool.driver.name already exists in self_run.tool.extensions
-                existing_extension = next(
-                    (
-                        ext
-                        for ext in self_run.tool.extensions
-                        if ext.name == report_tool.driver.name
-                        and ext.fullName == report_tool.driver.fullName
-                        and ext.organization == report_tool.driver.organization
-                    ),
-                    None,
-                )
-                if existing_extension is None:
-                    self_run.tool.extensions.append(report_tool.driver)
+            if include_driver:
+                if (
+                    self_run.tool.extensions is None
+                    or len(self_run.tool.extensions) == 0
+                ):
+                    self_run.tool.extensions = [report_tool.driver]
                 else:
-                    existing_extension.rules.extend(report_tool.driver.rules)
+                    # Check if report_tool.driver.name already exists in self_run.tool.extensions
+                    existing_extension = next(
+                        (
+                            ext
+                            for ext in self_run.tool.extensions
+                            if ext.name == report_tool.driver.name
+                            and ext.fullName == report_tool.driver.fullName
+                            and ext.organization == report_tool.driver.organization
+                        ),
+                        None,
+                    )
+                    if existing_extension is None:
+                        self_run.tool.extensions.append(report_tool.driver)
+                    else:
+                        if include_rules:
+                            # Add rules if the rule.id doesn't already exist in existing_extension.rules
+                            cur_rule_id_hash = {
+                                rule.id: rule
+                                for rule in (existing_extension.rules or [])
+                            }
+                            for rule in report_tool.driver.rules:
+                                if rule.id not in cur_rule_id_hash:
+                                    existing_extension.rules.append(rule)
 
         if self_run.results is None:
             self_run.results = []
         self_run.results.extend(report_results)
-        if self_run.invocations is None:
-            self_run.invocations = []
-        self_run.invocations.extend(report_invocations)
+        if self_run.invocations is None or len(self_run.invocations) == 0:
+            # Include by default if it doesn't have
+            # any invocations or doesn't exist yet
+            self_run.invocations = report_invocations
+        else:
+            # Otherwise, include the invocation unless
+            # told explicitly not to (default is to include)
+            if include_invocation:
+                self_run.invocations.extend(report_invocations)
         self.runs = [self_run]
 
         self.inlineExternalProperties.extend(sarif_report.inlineExternalProperties)

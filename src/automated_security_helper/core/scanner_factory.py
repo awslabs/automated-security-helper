@@ -18,6 +18,8 @@ class ScannerFactory:
     def __init__(
         self,
         config: ASHConfig = None,
+        source_dir: Path = None,
+        output_dir: Path = None,
         registered_scanner_plugins: Dict[str, RegisteredPlugin] = {},
     ) -> None:
         """Initialize the scanner factory with empty scanner registry.
@@ -31,6 +33,8 @@ class ScannerFactory:
             str, Union[Type[ScannerPluginBase], Callable[[], ScannerPluginBase]]
         ] = {}
         self._registered_scanner_plugins = registered_scanner_plugins
+        self.source_dir = source_dir
+        self.output_dir = output_dir
         self._register_default_scanners()
         self._register_config_scanners()
 
@@ -76,19 +80,17 @@ class ScannerFactory:
                 scanner_class = CustomScanner(
                     name=scanner_name,
                     config=scanner_config,
+                    source_dir=self.source_dir,
+                    output_dir=self.output_dir,
                 )
                 self.register_scanner(scanner_name, scanner_class)
                 ASH_LOGGER.debug(
                     f"Registered config scanner {scanner_name} with class {scanner_class}"
                 )
             except ValueError as e:
-                ASH_LOGGER.warning(
-                    f"Could not register config scanner {scanner_name} due to ValueError: {str(e)}"
-                )
+                ASH_LOGGER.warning(e)
             except Exception as e:
-                ASH_LOGGER.error(
-                    f"Error registering config scanner {scanner_name} due to Exception: {str(e)}"
-                )
+                ASH_LOGGER.error(e)
 
     def _register_default_scanners(self) -> None:
         """Register all available scanner plugins.
@@ -104,7 +106,10 @@ class ScannerFactory:
                 self.register_scanner(scanner_name, scanner_class)
                 self.default_scanners.add(scanner_name)
                 if callable(scanner_class):
-                    scanner_class = scanner_class()
+                    scanner_class = scanner_class(
+                        source_dir=self.source_dir,
+                        output_dir=self.output_dir,
+                    )
                 self._scanners[scanner_name] = scanner_class
             except ValueError:
                 # Skip if scanner is already registered
@@ -211,30 +216,6 @@ class ScannerFactory:
         # instance.configure(config)
 
         return instance
-
-    def get_scanner_class(self, scanner_name: str) -> ScannerPluginBase:
-        """Get the scanner class for a given name.
-
-        Args:
-            scanner_name: Name of scanner to retrieve (will be normalized)
-
-        Returns:
-            The scanner class
-
-        Raises:
-            ValueError: If scanner_name is not registered
-            TypeError: If stored value is not a scanner class
-        """
-        scanner_name = scanner_name
-        known_scanners = self.config.get_scanners()
-        if scanner_name not in self._scanners and scanner_name not in known_scanners:
-            raise ValueError("Unable to determine scanner class")
-        elif scanner_name not in self._scanners:
-            self.register_scanner(scanner_name, known_scanners[scanner_name])
-        scanner = self._scanners[scanner_name]
-        if isinstance(scanner, Callable):
-            scanner = scanner()
-        return scanner
 
     def available_scanners(self) -> Dict[str, Type[ScannerPluginBase]]:
         """Get dictionary of all registered scanners.

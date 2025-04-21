@@ -7,11 +7,11 @@ This security scanner depends on a valid ScannerPluginConfig to be provided in t
 `build.custom_scanners` section of an ASHConfig instance or ASH configuration YAML/JSON file.
 """
 
-from importlib.metadata import version
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+import shutil
+from typing import Annotated, Any, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -21,7 +21,7 @@ from automated_security_helper.core.constants import (
     SCANNER_TYPES,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.models.core import ToolArgs
+from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
@@ -44,7 +44,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
 class CustomScannerConfigOptions(ScannerOptionsBase):
@@ -70,8 +69,10 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
     def model_post_init(self, context):
         if self.config is None:
             self.config = CustomScannerConfig()
-        self.tool_type = "CUSTOM"
-        self.tool_version = version("checkov")
+        if self.command is None:
+            raise ScannerError(
+                f"({self.config.name or self.__class__.__name__}) Command not provided for custom scanner! If this is a Python based scanner, set the command property to `python` in your scanner properties to resolve this error."
+            )
         self.args = ToolArgs()
         super().model_post_init(context)
 
@@ -84,11 +85,13 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        return True
+        return shutil.which(self.command) is not None
 
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: Any | CustomScannerConfig | None = None,
     ) -> SarifReport:
         """Execute Checkov scan and return results.
@@ -108,7 +111,8 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
-                options=self.config.options,
+                target_type=target_type,
+                config=config,
             )
         except ScannerError as exc:
             raise exc
@@ -117,8 +121,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
 
         scanner_name = self.config.name
         try:
-            normalized_file_name = get_normalized_filename(str_to_normalize=target)
-            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
             final_args = self._resolve_arguments(
@@ -134,7 +137,10 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
             results = scanner_results.get("results", {})
             ASH_LOGGER.debug(f"({scanner_name}) Found {len(results)} results")
 
-            self._post_scan(target=target)
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
 
             tool = Tool(
                 driver=ToolComponent(

@@ -2,12 +2,12 @@ name: ASH - Core Pipeline
 on:
   push:
     branches:
-      - '*'
+      - "*"
     tags:
-      - '*'
+      - "*"
   pull_request:
     branches:
-      - '*'
+      - "*"
   workflow_dispatch: {}
 permissions:
   actions: read
@@ -16,21 +16,30 @@ permissions:
   id-token: write
   security-events: write
   pull-requests: write
+  statuses: write
 env:
   PYTHON_VERSION: "3.12"
 jobs:
   build:
-    strategy:
-      matrix:
-        runner:
-          # - macos-14 # Docker support on this runner is not working yet, still no options for ARM in hosted :-(
-          - ubuntu-latest
-    name: ASH Build & Scan - ${{ matrix.runner }}
-    runs-on: ${{ matrix.runner }}
+    # strategy:
+    #   matrix:
+    #     runner:
+    #       # - macos-14 # Docker support on this runner is not working yet, still no options for ARM in hosted :-(
+    #       - ubuntu-latest
+    name: ASH - Build & Scan
+    runs-on: ubuntu-latest
     env:
       IMG_NAME: ${{ github.repository }}
-      ARCH: ${{ matrix.runner == 'ubuntu-latest' && 'amd64' || 'arm64' }}
-      SUMMARY_FILE: 'ASH Scan Result Summary - ${{ matrix.runner }}.md'
+      ARCH: ubuntu-latest
+      SUMMARY_FILE: "ASH Scan Result Summary - ubuntu-latest.md"
+    permissions:
+      actions: read
+      checks: write
+      contents: write
+      id-token: write
+      security-events: read
+      pull-requests: write
+      statuses: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,27 +80,29 @@ jobs:
           # Disable exit on error
           set +e
 
+          tree .
+
           # Run ASH against itself
-          ./ash --source-dir $(pwd) --output-dir ash_output --container-uid 1001 --container-gid 123 --debug | \
+          ./ash \
+            --source-dir $(pwd) \
+            --output-dir ash_output \
+            --config ./.ash.yaml \
+            --strategy parallel \
+            --no-cleanup \
+            --build-target ci \
+            --verbose | \
               tee ash_stdout.txt
 
           # cat the output contents to build the summary markdown
           # strip out the color codes from the output
           ASH_STDOUT=$(cat ash_stdout.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-          ASH_AGG_RESULTS=$(cat ash_output/aggregated_results.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+          # ASH_AGG_RESULTS=$(cat ash_output/ash_aggregated_results.json | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
+          ASH_AGG_RESULTS=$(tree ash_output)
 
           # Write the summary markdown to a file
           cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
-          ## ASH Scan Output - ${{ env.ARCH }} - ${{ matrix.runner }}
-
-          \`\`\`bash
-          $ cat ash_stdout.txt
-
-          ${ASH_STDOUT}
-          \`\`\`
-
           <details>
-            <summary>Show aggregated_results.txt</summary>
+            <summary>ASH Scan Artifact Tree</summary>
 
             \`\`\`bash
             ${ASH_AGG_RESULTS}
@@ -147,14 +158,103 @@ jobs:
           path: ash_stdout.txt
           if-no-files-found: error
 
+      - name: Publish JUnit Test Report
+        uses: mikepenz/action-junit-report@v5
+        if: success() || failure() # always run even if the previous step fails
+        continue-on-error: true
+        with:
+          report_paths: "**/ash.junit.xml"
+          include_passed: true
+          update_check: true
+          check_name: ASH Scan JUnit Test Report
+
+      - name: Upload ASH SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: false
+        with:
+          sarif_file: ash_output/reports/ash.sarif
+          # Used to differentiate multiple results for one commit
+          category: ash
+
       - name: Collect ash_output artifact
         uses: actions/upload-artifact@v4
         if: always()
-        continue-on-error: false
+        continue-on-error: true
         with:
           name: ash_output
           path: ash_output
           if-no-files-found: error
+
+  unit-test:
+    name: Run unit tests
+    needs: []
+    runs-on: ubuntu-latest
+
+    permissions:
+      actions: read
+      checks: write
+      contents: write
+      id-token: write
+      security-events: read
+      pull-requests: write
+      statuses: write
+    if: >-
+      github.event_name == 'pull_request' ||
+      (
+        github.event_name == 'push' && github.ref != 'refs/heads/main'
+      )
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "poetry"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run PyTest
+        run: poetry run pytest
+
+      - name: Publish PyTest JUnit Test Report
+        uses: mikepenz/action-junit-report@v5
+        if: success() || failure() # always run even if the previous step fails
+        continue-on-error: false
+        with:
+          report_paths: "**/pytest.junit.xml"
+          include_passed: true
+          update_check: true
+          check_name: PyTest JUnit Test Report
+
+      - name: Code Coverage Report
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        if: success() || failure() # always run even if the previous step fails
+        continue-on-error: false
+        with:
+          filename: "test-results/pytest.coverage.xml"
+          badge: true
+          format: markdown
+          fail_below_min: false
+          hide_branch_rate: false
+          hide_complexity: false
+          indicators: true
+          output: both
+          thresholds: "50 75"
 
   build-docs:
     name: Build documentation
@@ -174,7 +274,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'poetry'
+          cache: "poetry"
 
       - name: Install Poetry
         run: |
@@ -207,7 +307,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'poetry'
+          cache: "poetry"
 
       - name: Install Poetry
         run: |

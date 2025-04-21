@@ -67,7 +67,7 @@
           "default": [],
           "description": "List of excluded paths and their corresponding reason to exclude from scanning",
           "items": {
-            "$ref": "#/$defs/PathExclusionEntry"
+            "$ref": "#/$defs/IgnorePathWithReason"
           },
           "title": "Excluded Paths",
           "type": "array"
@@ -281,7 +281,7 @@
             "additional_formats": [
               "cyclonedx_json"
             ],
-            "config_file": "NOT_PROVIDED",
+            "config_file": null,
             "frameworks": [
               "all"
             ],
@@ -321,10 +321,21 @@
           "type": "array"
         },
         "config_file": {
-          "default": "NOT_PROVIDED",
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
-          "title": "Config File",
-          "type": "string"
+          "title": "Config File"
         },
         "frameworks": {
           "default": [
@@ -426,7 +437,7 @@
           "default": [],
           "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
           "items": {
-            "$ref": "#/$defs/PathExclusionEntry"
+            "$ref": "#/$defs/IgnorePathWithReason"
           },
           "title": "Skip Path",
           "type": "array"
@@ -497,7 +508,8 @@
         "options": {
           "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
           "default": {
-            "baseline": null
+            "baseline_file": null,
+            "scan_settings": {}
           },
           "description": "Configure detect-secrets scanner"
         }
@@ -508,10 +520,13 @@
     "DetectSecretsScannerConfigOptions": {
       "additionalProperties": true,
       "properties": {
-        "baseline": {
+        "baseline_file": {
           "anyOf": [
             {
               "format": "path",
+              "type": "string"
+            },
+            {
               "type": "string"
             },
             {
@@ -519,8 +534,23 @@
             }
           ],
           "default": null,
-          "description": "Path to baseline file, relative to current source directory. Defaults to searching for `.detect-secrets.baseline` in the root of the source directory.",
-          "title": "Baseline"
+          "description": "Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
+          "title": "Baseline File"
+        },
+        "scan_settings": {
+          "additionalProperties": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
+          "title": "Scan Settings",
+          "type": "object"
         }
       },
       "title": "DetectSecretsScannerConfigOptions",
@@ -567,6 +597,27 @@
       "title": "GrypeScannerConfig",
       "type": "object"
     },
+    "IgnorePathWithReason": {
+      "description": "Represents a path exclusion entry.",
+      "properties": {
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "IgnorePathWithReason",
+      "type": "object"
+    },
     "NpmAuditScannerConfig": {
       "additionalProperties": true,
       "description": "JS/TS Dependency scanner configuration.",
@@ -608,25 +659,42 @@
       "title": "NpmAuditScannerConfig",
       "type": "object"
     },
-    "PathExclusionEntry": {
-      "description": "Represents a path exclusion entry.",
+    "ReporterPluginConfigBase": {
+      "additionalProperties": true,
       "properties": {
-        "path": {
-          "description": "Path or pattern to exclude",
-          "title": "Path",
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extension"
+        },
+        "name": {
+          "default": null,
+          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z][\\w-]+$",
+          "title": "Name",
           "type": "string"
         },
-        "reason": {
-          "description": "Reason for exclusion",
-          "title": "Reason",
-          "type": "string"
+        "options": {
+          "$ref": "#/$defs/ScannerOptionsBase",
+          "default": {},
+          "description": "Scanner options"
         }
       },
-      "required": [
-        "path",
-        "reason"
-      ],
-      "title": "PathExclusionEntry",
+      "title": "ReporterPluginConfigBase",
       "type": "object"
     },
     "ScannerConfigSegment": {
@@ -690,7 +758,7 @@
               "additional_formats": [
                 "cyclonedx_json"
               ],
-              "config_file": "NOT_PROVIDED",
+              "config_file": null,
               "frameworks": [
                 "all"
               ],
@@ -706,7 +774,8 @@
             "enabled": true,
             "name": "detect-secrets",
             "options": {
-              "baseline": null
+              "baseline_file": null,
+              "scan_settings": {}
             }
           },
           "description": "Configure the options for DetectSecrets"
@@ -1172,19 +1241,28 @@
       "title": "Converters",
       "type": "object"
     },
+    "external_reports_to_include": {
+      "default": [],
+      "description": "List of external reports to include in the final report. These can be SARIF, CycloneDX, or CDK synth paths that have produced NagReport CSVs or JSON files.",
+      "items": {
+        "type": "string"
+      },
+      "title": "External Reports To Include",
+      "type": "array"
+    },
     "fail_on_findings": {
       "default": true,
       "description": "Whether to exit with non-zero code if findings are detected",
       "title": "Fail On Findings",
       "type": "boolean"
     },
-    "ignore_paths": {
+    "global_ignore_paths": {
       "default": [],
-      "description": "List of paths to ignore during scanning",
+      "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
       "items": {
-        "type": "string"
+        "$ref": "#/$defs/IgnorePathWithReason"
       },
-      "title": "Ignore Paths",
+      "title": "Global Ignore Paths",
       "type": "array"
     },
     "max_concurrent_scanners": {
@@ -1208,28 +1286,32 @@
     },
     "output_formats": {
       "default": [
-        "text",
-        "yaml",
+        "asff",
+        "csv",
+        "cyclonedx",
+        "html",
         "json",
         "junitxml",
-        "html",
-        "cyclonedx",
-        "spdx",
+        "ocsf",
         "sarif",
-        "csv"
+        "spdx",
+        "text",
+        "yaml"
       ],
       "description": "Format for scanner results output",
       "items": {
         "enum": [
-          "text",
-          "yaml",
+          "asff",
+          "csv",
+          "cyclonedx",
+          "html",
           "json",
           "junitxml",
-          "html",
-          "cyclonedx",
-          "spdx",
+          "ocsf",
           "sarif",
-          "csv"
+          "spdx",
+          "text",
+          "yaml"
         ],
         "type": "string"
       },
@@ -1241,6 +1323,14 @@
       "description": "Name of the project being scanned",
       "title": "Project Name",
       "type": "string"
+    },
+    "reporters": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ReporterPluginConfigBase"
+      },
+      "default": {},
+      "title": "Reporters",
+      "type": "object"
     },
     "scanners": {
       "$ref": "#/$defs/ScannerConfigSegment",
@@ -1282,7 +1372,7 @@
             "additional_formats": [
               "cyclonedx_json"
             ],
-            "config_file": "NOT_PROVIDED",
+            "config_file": null,
             "frameworks": [
               "all"
             ],
@@ -1294,7 +1384,8 @@
           "enabled": true,
           "name": "detect-secrets",
           "options": {
-            "baseline": null
+            "baseline_file": null,
+            "scan_settings": {}
           }
         },
         "grype": {

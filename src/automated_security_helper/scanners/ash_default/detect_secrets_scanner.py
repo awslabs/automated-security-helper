@@ -3,6 +3,7 @@
 from importlib.metadata import version
 import json
 from pathlib import Path
+import re
 from typing import Annotated, List, Literal
 
 from pydantic import Field
@@ -32,7 +33,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.models.core import IgnorePathWithReason
 
 from detect_secrets import SecretsCollection
 from detect_secrets.settings import transient_settings
@@ -41,17 +42,18 @@ from detect_secrets.core.plugins.util import get_mapping_from_secret_type_to_cla
 
 class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
     baseline_file: Annotated[
-        str,
+        Path | str | None,
         Field(
             description="Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
         ),
-    ] = "NOT_PROVIDED"
+    ] = None
     scan_settings: Annotated[
         dict[str, List[dict[str, str]]],
         Field(
             description="Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
-        )
+        ),
     ] = {}
+
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):
     name: Literal["detect-secrets"] = "detect-secrets"
@@ -101,35 +103,42 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
         # Look through each baseline file path to see if it exists and configure
         # the scan settings according to the first baseline file found
-        self.config.options.baseline_file = None
         for baseline_path in possible_baseline_paths:
-            ASH_LOGGER.info(Path(baseline_path).absolute())
+            ASH_LOGGER.debug(
+                f"Checking for detect-secrets config @ {Path(baseline_path).absolute()}"
+            )
             if bool(self.config.options.scan_settings):
                 pass
             elif Path(baseline_path).absolute().exists():
                 abs_baseline_path = Path(baseline_path).absolute()
-                with open(abs_baseline_path, 'r') as f:
+                with open(abs_baseline_path, "r") as f:
                     self.config.options.scan_settings = json.load(f)
                     f.close()
-                ASH_LOGGER.debug(f"Custom settings identified: {self.config.options.scan_settings}")
+                ASH_LOGGER.verbose(
+                    f"Custom settings identified: {self.config.options.scan_settings}"
+                )
                 break
 
         # If no existing baseline is identified then use all detect-secrets plugins
         # This is the same as using the default_settings function provided by detect-secrets
         if not bool(self.config.options.scan_settings):
             self.config.options.scan_settings = {
-                'plugins_used': [
-                    {'name': plugin_type.__name__}
+                "plugins_used": [
+                    {"name": plugin_type.__name__}
                     for plugin_type in get_mapping_from_secret_type_to_class().values()
                 ],
             }
-            ASH_LOGGER.debug(f"Default settings identified: {self.config.options.scan_settings}")
+            ASH_LOGGER.debug(
+                f"Default settings identified: {self.config.options.scan_settings}"
+            )
 
         return super()._process_config_options()
 
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: DetectSecretsScannerConfig | None = None,
     ) -> SarifReport:
         """Execute detect-secrets scan and return results.
@@ -146,7 +155,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
-                options=self.config.options,
+                target_type=target_type,
+                config=config,
             )
         except ScannerError as exc:
             raise exc
@@ -154,36 +164,42 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ASH_LOGGER.debug(f"config: {config}")
 
         try:
-            # Set up target path for scan results for target path
-            normalized_file_name = get_normalized_filename(str_to_normalize=target)
-            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
-            self._resolve_arguments(target=target,results_file=target_results_dir)
+            self._resolve_arguments(target=target, results_file=target_results_dir)
 
             # Find all files to scan from the scan set
             scannable = scan_set(
-                source=self.source_dir,
-                output=self.output_dir,
+                source=target,
+                output=self.output_dir if target == self.source_dir else self.work_dir,
+                # filter_pattern=r"\.(yaml|yml|json)$",
             )
             ASH_LOGGER.debug(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets"
             )
             with transient_settings(self.config.options.scan_settings) as settings:
+                ASH_LOGGER.debug(f"Settings: {settings}")
                 self._secrets_collection.scan_files(*scannable)
 
-            self._post_scan(target=target)
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
 
             # Populate the Results list with findings from the scan
             results: List[Result] = []
             for filename, detections in self._secrets_collection.data.items():
                 for finding in detections:
+                    rule_id = re.sub(
+                        pattern=r"\W+", repl="-", string=finding.type
+                    ).upper()
                     results.append(
                         Result(
                             # Adjust as needed to capture findings from scanner as
                             # SARIF Result objects. Reference the current CDK Nag
                             # Scanner/Wrapper for examples on custom SARIF structure.
-                            ruleId="SECRET-DETECTED",
+                            ruleId=f"SECRET-{rule_id}",
                             properties=PropertyBag(
                                 tags=[
                                     "detect-secrets",
@@ -196,15 +212,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             message=Message(
                                 text=f"Secret of type '{finding.type}' detected in file '{filename}' at line {finding.line_number}"
                             ),
-                            analysisTarget=ArtifactLocation(
-                                uri=get_shortest_name(input=target),
-                            ),
                             locations=[
                                 Location(
                                     id=1,
                                     physicalLocation=PhysicalLocation(
                                         artifactLocation=ArtifactLocation(
-                                            uri=get_shortest_name(input=target),
+                                            uri=get_shortest_name(input=filename),
                                         ),
                                         region=Region(
                                             startLine=finding.line_number,

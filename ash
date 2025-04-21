@@ -173,8 +173,13 @@ else
       MOUNT_OUTPUT_DIR=""
       OUTPUT_DIR_OPTION=""
       if [[ ${OUTPUT_DIR_SPECIFIED} = "YES" ]]; then
-        MOUNT_SOURCE_DIR="${MOUNT_SOURCE_DIR},readonly" # add readonly source mount when --output-dir is specified
-        MOUNT_OUTPUT_DIR="--mount type=bind,source=${OUTPUT_DIR},destination=/out"
+        # Only make source dir readonly if output dir is not a subdirectory of source
+        # dir, otherwise writing to the output dir will fail due to attempting to write
+        # to a readonly fs.
+        if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]] && [[ "${OUTPUT_DIR}" != "${SOURCE_DIR}"* ]]; then
+          # add readonly source mount when --output-dir is outside source dir
+          MOUNT_SOURCE_DIR="${MOUNT_SOURCE_DIR},readonly"
+        fi
         OUTPUT_DIR_OPTION="--output-dir /out"
       fi
       echo "Running ASH scan using built image..."

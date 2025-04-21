@@ -4,13 +4,14 @@
 
 import re
 import sys
-from datetime import datetime
 from typing import List, Optional
 from pathspec import PathSpec
 from pathlib import Path
 import argparse
 import os
 from glob import glob
+
+from automated_security_helper.utils.log import ASH_LOGGER
 
 ASH_INCLUSIONS = [
     ".git",
@@ -53,13 +54,7 @@ def black(msg) -> str:
 
 def debug_echo(*msg, debug: bool = False) -> str:
     if debug:
-        print(
-            yellow(
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [get-scan-set.py] DEBUG:"
-            ),
-            *msg,
-            file=sys.stderr,
-        )
+        ASH_LOGGER.debug(msg)
 
 
 def get_ash_ignorespec_lines(

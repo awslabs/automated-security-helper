@@ -3,6 +3,7 @@
 from importlib.metadata import version
 import json
 from pathlib import Path
+import shutil
 from typing import Annotated, List, Literal
 
 from pydantic import Field
@@ -10,7 +11,7 @@ from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
-    PathExclusionEntry,
+    IgnorePathWithReason,
     ToolExtraArg,
 )
 from automated_security_helper.base.scanner_plugin import (
@@ -25,7 +26,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
 CheckFrameworks = Literal[
@@ -70,13 +70,13 @@ CheckFrameworks = Literal[
 
 class CheckovScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
-        str,
+        Path | str | None,
         Field(
             description="Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
         ),
-    ] = "NOT_PROVIDED"
+    ] = None
     skip_path: Annotated[
-        List[PathExclusionEntry],
+        List[IgnorePathWithReason],
         Field(
             description='Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.',
         ),
@@ -155,7 +155,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         """
         # Checkov is a dependency this Python module, if the Python import got
         # this far then we know we're in a valid runtime for this scanner.
-        return True
+        return shutil.which(self.command) is not None
 
     def _process_config_options(self):
         # Checkov config path
@@ -171,11 +171,11 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         for conf_path in possible_config_paths:
             if Path(conf_path).exists():
-                self.args.extra_args.extend(
-                    [
-                        "--config-file",
-                        get_shortest_name(input=conf_path),
-                    ]
+                self.args.extra_args.append(
+                    ToolExtraArg(
+                        key="--config-file",
+                        value=get_shortest_name(input=conf_path),
+                    )
                 )
                 break
 
@@ -203,6 +203,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     def scan(
         self,
         target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: CheckovScannerConfig | None = None,
     ) -> SarifReport:
         """Execute Checkov scan and return results.
@@ -219,18 +221,19 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         try:
             self._pre_scan(
                 target=target,
-                options=self.config.options,
+                target_type=target_type,
+                config=config,
             )
         except ScannerError as exc:
             raise exc
-        ASH_LOGGER.debug(f"self.config: {self.config}")
-        ASH_LOGGER.debug(f"config: {config}")
 
         try:
-            normalized_file_name = get_normalized_filename(str_to_normalize=target)
-            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
+
+            # Extend the skip-paths args with the global exclusion list
+            self.config.options.skip_path.extend(global_ignore_paths)
             final_args = self._resolve_arguments(
                 target=target,
                 # We want to use the parent here, not the results_file, as Checkov is expecting the output
@@ -242,14 +245,17 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 results_dir=target_results_dir,
             )
 
-            self._post_scan(target=target)
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
 
             checkov_results = {}
             Path(results_file).parent.mkdir(exist_ok=True, parents=True)
             with open(results_file, "r") as f:
                 checkov_results = json.load(f)
             try:
-                sarif_report = SarifReport.model_validate(checkov_results)
+                sarif_report: SarifReport = SarifReport.model_validate(checkov_results)
                 sarif_report.runs[0].invocations = [
                     Invocation(
                         commandLine=final_args[0],
@@ -260,7 +266,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                         exitCode=self.exit_code,
                         exitCodeDescription="\n".join(self.errors),
                         workingDirectory=ArtifactLocation(
-                            uri=target.as_posix(),
+                            uri=get_shortest_name(input=target),
                         ),
                         properties=PropertyBag(
                             tool=sarif_report.runs[0].tool,

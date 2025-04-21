@@ -31,7 +31,7 @@ def mock_secrets_collection():
                     PotentialSecret(
                         type="Base64 High Entropy String",
                         filename="test_file.py",
-                        secret="abcd1234",
+                        secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                         line_number=10,
                         is_secret=True,
                         is_verified=True,
@@ -71,29 +71,29 @@ def test_detect_secrets_scanner_process_config_options(detect_secrets_scanner):
 
 
 def test_detect_secrets_scanner_scan(
-    detect_secrets_scanner, mock_secrets_collection, tmp_path
+    detect_secrets_scanner, test_source_dir, test_output_dir
 ):
     """Test DetectSecretsScanner scan execution."""
-    target_dir = tmp_path / "target"
+    target_dir = test_source_dir / "target"
     target_dir.mkdir()
 
     # Create a test file with a potential secret
     test_file = target_dir / "test_file.py"
     test_file.write_text('secret = "base64_encoded_secret=="')
 
-    detect_secrets_scanner.source_dir = str(target_dir)
-    detect_secrets_scanner.output_dir = str(tmp_path / "output")
+    detect_secrets_scanner.source_dir = test_source_dir
+    detect_secrets_scanner.output_dir = test_output_dir
 
-    result = detect_secrets_scanner.scan(target_dir)
+    result = detect_secrets_scanner.scan(test_source_dir, target_type="source")
 
     assert result is not None
     assert len(result.runs) == 1
     assert result.runs[0].tool.driver.name == "detect-secrets"
 
     # Verify SARIF report structure
-    assert result.runs[0].results
+    assert len(result.runs[0].results) == 1
     finding = result.runs[0].results[0]
-    assert finding.ruleId == "SECRET-DETECTED"
+    assert finding.ruleId == "SECRET-SECRET-KEYWORD"
     assert finding.level == Level.error
     assert finding.kind == Kind.fail
     assert "detect-secrets" in finding.properties.tags
@@ -107,7 +107,7 @@ def test_detect_secrets_scanner_scan_error(
     mock_secrets_collection.side_effect = Exception("Scan failed")
 
     with pytest.raises(ScannerError) as exc_info:
-        detect_secrets_scanner.scan(Path("/nonexistent"))
+        detect_secrets_scanner.scan(Path("/nonexistent"), target_type="source")
     assert "Target /nonexistent does not exist!" in str(exc_info.value)
 
 
@@ -123,7 +123,7 @@ def test_detect_secrets_scanner_with_no_findings(
     detect_secrets_scanner.source_dir = str(target_dir)
     detect_secrets_scanner.output_dir = str(tmp_path / "output")
 
-    result = detect_secrets_scanner.scan(target_dir)
+    result = detect_secrets_scanner.scan(target_dir, target_type="source")
 
     assert result is not None
     assert len(result.runs) == 1
@@ -143,7 +143,7 @@ def test_detect_secrets_scanner_sarif_output(
                 PotentialSecret(
                     type="Base64 High Entropy String",
                     filename="test_file.py",
-                    secret="abcd1234",
+                    secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                     line_number=10,
                     is_secret=True,
                     is_verified=True,
@@ -158,7 +158,7 @@ def test_detect_secrets_scanner_sarif_output(
     detect_secrets_scanner.source_dir = str(target_dir)
     detect_secrets_scanner.output_dir = str(tmp_path / "output")
 
-    result = detect_secrets_scanner.scan(target_dir)
+    result = detect_secrets_scanner.scan(target_dir, target_type="source")
 
     # Verify SARIF structure
     assert result.runs[0].tool.driver.name == "detect-secrets"
@@ -187,7 +187,7 @@ def test_detect_secrets_scanner_with_multiple_files(
                 PotentialSecret(
                     type="Secret1",
                     filename="test_file.py",
-                    secret="hash1",
+                    secret="hash1",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                     line_number=81,
                     is_secret=True,
                     is_verified=True,
@@ -199,7 +199,7 @@ def test_detect_secrets_scanner_with_multiple_files(
                 PotentialSecret(
                     type="AWSSecretKey",
                     filename="test_file.py",
-                    secret="1239491230230912",
+                    secret="1239491230230912",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                     line_number=4,
                     is_secret=True,
                     is_verified=True,
@@ -214,6 +214,6 @@ def test_detect_secrets_scanner_with_multiple_files(
     detect_secrets_scanner.source_dir = str(target_dir)
     detect_secrets_scanner.output_dir = str(tmp_path / "output")
 
-    result = detect_secrets_scanner.scan(target_dir)
+    result = detect_secrets_scanner.scan(target_dir, target_type="source")
 
     assert result is not None
