@@ -184,8 +184,9 @@ class LiveProgressDisplay:
                 console=self.console,
                 refresh_per_second=4,
                 auto_refresh=True,
-                vertical_overflow="visible",
-                screen=True,  # Use alternate screen mode to ensure proper display
+                vertical_overflow="ellipsis",
+                transient=True,
+                screen=False,
             )
             self.live.__enter__()
 
@@ -998,7 +999,7 @@ class ScanExecutionEngine:
         self.ensure_initialized(config=config)
 
         # Print progress update
-        ASH_LOGGER.info("\n----- Starting report generation phase -----")
+        ASH_LOGGER.info("----- Starting report generation phase -----")
 
         # Start progress display - only if not already started
         if not self.progress_display.live:
@@ -1268,7 +1269,7 @@ class ScanExecutionEngine:
         ASH_LOGGER.info(f"Executing phases: {ordered_phases}")
 
         # Log a message to show progress is happening
-        ASH_LOGGER.info("\n===== ASH Security Scan Starting =====")
+        ASH_LOGGER.info("===== ASH Security Scan Starting =====")
         ASH_LOGGER.info(f"Executing phases: {', '.join(ordered_phases)}")
 
         # Start the progress display before executing any phases
@@ -1321,21 +1322,17 @@ class ScanExecutionEngine:
                     self.run_report_phase(config)
 
             # Return the results
-            # ASH_LOGGER.info("\n===== ASH Security Scan Complete =====")
+            # ASH_LOGGER.info("===== ASH Security Scan Complete =====")
             return self._results
 
         except Exception as e:
             ASH_LOGGER.error(f"Execution failed: {str(e)}")
             ASH_LOGGER.info(f"\n❌ Execution failed: {str(e)}")
             raise
-        # finally:
-        #     # Ensure the progress display is stopped properly
-        #     if hasattr(self.progress_display, 'live') and self.progress_display.live:
-        #         self.progress_display.stop()
         finally:
-            # Stop the progress display
-            # self.progress_display.stop()
-            ASH_LOGGER.info("\n===== ASH Security Scan Complete =====")
+            # if hasattr(self.progress_display, 'live') and self.progress_display.live:
+            #     self.progress_display.stop()
+            ASH_LOGGER.info("===== ASH Security Scan Complete =====")
 
         return ASHARPModel(description="No results generated")
 
