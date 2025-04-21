@@ -19,6 +19,7 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
+    MultiformatMessageString,
     SarifReport,
     Run,
     Tool,
@@ -179,8 +180,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         rule = ReportingDescriptor(
                             id=vuln_id,
                             name=f"npm-audit-{vuln_id}",
-                            shortDescription=Message(text=title),
-                            fullDescription=Message(text=description),
+                            shortDescription=MultiformatMessageString(text=title),
+                            fullDescription=MultiformatMessageString(text=description),
                             helpUri=via.get("url", ""),
                             properties=PropertyBag(
                                 tags=["security", "npm-audit", severity],
