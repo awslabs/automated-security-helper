@@ -249,6 +249,8 @@ def get_logger(
     level: str | int | None = None,
     output_dir: Path | None = None,
     log_format: Literal["JSONL", "TABULAR", "BOTH"] = "TABULAR",
+    show_progress: bool = True,
+    use_color: bool = True,
 ) -> ASHLogger:
     # VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
     # DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
@@ -286,6 +288,8 @@ def get_logger(
                         "logging.level.trace": "green",
                     }
                 ),
+                highlight=use_color,
+                color_system="auto" if use_color else None,
             )
         }
         if os.environ.get("ASH_IN_CONTAINER", "NO").upper() in ["YES", "1", "TRUE"]
@@ -297,7 +301,9 @@ def get_logger(
                         "logging.level.warning": "yellow",
                         "logging.level.trace": "green",
                     }
-                )
+                ),
+                highlight=use_color,
+                color_system="auto" if use_color else None,
             )
         }
     )
@@ -344,7 +350,7 @@ def get_logger(
     #     formatter = logging.Formatter(formatter_str)
     # handler.setFormatter(formatter)
 
-    if not logger.handlers:
+    if not logger.handlers and not show_progress:
         logger.addHandler(handler)
     if output_dir:
         """Add a file handler for this logger with the specified `name` (and

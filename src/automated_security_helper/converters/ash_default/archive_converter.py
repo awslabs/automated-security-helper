@@ -20,6 +20,7 @@ from automated_security_helper.base.options import (
     ConverterOptionsBase,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
@@ -44,7 +45,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
     def model_post_init(self, context):
         self.work_dir = (
-            self.output_dir.joinpath("temp").joinpath("converters").joinpath("archive")
+            self.output_dir.joinpath("converted")
+            .joinpath("converters")
+            .joinpath("archive")
         )
         if self.config is None:
             self.config = ArchiveConverterConfig()
@@ -95,7 +98,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         ASH_LOGGER.debug(f"Found {len(archive_files)} files to convert in scan set.")
         results: List[Path] = []
         for archive_file in archive_files:
-            normalized_archive_file = get_normalized_filename(archive_file)
+            short_archive_file = get_shortest_name(archive_file)
+            normalized_archive_file = get_normalized_filename(short_archive_file)
             target_path = self.work_dir.joinpath(self.config.name).joinpath(
                 normalized_archive_file
             )

@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
 from enum import Enum
 import logging
 import os
@@ -9,16 +10,14 @@ import json
 import sys
 from pathlib import Path
 
+from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.models.core import ExportFormat
 
 
-app = typer.Typer(
-    name="ash",
-    help="Automated Security Helper Multi-Scanner",
-    pretty_exceptions_enable=True,
-    pretty_exceptions_short=True,
-    pretty_exceptions_show_locals=True,
-)
+class Phases(str, Enum):
+    convert = "convert"
+    scan = "scan"
+    report = "report"
 
 
 class Strategy(str, Enum):
@@ -31,11 +30,8 @@ class AshBuildTarget(str, Enum):
     ci = "ci"
 
 
-@app.command(
-    name="scan",
-    no_args_is_help=False,
-)
-def scan(
+def run(
+    ctx: typer.Context,
     source_dir: Annotated[
         str,
         typer.Option(help="The source directory to scan"),
@@ -48,10 +44,14 @@ def scan(
     ] = Path.cwd().joinpath("ash_output").as_posix(),
     config: Annotated[
         str,
-        typer.Option(help="The path to the configuration file", envvar="ASH_CONFIG"),
+        typer.Option(
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
+            envvar="ASH_CONFIG",
+        ),
     ] = None,
     verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
     offline: Annotated[
         bool,
         typer.Option(
@@ -69,7 +69,7 @@ def scan(
     progress: Annotated[
         bool,
         typer.Option(
-            help="Show progress of each job interactively in the console. Defaults to True."
+            help="Show progress of each job live in the console. Defaults to True."
         ),
     ] = True,
     output_formats: Annotated[
@@ -90,38 +90,38 @@ def scan(
     cleanup: Annotated[
         bool,
         typer.Option(
-            help="Clean up working directory after scan completes. Defaults to True. INFO: Scans will always clean up existing files in the output directory before a new scan starts. This parameter only affects the cleanup of the temporary work directory after a scan has completed, typically for inspection of temporary artifacts."
+            help="Clean up 'converted' directory and other temporary files after scan completes. Defaults to False. Note: Scans will always clean up existing files in the output directory before a new scan starts. This parameter only affects the cleanup of the temporary work directory after a scan has completed, typically for inspection of temporary artifacts."
         ),
-    ] = True,
-    # region: Container mgmt
-    build: Annotated[
+    ] = False,
+    phases: Annotated[
+        List[Phases],
+        typer.Option(
+            help="The phases to run. Defaults to all phases.",
+        ),
+    ] = [
+        Phases.convert,
+        Phases.scan,
+        Phases.report,
+    ],
+    version: Annotated[
         bool,
         typer.Option(
-            help="Build the container image. Use --no-build to skip a rebuild of an existing image."
+            "-v",
+            "--version",
+            help="Prints version number",
         ),
-    ] = True,
-    run: Annotated[
-        bool,
-        typer.Option(
-            help="Run a scan using the container image. Use --no-run to skip the scan and only build the ASH container image."
-        ),
-    ] = True,
-    build_target: Annotated[
-        AshBuildTarget,
-        typer.Option(
-            help="Specify build target for container image (e.g. 'ci' for elevated access)",
-        ),
-    ] = AshBuildTarget.default.value,
-    oci_runner: Annotated[
-        str,
-        typer.Option(
-            help="Specify OCI runner to use (e.g. 'docker', 'finch')",
-            envvar="OCI_RUNNER",
-        ),
-    ] = os.environ.get("OCI_RUNNER", None),
-    # endregion
+    ] = False,
 ):
-    """Main entry point."""
+    """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
+    if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:
+        return
+
+    if version:
+        from automated_security_helper import __version__
+
+        typer.echo(f"awslabs/automated-security-helper v{__version__}")
+        raise typer.Exit()
+
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
     from automated_security_helper.core.execution_engine import ExecutionStrategy
     from automated_security_helper.models.core import ExportFormat
@@ -133,16 +133,30 @@ def scan(
         logger = get_logger(
             level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
             output_dir=Path(output_dir),
+            show_progress=progress
+            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+            not in ["YES", "1", "TRUE"],
+            use_color=color,
         )
         # Create orchestrator instance
         source_dir = Path(source_dir)
         output_dir = Path(output_dir)
         logger.debug(f"Scanners specified: {scanners}")
 
+        if config is None:
+            for config_file in ASH_CONFIG_FILE_NAMES:
+                def_path = Path(source_dir).joinpath(config_file)
+                if def_path.exists():
+                    logger.info(f"Using config file found at: {def_path.as_posix()}")
+                    config = def_path.as_posix()
+                    break
+        else:
+            logger.info(f"Using config file specified at: {config}")
+
         orchestrator = ASHScanOrchestrator(
             source_dir=source_dir,
             output_dir=output_dir,
-            work_dir=output_dir.joinpath("temp"),
+            work_dir=output_dir.joinpath("converted"),
             scan_output_format=[
                 ExportFormat.HTML,
                 ExportFormat.JSON,
@@ -164,10 +178,27 @@ def scan(
             show_progress=progress
             and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
             not in ["YES", "1", "TRUE"],
+            color_system="auto" if color else None,
         )
 
-        # Execute scan
-        results = orchestrator.execute_scan()
+        # Determine which phases to run. Process them in required order to build the
+        # final ordered list of execution.
+        phases_to_run = []
+        if Phases.convert in phases:
+            phases_to_run.append("convert")
+        if Phases.scan in phases:
+            phases_to_run.append("scan")
+        if Phases.report in phases:
+            phases_to_run.append("report")
+
+        # Default to all phases if none specified
+        if not phases_to_run:
+            phases_to_run = ["convert", "scan", "report"]
+
+        logger.debug(f"Running phases: {phases_to_run}")
+
+        # Execute scan with specified phases
+        results = orchestrator.execute_scan(phases=phases_to_run)
         if isinstance(results, ASHARPModel):
             content = results.model_dump_json(indent=2, by_alias=True)
         else:
@@ -181,7 +212,3 @@ def scan(
     except Exception as e:
         logger.exception(e)
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    app()

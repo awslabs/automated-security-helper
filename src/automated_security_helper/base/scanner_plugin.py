@@ -73,7 +73,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         # Ensure paths are Path objects
         self.source_dir = Path(str(self.source_dir))
         self.output_dir = Path(str(self.output_dir))
-        self.work_dir = self.output_dir.joinpath("temp")
+        self.work_dir = self.output_dir.joinpath("converted")
         self.results_dir = self.output_dir.joinpath("scanners").joinpath(
             self.config.name
         )
@@ -90,8 +90,10 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         """Log a message to the scanner's log file.
 
         Args:
+            *msg: Message to log
             level: Log level
-            msg: Message to log
+            target_type: Target type (e.g. source, converted)
+            append_to_stream: Append to stdout or stderr stream
         """
         tt = None
         if target_type is not None:
@@ -170,7 +172,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     def _pre_scan(
         self,
         target: Path,
-        target_type: Literal["source", "temp"],
+        target_type: Literal["source", "converted"],
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
@@ -203,7 +205,6 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             level=logging.DEBUG,
         )
 
-        self.results_dir.mkdir(parents=True, exist_ok=True)
         if not Path(target).exists():
             raise ScannerError(
                 f"([yellow]{self.config.name or self.__class__.__name__}[/yellow] @ [magenta]{target_type}[/magenta]) Target {target} does not exist!"
@@ -216,7 +217,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     def _post_scan(
         self,
         target: Path,
-        target_type: Literal["source", "temp"],
+        target_type: Literal["source", "converted"],
     ) -> None:
         """Perform pre-scan setup.
 
@@ -319,7 +320,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "temp"],
+        target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
         config: T | ScannerPluginConfigBase = None,
         *args,

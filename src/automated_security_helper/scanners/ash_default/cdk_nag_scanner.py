@@ -35,7 +35,6 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.models.core import IgnorePathWithReason
 
 
@@ -130,7 +129,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "temp"],
+        target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
         config: CdkNagScannerConfig | None = None,
     ) -> SarifReport:
@@ -156,8 +155,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Find all JSON/YAML files to scan from the scan set
         scannable = scan_set(
-            source=self.work_dir if target_type == "temp" else self.source_dir,
-            output=self.work_dir if target_type == "temp" else self.output_dir,
+            source=self.work_dir if target_type == "converted" else self.source_dir,
+            output=self.work_dir if target_type == "converted" else self.output_dir,
         )
         ASH_LOGGER.debug(
             f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"
@@ -187,12 +186,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         failed_files = []
         target_rel_path = get_shortest_name(input=target)
 
-        scan_dir_name = get_normalized_filename(str_to_normalize=target)
-        outdir = (
-            self.output_dir.joinpath("scanners")
-            .joinpath("cdk-nag")
-            .joinpath(scan_dir_name)
-        )
+        outdir = self.results_dir.joinpath(target_type)
         sarif_results: List[Result] = []
         for cfn_file in scannable:
             try:

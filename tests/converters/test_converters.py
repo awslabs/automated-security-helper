@@ -62,7 +62,7 @@ class TestArchiveConverter:
         assert converter.config == config
         assert converter.source_dir == temp_dir
         assert converter.output_dir == temp_dir / "output"
-        assert converter.work_dir == temp_dir / "output" / "temp"
+        assert converter.work_dir == temp_dir / "output" / "converted"
 
     def test_archive_converter_validate(self, temp_dir):
         """Test validate method."""
@@ -160,7 +160,7 @@ class TestJupyterNotebookConverter:
         assert converter.config == config
         assert converter.source_dir == temp_dir
         assert converter.output_dir == temp_dir / "output"
-        assert converter.work_dir == (temp_dir / "output" / "temp")
+        assert converter.work_dir == (temp_dir / "output" / "converted")
 
     def test_jupyter_converter_validate(self, temp_dir):
         """Test validate method."""

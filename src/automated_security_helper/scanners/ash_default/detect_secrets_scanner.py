@@ -33,7 +33,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.models.core import IgnorePathWithReason
 
 from detect_secrets import SecretsCollection
@@ -138,7 +137,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "temp"],
+        target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
         config: DetectSecretsScannerConfig | None = None,
     ) -> SarifReport:
@@ -165,9 +164,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ASH_LOGGER.debug(f"config: {config}")
 
         try:
-            # Set up target path for scan results for target path
-            normalized_file_name = get_normalized_filename(str_to_normalize=target)
-            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
             self._resolve_arguments(target=target, results_file=target_results_dir)

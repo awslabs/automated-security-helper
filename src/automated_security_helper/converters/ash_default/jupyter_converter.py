@@ -19,6 +19,7 @@ from automated_security_helper.base.options import (
     ConverterOptionsBase,
 )
 from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
@@ -45,7 +46,9 @@ class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfi
 
     def model_post_init(self, context):
         self.work_dir = (
-            self.output_dir.joinpath("temp").joinpath("converters").joinpath("jupyter")
+            self.output_dir.joinpath("converted")
+            .joinpath("converters")
+            .joinpath("jupyter")
         )
         self.tool_version = version("nbconvert")
         if self.config is None:
@@ -77,10 +80,11 @@ class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfi
         for ipynb_file in ipynb_files:
             ASH_LOGGER.debug(f"Converting {ipynb_file} to .py")
             # Convert to Python
-            normalized_archive_file = get_normalized_filename(ipynb_file)
+            short_file_name = get_shortest_name(ipynb_file)
+            normalized_file_name = get_normalized_filename(short_file_name)
             py_file = (
                 self.work_dir.joinpath(self.config.name)
-                .joinpath(normalized_archive_file)
+                .joinpath(normalized_file_name)
                 .joinpath(ipynb_file)
                 .with_suffix(".py")
             )

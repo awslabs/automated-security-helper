@@ -10,6 +10,15 @@ ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
 
 ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
 
+ASH_CONFIG_FILE_NAMES = [
+    ".ash.yml",
+    ".ash.yaml",
+    ".ash.json",
+    "ash.yml",
+    "ash.yaml",
+    "ash.json",
+]
+
 KNOWN_SCANNABLE_EXTENSIONS = [
     # JavaScript and TypeScript ecosystem
     "js",

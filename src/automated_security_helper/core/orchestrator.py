@@ -11,13 +11,18 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from automated_security_helper.config.default_config import get_default_config
 
+from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.execution_engine import (
     ExecutionStrategy,
     ScanExecutionEngine,
+    ExecutionPhaseType,
 )
 
 from automated_security_helper.config.ash_config import ASHConfig
-from automated_security_helper.core.exceptions import ASHValidationError
+from automated_security_helper.core.exceptions import (
+    ASHValidationError,
+    ASHConfigValidationError,
+)
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.core import ExportFormat, IgnorePathWithReason
 from automated_security_helper.utils.get_scan_set import scan_set
@@ -53,6 +58,9 @@ class ASHScanOrchestrator(BaseModel):
     config_path: Annotated[
         Optional[Path], Field(None, description="Path to configuration file")
     ]
+    color_system: Annotated[
+        Optional[str], Field(None, description="Color system to use for console output")
+    ] = None
     verbose: Annotated[bool, Field(False, description="Enable verbose logging")]
     debug: Annotated[bool, Field(False, description="Enable debug logging")]
     show_progress: Annotated[
@@ -139,6 +147,9 @@ class ASHScanOrchestrator(BaseModel):
             config=self.config,
             show_progress=self.show_progress,
             global_ignore_paths=self.global_ignore_paths,
+            color_system=self.color_system,
+            verbose=self.verbose,
+            debug=self.debug,
         )
 
         ASH_LOGGER.info("ASH Orchestrator and ScanExecutionEngine initialized")
@@ -156,7 +167,7 @@ class ASHScanOrchestrator(BaseModel):
                 f"Creating output directory if it does not exist: {self.output_dir}"
             )
             self.output_dir.mkdir(parents=True, exist_ok=True)
-            for working_dir in ["reports", "scanners", "temp"]:
+            for working_dir in ["reports", "scanners", "converted"]:
                 path_working_dir = self.output_dir.joinpath(working_dir)
                 if path_working_dir.exists():
                     ASH_LOGGER.verbose(
@@ -172,12 +183,29 @@ class ASHScanOrchestrator(BaseModel):
         """Load configuration from file or return default configuration."""
         try:
             if not self.config_path:
-                ASH_LOGGER.debug(
-                    "No configuration file provided, using default configuration"
+                ASH_LOGGER.verbose(
+                    "No configuration file provided, checking for default paths"
+                )
+                for item in ASH_CONFIG_FILE_NAMES:
+                    config_path = self.source_dir.joinpath(item)
+                    if config_path.exists():
+                        self.config_path = config_path
+                        ASH_LOGGER.verbose(
+                            f"Found configuration file at: {config_path.as_posix()}"
+                        )
+                        break
+                ASH_LOGGER.verbose(
+                    "Configuration file not found or provided, using default config"
                 )
                 config = get_default_config()
-            else:
-                ASH_LOGGER.debug(f"Loading configuration from {self.config_path}")
+
+            # We *always* want to evaluate this after the inverse block above runs, in
+            # case self.config_path is resolved from a default location.
+            # Do not use `else:` here!
+            if self.config_path:
+                ASH_LOGGER.debug(
+                    f"Loading configuration from {self.config_path.as_posix()}"
+                )
                 try:
                     with open(self.config_path, "r") as f:
                         if str(self.config_path).endswith(".json"):
@@ -192,10 +220,12 @@ class ASHScanOrchestrator(BaseModel):
                     config = ASHConfig(**config_data)
                 except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
                     ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
-                    raise ASHValidationError(f"Failed to load configuration: {str(e)}")
+                    raise ASHConfigValidationError(
+                        f"Failed to load configuration: {str(e)}"
+                    )
                 except ValidationError as e:
                     ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
-                    raise ASHValidationError(
+                    raise ASHConfigValidationError(
                         f"Configuration validation failed: {str(e)}"
                     )
 
@@ -208,16 +238,26 @@ class ASHScanOrchestrator(BaseModel):
 
             return config
         except Exception as e:
-            ASH_LOGGER.error(f"Error during configuration loading: {str(e)}")
-            raise ASHValidationError(f"Failed to load configuration: {str(e)}")
+            raise e
 
-    def execute_scan(self) -> Dict:
-        """Execute the security scan and return results."""
-        ASH_LOGGER.debug(f"Source directory: {self.source_dir}")
-        ASH_LOGGER.debug(f"Output directory: {self.output_dir}")
-        ASH_LOGGER.debug(f"Work directory: {self.work_dir}")
-        ASH_LOGGER.debug(f"Configuration path: {self.config_path}")
-        ASH_LOGGER.debug(f"Output formats: {self.scan_output_formats}")
+    def execute_scan(
+        self, phases: List[ExecutionPhaseType] = ["convert", "scan", "report"]
+    ) -> Dict:
+        """Execute the security scan and return results.
+
+        Args:
+            phases (List[ExecutionPhaseType], optional): The phases to execute.
+                Defaults to ["convert", "scan", "report"].
+
+        Returns:
+            Dict: The results of the scan.
+        """
+        ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
+        ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
+        ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")
+        ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")
+        ASH_LOGGER.verbose(f"Output formats: {self.scan_output_formats}")
+        ASH_LOGGER.verbose(f"Executing phases: {phases}")
 
         try:
             # Load and validate configuration
@@ -234,10 +274,15 @@ class ASHScanOrchestrator(BaseModel):
                     strategy=self.strategy,
                     enabled_scanners=self.enabled_scanners,
                     config=self.config,
+                    show_progress=self.show_progress,
+                    global_ignore_paths=self.global_ignore_paths,
+                    color_system=self.color_system,
+                    verbose=self.verbose,
+                    debug=self.debug,
                 )
 
-            # Execute scanners with validated config
-            try:
+            # Identify files to scan
+            if "convert" in phases or "scan" in phases:
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")
                 self.source_scan_set = scan_set(
                     source=self.source_dir,
@@ -247,18 +292,25 @@ class ASHScanOrchestrator(BaseModel):
                 ASH_LOGGER.info(
                     f"Found {len(self.source_scan_set)} files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified."
                 )
-                prepare_output = self.execution_engine.run_prepare_phase(config)
-                ASH_LOGGER.verbose(f"Converted scannable paths: {prepare_output}")
-                self.work_scan_set = scan_set(
-                    source=self.work_dir,
-                    output=self.work_dir,
-                    debug=self.debug,
+
+            try:
+                # Execute all phases
+                asharp_model_results = self.execution_engine.execute_phases(
+                    phases=phases, config=config
                 )
-                asharp_model_results = self.execution_engine.run_scan_phase(config)
+
+                # Update work scan set after conversion if convert phase was run
+                if "convert" in phases:
+                    self.work_scan_set = scan_set(
+                        source=self.work_dir,
+                        output=self.work_dir,
+                        debug=self.debug,
+                    )
+
                 ASH_LOGGER.debug("Scan execution completed successfully")
             except Exception as e:
-                ASH_LOGGER.error(f"Scan execution failed: {str(e)}")
-                raise ASHValidationError(f"Scan execution failed: {str(e)}")
+                ASH_LOGGER.error(f"Execution failed: {str(e)}")
+                raise
 
             # Process and validate results
             if not asharp_model_results:
@@ -266,28 +318,28 @@ class ASHScanOrchestrator(BaseModel):
                 asharp_model_results = ASHARPModel(
                     description="ASH execution engine returned no results!"
                 )
-                # else:
-                #     for fmt in self.config.output_formats:
-                #         outfile = asharp_model_results.report(
-                #             output_format=fmt,
-                #             output_dir=self.output_dir,
-                #         )
-                #         if outfile is None:
-                #             ASH_LOGGER.warning(
-                #                 f"Failed to generate output for format {fmt}"
-                #             )
-                #         elif isinstance(outfile, Path) and not outfile.exists():
-                #             ASH_LOGGER.warning(
-                #                 f"Output file {outfile} does not exist for format {fmt}"
-                #             )
-                #         elif isinstance(outfile, Path) and outfile.exists():
-                #             ASH_LOGGER.verbose(
-                #                 f"Generated output for format {fmt} at {outfile}"
-                #             )
-                #         else:
-                #             ASH_LOGGER.verbose(
-                #                 f"Unexpected response when formatting {fmt}: {outfile}"
-                #             )
+            else:
+                for fmt in self.config.output_formats:
+                    outfile = asharp_model_results.report(
+                        output_format=fmt,
+                        output_dir=self.output_dir,
+                    )
+                    if outfile is None:
+                        ASH_LOGGER.warning(
+                            f"Failed to generate output for format {fmt}"
+                        )
+                    elif isinstance(outfile, Path) and not outfile.exists():
+                        ASH_LOGGER.warning(
+                            f"Output file {outfile} does not exist for format {fmt}"
+                        )
+                    elif isinstance(outfile, Path) and outfile.exists():
+                        ASH_LOGGER.verbose(
+                            f"Generated output for format {fmt} at {outfile}"
+                        )
+                    else:
+                        ASH_LOGGER.verbose(
+                            f"Unexpected response when formatting {fmt}: {outfile}"
+                        )
 
                 ASH_LOGGER.info("ASH scan completed successfully!")
             if not self.no_cleanup:

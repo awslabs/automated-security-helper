@@ -9,6 +9,7 @@
     },
     {
       "args": [
+        "run",
         "--source-dir",
         "${workspaceFolder}",
         "--output-dir",

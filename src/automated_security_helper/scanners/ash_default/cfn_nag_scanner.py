@@ -119,7 +119,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "temp"],
+        target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
         config: CfnNagScannerConfig | None = None,
     ) -> SarifReport:
@@ -144,13 +144,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             raise exc
 
         try:
-            # Set up target path for scan results for target path
-            normalized_target_dir_name = get_normalized_filename(
-                str_to_normalize=target
-            )
-            target_results_dir = Path(self.results_dir).joinpath(
-                normalized_target_dir_name
-            )
+            target_results_dir = self.results_dir.joinpath(target_type)
 
             # Find all files to scan from the scan set
             scannable = scan_set(

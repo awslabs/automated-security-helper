@@ -25,7 +25,6 @@ classifiers = [
 
 packages = [
   {include = "automated_security_helper", from = "src"},
-  {include = "asharp", from = "src"},
 ]
 include = [
     { path = "src/automated_security_helper/assets", format = ["sdist", "wheel"] }
@@ -33,7 +32,7 @@ include = [
 
 [tool.poetry.scripts]
 asharp = 'asharp.asharp:main'
-ashv3 = "automated_security_helper.cli:app"
+ashv3 = "automated_security_helper.cli:ash_cli"
 schemagen = 'automated_security_helper.schemas.generate_schemas:main'
 get-scan-set = 'automated_security_helper.utils.get_scan_set:main'
 

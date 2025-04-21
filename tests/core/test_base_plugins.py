@@ -48,7 +48,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter()
         assert converter.source_dir == Path(".")
         assert converter.output_dir == Path("ash_output")
-        assert converter.work_dir == Path("ash_output/temp")
+        assert converter.work_dir == Path("ash_output/converted")
 
     def test_setup_paths_custom(self):
         """Test setup_paths with custom values."""
@@ -57,7 +57,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter(source_dir=source, output_dir=output)
         assert converter.source_dir == source
         assert converter.output_dir == output
-        assert converter.work_dir == output.joinpath("temp")
+        assert converter.work_dir == output.joinpath("converted")
 
     def test_setup_paths_string_conversion(self):
         """Test setup_paths converts string paths to Path objects."""
@@ -215,7 +215,7 @@ class TestScannerPlugin:
         def scan(
             self,
             target: Path,
-            target_type: Literal["source", "temp"],
+            target_type: Literal["source", "converted"],
             global_ignore_paths: List[IgnorePathWithReason] = [],
             config=None,
             *args,
@@ -235,7 +235,7 @@ class TestScannerPlugin:
         scanner = self.DummyScanner(config=config, source_dir=tmp_path)
         assert scanner.source_dir == tmp_path
         assert scanner.output_dir == tmp_path.joinpath("ash_output")
-        assert scanner.work_dir == scanner.output_dir.joinpath("temp")
+        assert scanner.work_dir == scanner.output_dir.joinpath("converted")
         assert scanner.results_dir == scanner.output_dir.joinpath("scanners").joinpath(
             config.name
         )
@@ -271,7 +271,7 @@ class TestScannerPlugin:
         config = self.DummyConfig()
         scanner = self.DummyScanner(config=config)
         with pytest.raises(ScannerError):
-            scanner._pre_scan(Path("nonexistent.txt"), target_type="temp")
+            scanner._pre_scan(Path("nonexistent.txt"), target_type="converted")
 
     def test_pre_scan_creates_dirs(self, tmp_path):
         """Test _pre_scan creates necessary directories."""
@@ -281,7 +281,7 @@ class TestScannerPlugin:
         )
         test_file = tmp_path.joinpath("test.txt")
         test_file.touch()
-        scanner._pre_scan(test_file, target_type="temp")
+        scanner._pre_scan(test_file, target_type="converted")
         assert scanner.work_dir.exists()
         assert scanner.results_dir.exists()
 

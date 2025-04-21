@@ -132,7 +132,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     def scan(
         self,
         target: Path,
-        target_type: Literal["source", "temp"],
+        target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
         config: SyftScannerConfig | None = None,
     ) -> CycloneDXReport:
