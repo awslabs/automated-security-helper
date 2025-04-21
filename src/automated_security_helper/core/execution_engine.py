@@ -287,12 +287,11 @@ class LiveProgressDisplay:
         elif "Warning" in status:
             status_emoji = self.status_emojis["warning"]
 
-        task_id = self.progress.add_task(
+        self.progress.add_task(
             f"[{phase.upper()}] {details} - {status_emoji} {status}",
             total=100,
             completed=100,
         )
-        ASH_LOGGER.debug(f"Added summary row for {phase}: {status} -- TaskID {task_id}")
 
     def complete_task(
         self,

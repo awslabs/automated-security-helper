@@ -71,7 +71,7 @@ def run(
         typer.Option(
             help="Show progress of each job live in the console. Defaults to True."
         ),
-    ] = True,
+    ] = False,  # temporary while troubleshooting live display
     output_formats: Annotated[
         List[ExportFormat],
         typer.Option(
