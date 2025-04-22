@@ -3,7 +3,7 @@ ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
 
 # First stage: Build poetry requirements
 FROM ${BASE_IMAGE} AS poetry-reqs
-ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONDONTWRITEBYTECODE=1
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y python3-venv && \
