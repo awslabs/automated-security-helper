@@ -38,6 +38,12 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             description="The command to invoke the scanner, typically the binary or path to a script"
         ),
     ] = None
+    subcommands: Annotated[
+        List[str],
+        Field(
+            description="Subcommands to include when invoking the scanner, e.g. ['scan'] is needed as the subcommand for 'semgrep' as Semgrep supports multiple subcommands, but we are specifically interested in running a scan."
+        ),
+    ] = []
     args: Annotated[
         ToolArgs,
         Field(
@@ -143,6 +149,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
 
         args = [
             self.command,
+            *self.subcommands,
             self.args.format_arg,
             self.args.format_arg_value,
         ]

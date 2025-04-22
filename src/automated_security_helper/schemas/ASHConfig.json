@@ -975,6 +975,15 @@
           "default": null,
           "title": "Start Time"
         },
+        "subcommands": {
+          "default": [],
+          "description": "Subcommands to include when invoking the scanner, e.g. ['scan'] is needed as the subcommand for 'semgrep' as Semgrep supports multiple subcommands, but we are specifically interested in running a scan.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Subcommands",
+          "type": "array"
+        },
         "tool_type": {
           "default": "UNKNOWN",
           "title": "Tool Type",

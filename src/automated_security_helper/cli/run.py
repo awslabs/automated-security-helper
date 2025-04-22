@@ -71,7 +71,7 @@ def run(
         typer.Option(
             help="Show progress of each job live in the console. Defaults to True."
         ),
-    ] = True,
+    ] = False,
     output_formats: Annotated[
         List[ExportFormat],
         typer.Option(
@@ -123,7 +123,7 @@ def run(
         raise typer.Exit()
 
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
-    from automated_security_helper.core.execution_engine import ExecutionStrategy
+    from automated_security_helper.core.progress import ExecutionStrategy
     from automated_security_helper.models.core import ExportFormat
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
     from automated_security_helper.models.asharp_model import ASHARPModel

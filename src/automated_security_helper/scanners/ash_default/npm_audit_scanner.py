@@ -1,10 +1,9 @@
 """Module containing the NPM Audit security scanner implementation."""
 
 import json
-import os
+import logging
 from pathlib import Path
 import shutil
-import subprocess
 from typing import Annotated, Dict, List, Literal, Any
 
 from pydantic import Field
@@ -34,6 +33,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ReportingDescriptor,
     Invocation,
 )
+from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 
@@ -79,40 +79,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     def _process_config_options(self):
         return super()._process_config_options()
-
-    def _find_package_files(self, target: Path) -> List[Path]:
-        """Find package.json and package-lock.json files in the target directory.
-
-        Args:
-            target: Path to scan
-
-        Returns:
-            List of paths to package files
-        """
-        package_files = []
-
-        # Look for package.json files
-        for root, _, files in os.walk(target):
-            if "package.json" in files:
-                package_path = Path(root) / "package.json"
-                package_files.append(package_path)
-
-                # Check if there's a corresponding package-lock.json
-                lock_path = Path(root) / "package-lock.json"
-                if lock_path.exists():
-                    package_files.append(lock_path)
-
-                # Check for yarn.lock
-                yarn_lock_path = Path(root) / "yarn.lock"
-                if yarn_lock_path.exists():
-                    package_files.append(yarn_lock_path)
-
-                # Check for pnpm-lock.yaml
-                pnpm_lock_path = Path(root) / "pnpm-lock.yaml"
-                if pnpm_lock_path.exists():
-                    package_files.append(pnpm_lock_path)
-
-        return package_files
 
     def _convert_npm_audit_to_sarif(
         self, npm_audit_results: Dict[str, Any], target_path: Path
@@ -293,10 +259,34 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             results_file = target_results_dir.joinpath("results.json")
             results_file.parent.mkdir(exist_ok=True, parents=True)
 
-            # Find package files
-            package_files = self._find_package_files(target)
+            # Find all JSON/YAML files to scan from the scan set
+            scannable = scan_set(
+                source=self.work_dir if target_type == "converted" else self.source_dir,
+                output=self.work_dir if target_type == "converted" else self.output_dir,
+            )
+            scannable = [
+                f.strip()
+                for f in scannable
+                if Path(f).name
+                in [
+                    "package-lock.json",
+                    "yarn.lock",
+                    "pnpm-lock.yaml",
+                ]
+            ]
+            joined_files = "\n- ".join(scannable)
+            ASH_LOGGER.debug(f"Found {len(scannable)} package locks:\n- {joined_files}")
 
-            if not package_files:
+            if len(scannable) == 0:
+                self._scanner_log(
+                    f"No package lock files found in {target_type} directory to scan. Exiting.",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
+                return
+
+            if not scannable:
                 ASH_LOGGER.info(f"No package.json files found in {target}")
                 # Return empty SARIF report
                 return SarifReport(
@@ -326,27 +316,34 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             # Run npm audit for each package.json file
             all_results = {}
-            for package_file in package_files:
+            for item in scannable:
+                package_file = Path(item)
                 if "package.json" in package_file.name:
                     package_dir = package_file.parent
                     ASH_LOGGER.info(f"Running npm audit in {package_dir}")
 
                     try:
                         # Run npm audit
-                        cmd = ["npm", "audit", "--json"]
-                        result = subprocess.run(
-                            cmd,
-                            cwd=package_dir,
-                            capture_output=True,
-                            text=True,
-                            check=False,
+                        if package_file.name == "yarn.lock":
+                            binary = "yarn"
+                        elif package_file.name == "pnpm-lock.yaml":
+                            binary = "pnpm"
+                        else:
+                            binary = "npm"
+                        cmd = [binary, "audit", "--json"]
+                        result = self._run_subprocess(
+                            command=cmd,
+                            results_dir=target_results_dir,
+                            stdout_preference="both",
+                            stderr_preference="both",
                         )
+                        ASH_LOGGER.info(result)
 
                         # npm audit returns non-zero exit code when vulnerabilities are found
                         # but we still want to process the output
-                        if result.stdout:
+                        if result.get("stdout", None):
                             try:
-                                audit_results = json.loads(result.stdout)
+                                audit_results = json.loads(result.get("stdout", None))
                                 # Merge results
                                 if not all_results:
                                     all_results = audit_results
