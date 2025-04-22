@@ -2,6 +2,7 @@
 
 from importlib.metadata import version
 import json
+from multiprocessing import cpu_count
 from pathlib import Path
 import re
 from typing import Annotated, List, Literal
@@ -53,6 +54,13 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
             description="Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
         ),
     ] = {}
+    num_cores: Annotated[
+        int,
+        Field(
+            1,
+            description="Number of cores to use for parallel processing. Defaults to using the max cores on the current host.",
+        ),
+    ] = cpu_count()
 
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):
@@ -180,7 +188,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
             with transient_settings(self.config.options.scan_settings) as settings:
                 ASH_LOGGER.debug(f"Settings: {settings}")
-                self._secrets_collection.scan_files(*scannable)
+                self._secrets_collection.scan_files(*scannable, num_processors=self.config.options.num_cores)
 
             self._post_scan(
                 target=target,
