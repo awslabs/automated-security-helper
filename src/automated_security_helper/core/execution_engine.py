@@ -361,7 +361,7 @@ class ScanExecutionEngine:
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
-                    report_phase.execute()
+                    report_phase.execute(report_dir=self.output_dir.joinpath("reports"))
 
             # Return the results
             return self._results

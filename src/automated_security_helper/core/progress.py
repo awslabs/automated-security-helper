@@ -1,6 +1,7 @@
 from enum import Enum
 import logging
 import os
+import sys
 import time
 from typing import Literal
 
@@ -95,10 +96,10 @@ class LiveProgressDisplay:
 
         # Set up a log handler to capture logs with appropriate level based on flags
         log_level = logging.DEBUG
-        if verbose:
-            log_level = 15  # VERBOSE level
-        if debug:
-            log_level = logging.DEBUG
+        # if verbose:
+        #     log_level = 15  # VERBOSE level
+        # if debug:
+        #     log_level = logging.DEBUG
 
         self.log_handler = LiveDisplayLogHandler(self.log_panel, level=log_level)
         self.log_handler.setFormatter(logging.Formatter("%(message)s"))
@@ -159,7 +160,7 @@ class LiveProgressDisplay:
         if self.show_progress:
             try:
                 # Use auto_refresh=True and vertical_overflow="visible" to allow the panel to adjust its height
-                print("Setting Live setup")
+                print("Setting Live setup", file=sys.stderr)
 
                 # Create a simpler layout for testing
                 self.live = Live(
@@ -170,11 +171,11 @@ class LiveProgressDisplay:
                     vertical_overflow="visible",
                     screen=False,  # Try without screen mode
                 )
-                print("Entering Live setup")
+                print("Entering Live setup", file=sys.stderr)
                 self.live.__enter__()
-                print("Entered Live setup")
+                print("Entered Live setup", file=sys.stderr)
             except Exception as e:
-                print(f"ERROR initializing live display: {str(e)}")
+                print(f"ERROR initializing live display: {str(e)}", file=sys.stderr)
                 import traceback
 
                 traceback.print_exc()
@@ -253,6 +254,9 @@ class LiveProgressDisplay:
             update_kwargs["advance"] = advance
         if completed is not None:
             update_kwargs["completed"] = completed
+            # If task is completed at 100%, also mark it as finished to stop the timer
+            if completed == 100:
+                self.progress.stop_task(task_id)
         if description is not None:
             # Format the description with the phase
             full_description = f"[{phase.value.upper()}] {description}"

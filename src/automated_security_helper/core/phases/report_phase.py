@@ -1,5 +1,6 @@
 """Implementation of the Report phase."""
 
+from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -13,13 +14,15 @@ class ReportPhase(EnginePhase):
         """Return the name of this phase."""
         return "report"
 
-    def execute(self, **kwargs) -> None:
+    def execute(self, report_dir: Path, **kwargs) -> None:
         """Execute the Report phase.
 
         Args:
+            report_dir(Path): The directory to save reports to.
             **kwargs: Additional arguments
         """
         ASH_LOGGER.debug("Entering: ReportPhase.execute()")
+        report_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize progress
         self.initialize_progress("Starting report generation...")
@@ -102,8 +105,7 @@ class ReportPhase(EnginePhase):
         reporter_tasks = {}
         completed_reporters = 0
         total_reporters = len(active_reporters)
-        output_dir = self.output_dir.joinpath("reports")
-        output_dir.mkdir(parents=True, exist_ok=True)
+        report_dir.mkdir(parents=True, exist_ok=True)
 
         for fmt, reporter_info in active_reporters.items():
             reporter = reporter_info["reporter"]
@@ -157,7 +159,7 @@ class ReportPhase(EnginePhase):
                 elif fmt == "spdx":
                     output_filename = "ash.spdx.json"
 
-                output_file = output_dir.joinpath(output_filename)
+                output_file = report_dir.joinpath(output_filename)
                 ASH_LOGGER.info(f"Writing {fmt} report to {output_file}")
                 output_file.write_text(formatted)
 
@@ -204,7 +206,7 @@ class ReportPhase(EnginePhase):
         )
 
         # Add summary row
-        self.add_summary(
-            "Complete",
-            f"Generated reports with {completed_reporters}/{total_reporters} reporters",
-        )
+        # self.add_summary(
+        #     "Complete",
+        #     f"Generated reports with {completed_reporters}/{total_reporters} reporters",
+        # )

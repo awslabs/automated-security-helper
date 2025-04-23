@@ -134,9 +134,9 @@ class ScanPhase(EnginePhase):
             )
 
             # Add summary row
-            self.add_summary(
-                "Complete", f"Executed {len(self._completed_scanners)} scanners"
-            )
+            # self.add_summary(
+            #     "Complete", f"Executed {len(self._completed_scanners)} scanners"
+            # )
 
             return self.asharp_model
 
@@ -145,7 +145,7 @@ class ScanPhase(EnginePhase):
             self.update_progress(100, f"Scan failed: {str(e)}")
 
             # Add error to summary
-            self.add_summary("Failed", f"Error: {str(e)}")
+            # self.add_summary("Failed", f"Error: {str(e)}")
 
             ASH_LOGGER.error(f"Execution failed: {str(e)}")
             raise
@@ -401,10 +401,10 @@ class ScanPhase(EnginePhase):
                     description=f"[red]({scanner_name}) Failed: {str(e)}",
                 )
 
-                # Log error
+                # Log error but continue with other scanners
                 ASH_LOGGER.error(f"Scanner failed: {scanner_name} - {str(e)}")
 
-                raise
+                # Don't re-raise the exception so we can continue with other scanners
             finally:
                 completed += 1
 
@@ -524,9 +524,19 @@ class ScanPhase(EnginePhase):
                             description=f"[red]({scanner_name}) Failed: {str(e)}",
                         )
 
-                    # Log error
-                    ASH_LOGGER.error(f"Scanner execution failed: {str(e)}")
-                    raise
+                    # Log error but continue with other scanners
+                    ASH_LOGGER.error(
+                        f"Scanner execution failed: {scanner_name} - {str(e)}"
+                    )
+
+                    # Still count this as completed for progress tracking
+                    completed_count += 1
+                    if len(futures) > 0:  # Avoid division by zero
+                        progress_percent = 50 + (completed_count / len(futures) * 40)
+                        self.update_progress(
+                            int(progress_percent),
+                            f"Completed {completed_count}/{len(futures)} scanner tasks (with errors)",
+                        )
 
     def _process_results(self, results: ScanResultsContainer) -> None:
         """Process scanner results and update ASHARPModel.

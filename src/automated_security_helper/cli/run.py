@@ -176,8 +176,16 @@ def run(
             no_cleanup=not cleanup,
             output_formats=output_formats,
             show_progress=progress
-            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-            not in ["YES", "1", "TRUE"],
+            and (
+                os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+                not in [
+                    "YES",
+                    "1",
+                    "TRUE",
+                ]  # Running inside the container is not guaranteed to produce the live progress outputs correctly
+                or os.environ.get("CI", None)
+                is not None  # Neither is running in a CI pipeline
+            ),
             color_system="auto" if color else None,
         )
 

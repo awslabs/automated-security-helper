@@ -25,7 +25,7 @@ from automated_security_helper.core.exceptions import (
     ASHValidationError,
     ASHConfigValidationError,
 )
-from automated_security_helper.models.core import ExportFormat, IgnorePathWithReason
+from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -84,13 +84,6 @@ class ASHScanOrchestrator(BaseModel):
         bool, Field(False, description="Keep work directory after scan")
     ]
 
-    global_ignore_paths: Annotated[
-        List[IgnorePathWithReason],
-        Field(
-            description="Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'."
-        ),
-    ] = []
-
     metadata: Annotated[
         Dict[str, Any],
         Field(default_factory=dict, description="Additional metadata for the scan"),
@@ -147,7 +140,7 @@ class ASHScanOrchestrator(BaseModel):
             enabled_scanners=self.enabled_scanners,
             config=self.config,
             show_progress=self.show_progress,
-            global_ignore_paths=self.global_ignore_paths,
+            global_ignore_paths=self.config.global_settings.ignore_paths,
             color_system=self.color_system,
             verbose=self.verbose,
             debug=self.debug,
@@ -219,6 +212,7 @@ class ASHScanOrchestrator(BaseModel):
 
                     ASH_LOGGER.debug("Transforming file config")
                     config = ASHConfig(**config_data)
+                    ASH_LOGGER.debug(f"Loaded config from file: {config}")
                 except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
                     ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
                     raise ASHConfigValidationError(

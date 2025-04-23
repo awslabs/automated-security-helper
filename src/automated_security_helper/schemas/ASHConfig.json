@@ -1,5 +1,34 @@
 {
   "$defs": {
+    "AshGlobalDefaultsConfigSection": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore_paths": {
+          "default": [],
+          "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
+          "items": {
+            "$ref": "#/$defs/IgnorePathWithReason"
+          },
+          "title": "Ignore Paths",
+          "type": "array"
+        },
+        "severity_threshold": {
+          "default": "MEDIUM",
+          "description": "Global minimum severity level to consider findings as failures across all scanners",
+          "enum": [
+            "ALL",
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ],
+          "title": "Severity Threshold",
+          "type": "string"
+        }
+      },
+      "title": "AshGlobalDefaultsConfigSection",
+      "type": "object"
+    },
     "BanditScannerConfig": {
       "additionalProperties": true,
       "properties": {
@@ -21,7 +50,7 @@
             "confidence_level": "all",
             "excluded_paths": [],
             "ignore_nosec": false,
-            "severity_level": "all"
+            "severity_threshold": null
           },
           "description": "Configure Bandit scanner"
         }
@@ -78,17 +107,25 @@
           "title": "Ignore Nosec",
           "type": "boolean"
         },
-        "severity_level": {
-          "default": "all",
-          "description": "Confidence level for Bandit findings",
-          "enum": [
-            "all",
-            "low",
-            "medium",
-            "high"
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Severity Level",
-          "type": "string"
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
         }
       },
       "title": "BanditScannerConfigOptions",
@@ -193,7 +230,8 @@
               "NIST80053R4Checks": false,
               "NIST80053R5Checks": false,
               "PCIDSS321Checks": false
-            }
+            },
+            "severity_threshold": null
           },
           "description": "Configure Bandit scanner"
         }
@@ -215,6 +253,26 @@
             "PCIDSS321Checks": false
           },
           "description": "CDK Nag packs to enable"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
         }
       },
       "title": "CdkNagScannerConfigOptions",
@@ -238,7 +296,9 @@
         },
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {},
+          "default": {
+            "severity_threshold": null
+          },
           "description": "Enable CFN Nag IAC scanner"
         },
         "type": {
@@ -285,6 +345,7 @@
             "frameworks": [
               "all"
             ],
+            "severity_threshold": null,
             "skip_frameworks": [],
             "skip_path": []
           },
@@ -386,6 +447,26 @@
           "title": "Frameworks",
           "type": "array"
         },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        },
         "skip_frameworks": {
           "default": [],
           "description": "Specific frameworks to exclude with Checkov. Defaults to none.",
@@ -462,7 +543,9 @@
         },
         "options": {
           "$ref": "#/$defs/CustomScannerConfigOptions",
-          "default": {},
+          "default": {
+            "severity_threshold": null
+          },
           "description": "Configure custom scanner"
         },
         "type": {
@@ -487,7 +570,28 @@
     },
     "CustomScannerConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "properties": {
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
       "title": "CustomScannerConfigOptions",
       "type": "object"
     },
@@ -509,7 +613,8 @@
           "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
           "default": {
             "baseline_file": null,
-            "scan_settings": {}
+            "scan_settings": {},
+            "severity_threshold": null
           },
           "description": "Configure detect-secrets scanner"
         }
@@ -551,6 +656,26 @@
           "description": "Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
           "title": "Scan Settings",
           "type": "object"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
         }
       },
       "title": "DetectSecretsScannerConfigOptions",
@@ -574,7 +699,9 @@
         },
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {},
+          "default": {
+            "severity_threshold": null
+          },
           "description": "Configure Grype scanner"
         },
         "type": {
@@ -636,7 +763,9 @@
         },
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {},
+          "default": {
+            "severity_threshold": null
+          },
           "description": "Enable NPM/PNPM/Yarn Audit dependency scanner"
         },
         "type": {
@@ -690,7 +819,9 @@
         },
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {},
+          "default": {
+            "severity_threshold": null
+          },
           "description": "Scanner options"
         }
       },
@@ -717,7 +848,7 @@
               "confidence_level": "all",
               "excluded_paths": [],
               "ignore_nosec": false,
-              "severity_level": "all"
+              "severity_threshold": null
             }
           },
           "description": "Configure the options for Bandit"
@@ -734,7 +865,8 @@
                 "NIST80053R4Checks": false,
                 "NIST80053R5Checks": false,
                 "PCIDSS321Checks": false
-              }
+              },
+              "severity_threshold": null
             }
           },
           "description": "Configure the options for CdkNag"
@@ -744,7 +876,9 @@
           "default": {
             "enabled": true,
             "name": "cfn-nag",
-            "options": {},
+            "options": {
+              "severity_threshold": null
+            },
             "type": "IAC"
           },
           "description": "Configure the options for CfnNag"
@@ -762,6 +896,7 @@
               "frameworks": [
                 "all"
               ],
+              "severity_threshold": null,
               "skip_frameworks": [],
               "skip_path": []
             }
@@ -775,7 +910,8 @@
             "name": "detect-secrets",
             "options": {
               "baseline_file": null,
-              "scan_settings": {}
+              "scan_settings": {},
+              "severity_threshold": null
             }
           },
           "description": "Configure the options for DetectSecrets"
@@ -785,7 +921,9 @@
           "default": {
             "enabled": true,
             "name": "grype",
-            "options": {},
+            "options": {
+              "severity_threshold": null
+            },
             "type": "SAST"
           },
           "description": "Configure the options for Grype"
@@ -795,7 +933,9 @@
           "default": {
             "enabled": true,
             "name": "npm-audit",
-            "options": {},
+            "options": {
+              "severity_threshold": null
+            },
             "type": "DEPENDENCY"
           },
           "description": "Configure the options for NpmAudit"
@@ -805,7 +945,9 @@
           "default": {
             "enabled": true,
             "name": "semgrep",
-            "options": {},
+            "options": {
+              "severity_threshold": null
+            },
             "type": "SAST"
           },
           "description": "Configure the options for Semgrep"
@@ -815,7 +957,9 @@
           "default": {
             "enabled": true,
             "name": "syft",
-            "options": {},
+            "options": {
+              "severity_threshold": null
+            },
             "type": "SBOM"
           },
           "description": "Configure the options for Syft"
@@ -827,7 +971,28 @@
     "ScannerOptionsBase": {
       "additionalProperties": true,
       "description": "Base class for scanner options.",
-      "properties": {},
+      "properties": {
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
       "title": "ScannerOptionsBase",
       "type": "object"
     },
@@ -1037,7 +1202,9 @@
         },
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {},
+          "default": {
+            "severity_threshold": null
+          },
           "description": "Scanner options"
         }
       },
@@ -1062,7 +1229,9 @@
         },
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {},
+          "default": {
+            "severity_threshold": null
+          },
           "description": "Configure Semgrep scanner"
         },
         "type": {
@@ -1103,7 +1272,9 @@
         },
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {},
+          "default": {
+            "severity_threshold": null
+          },
           "description": "Configure Syft scanner"
         },
         "type": {
@@ -1265,14 +1436,21 @@
       "title": "Fail On Findings",
       "type": "boolean"
     },
-    "global_ignore_paths": {
-      "default": [],
-      "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
-      "items": {
-        "$ref": "#/$defs/IgnorePathWithReason"
+    "global_defaults": {
+      "$ref": "#/$defs/AshGlobalDefaultsConfigSection",
+      "default": {
+        "ignore_paths": [],
+        "severity_threshold": "MEDIUM"
       },
-      "title": "Global Ignore Paths",
-      "type": "array"
+      "description": "Global default settings for ASH"
+    },
+    "global_settings": {
+      "$ref": "#/$defs/AshGlobalDefaultsConfigSection",
+      "default": {
+        "ignore_paths": [],
+        "severity_threshold": "MEDIUM"
+      },
+      "description": "Legacy global settings (deprecated, use global_defaults instead)"
     },
     "max_concurrent_scanners": {
       "default": 4,
@@ -1352,7 +1530,7 @@
             "confidence_level": "all",
             "excluded_paths": [],
             "ignore_nosec": false,
-            "severity_level": "all"
+            "severity_threshold": null
           }
         },
         "cdk-nag": {
@@ -1365,13 +1543,16 @@
               "NIST80053R4Checks": false,
               "NIST80053R5Checks": false,
               "PCIDSS321Checks": false
-            }
+            },
+            "severity_threshold": null
           }
         },
         "cfn-nag": {
           "enabled": true,
           "name": "cfn-nag",
-          "options": {},
+          "options": {
+            "severity_threshold": null
+          },
           "type": "IAC"
         },
         "checkov": {
@@ -1385,6 +1566,7 @@
             "frameworks": [
               "all"
             ],
+            "severity_threshold": null,
             "skip_frameworks": [],
             "skip_path": []
           }
@@ -1394,48 +1576,44 @@
           "name": "detect-secrets",
           "options": {
             "baseline_file": null,
-            "scan_settings": {}
+            "scan_settings": {},
+            "severity_threshold": null
           }
         },
         "grype": {
           "enabled": true,
           "name": "grype",
-          "options": {},
+          "options": {
+            "severity_threshold": null
+          },
           "type": "SAST"
         },
         "npm-audit": {
           "enabled": true,
           "name": "npm-audit",
-          "options": {},
+          "options": {
+            "severity_threshold": null
+          },
           "type": "DEPENDENCY"
         },
         "semgrep": {
           "enabled": true,
           "name": "semgrep",
-          "options": {},
+          "options": {
+            "severity_threshold": null
+          },
           "type": "SAST"
         },
         "syft": {
           "enabled": true,
           "name": "syft",
-          "options": {},
+          "options": {
+            "severity_threshold": null
+          },
           "type": "SBOM"
         }
       },
       "description": "Scanner configurations by type"
-    },
-    "severity_threshold": {
-      "default": "MEDIUM",
-      "description": "Minimum severity level to raise unsuccessful exit codes from ASH if found",
-      "enum": [
-        "ALL",
-        "LOW",
-        "MEDIUM",
-        "HIGH",
-        "CRITICAL"
-      ],
-      "title": "Severity Threshold",
-      "type": "string"
     }
   },
   "title": "ASHConfig",

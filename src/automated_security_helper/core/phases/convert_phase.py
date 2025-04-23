@@ -46,7 +46,7 @@ class ConvertPhase(EnginePhase):
         # If no converters found, still update progress to 100%
         if not converters or not isinstance(converters, dict) or len(converters) == 0:
             self.update_progress(100, "No converters to run")
-            self.add_summary("Complete", "No converters to run")
+            # self.add_summary("Complete", "No converters to run")
             return converted_paths
 
         # We have converters to run
@@ -116,6 +116,6 @@ class ConvertPhase(EnginePhase):
         )
 
         # Add summary row
-        self.add_summary("Complete", f"Converted {len(converted_paths)} paths")
+        # self.add_summary("Complete", f"Converted {len(converted_paths)} paths")
 
         return converted_paths
