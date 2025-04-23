@@ -239,14 +239,8 @@ class ASHConfig(BaseModel):
     global_settings: Annotated[
         AshGlobalDefaultsConfigSection,
         Field(
-            description="Legacy global settings (deprecated, use global_defaults instead)"
+            description="Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
         ),
-    ] = AshGlobalDefaultsConfigSection()
-
-    # New global defaults section
-    global_defaults: Annotated[
-        AshGlobalDefaultsConfigSection,
-        Field(description="Global default settings for ASH"),
     ] = AshGlobalDefaultsConfigSection()
 
     external_reports_to_include: Annotated[

@@ -1436,21 +1436,13 @@
       "title": "Fail On Findings",
       "type": "boolean"
     },
-    "global_defaults": {
-      "$ref": "#/$defs/AshGlobalDefaultsConfigSection",
-      "default": {
-        "ignore_paths": [],
-        "severity_threshold": "MEDIUM"
-      },
-      "description": "Global default settings for ASH"
-    },
     "global_settings": {
       "$ref": "#/$defs/AshGlobalDefaultsConfigSection",
       "default": {
         "ignore_paths": [],
         "severity_threshold": "MEDIUM"
       },
-      "description": "Legacy global settings (deprecated, use global_defaults instead)"
+      "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
     },
     "max_concurrent_scanners": {
       "default": 4,

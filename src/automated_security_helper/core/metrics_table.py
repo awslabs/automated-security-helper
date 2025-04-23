@@ -51,15 +51,15 @@ def generate_metrics_table(
         ASH_LOGGER.error(f"Error loading config, using default: {e}")
         ash_conf = ASHConfig()
 
-    # Check for global_defaults.severity_threshold first (new structure)
+    # Check for global_settings.severity_threshold first (new structure)
     if (
         ash_conf
-        and hasattr(ash_conf, "global_defaults")
-        and hasattr(ash_conf.global_defaults, "severity_threshold")
+        and hasattr(ash_conf, "global_settings")
+        and hasattr(ash_conf.global_settings, "severity_threshold")
     ):
-        global_threshold = ash_conf.global_defaults.severity_threshold
+        global_threshold = ash_conf.global_settings.severity_threshold
         ASH_LOGGER.debug(
-            f"Using global severity threshold from global_defaults: {global_threshold}"
+            f"Using global severity threshold from global_settings: {global_threshold}"
         )
     # Fall back to global_settings.severity_threshold (legacy structure)
     elif (
