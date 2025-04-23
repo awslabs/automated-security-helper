@@ -73,12 +73,18 @@ class ScannerPluginBase(BaseModel, Generic[T]):
 
         if self.source_dir is None:
             self.source_dir = Path.cwd()
+            ASH_LOGGER.verbose(
+                f"({self.config.name or self.__class__.__name__}) Source directory was not provided! Defaulting to the current directory: {self.source_dir.as_posix()}"
+            )
         if self.output_dir is None:
             self.output_dir = self.source_dir.joinpath("ash_output")
+            ASH_LOGGER.verbose(
+                f"({self.config.name or self.__class__.__name__}) Output directory was not provided! Defaulting to ash_output directory relative to the source directory: {self.output_dir.as_posix()}"
+            )
 
         # Ensure paths are Path objects
-        self.source_dir = Path(str(self.source_dir))
-        self.output_dir = Path(str(self.output_dir))
+        self.source_dir = Path(self.source_dir)
+        self.output_dir = Path(self.output_dir)
         self.work_dir = self.output_dir.joinpath("converted")
         self.results_dir = self.output_dir.joinpath("scanners").joinpath(
             self.config.name

@@ -224,11 +224,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 level=20,
                 append_to_stream="stderr",  # This will add the message to self.errors
             )
-            # Return a minimal SARIF report with no runs
-            return SarifReport(
-                version="2.1.0",
-                runs=[],
-            )
+            return
 
         try:
             self._pre_scan(

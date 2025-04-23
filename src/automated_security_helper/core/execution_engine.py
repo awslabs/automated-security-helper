@@ -175,8 +175,8 @@ class ScanExecutionEngine:
         )
         self._scanner_factory = ScannerFactory(
             config=config,
-            source_dir=source_dir,
-            output_dir=output_dir,
+            source_dir=self.source_dir,
+            output_dir=self.output_dir,
             registered_scanner_plugins=self._plugin_registry.get_plugin(
                 plugin_type=PluginType.scanner
             ),
