@@ -6,9 +6,10 @@ from typing import Dict, List, Any
 from pathlib import Path
 
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.core.scanner_factory import ScannerFactory
-from automated_security_helper.core.plugin_registry import PluginRegistry
+from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
@@ -82,13 +83,29 @@ class ScanPhase(EnginePhase):
 
             # Process scanners
             if scanner_configs:
-                for scanner_name, scanner_config in scanner_configs.items():
-                    if scanner_config:
+                for scanner_name, scanner_plugin_class in scanner_configs.items():
+                    if scanner_plugin_class:
                         # Add scanner to execution queue with default target
-                        scanner_config_instance = scanner_config()
+                        scanner_plugin_class_instance = scanner_plugin_class(
+                            config=(
+                                self.config.get_plugin_config(
+                                    plugin_type=PluginType.scanner,
+                                    plugin_name=scanner_name,
+                                )
+                                if self.config is not None
+                                else None
+                            ),
+                            context=PluginContext(
+                                source_dir=self.source_dir,
+                                output_dir=self.output_dir,
+                                work_dir=self.work_dir,
+                            ),
+                            source_dir=self.source_dir,
+                            output_dir=self.output_dir,
+                        )
                         if (
-                            hasattr(scanner_config_instance.config, "enabled")
-                            and bool(scanner_config_instance.config.enabled)
+                            hasattr(scanner_plugin_class_instance.config, "enabled")
+                            and bool(scanner_plugin_class_instance.config.enabled)
                             and (
                                 not enabled_scanners
                                 or scanner_name.lower().strip() in enabled_scanners
@@ -98,7 +115,7 @@ class ScanPhase(EnginePhase):
                             self._queue.put(
                                 (
                                     scanner_name,
-                                    scanner_config_instance,
+                                    scanner_plugin_class_instance,
                                     [
                                         {"path": self.source_dir, "type": "source"},
                                         {"path": self.work_dir, "type": "converted"},
@@ -231,6 +248,25 @@ class ScanPhase(EnginePhase):
                         ASH_LOGGER.debug(
                             f"Executing {scanner_config.name or scanner_plugin.__class__.__name__}.scan() on {target_type}"
                         )
+                        # Ensure scanner has proper context
+                        if (
+                            not hasattr(scanner_plugin, "context")
+                            or scanner_plugin.context is None
+                        ):
+                            scanner_plugin.context = PluginContext(
+                                source_dir=self.source_dir,
+                                output_dir=self.output_dir,
+                                work_dir=self.work_dir,
+                            )
+
+                        # Ensure scanner output paths are set correctly
+                        scanner_plugin.source_dir = self.source_dir
+                        scanner_plugin.output_dir = self.output_dir
+                        scanner_plugin.work_dir = self.work_dir
+                        scanner_plugin.results_dir = self.output_dir.joinpath(
+                            "scanners"
+                        ).joinpath(scanner_config.name)
+
                         raw_results = scanner_plugin.scan(
                             target=scan_target,
                             config=scanner_config,

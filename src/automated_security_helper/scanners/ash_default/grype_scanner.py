@@ -35,7 +35,7 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     severity_threshold: Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = (
-        "HIGH"
+        None
     )
 
 

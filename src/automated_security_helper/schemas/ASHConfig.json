@@ -788,6 +788,36 @@
       "title": "NpmAuditScannerConfig",
       "type": "object"
     },
+    "PluginContext": {
+      "description": "Context container for plugins to ensure consistent path information.",
+      "properties": {
+        "output_dir": {
+          "description": "Output directory for results",
+          "format": "path",
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "source_dir": {
+          "description": "Source directory to scan",
+          "format": "path",
+          "title": "Source Dir",
+          "type": "string"
+        },
+        "work_dir": {
+          "default": null,
+          "description": "Working directory for temporary files",
+          "format": "path",
+          "title": "Work Dir",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_dir",
+        "output_dir"
+      ],
+      "title": "PluginContext",
+      "type": "object"
+    },
     "ReporterPluginConfigBase": {
       "additionalProperties": true,
       "properties": {
@@ -1028,6 +1058,17 @@
           ],
           "default": null,
           "title": "Config"
+        },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "description": {
           "anyOf": [

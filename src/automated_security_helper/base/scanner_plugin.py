@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import logging
 from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
@@ -28,6 +29,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
     model_config = ConfigDict(extra="allow")
 
     config: T | ScannerPluginConfigBase | None = None
+    context: PluginContext | None = None
 
     tool_type: str = "UNKNOWN"
     tool_version: str | None = None
@@ -71,25 +73,38 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                 f"Unable to initialize {self.__class__.__name__}! Configuration is empty."
             )
 
-        if self.source_dir is None:
-            self.source_dir = Path.cwd()
-            ASH_LOGGER.verbose(
-                f"({self.config.name or self.__class__.__name__}) Source directory was not provided! Defaulting to the current directory: {self.source_dir.as_posix()}"
-            )
-        if self.output_dir is None:
-            self.output_dir = self.source_dir.joinpath("ash_output")
-            ASH_LOGGER.verbose(
-                f"({self.config.name or self.__class__.__name__}) Output directory was not provided! Defaulting to ash_output directory relative to the source directory: {self.output_dir.as_posix()}"
-            )
+        # Use context if provided, otherwise fall back to instance attributes
+        if self.context is not None:
+            ASH_LOGGER.debug(f"Using provided context for {self.__class__.__name__}")
+            self.source_dir = self.context.source_dir
+            self.output_dir = self.context.output_dir
+            self.work_dir = self.context.work_dir
+        else:
+            # Fall back to instance attributes or defaults
+            if self.source_dir is None:
+                self.source_dir = Path.cwd()
+                ASH_LOGGER.verbose(
+                    f"({self.config.name or self.__class__.__name__}) Source directory was not provided! Defaulting to the current directory: {self.source_dir.as_posix()}"
+                )
+            if self.output_dir is None:
+                self.output_dir = self.source_dir.joinpath("ash_output")
+                ASH_LOGGER.verbose(
+                    f"({self.config.name or self.__class__.__name__}) Output directory was not provided! Defaulting to ash_output directory relative to the source directory: {self.output_dir.as_posix()}"
+                )
 
-        # Ensure paths are Path objects
-        self.source_dir = Path(self.source_dir)
-        self.output_dir = Path(self.output_dir)
-        self.work_dir = self.output_dir.joinpath("converted")
+            # Ensure paths are Path objects
+            self.source_dir = Path(self.source_dir)
+            self.output_dir = Path(self.output_dir)
+            self.work_dir = self.output_dir.joinpath("converted")
+
+        # Set up results directory based on output directory
         self.results_dir = self.output_dir.joinpath("scanners").joinpath(
             self.config.name
         )
 
+        ASH_LOGGER.debug(
+            f"Scanner {self.config.name} initialized with source_dir={self.source_dir}, output_dir={self.output_dir}"
+        )
         return super().model_post_init(context)
 
     def _scanner_log(
@@ -223,9 +238,20 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                 f"([yellow]{self.config.name or self.__class__.__name__}[/yellow] @ [magenta]{target_type}[/magenta]) Target {target} does not exist!"
             )
 
+        # Ensure all required directories exist
         self.work_dir.mkdir(parents=True, exist_ok=True)
         if self.results_dir:
             self.results_dir.mkdir(parents=True, exist_ok=True)
+
+        # Log the paths being used
+        self._scanner_log(
+            f"Using source_dir: {self.source_dir}",
+            f"Using output_dir: {self.output_dir}",
+            f"Using work_dir: {self.work_dir}",
+            f"Using results_dir: {self.results_dir}",
+            target_type=target_type,
+            level=logging.DEBUG,
+        )
 
     def _post_scan(
         self,

@@ -12,6 +12,7 @@ from automated_security_helper.base.converter_plugin import (
     ConverterPluginConfigBase,
 )
 from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
@@ -60,6 +61,7 @@ class PluginRegistry(BaseModel):
     """Registry for plugins."""
 
     config: ASHConfig | None = None
+    plugin_context: PluginContext | None = None
     registered_plugins: Dict[str, Dict[str, RegisteredPlugin]] = {}
 
     def model_post_init(self, context):

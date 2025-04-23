@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 
 
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.metrics_table import display_metrics_table
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
@@ -145,7 +146,7 @@ class ScanExecutionEngine:
                 if work_dir:
                     self.work_dir = Path(work_dir)
                 else:
-                    self.work_dir = self.output_dir / "converted"
+                    self.work_dir = self.output_dir.joinpath("converted")
                 self.work_dir.mkdir(parents=True, exist_ok=True)
             else:
                 self.output_dir = None
@@ -175,6 +176,11 @@ class ScanExecutionEngine:
         )
         self._scanner_factory = ScannerFactory(
             config=config,
+            plugin_context=PluginContext(
+                source_dir=self.source_dir,
+                output_dir=self.output_dir,
+                work_dir=self.work_dir,
+            ),
             source_dir=self.source_dir,
             output_dir=self.output_dir,
             registered_scanner_plugins=self._plugin_registry.get_plugin(
@@ -187,7 +193,20 @@ class ScanExecutionEngine:
         self._registered_scanners = {}
         self._enabled_from_config = []
         for key, val in self._scanner_factory.available_scanners().items():
-            val_instance = val()
+            val_instance = val(
+                config=self._config.get_plugin_config(
+                    plugin_type=PluginType.scanner, plugin_name=key
+                )
+                if self._config is not None
+                else None,
+                context=PluginContext(
+                    source_dir=self.source_dir,
+                    output_dir=self.output_dir,
+                    work_dir=self.work_dir,
+                ),
+                source_dir=self.source_dir,
+                output_dir=self.output_dir,
+            )
             ASH_LOGGER.debug(
                 f"Evaluating key {key} with val: {val_instance.model_dump_json()}"
             )

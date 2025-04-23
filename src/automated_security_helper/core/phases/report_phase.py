@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -54,20 +55,53 @@ class ReportPhase(EnginePhase):
             YAMLReporter,
         )
 
+        plugin_context = PluginContext(
+            source_dir=self.source_dir,
+            output_dir=self.output_dir,
+            work_dir=self.work_dir,
+        )
+
         available_reporters = {
-            "asff": {"reporter": ASFFReporter(), "name": "ASFF Reporter"},
-            "csv": {"reporter": CSVReporter(), "name": "CSV Reporter"},
+            "asff": {
+                "reporter": ASFFReporter(context=plugin_context),
+                "name": "ASFF Reporter",
+            },
+            "csv": {
+                "reporter": CSVReporter(context=plugin_context),
+                "name": "CSV Reporter",
+            },
             "cyclonedx": {
-                "reporter": CycloneDXReporter(),
+                "reporter": CycloneDXReporter(context=plugin_context),
                 "name": "CycloneDX Reporter",
             },
-            "html": {"reporter": HTMLReporter(), "name": "HTML Reporter"},
-            "json": {"reporter": JSONReporter(), "name": "JSON Reporter"},
-            "junitxml": {"reporter": JUnitXMLReporter(), "name": "JUnit XML Reporter"},
-            "sarif": {"reporter": SARIFReporter(), "name": "SARIF Reporter"},
-            "spdx": {"reporter": SPDXReporter(), "name": "SPDX Reporter"},
-            "text": {"reporter": TextReporter(), "name": "Text Reporter"},
-            "yaml": {"reporter": YAMLReporter(), "name": "YAML Reporter"},
+            "html": {
+                "reporter": HTMLReporter(context=plugin_context),
+                "name": "HTML Reporter",
+            },
+            "json": {
+                "reporter": JSONReporter(context=plugin_context),
+                "name": "JSON Reporter",
+            },
+            "junitxml": {
+                "reporter": JUnitXMLReporter(context=plugin_context),
+                "name": "JUnit XML Reporter",
+            },
+            "sarif": {
+                "reporter": SARIFReporter(context=plugin_context),
+                "name": "SARIF Reporter",
+            },
+            "spdx": {
+                "reporter": SPDXReporter(context=plugin_context),
+                "name": "SPDX Reporter",
+            },
+            "text": {
+                "reporter": TextReporter(context=plugin_context),
+                "name": "Text Reporter",
+            },
+            "yaml": {
+                "reporter": YAMLReporter(context=plugin_context),
+                "name": "YAML Reporter",
+            },
         }
 
         # Filter reporters based on the configured output formats
@@ -141,6 +175,13 @@ class ReportPhase(EnginePhase):
                 )
 
                 # Generate the report
+                reporter.source_dir = self.source_dir
+                reporter.output_dir = self.output_dir
+                reporter.context = PluginContext(
+                    source_dir=self.source_dir,
+                    output_dir=self.output_dir,
+                    work_dir=self.work_dir,
+                )
                 formatted = reporter.report(self.asharp_model)
                 if formatted is None:
                     ASH_LOGGER.error(

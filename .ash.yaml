@@ -32,7 +32,6 @@ scanners:
     enabled: true
     options:
       confidence_level: all
-      severity_threshold: MEDIUM
       ignore_nosec: false
       excluded_paths: []
   cdk-nag:

@@ -172,7 +172,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # Find all files to scan from the scan set
             scannable = scan_set(
                 source=target,
-                output=self.output_dir if target == self.source_dir else self.work_dir,
+                output=self.output_dir,  # Always use the configured output_dir
                 # filter_pattern=r"\.(yaml|yml|json)$",
             )
             ASH_LOGGER.debug(
