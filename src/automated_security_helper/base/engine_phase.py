@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from automated_security_helper.config.ash_config import ASHConfig
+from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.models.asharp_model import ASHARPModel
 
 
@@ -65,8 +66,21 @@ class EnginePhase(ABC):
         if self.progress_display:
             if not description:
                 description = f"Starting {self.phase_name} phase..."
+
+            # Convert string phase name to ExecutionPhase enum
+            phase_enum = None
+            if self.phase_name == "convert":
+                phase_enum = ExecutionPhase.CONVERT
+            elif self.phase_name == "scan":
+                phase_enum = ExecutionPhase.SCAN
+            elif self.phase_name == "report":
+                phase_enum = ExecutionPhase.REPORT
+            else:
+                # Default to CONVERT if unknown
+                phase_enum = ExecutionPhase.CONVERT
+
             self.phase_task = self.progress_display.add_task(
-                phase=self.phase_name, description=description, total=100
+                phase=phase_enum, description=description, total=100
             )
 
     def update_progress(self, completed: int, description: str = None) -> None:
@@ -77,8 +91,20 @@ class EnginePhase(ABC):
             description: Updated description for the progress task
         """
         if self.progress_display and self.phase_task is not None:
+            # Convert string phase name to ExecutionPhase enum
+            phase_enum = None
+            if self.phase_name == "convert":
+                phase_enum = ExecutionPhase.CONVERT
+            elif self.phase_name == "scan":
+                phase_enum = ExecutionPhase.SCAN
+            elif self.phase_name == "report":
+                phase_enum = ExecutionPhase.REPORT
+            else:
+                # Default to CONVERT if unknown
+                phase_enum = ExecutionPhase.CONVERT
+
             self.progress_display.update_task(
-                phase=self.phase_name,
+                phase=phase_enum,
                 task_id=self.phase_task,
                 completed=completed,
                 description=description

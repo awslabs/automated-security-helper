@@ -94,7 +94,7 @@ class LiveProgressDisplay:
         self.log_panel = RichLogPanel(max_lines=max_log_lines)
 
         # Set up a log handler to capture logs with appropriate level based on flags
-        log_level = logging.INFO
+        log_level = logging.DEBUG
         if verbose:
             log_level = 15  # VERBOSE level
         if debug:
@@ -157,23 +157,34 @@ class LiveProgressDisplay:
     def start(self):
         """Start the live display if progress is enabled."""
         if self.show_progress:
-            # Use auto_refresh=True and vertical_overflow="visible" to allow the panel to adjust its height
-            print("Setting Live setup")
-            self.live = Live(
-                self.layout,
-                console=self.console,
-                # refresh_per_second=4,
-                auto_refresh=True,
-                vertical_overflow="visible",
-                # transient=True,
-                # screen=False,
-            )
-            print("Entering Live setup")
-            self.live.__enter__()
-            print("Entered Live setup")
+            try:
+                # Use auto_refresh=True and vertical_overflow="visible" to allow the panel to adjust its height
+                print("Setting Live setup")
 
-            # Log a message to show in the log panel
-            ASH_LOGGER.info("ASH Security Scan started")
+                # Create a simpler layout for testing
+                self.live = Live(
+                    self.layout,
+                    console=self.console,
+                    refresh_per_second=4,
+                    auto_refresh=True,
+                    vertical_overflow="visible",
+                    screen=False,  # Try without screen mode
+                )
+                print("Entering Live setup")
+                self.live.__enter__()
+                print("Entered Live setup")
+            except Exception as e:
+                print(f"ERROR initializing live display: {str(e)}")
+                import traceback
+
+                traceback.print_exc()
+                # Fall back to non-progress mode
+                self.show_progress = False
+                ASH_LOGGER.error(f"Failed to initialize progress display: {str(e)}")
+                ASH_LOGGER.info("Continuing without progress display")
+
+        # Log a message to show in the log panel
+        ASH_LOGGER.info("ASH Security Scan started")
 
     def stop(self):
         """Stop the live display if it's running."""
@@ -355,16 +366,3 @@ class LiveProgressDisplay:
             elapsed_str,
             f"{self.status_emojis[status_key]} {status_text}",
         )
-
-
-class ScanProgress:
-    """Tracks progress of security scans."""
-
-    def __init__(self, total: int):
-        """Initialize scan progress tracker."""
-        self.completed = 0
-        self.total = total
-
-    def increment(self):
-        """Increment the completed count."""
-        self.completed += 1

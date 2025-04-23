@@ -1,6 +1,7 @@
 """Implementation of the Report phase."""
 
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -111,13 +112,13 @@ class ReportPhase(EnginePhase):
             # Create task for this reporter
             task_description = f"[magenta]({reporter_name}) Generating {fmt} report..."
             reporter_task = self.progress_display.add_task(
-                phase=self.phase_name, description=task_description, total=100
+                phase=ExecutionPhase.REPORT, description=task_description, total=100
             )
             reporter_tasks[fmt] = reporter_task
 
             # Update reporter task to show it's starting
             self.progress_display.update_task(
-                phase=self.phase_name,
+                phase=ExecutionPhase.REPORT,
                 task_id=reporter_task,
                 completed=10,
                 description=f"[blue]({reporter_name}) Starting {fmt} report generation...",
@@ -131,7 +132,7 @@ class ReportPhase(EnginePhase):
 
                 # Update reporter task to show progress
                 self.progress_display.update_task(
-                    phase=self.phase_name,
+                    phase=ExecutionPhase.REPORT,
                     task_id=reporter_task,
                     completed=50,
                     description=f"[yellow]({reporter_name}) Generating {fmt} report...",
@@ -162,7 +163,7 @@ class ReportPhase(EnginePhase):
 
                 # Update reporter task to show completion
                 self.progress_display.update_task(
-                    phase=self.phase_name,
+                    phase=ExecutionPhase.REPORT,
                     task_id=reporter_task,
                     completed=100,
                     description=f"[green]({reporter_name}) {fmt.upper()} report generated",
@@ -185,7 +186,7 @@ class ReportPhase(EnginePhase):
                     f"Error generating reports with {reporter_name}: {str(e)}"
                 )
                 self.progress_display.update_task(
-                    phase=self.phase_name,
+                    phase=ExecutionPhase.REPORT,
                     task_id=reporter_task,
                     completed=100,
                     description=f"[red]({reporter_name}) Failed: {str(e)}",

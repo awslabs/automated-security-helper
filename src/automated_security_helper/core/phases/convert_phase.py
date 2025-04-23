@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -55,7 +56,7 @@ class ConvertPhase(EnginePhase):
         for converter_name, converter_config in converters.items():
             # Create task for this converter
             converter_task = self.progress_display.add_task(
-                phase=self.phase_name,
+                phase=ExecutionPhase.CONVERT,
                 description=f"Running converter: {converter_name}",
                 total=100,
             )
@@ -73,7 +74,7 @@ class ConvertPhase(EnginePhase):
 
             # Update converter task to 50%
             self.progress_display.update_task(
-                phase=self.phase_name,
+                phase=ExecutionPhase.CONVERT,
                 task_id=converter_task,
                 completed=50,
                 description=f"Running converter: {converter_name}",
@@ -87,7 +88,7 @@ class ConvertPhase(EnginePhase):
 
             # Update converter task to 100%
             self.progress_display.update_task(
-                phase=self.phase_name,
+                phase=ExecutionPhase.CONVERT,
                 task_id=converter_task,
                 completed=100,
                 description=f"Completed converter: {converter_name}",

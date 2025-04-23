@@ -17,7 +17,7 @@ from automated_security_helper.core.progress import (
 )
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.execution_engine import (
-    ScanExecutionEngine2 as ScanExecutionEngine,
+    ScanExecutionEngine as ScanExecutionEngine,
 )
 
 from automated_security_helper.config.ash_config import ASHConfig

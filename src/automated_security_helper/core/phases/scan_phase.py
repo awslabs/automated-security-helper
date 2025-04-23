@@ -6,7 +6,9 @@ from typing import Dict, List, Any
 from pathlib import Path
 
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.core.scanner_factory import ScannerFactory
+from automated_security_helper.core.plugin_registry import PluginRegistry
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
@@ -25,7 +27,7 @@ class ScanPhase(EnginePhase):
     def execute(
         self,
         scanner_factory: ScannerFactory,
-        plugin_registry,
+        plugin_registry: PluginRegistry,
         enabled_scanners: List[str] = None,
         parallel: bool = True,
         max_workers: int = 4,
@@ -348,7 +350,7 @@ class ScanPhase(EnginePhase):
             # Create task for this scanner
             task_description = f"[cyan]({scanner_name}) Scanning directories..."
             scanner_task = self.progress_display.add_task(
-                phase=self.phase_name, description=task_description, total=100
+                phase=ExecutionPhase.SCAN, description=task_description, total=100
             )
 
             # Update main scan task progress
@@ -361,7 +363,7 @@ class ScanPhase(EnginePhase):
             try:
                 # Update scanner task to 50%
                 self.progress_display.update_task(
-                    phase=self.phase_name,
+                    phase=ExecutionPhase.SCAN,
                     task_id=scanner_task,
                     completed=50,
                 )
@@ -381,7 +383,7 @@ class ScanPhase(EnginePhase):
 
                 # Update scanner task to 100%
                 self.progress_display.update_task(
-                    phase=self.phase_name,
+                    phase=ExecutionPhase.SCAN,
                     task_id=scanner_task,
                     completed=100,
                     description=f"[green]({scanner_name}) Completed scan",
@@ -393,7 +395,7 @@ class ScanPhase(EnginePhase):
             except Exception as e:
                 # Update scanner task to show error
                 self.progress_display.update_task(
-                    phase=self.phase_name,
+                    phase=ExecutionPhase.SCAN,
                     task_id=scanner_task,
                     completed=100,
                     description=f"[red]({scanner_name}) Failed: {str(e)}",
@@ -436,13 +438,13 @@ class ScanPhase(EnginePhase):
                 task_key = f"{scanner_name}_task"
                 task_description = f"[magenta]({scanner_name}) Scanning directories..."
                 scanner_task = self.progress_display.add_task(
-                    phase=self.phase_name, description=task_description, total=100
+                    phase=ExecutionPhase.SCAN, description=task_description, total=100
                 )
                 scanner_tasks[task_key] = scanner_task
 
                 # Update scanner task to show it's queued
                 self.progress_display.update_task(
-                    phase=self.phase_name,
+                    phase=ExecutionPhase.SCAN,
                     task_id=scanner_task,
                     completed=10,
                     description=f"[blue]({scanner_name}) Queued scan...",
@@ -490,7 +492,7 @@ class ScanPhase(EnginePhase):
 
                     if task_id is not None:
                         self.progress_display.update_task(
-                            phase=self.phase_name,
+                            phase=ExecutionPhase.SCAN,
                             task_id=task_id,
                             completed=100,
                             description=f"[green]({scanner_name}) Completed scan",
@@ -516,7 +518,7 @@ class ScanPhase(EnginePhase):
 
                     if task_id is not None:
                         self.progress_display.update_task(
-                            phase=self.phase_name,
+                            phase=ExecutionPhase.SCAN,
                             task_id=task_id,
                             completed=100,
                             description=f"[red]({scanner_name}) Failed: {str(e)}",

@@ -30,7 +30,7 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class ScanExecutionEngine2:
+class ScanExecutionEngine:
     """Manages the execution of security scanners."""
 
     def __init__(
@@ -377,10 +377,18 @@ class ScanExecutionEngine2:
             # Display the final metrics table
             ASH_LOGGER.info("===== ASH Security Scan Complete =====")
             if self._completed_scanners:
+                # Get color setting from progress display
+                use_color = True
+                if hasattr(self.progress_display, "console") and hasattr(
+                    self.progress_display.console, "color_system"
+                ):
+                    use_color = self.progress_display.console.color_system is not None
+
                 display_metrics_table(
                     completed_scanners=self._completed_scanners,
                     asharp_model=self._asharp_model,
                     scan_results=self._scan_results,
+                    use_color=use_color,
                 )
 
         return ASHARPModel(description="No results generated")

@@ -18,9 +18,9 @@ global_ignore_paths:
   - path: .mypy_cache
     reason: This path contains .gitignore'd cache data used by dev/build tools.
 output_formats:
+  - sarif
   - junitxml
   - html
-  - sarif
   - cyclonedx
   - asff
   - ocsf

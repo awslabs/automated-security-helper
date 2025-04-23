@@ -121,6 +121,7 @@ def display_metrics_table(
     completed_scanners: List[ScannerPluginBase],
     asharp_model: ASHARPModel,
     scan_results: Dict[str, Any] = None,
+    use_color: bool = True,
 ) -> None:
     """Display a Rich table with metrics for each scanner.
 
@@ -128,12 +129,13 @@ def display_metrics_table(
         completed_scanners: List of completed scanner plugins
         asharp_model: The ASHARPModel with scan results
         scan_results: Optional dictionary of additional scan results
+        use_color: Whether to use color in the output (respects --no-color flag)
     """
     try:
         table = generate_metrics_table(completed_scanners, asharp_model, scan_results)
 
-        # Create a console and print the table
-        console = Console()
+        # Create a console with color settings that respect the --no-color flag
+        console = Console(color_system="auto" if use_color else None)
         console.print("\n")  # Add some space
         console.print(table)
         console.print("\n")  # Add some space
