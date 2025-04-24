@@ -19,7 +19,6 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
 class SyftScannerConfigOptions(ScannerOptionsBase):
@@ -157,8 +156,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             raise exc
 
         try:
-            normalized_file_name = get_normalized_filename(str_to_normalize=target)
-            target_results_dir = Path(self.results_dir).joinpath(normalized_file_name)
+            target_results_dir = Path(self.results_dir).joinpath(target_type)
             results_file = target_results_dir.joinpath("syft.cdx.json")
             self.config.options.exclude.extend(global_ignore_paths)
 

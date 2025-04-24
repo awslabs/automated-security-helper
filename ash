@@ -171,7 +171,7 @@ else
     if [ "${NO_RUN}" = "NO" ]; then
       MOUNT_SOURCE_DIR="--mount type=bind,source=${SOURCE_DIR},destination=/src"
       MOUNT_OUTPUT_DIR=""
-      OUTPUT_DIR_OPTION=""
+      OUTPUT_DIR_OPTION="--output-dir /out"
       if [[ ${OUTPUT_DIR_SPECIFIED} = "YES" ]]; then
         # Only make source dir readonly if output dir is not a subdirectory of source
         # dir, otherwise writing to the output dir will fail due to attempting to write
@@ -180,8 +180,12 @@ else
           # add readonly source mount when --output-dir is outside source dir
           MOUNT_SOURCE_DIR="${MOUNT_SOURCE_DIR},readonly"
         fi
-        OUTPUT_DIR_OPTION="--output-dir /out"
+        # set mount option for output dir
+        MOUNT_OUTPUT_DIR="--mount type=bind,source=${OUTPUT_DIR},destination=/out"
       fi
+      echo "MOUNT_SOURCE_DIR resolved: ${MOUNT_SOURCE_DIR}"
+      echo "MOUNT_OUTPUT_DIR resolved: ${MOUNT_OUTPUT_DIR}"
+      echo "OUTPUT_DIR_OPTION resolved: ${OUTPUT_DIR_OPTION}"
       echo "Running ASH scan using built image..."
       eval ${RESOLVED_OCI_RUNNER} run \
           --rm \

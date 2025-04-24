@@ -36,10 +36,6 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         Literal["all", "low", "medium", "high"],
         Field(description="Confidence level for Bandit findings"),
     ] = "all"
-    severity_level: Annotated[
-        Literal["all", "low", "medium", "high"],
-        Field(description="Confidence level for Bandit findings"),
-    ] = "all"
     ignore_nosec: Annotated[
         bool,
         Field(
@@ -170,11 +166,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 key="--confidence-level", value=self.config.options.confidence_level
             )
         )
-        self.args.extra_args.append(
-            ToolExtraArg(
-                key="--severity-level", value=self.config.options.severity_level
-            )
-        )
+        self.args.extra_args.append(ToolExtraArg(key="--severity-level", value="all"))
         for fmt in self.config.options.additional_formats:
             self.args.extra_args.append(ToolExtraArg(key="--format", value=fmt))
         if self.config.options.ignore_nosec:

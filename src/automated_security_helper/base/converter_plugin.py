@@ -8,6 +8,8 @@ from typing_extensions import Self
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class ConverterPluginConfigBase(PluginConfigBase):
@@ -27,6 +29,7 @@ class ConverterPluginBase(BaseModel, Generic[T]):
     )
 
     config: T | PluginConfigBase | None = None
+    context: PluginContext | None = None
 
     source_dir: Path | None = None
     output_dir: Path | None = None
@@ -35,17 +38,33 @@ class ConverterPluginBase(BaseModel, Generic[T]):
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
         """Set up default paths and initialize plugin configuration."""
-        # Use default paths if none provided
-        if self.source_dir is None:
-            self.source_dir = Path(".")
-        if self.output_dir is None:
-            self.output_dir = self.source_dir.joinpath("ash_output")
+        # Use context if provided, otherwise fall back to instance attributes
+        if self.context is not None:
+            ASH_LOGGER.debug(f"Using provided context for {self.__class__.__name__}")
+            self.source_dir = self.context.source_dir
+            self.output_dir = self.context.output_dir
+            self.work_dir = self.context.work_dir
+        else:
+            # Use default paths if none provided
+            if self.source_dir is None:
+                self.source_dir = Path(".")
+                ASH_LOGGER.verbose(
+                    f"({self.__class__.__name__}) Source directory was not provided! Defaulting to the current directory"
+                )
+            if self.output_dir is None:
+                ASH_LOGGER.verbose(
+                    f"({self.__class__.__name__}) Output directory was not provided! Defaulting to ash_output directory relative to the source directory."
+                )
+                self.output_dir = self.source_dir.joinpath("ash_output")
 
-        # Ensure paths are Path objects
-        self.source_dir = Path(str(self.source_dir))
-        self.output_dir = Path(str(self.output_dir))
-        self.work_dir = self.output_dir.joinpath("converted")
+            # Ensure paths are Path objects
+            self.source_dir = Path(str(self.source_dir))
+            self.output_dir = Path(str(self.output_dir))
+            self.work_dir = self.output_dir.joinpath("converted")
 
+        ASH_LOGGER.debug(
+            f"Converter {self.config.name if self.config else self.__class__.__name__} initialized with source_dir={self.source_dir}, output_dir={self.output_dir}"
+        )
         return self
 
     def configure(

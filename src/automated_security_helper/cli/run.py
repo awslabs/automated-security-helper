@@ -123,7 +123,7 @@ def run(
         raise typer.Exit()
 
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
-    from automated_security_helper.core.execution_engine import ExecutionStrategy
+    from automated_security_helper.core.progress import ExecutionStrategy
     from automated_security_helper.models.core import ExportFormat
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
     from automated_security_helper.models.asharp_model import ASHARPModel
@@ -176,8 +176,16 @@ def run(
             no_cleanup=not cleanup,
             output_formats=output_formats,
             show_progress=progress
-            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-            not in ["YES", "1", "TRUE"],
+            and (
+                os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+                not in [
+                    "YES",
+                    "1",
+                    "TRUE",
+                ]  # Running inside the container is not guaranteed to produce the live progress outputs correctly
+                or os.environ.get("CI", None)
+                is not None  # Neither is running in a CI pipeline
+            ),
             color_system="auto" if color else None,
         )
 

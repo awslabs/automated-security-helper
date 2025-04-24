@@ -43,6 +43,16 @@ class ScanResultsContainer(BaseModel):
     duration: float | None = 0
     metadata: Dict[str, Any] = {}
     raw_results: Any | None = None
+    severity_counts: Dict[str, int] = Field(
+        default_factory=lambda: {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+        }
+    )
+    status: str = "passed"  # Can be "passed", "failed", "warning"
 
     def add_metadata(self, key: str, value: Any) -> None:
         """Add metadata to the container.

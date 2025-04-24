@@ -114,11 +114,7 @@ def run_cdk_nag_against_cfn_template(
         return None
 
     ASH_LOGGER.debug(f"Validated model from template: {model}")
-    ASH_LOGGER.debug(f"outdir before check: {outdir.as_posix() if outdir else 'None'}")
-    if outdir is None:
-        outdir = (
-            Path.cwd().joinpath("ash_output").joinpath("scanners").joinpath("cdknag")
-        )
+    ASH_LOGGER.debug(f"outdir: {outdir.as_posix() if outdir else 'None'}")
     try:
         clean_template_filename = get_shortest_name(input=template_path)
     except ValueError as e:

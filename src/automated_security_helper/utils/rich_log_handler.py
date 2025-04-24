@@ -5,6 +5,7 @@ from rich.console import RenderableType
 from rich.text import Text
 from rich.table import Table
 from collections import deque
+import sys
 
 
 class RichLogPanel:
@@ -27,7 +28,7 @@ class RichLogPanel:
             logging.ERROR: "ERROR",
             logging.WARNING: "WARN",
             logging.INFO: "INFO",
-            15: "VERB",  # VERBOSE
+            15: "VERBOSE",  # VERBOSE
             logging.DEBUG: "DEBUG",
             5: "TRACE",  # TRACE
         }
@@ -110,5 +111,6 @@ class LiveDisplayLogHandler(logging.Handler):
         try:
             message = self.format(record)
             self.log_panel.add_log(message, record.levelno)
-        except Exception:
+        except Exception as e:
+            print(f"ERROR in LiveDisplayLogHandler: {e}", file=sys.stderr)
             self.handleError(record)

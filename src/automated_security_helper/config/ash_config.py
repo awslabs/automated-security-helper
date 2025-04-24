@@ -16,6 +16,7 @@ from automated_security_helper.config.scanner_types import (
     GrypeScannerConfig,
     SyftScannerConfig,
 )
+from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.reporters.ash_default.asff_reporter import (
     ASFFReporterConfig,
@@ -135,6 +136,26 @@ class ReporterConfigSegment(BaseModel):
     ] = ASFFReporterConfig()
 
 
+class AshGlobalDefaultsConfigSection(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+
+    severity_threshold: Annotated[
+        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        Field(
+            description="Global minimum severity level to consider findings as failures across all scanners"
+        ),
+    ] = ASH_DEFAULT_SEVERITY_LEVEL
+
+    ignore_paths: Annotated[
+        List[IgnorePathWithReason],
+        Field(
+            description="Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'."
+        ),
+    ] = []
+
+
 class ASHConfig(BaseModel):
     """Main configuration model for Automated Security Helper."""
 
@@ -214,12 +235,13 @@ class ASHConfig(BaseModel):
         ),
     ] = True
 
-    global_ignore_paths: Annotated[
-        List[IgnorePathWithReason],
+    # Legacy global settings (deprecated)
+    global_settings: Annotated[
+        AshGlobalDefaultsConfigSection,
         Field(
-            description="Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'."
+            description="Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
         ),
-    ] = []
+    ] = AshGlobalDefaultsConfigSection()
 
     external_reports_to_include: Annotated[
         List[str],
@@ -232,13 +254,6 @@ class ASHConfig(BaseModel):
         str,
         Field(description="Directory to store scan outputs"),
     ] = "ash_output"
-
-    severity_threshold: Annotated[
-        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
-        Field(
-            description="Minimum severity level to raise unsuccessful exit codes from ASH if found"
-        ),
-    ] = "MEDIUM"
 
     max_concurrent_scanners: Annotated[
         int, Field(description="Maximum number of scanners to run concurrently", ge=1)
@@ -332,7 +347,15 @@ class ASHConfig(BaseModel):
                     )
                 ):
                     key_map[possible] = item_name
-            if plugin_name in key_map:
+
+            # Try direct match first
+            if plugin_name in item_dict:
+                ASH_LOGGER.debug(
+                    f"Found {plugin_type} plugin {og_plugin_name} with direct match"
+                )
+                found = item_dict[plugin_name]
+            # Then try normalized match
+            elif plugin_name in key_map:
                 ASH_LOGGER.debug(
                     f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
                 )

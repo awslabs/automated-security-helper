@@ -34,6 +34,9 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
             description="Path to Grype configuration file, relative to current source directory. Defaults to searching for `.grype.yaml` and `.grype.yml` in the root of the source directory.",
         ),
     ] = None
+    severity_threshold: Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = (
+        None
+    )
 
 
 class GrypeScannerConfig(ScannerPluginConfigBase):

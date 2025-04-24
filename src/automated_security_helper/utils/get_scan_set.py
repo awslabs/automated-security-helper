@@ -201,24 +201,22 @@ def scan_set(
     ashscanset_imported = False
 
     if output:
-        ashignore_path = Path(output).joinpath("ash-ignore-report.txt")
-        ashscanset_path = Path(output).joinpath("ash-scan-set-files-list.txt")
+        # Ensure output is a Path object
+        output_path = Path(output)
+        ashignore_path = output_path.joinpath("ash-ignore-report.txt")
+        ashscanset_path = output_path.joinpath("ash-scan-set-files-list.txt")
         if ashignore_path.exists():
             with open(ashignore_path) as f:
                 ashignore_content = f.readlines()
             ashignore_imported = True
-            # print(
-            #     cyan(f"Imported ash-ignore-report.txt from {output}"),
-            #     file=sys.stderr,
-            # )
+            debug_echo(f"Imported ash-ignore-report.txt from {output}", debug=debug)
         if ashscanset_path.exists():
             with open(ashscanset_path) as f:
                 ashscanset_list = f.readlines()
             ashscanset_imported = True
-            # print(
-            #     cyan(f"Imported ash-scan-set-files-list.txt from {output}"),
-            #     file=sys.stderr,
-            # )
+            debug_echo(
+                f"Imported ash-scan-set-files-list.txt from {output}", debug=debug
+            )
 
     if not ashignore_content:
         ashignore_content = get_ash_ignorespec_lines(source, ignorefile, debug=debug)
@@ -228,6 +226,11 @@ def scan_set(
         ashscanset_list = get_files_not_matching_spec(source, spec, debug=debug)
 
     if output:
+        # Ensure output is a Path object
+        output_path = Path(output)
+        ashignore_path = output_path.joinpath("ash-ignore-report.txt")
+        ashscanset_path = output_path.joinpath("ash-scan-set-files-list.txt")
+
         if not ashignore_imported:
             debug_echo(f"Writing ash-ignore-report.txt to {output}", debug=debug)
             if not ashignore_path.parent.exists():

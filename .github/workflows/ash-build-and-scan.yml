@@ -173,7 +173,7 @@ jobs:
         continue-on-error: false
         with:
           sarif_file: ash_output/reports/ash.sarif
-          # Used to differentiate multiple results for one commit
+          wait-for-processing: true
           category: ash
 
       - name: Collect ash_output artifact

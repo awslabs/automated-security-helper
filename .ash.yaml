@@ -1,37 +1,37 @@
 # yaml-language-server: $schema=./src/automated_security_helper/schemas/ASHConfig.json
 project_name: automated-security-helper
+fail_on_findings: true
+global_settings:
+  severity_threshold: MEDIUM
+  ignore_paths:
+    - path: 'tests/test_data'
+      reason: This is test data that is used during unit testing only and is not part of the core application.
+    - path: .venv
+      reason: This path contains .gitignore'd cache data used by dev/build tools.
+    - path: .git
+      reason: This path contains .gitignore'd cache data used by dev/build tools.
+    - path: .ruff
+      reason: This path contains .gitignore'd cache data used by dev/build tools.
+    - path: .pytest_cache
+      reason: This path contains .gitignore'd cache data used by dev/build tools.
+    - path: .mypy_cache
+      reason: This path contains .gitignore'd cache data used by dev/build tools.
 build:
   build_mode: ONLINE
   custom_scanners: []
-fail_on_findings: true
-global_ignore_paths:
-  - path: 'tests/test_data'
-    reason: This is test data that is used during unit testing only and is not part of the core application.
-  - path: .venv
-    reason: This path contains .gitignore'd cache data used by dev/build tools.
-  - path: .git
-    reason: This path contains .gitignore'd cache data used by dev/build tools.
-  - path: .ruff
-    reason: This path contains .gitignore'd cache data used by dev/build tools.
-  - path: .pytest_cache
-    reason: This path contains .gitignore'd cache data used by dev/build tools.
-  - path: .mypy_cache
-    reason: This path contains .gitignore'd cache data used by dev/build tools.
 output_formats:
+  - sarif
   - junitxml
   - html
-  - sarif
   - cyclonedx
   - asff
   - ocsf
   - text
-severity_threshold: ALL
 scanners:
   bandit:
     enabled: true
     options:
       confidence_level: all
-      severity_level: all
       ignore_nosec: false
       excluded_paths: []
   cdk-nag:

@@ -288,7 +288,6 @@ class ASHARPModel(BaseModel):
 
     def save_model(self, output_dir: Path) -> None:
         """Save ASHARPModel as JSON alongside aggregated results."""
-        from automated_security_helper.config.ash_config import ASHConfig
 
         report_dir = output_dir.joinpath("reports")
         report_dir.mkdir(parents=True, exist_ok=True)
@@ -305,37 +304,37 @@ class ASHARPModel(BaseModel):
             )
         )
 
-        # # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
-        json_path = output_dir.joinpath("ash.cdx.json")
-        json_path.write_text(
-            self.cyclonedx.model_dump_json(
-                by_alias=True,
-                exclude_unset=True,
-                exclude_none=True,
-                # exclude_defaults=True,
-                # round_trip=True,
-            )
-        )
+        # # # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
+        # json_path = output_dir.joinpath("ash.cdx.json")
+        # json_path.write_text(
+        #     self.cyclonedx.model_dump_json(
+        #         by_alias=True,
+        #         exclude_unset=True,
+        #         exclude_none=True,
+        #         # exclude_defaults=True,
+        #         # round_trip=True,
+        #     )
+        # )
 
-        ash_config: ASHConfig = self.ash_config
+        # ash_config: ASHConfig = self.ash_config
 
-        for fmt in ash_config.output_formats:
-            outfile = self.report(
-                output_format=fmt,
-                output_dir=report_dir,
-            )
-            if outfile is None:
-                ASH_LOGGER.warning(f"Failed to generate output for format {fmt}")
-            elif isinstance(outfile, Path) and not outfile.exists():
-                ASH_LOGGER.warning(
-                    f"Output file {outfile} does not exist for format {fmt}"
-                )
-            elif isinstance(outfile, Path) and outfile.exists():
-                ASH_LOGGER.verbose(f"Generated output for format {fmt} at {outfile}")
-            else:
-                ASH_LOGGER.verbose(
-                    f"Unexpected response when formatting {fmt}: {outfile}"
-                )
+        # for fmt in ash_config.output_formats:
+        #     outfile = self.report(
+        #         output_format=fmt,
+        #         output_dir=report_dir,
+        #     )
+        #     if outfile is None:
+        #         ASH_LOGGER.warning(f"Failed to generate output for format {fmt}")
+        #     elif isinstance(outfile, Path) and not outfile.exists():
+        #         ASH_LOGGER.warning(
+        #             f"Output file {outfile} does not exist for format {fmt}"
+        #         )
+        #     elif isinstance(outfile, Path) and outfile.exists():
+        #         ASH_LOGGER.verbose(f"Generated output for format {fmt} at {outfile}")
+        #     else:
+        #         ASH_LOGGER.verbose(
+        #             f"Unexpected response when formatting {fmt}: {outfile}"
+        #         )
 
     @classmethod
     def load_model(cls, json_path: Path) -> Optional["ASHARPModel"]:
