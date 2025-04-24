@@ -49,11 +49,11 @@ class ConverterPluginBase(BaseModel, Generic[T]):
             if self.source_dir is None:
                 self.source_dir = Path(".")
                 ASH_LOGGER.verbose(
-                    f"({self.config.name or self.__class__.__name__}) Source directory was not provided! Defaulting to the current directory"
+                    f"({self.__class__.__name__}) Source directory was not provided! Defaulting to the current directory"
                 )
             if self.output_dir is None:
                 ASH_LOGGER.verbose(
-                    f"({self.config.name or self.__class__.__name__}) Output directory was not provided! Defaulting to ash_output directory relative to the source directory."
+                    f"({self.__class__.__name__}) Output directory was not provided! Defaulting to ash_output directory relative to the source directory."
                 )
                 self.output_dir = self.source_dir.joinpath("ash_output")
 

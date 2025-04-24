@@ -61,8 +61,13 @@ class ScannerFactory:
                     continue
 
                 # Try to find matching scanner class
+                scanner_model = scanner.model_dump(by_alias=True)
+                if "context" in scanner_model:
+                    del scanner_model[
+                        "context"
+                    ]  # Remove context if it exists to avoid duplicate
                 scanner_class = CustomScanner(
-                    **scanner.model_dump(by_alias=True), context=self.plugin_context
+                    **scanner_model, context=self.plugin_context
                 )
                 self.register_scanner(scanner.config.name, scanner_class)
                 ASH_LOGGER.debug(
@@ -205,7 +210,7 @@ class ScannerFactory:
         scanner_class = None
         if scanner_name:
             if scanner_name not in self._scanners:
-                raise ValueError(f"Scanner '{scanner_name}' is not registered")
+                raise ValueError("Unable to determine scanner class")
             scanner_class = self._scanners[scanner_name]
 
         if not scanner_class:
