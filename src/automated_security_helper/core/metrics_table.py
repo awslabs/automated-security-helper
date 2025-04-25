@@ -28,7 +28,7 @@ def generate_metrics_table(
         Table: Rich table with scanner metrics
     """
     # Create a table
-    table = Table(title="ASH Scan Results Summary", expand=True, min_width=100)
+    table = Table(title="ASH Scan Results Summary", expand=True, min_width=120)
 
     # Add columns
     table.add_column("Scanner", style="cyan")

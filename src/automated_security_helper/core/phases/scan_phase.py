@@ -286,7 +286,7 @@ class ScanPhase(EnginePhase):
                         "output": scanner_plugin.output,
                     }
                 finally:
-                    ASH_LOGGER.debug(
+                    ASH_LOGGER.trace(
                         f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}"
                     )
                     if raw_results is None:
