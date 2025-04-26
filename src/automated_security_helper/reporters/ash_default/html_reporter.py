@@ -19,6 +19,7 @@ class HTMLReporterConfig(ReporterPluginConfigBase):
     name: Literal["html"] = "html"
     extension: str = "html"
     enabled: bool = True
+    options: HTMLReporterConfigOptions = HTMLReporterConfigOptions()
 
 
 class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):

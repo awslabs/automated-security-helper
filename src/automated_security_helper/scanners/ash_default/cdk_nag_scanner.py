@@ -155,8 +155,16 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Find all JSON/YAML files to scan from the scan set
         scannable = scan_set(
-            source=self.work_dir if target_type == "converted" else self.source_dir,
-            output=self.work_dir if target_type == "converted" else self.output_dir,
+            source=(
+                self.context.work_dir
+                if target_type == "converted"
+                else self.context.source_dir
+            ),
+            output=(
+                self.context.work_dir
+                if target_type == "converted"
+                else self.context.output_dir
+            ),
         )
         ASH_LOGGER.debug(
             f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"
@@ -286,7 +294,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             exitCode=0,
                             exitCodeDescription="\n".join(self.errors),
                             workingDirectory=ArtifactLocation(
-                                uri=get_shortest_name(input=self.source_dir),
+                                uri=get_shortest_name(input=self.context.source_dir),
                             ),
                             properties=PropertyBag(
                                 tool=tool,

@@ -25,6 +25,7 @@ class ASFFReporterConfig(ReporterPluginConfigBase):
     name: Literal["asff"] = "asff"
     extension: str = "asff"
     enabled: bool = False
+    options: ASFFReporterConfigOptions = ASFFReporterConfigOptions()
 
 
 class ASFFReporter(ReporterPluginBase[ASFFReporterConfig]):

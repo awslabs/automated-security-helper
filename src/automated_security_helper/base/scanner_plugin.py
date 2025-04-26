@@ -52,15 +52,12 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             description="Specialized arguments to pass to the scanner command. Includes an `extra_args` field which accepts a dictionary of arbitrary arguments to pass to the scanner. These are not configurable at scan time."
         ),
     ] = ToolArgs()
-    source_dir: Path | None = None
-    output_dir: Path | None = None
 
     output: List[str] = []
     errors: List[str] = []
 
     # These will be initialized during `self.model_post_init()`
     # in paths relative to the `output_dir` provided
-    work_dir: Path | None = None
     results_dir: Path | None = None
     results_file: Path | None = None
     start_time: datetime | None = None
@@ -74,36 +71,19 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             )
 
         # Use context if provided, otherwise fall back to instance attributes
-        if self.context is not None:
-            ASH_LOGGER.debug(f"Using provided context for {self.__class__.__name__}")
-            self.source_dir = self.context.source_dir
-            self.output_dir = self.context.output_dir
-            self.work_dir = self.context.work_dir
-        else:
-            # Fall back to instance attributes or defaults
-            if self.source_dir is None:
-                self.source_dir = Path.cwd()
-                ASH_LOGGER.verbose(
-                    f"({self.config.name or self.__class__.__name__}) Source directory was not provided! Defaulting to the current directory: {self.source_dir.as_posix()}"
-                )
-            if self.output_dir is None:
-                self.output_dir = self.source_dir.joinpath("ash_output")
-                ASH_LOGGER.verbose(
-                    f"({self.config.name or self.__class__.__name__}) Output directory was not provided! Defaulting to ash_output directory relative to the source directory: {self.output_dir.as_posix()}"
-                )
-
-            # Ensure paths are Path objects
-            self.source_dir = Path(self.source_dir)
-            self.output_dir = Path(self.output_dir)
-            self.work_dir = self.output_dir.joinpath("converted")
+        if self.context is None:
+            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
+        ASH_LOGGER.debug(f"Using provided context for {self.__class__.__name__}")
 
         # Set up results directory based on output directory
-        self.results_dir = self.output_dir.joinpath("scanners").joinpath(
+        self.results_dir = self.context.output_dir.joinpath("scanners").joinpath(
             self.config.name
         )
 
+        self._process_config_options()
+
         ASH_LOGGER.debug(
-            f"Scanner {self.config.name} initialized with source_dir={self.source_dir}, output_dir={self.output_dir}"
+            f"Scanner {self.config.name} initialized with source_dir={self.context.source_dir}, output_dir={self.context.output_dir}"
         )
         return super().model_post_init(context)
 
@@ -166,7 +146,9 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         Returns:
             List[str]: Arguments to pass to scanner
         """
-        self._process_config_options()
+
+        # # Process configuration options to populate extra_args
+        # self._process_config_options()
 
         args = [
             self.command,
@@ -239,15 +221,15 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             )
 
         # Ensure all required directories exist
-        self.work_dir.mkdir(parents=True, exist_ok=True)
+        self.context.work_dir.mkdir(parents=True, exist_ok=True)
         if self.results_dir:
             self.results_dir.mkdir(parents=True, exist_ok=True)
 
         # Log the paths being used
         self._scanner_log(
-            f"Using source_dir: {self.source_dir}",
-            f"Using output_dir: {self.output_dir}",
-            f"Using work_dir: {self.work_dir}",
+            f"Using source_dir: {self.context.source_dir}",
+            f"Using output_dir: {self.context.output_dir}",
+            f"Using work_dir: {self.context.work_dir}",
             f"Using results_dir: {self.results_dir}",
             target_type=target_type,
             level=logging.DEBUG,
@@ -295,7 +277,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         except Exception as e:
             ASH_LOGGER.debug(e)
 
-        ASH_LOGGER.debug(f"({self.config.name}) Running: {command}")
+        ASH_LOGGER.verbose(f"({self.config.name}) Running: {command}")
         try:
             result = subprocess.run(  # nosec B603 - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
                 command,
@@ -303,7 +285,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                 text=True,
                 shell=False,
                 check=False,
-                cwd=Path(self.source_dir).as_posix(),
+                cwd=Path(self.context.source_dir).as_posix(),
                 # env=os.environ.copy(),
             )
             # Default to 1 if it doesn't exist, something went wrong during execution

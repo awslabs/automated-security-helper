@@ -7,7 +7,7 @@ from typing import Annotated
 import yaml
 import typer
 
-from automated_security_helper.config.ash_config import ASHConfig
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -53,11 +53,11 @@ def init(
         )
         raise typer.Exit(1)
     typer.secho(f"Saving ASH config to path: {config_path.absolute()}")
-    config = ASHConfig(
+    config = AshConfig(
         project_name=config_path.absolute().parent.name,
     )
     config_strings = [
-        "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/src/automated_security_helper/schemas/ASHConfig.json",
+        "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/src/automated_security_helper/schemas/AshConfig.json",
         yaml.dump(
             config.model_dump(by_alias=True, exclude_defaults=False),
             sort_keys=False,
@@ -79,7 +79,7 @@ def get(
     if not Path(filename).exists():
         typer.secho(f"Config file does not exist at {filename}", fg=typer.colors.RED)
         raise typer.Exit(1)
-    config = ASHConfig.from_file(Path(filename))
+    config = AshConfig.from_file(Path(filename))
     typer.secho(
         yaml.dump(
             config.model_dump(
@@ -107,7 +107,7 @@ def validate(
         typer.secho(f"Config file does not exist at {filename}", fg=typer.colors.RED)
         raise typer.Exit(1)
     try:
-        config = ASHConfig.from_file(Path(filename))
+        config = AshConfig.from_file(Path(filename))
         if config.project_name:
             typer.secho(
                 f"Config file '{Path(filename).absolute().as_posix()}' is valid",

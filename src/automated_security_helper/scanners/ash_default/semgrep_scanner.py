@@ -119,8 +119,44 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     value="off",
                 )
             )
-            # Offline mode uses environment variables for rules
-            # This is handled by the container setup
+            # Check if SEMGREP_RULES_CACHE_DIR is set in environment
+            semgrep_rules_cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
+            if semgrep_rules_cache_dir:
+                # Use the cached rules
+                import glob
+
+                semgrep_rules = glob.glob(f"{semgrep_rules_cache_dir}/*")
+                if semgrep_rules:
+                    # Join all rule paths with commas
+                    rules_str = ",".join(semgrep_rules)
+                    self.args.extra_args.append(
+                        ToolExtraArg(
+                            key="--config",
+                            value=rules_str,
+                        )
+                    )
+                else:
+                    self._scanner_log(
+                        "No Semgrep rules found in cache directory, falling back to p/ci",
+                        level=logging.WARNING,
+                    )
+                    self.args.extra_args.append(
+                        ToolExtraArg(
+                            key="--config",
+                            value="p/ci",
+                        )
+                    )
+            else:
+                self._scanner_log(
+                    "SEMGREP_RULES_CACHE_DIR not set but offline mode enabled, falling back to p/ci",
+                    level=logging.WARNING,
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(
+                        key="--config",
+                        value="p/ci",
+                    )
+                )
         else:
             # In online mode, use config=auto
             self.args.extra_args.append(

@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import ReporterPluginBase
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
@@ -45,7 +44,7 @@ class ReportPhase(EnginePhase):
         ASH_LOGGER.info("Preparing report data...")
 
         # Get output formats from config
-        output_formats = getattr(self.config, "output_formats", [])
+        output_formats = getattr(self.plugin_context.config, "output_formats", [])
 
         # If CLI output formats are provided, they override the config
         cli_specified = False
@@ -53,13 +52,6 @@ class ReportPhase(EnginePhase):
             cli_specified = True
             output_formats = cli_output_formats
             ASH_LOGGER.info(f"Using CLI-specified output formats: {output_formats}")
-
-        # Create plugin context
-        plugin_context = PluginContext(
-            source_dir=self.source_dir,
-            output_dir=self.output_dir,
-            work_dir=self.work_dir,
-        )
 
         # Get all registered reporter plugins
         registered_reporters = {}
@@ -98,7 +90,7 @@ class ReportPhase(EnginePhase):
                         # Create reporter instance
                         reporter_class = reporter_plugin.plugin_class
                         reporter_instance = reporter_class(
-                            context=plugin_context, config=reporter_config
+                            context=self.plugin_context, config=reporter_config
                         )
 
                         active_reporters[fmt_str] = {
@@ -115,8 +107,14 @@ class ReportPhase(EnginePhase):
                     ASH_LOGGER.warning(f"No reporter found for format: {fmt_str}")
         else:
             # First, check the reporters block in the config
-            if hasattr(self.config, "reporters") and self.config.reporters:
-                for reporter_name, reporter_config in self.config.reporters.items():
+            if (
+                hasattr(self.plugin_context.config, "reporters")
+                and self.plugin_context.config.reporters
+            ):
+                for (
+                    reporter_name,
+                    reporter_config,
+                ) in self.plugin_context.config.reporters.items():
                     reporter_name = reporter_name.lower()
                     if (
                         reporter_name in registered_reporters
@@ -127,7 +125,7 @@ class ReportPhase(EnginePhase):
                         reporter_class = reporter_plugin.plugin_class
 
                         # Create an instance with the context
-                        reporter_instance = reporter_class(context=plugin_context)
+                        reporter_instance = reporter_class(context=self.plugin_context)
 
                         # Configure the reporter with its config from the reporters block
                         reporter_instance.configure(reporter_config)
@@ -164,7 +162,7 @@ class ReportPhase(EnginePhase):
                         # Create reporter instance
                         reporter_class = reporter_plugin.plugin_class
                         reporter_instance = reporter_class(
-                            context=plugin_context, config=reporter_config
+                            context=self.plugin_context, config=reporter_config
                         )
 
                         active_reporters[fmt_str] = {
@@ -242,9 +240,7 @@ class ReportPhase(EnginePhase):
                 )
 
                 # Generate the report
-                reporter.source_dir = self.source_dir
-                reporter.output_dir = self.output_dir
-                reporter.context = plugin_context
+                reporter.context = self.plugin_context
                 formatted = reporter.report(self.asharp_model)
                 if formatted is None:
                     ASH_LOGGER.error(

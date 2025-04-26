@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from typing import Any, Literal
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -15,8 +16,9 @@ class JSONReporterConfigOptions(ReporterOptionsBase):
 
 class JSONReporterConfig(ReporterPluginConfigBase):
     name: Literal["json"] = "json"
-    extension: str = "json"
-    enabled: bool = False
+    extension: str = "flat.json"
+    enabled: bool = True
+    options: JSONReporterConfigOptions = JSONReporterConfigOptions()
 
 
 class JSONReporter(ReporterPluginBase[JSONReporterConfig]):
@@ -29,4 +31,11 @@ class JSONReporter(ReporterPluginBase[JSONReporterConfig]):
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
-        return model.model_dump_json(by_alias=True)
+        flat_vulns = model.to_flat_vulnerabilities()
+        return json.dumps(
+            [
+                vuln.model_dump(exclude_none=True, exclude_unset=True, mode="json")
+                for vuln in flat_vulns
+            ],
+            indent=2,
+        )

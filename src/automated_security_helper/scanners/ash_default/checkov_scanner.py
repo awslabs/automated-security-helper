@@ -100,6 +100,12 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
             description="List of additional formats to output. Defaults to including CycloneDX JSON"
         ),
     ] = ["cyclonedx_json"]
+    offline: Annotated[
+        bool,
+        Field(
+            description="Run in offline mode, disabling policy downloads",
+        ),
+    ] = False
     frameworks: Annotated[
         List[CheckFrameworks],
         Field(
@@ -178,6 +184,18 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     )
                 )
                 break
+
+        # Add offline mode if enabled
+        if self.config.options.offline:
+            self.args.extra_args.append(
+                ToolExtraArg(
+                    key="--no-download",
+                    value="",
+                )
+            )
+            ASH_LOGGER.info(
+                "Running Checkov in offline mode - policy downloads disabled"
+            )
 
         for item in self.config.options.additional_formats:
             self.args.extra_args.append(ToolExtraArg(key="--output", value=item))

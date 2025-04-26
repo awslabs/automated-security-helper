@@ -3,9 +3,9 @@
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/scanners/ash_default/custom_scanner.py#L0"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 # <kbd>module</kbd> `scanners.ash_default.custom_scanner`
-Module containing the generic security scanner implementation. 
+Module containing the generic security scanner implementation.
 
-This security scanner depends on a valid ScannerPluginConfig to be provided in the `build.custom_scanners` section of an ASHConfig instance or ASH configuration YAML/JSON file. 
+This security scanner depends on a valid ScannerPluginConfig to be provided in the `build.custom_scanners` section of an AshConfig instance or ASH configuration YAML/JSON file.
 
 **Global Variables**
 ---------------
@@ -27,23 +27,23 @@ This security scanner depends on a valid ScannerPluginConfig to be provided in t
 
 #### <kbd>property</kbd> model_extra
 
-Get extra fields set during validation. 
+Get extra fields set during validation.
 
 
 
 **Returns:**
-  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`. 
+  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`.
 
 ---
 
 #### <kbd>property</kbd> model_fields_set
 
-Returns the set of fields that have been explicitly set on this model instance. 
+Returns the set of fields that have been explicitly set on this model instance.
 
 
 
 **Returns:**
-  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults. 
+  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults.
 
 
 
@@ -53,30 +53,30 @@ Returns the set of fields that have been explicitly set on this model instance.
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/scanners/ash_default/custom_scanner.py#L55"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>class</kbd> `CustomScannerConfig`
-Custom scanner configuration. 
+Custom scanner configuration.
 
 
 ---
 
 #### <kbd>property</kbd> model_extra
 
-Get extra fields set during validation. 
+Get extra fields set during validation.
 
 
 
 **Returns:**
-  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`. 
+  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`.
 
 ---
 
 #### <kbd>property</kbd> model_fields_set
 
-Returns the set of fields that have been explicitly set on this model instance. 
+Returns the set of fields that have been explicitly set on this model instance.
 
 
 
 **Returns:**
-  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults. 
+  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults.
 
 
 
@@ -86,30 +86,30 @@ Returns the set of fields that have been explicitly set on this model instance.
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/scanners/ash_default/custom_scanner.py#L66"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>class</kbd> `CustomScanner`
-CustomScanner provides an interface for custom scanners using known formats. 
+CustomScanner provides an interface for custom scanners using known formats.
 
 
 ---
 
 #### <kbd>property</kbd> model_extra
 
-Get extra fields set during validation. 
+Get extra fields set during validation.
 
 
 
 **Returns:**
-  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`. 
+  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`.
 
 ---
 
 #### <kbd>property</kbd> model_fields_set
 
-Returns the set of fields that have been explicitly set on this model instance. 
+Returns the set of fields that have been explicitly set on this model instance.
 
 
 
 **Returns:**
-  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults. 
+  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults.
 
 
 
@@ -140,24 +140,24 @@ scan(
 ) → SarifReport
 ```
 
-Execute Checkov scan and return results. 
+Execute Checkov scan and return results.
 
 
 
 **Args:**
- 
- - <b>`target`</b>:  Path to scan 
+
+ - <b>`target`</b>:  Path to scan
 
 
 
 **Returns:**
- SarifReport containing the scan findings and metadata 
+ SarifReport containing the scan findings and metadata
 
 
 
 **Raises:**
- 
- - <b>`ScannerError`</b>:  If the scan fails or results cannot be parsed 
+
+ - <b>`ScannerError`</b>:  If the scan fails or results cannot be parsed
 
 ---
 
@@ -169,18 +169,18 @@ Execute Checkov scan and return results.
 validate() → bool
 ```
 
-Validate the scanner configuration and requirements. 
+Validate the scanner configuration and requirements.
 
 
 
 **Returns:**
-  True if validation passes, False otherwise 
+  True if validation passes, False otherwise
 
 
 
 **Raises:**
- 
- - <b>`ScannerError`</b>:  If validation fails 
+
+ - <b>`ScannerError`</b>:  If validation fails
 
 
 

@@ -1,5 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
 import csv
 from io import StringIO
 from typing import Any, Literal
@@ -17,7 +15,8 @@ class CSVReporterConfigOptions(ReporterOptionsBase):
 class CSVReporterConfig(ReporterPluginConfigBase):
     name: Literal["csv"] = "csv"
     extension: str = "csv"
-    enabled: bool = False
+    enabled: bool = True
+    options: CSVReporterConfigOptions = CSVReporterConfigOptions()
 
 
 class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
@@ -33,9 +32,46 @@ class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
         output = StringIO()
         writer = csv.writer(output)
 
-        # Write headers
-        writer.writerow(["Finding ID", "Severity", "Description", "Location"])
+        # Get flattened vulnerabilities
+        flat_vulns = model.to_flat_vulnerabilities()
 
-        # TODO: Implement CSV row writing based on findings
+        if not flat_vulns:
+            # If no vulnerabilities, return a header-only CSV
+            writer.writerow(
+                [
+                    "ID",
+                    "Title",
+                    "Description",
+                    "Severity",
+                    "Scanner",
+                    "Scanner Type",
+                    "Rule ID",
+                    "File Path",
+                    "Line Start",
+                    "Line End",
+                    "CVE ID",
+                    "CWE ID",
+                    "Fix Available",
+                    "Detected At",
+                    "Tags",
+                    "Properties",
+                    "References",
+                ]
+            )
+            return output.getvalue()
+
+        # Get all field names from the first vulnerability
+        fields = list(flat_vulns[0].model_fields.keys())
+
+        # Write header row
+        writer.writerow(fields)
+
+        # Write data rows
+        for vuln in flat_vulns:
+            row = []
+            for field in fields:
+                value = getattr(vuln, field)
+                row.append(value if value is not None else "")
+            writer.writerow(row)
 
         return output.getvalue()

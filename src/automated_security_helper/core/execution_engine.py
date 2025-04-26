@@ -9,6 +9,7 @@ from typing import List, Optional
 
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.metrics_table import display_metrics_table
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
@@ -24,7 +25,7 @@ from automated_security_helper.models.core import IgnorePathWithReason
 
 # Define valid execution phases
 from automated_security_helper.config.ash_config import (
-    ASHConfig,
+    AshConfig,
 )
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.core.scanner_factory import ScannerFactory
@@ -37,9 +38,7 @@ class ScanExecutionEngine:
 
     def __init__(
         self,
-        source_dir: Path = None,
-        output_dir: Path = None,
-        work_dir: Path = None,
+        context: PluginContext,
         # enabled_scanners is the list of scanner names that were explicitly passed
         # in from the Orchestrator. This allows ASH users to specify the scanners via CLI
         # at runtime for a more focused scan (e.g. during finding remediation where
@@ -48,7 +47,6 @@ class ScanExecutionEngine:
         enabled_scanners: Optional[List[str]] = [],
         strategy: Optional[ExecutionStrategy] = ExecutionStrategy.PARALLEL,
         asharp_model: Optional[ASHARPModel] = None,
-        config: Optional[ASHConfig] = None,
         show_progress: bool = True,
         global_ignore_paths: List[IgnorePathWithReason] = [],
         color_system: str = "auto",
@@ -58,14 +56,10 @@ class ScanExecutionEngine:
         """Initialize the execution engine.
 
         Args:
-            source_dir: Source directory to scan
-            output_dir: Output directory for scan results
-            work_dir: Working directory for temporary files
             enabled_scanners: List of scanner names to enable. If None, all scanners are enabled.
                 If empty list, no scanners are enabled.
             strategy: Execution strategy to use for scanner execution (default: PARALLEL)
             asharp_model: Optional ASHARPModel to use for results
-            config: Optional ASHConfig to use for configuration
             show_progress: Whether to show progress bars
             global_ignore_paths: List of paths to ignore globally
             color_system: Color system to use for the console
@@ -74,16 +68,19 @@ class ScanExecutionEngine:
         """
         # Set up logging and initial state
         ASH_LOGGER.debug("Initializing ScanExecutionEngine")
+        if context is None:
+            raise ValueError("Context must be provided")
+
         self._asharp_model = (
             asharp_model
             if asharp_model is not None
             else ASHARPModel(
                 name=f"ASH Scan {datetime.now().isoformat()}",
                 description="Aggregated security scan results",
-                ash_config=config,
+                ash_config=context.config,
             )
         )
-        self._config = config
+        self._context = context
         self._scanners = {}
         self._scan_results = {}
         self._strategy = strategy
@@ -112,11 +109,17 @@ class ScanExecutionEngine:
         ]
 
         # Config can override environment
-        if config:
-            if hasattr(config, "debug") and config.debug is not None:
-                debug_flag = config.debug
-            if hasattr(config, "verbose") and config.verbose is not None:
-                verbose_flag = config.verbose
+        if self._context.config:
+            if (
+                hasattr(self._context.config, "debug")
+                and self._context.config.debug is not None
+            ):
+                debug_flag = self._context.config.debug
+            if (
+                hasattr(self._context.config, "verbose")
+                and self._context.config.verbose is not None
+            ):
+                verbose_flag = self._context.config.verbose
 
         # Initialize progress display with debug/verbose flags
         self.progress_display = LiveProgressDisplay(
@@ -137,26 +140,14 @@ class ScanExecutionEngine:
         # Initialize basic configuration
 
         # Convert and set up paths
-        self.source_dir = Path(source_dir) if source_dir else None
+        self._context.source_dir = (
+            Path(self._context.source_dir) if self._context.source_dir else None
+        )
         try:
-            # Convert and validate source directory
-
-            # Convert and validate output directory
-            if output_dir:
-                self.output_dir = Path(output_dir)
-                if work_dir:
-                    self.work_dir = Path(work_dir)
-                else:
-                    self.work_dir = self.output_dir.joinpath("converted")
-                self.work_dir.mkdir(parents=True, exist_ok=True)
-            else:
-                self.output_dir = None
-                self.work_dir = None
-
             # Log directory setup
-            ASH_LOGGER.debug(f"Source directory: {self.source_dir}")
-            ASH_LOGGER.debug(f"Output directory: {self.output_dir}")
-            ASH_LOGGER.debug(f"Work directory: {self.work_dir}")
+            ASH_LOGGER.debug(f"Source directory: {self._context.source_dir}")
+            ASH_LOGGER.debug(f"Output directory: {self._context.output_dir}")
+            ASH_LOGGER.debug(f"Work directory: {self._context.work_dir}")
 
         except Exception as e:
             ASH_LOGGER.error(f"Failed to setup directories: {e}")
@@ -173,23 +164,16 @@ class ScanExecutionEngine:
         self._registered_scanners = {}
         self._initialized = False
         self._plugin_registry = PluginRegistry(
-            config=config,
+            config=self._context.config,
         )
         self._scanner_factory = ScannerFactory(
-            config=config,
-            plugin_context=PluginContext(
-                source_dir=self.source_dir,
-                output_dir=self.output_dir,
-                work_dir=self.work_dir,
-            ),
-            source_dir=self.source_dir,
-            output_dir=self.output_dir,
+            plugin_context=self._context,
             registered_scanner_plugins=self._plugin_registry.get_plugin(
                 plugin_type=PluginType.scanner
             ),
         )
 
-        self.ensure_initialized(config=config)
+        self.ensure_initialized(config=self._context.config)
 
         self._registered_scanners = {}
         self._enabled_from_config = []
@@ -203,12 +187,12 @@ class ScanExecutionEngine:
                     else None
                 ),
                 context=PluginContext(
-                    source_dir=self.source_dir,
-                    output_dir=self.output_dir,
-                    work_dir=self.work_dir,
+                    source_dir=self._context.source_dir,
+                    output_dir=self._context.output_dir,
+                    work_dir=self._context.work_dir,
                 ),
-                source_dir=self.source_dir,
-                output_dir=self.output_dir,
+                source_dir=self._context.source_dir,
+                output_dir=self._context.output_dir,
             )
             ASH_LOGGER.debug(
                 f"Evaluating key {key} with val: {val_instance.model_dump_json()}"
@@ -265,14 +249,14 @@ class ScanExecutionEngine:
         try:
             scanner = self._scanner_factory.create_scanner(
                 scanner_name=lookup_name,
-                source_dir=self.source_dir,
-                output_dir=self.output_dir,
+                source_dir=self._context.source_dir,
+                output_dir=self._context.output_dir,
             )
             return scanner
         except ValueError as e:
             raise ValueError(f"Scanner {lookup_name} could not be created: {str(e)}")
 
-    def ensure_initialized(self, config: Optional[ASHConfig] = None) -> None:
+    def ensure_initialized(self, config: Optional[AshConfig] = None) -> None:
         """Ensure scanner factory and scanners are properly initialized.
 
         This method:
@@ -288,11 +272,11 @@ class ScanExecutionEngine:
             if config is not None:
                 self._config = config
             if not self._config or self._config is None:
-                self._config = ASHConfig(
+                self._config = AshConfig(
                     project_name="ASH Default Project Config",
                 )
-            if not isinstance(self._config, ASHConfig):
-                raise ValueError("Configuration must be an ASHConfig instance")
+            if not isinstance(self._config, AshConfig):
+                raise ValueError("Configuration must be an AshConfig instance")
 
             # Mark initialization complete
             self._initialized = True
@@ -300,14 +284,14 @@ class ScanExecutionEngine:
     def execute_phases(
         self,
         phases: List[ExecutionPhaseType] = ["convert", "scan", "report"],
-        config: Optional[ASHConfig] = None,
+        config: Optional[AshConfig] = None,
     ) -> ASHARPModel:
         """Execute the specified phases in the correct order.
 
         Args:
             phases (List[ExecutionPhaseType], optional): The phases to execute.
                 Defaults to ["convert", "scan", "report"].
-            config (Optional[ASHConfig], optional): An override configuration to be
+            config (Optional[AshConfig], optional): An override configuration to be
                 provided at the start of execution.
                 Defaults to None.
 
@@ -347,12 +331,12 @@ class ScanExecutionEngine:
         # Only create directories if we're not in report-only mode
         if not report_only:
             # Ensure work directory exists
-            if self.work_dir:
-                self.work_dir.mkdir(parents=True, exist_ok=True)
+            if self._context.work_dir:
+                self._context.work_dir.mkdir(parents=True, exist_ok=True)
 
             # Clean up existing directories if needed
-            for working_dir in ["scanners", "converted"]:
-                path_working_dir = self.output_dir.joinpath(working_dir)
+            for working_dir in ["scanners", ASH_WORK_DIR_NAME]:
+                path_working_dir = self._context.output_dir.joinpath(working_dir)
                 if path_working_dir.exists():
                     ASH_LOGGER.verbose(
                         f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
@@ -361,7 +345,7 @@ class ScanExecutionEngine:
                 path_working_dir.mkdir(parents=True, exist_ok=True)
 
         # Always ensure reports directory exists
-        reports_dir = self.output_dir.joinpath("reports")
+        reports_dir = self._context.output_dir.joinpath("reports")
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         # Start the progress display before executing any phases
@@ -375,10 +359,7 @@ class ScanExecutionEngine:
                 if phase_name == "convert":
                     # Create and execute the Convert phase
                     convert_phase = ConvertPhase(
-                        source_dir=self.source_dir,
-                        output_dir=self.output_dir,
-                        work_dir=self.work_dir,
-                        config=self._config,
+                        plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
@@ -387,10 +368,7 @@ class ScanExecutionEngine:
                 elif phase_name == "scan":
                     # Create and execute the Scan phase
                     scan_phase = ScanPhase(
-                        source_dir=self.source_dir,
-                        output_dir=self.output_dir,
-                        work_dir=self.work_dir,
-                        config=self._config,
+                        plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
@@ -408,15 +386,12 @@ class ScanExecutionEngine:
                 elif phase_name == "report":
                     # Create and execute the Report phase
                     report_phase = ReportPhase(
-                        source_dir=self.source_dir,
-                        output_dir=self.output_dir,
-                        work_dir=self.work_dir,
-                        config=config or self._config,
+                        plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
                     report_phase.execute(
-                        report_dir=self.output_dir.joinpath("reports"),
+                        report_dir=self._context.output_dir.joinpath("reports"),
                         plugin_registry=self._plugin_registry,
                         cli_output_formats=(
                             self._config.output_formats

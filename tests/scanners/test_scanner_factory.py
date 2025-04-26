@@ -17,9 +17,9 @@ from automated_security_helper.core.scanner_factory import ScannerFactory
 class TestScannerFactory:
     """Test cases for scanner factory."""
 
-    def test_scanner_factory_initialization(self):
+    def test_scanner_factory_initialization(self, test_plugin_context):
         """Test that factory properly initializes."""
-        factory = ScannerFactory()
+        factory = ScannerFactory(plugin_context=test_plugin_context)
         factory._scanners = {}  # Clear existing scanners
 
         # Register test scanners
@@ -37,9 +37,9 @@ class TestScannerFactory:
         assert scanners["bandit"] == BanditScanner
         assert scanners["cdknag"] == CdkNagScanner
 
-    def test_scanner_factory_registration(self, ash_config):
+    def test_scanner_factory_registration(self, ash_config, test_plugin_context):
         """Test scanner registration functionality."""
-        factory = ScannerFactory(config=ash_config)
+        factory = ScannerFactory(plugin_context=test_plugin_context, config=ash_config)
         factory._scanners = {}  # Start fresh
 
         # Register a new scanner
@@ -54,10 +54,15 @@ class TestScannerFactory:
         assert "test" in scanners
 
     def test_create_invalid_scanner(
-        self, mock_scanner_plugin, ash_config, test_source_dir, test_output_dir
+        self,
+        mock_scanner_plugin,
+        ash_config,
+        test_source_dir,
+        test_output_dir,
+        test_plugin_context,
     ):
         """Test creating scanner with invalid configuration."""
-        factory = ScannerFactory(config=ash_config)
+        factory = ScannerFactory(plugin_context=test_plugin_context, config=ash_config)
 
         # Test non-existent scanner
         config = mock_scanner_plugin(name="invalid", type="UNKNOWN")
@@ -67,10 +72,10 @@ class TestScannerFactory:
             )
 
     def test_scanner_factory_config_validation(
-        self, ash_config, test_source_dir, test_output_dir
+        self, ash_config, test_source_dir, test_output_dir, test_plugin_context
     ):
         """Test scanner configuration validation."""
-        factory = ScannerFactory(config=ash_config)
+        factory = ScannerFactory(plugin_context=test_plugin_context, config=ash_config)
 
         # Test with missing name in dict config
         with pytest.raises(ValueError, match="Unable to determine scanner class"):
@@ -81,10 +86,15 @@ class TestScannerFactory:
             factory.create_scanner("test", None, test_source_dir, test_output_dir)
 
     def test_scanner_factory_default_scanners(
-        self, mock_scanner_plugin, ash_config, test_source_dir, test_output_dir
+        self,
+        mock_scanner_plugin,
+        ash_config,
+        test_source_dir,
+        test_output_dir,
+        test_plugin_context,
     ):
         """Test that default scanners are properly registered and can be created."""
-        factory = ScannerFactory(config=ash_config)
+        factory = ScannerFactory(plugin_context=test_plugin_context, config=ash_config)
 
         # Check available scanners from scanners namespace
         scanners = factory.available_scanners()
@@ -111,12 +121,17 @@ class TestScannerFactory:
             # assert scanner.config.name == name
 
     def test_scanner_factory_buildtime_scanners(
-        self, mock_scanner_plugin, ash_config, test_source_dir, test_output_dir
+        self,
+        mock_scanner_plugin,
+        ash_config,
+        test_source_dir,
+        test_output_dir,
+        test_plugin_context,
     ):
-        """Test that build-time scanners from ASHConfig are properly registered."""
+        """Test that build-time scanners from AshConfig are properly registered."""
 
         # Create factory with config
-        factory = ScannerFactory(config=ash_config)
+        factory = ScannerFactory(plugin_context=test_plugin_context, config=ash_config)
 
         # Verify build-time scanners are configured on the factory instance's config
         assert "trivy-sast" in [
@@ -132,14 +147,14 @@ class TestScannerFactory:
         assert "trivy-sbom" in factory.available_scanners()
 
     def test_scanner_factory_config_scanners(
-        self, ash_config, test_source_dir, test_output_dir
+        self, ash_config, test_source_dir, test_output_dir, test_plugin_context
     ):
-        """Test that custom scanners from ASHConfig sections are properly registered."""
+        """Test that custom scanners from AshConfig sections are properly registered."""
         # Create config with custom scanners
         config = ash_config
 
         # Create factory with config
-        factory = ScannerFactory(config=config)
+        factory = ScannerFactory(plugin_context=test_plugin_context, config=config)
 
         # Verify scanners are registered but not as defaults
         scanners = factory.available_scanners()

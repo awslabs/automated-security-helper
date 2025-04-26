@@ -8,8 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
-from typing import Annotated, Dict, Any, Optional, Union
+from typing import Annotated, Dict, Any, Optional, Union, List
 from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
@@ -20,6 +21,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+
+__all__ = ["ASHARPModel"]
 
 __all__ = ["ASHARPModel"]
 
@@ -194,10 +197,10 @@ class ASHARPModel(BaseModel):
 
     @field_validator("ash_config")
     def validate_ash_config(cls, v: any):
-        from automated_security_helper.config.ash_config import ASHConfig
+        from automated_security_helper.config.ash_config import AshConfig
 
         try:
-            return ASHConfig.model_validate(v)
+            return AshConfig.model_validate(v)
         except Exception as e:
             ASH_LOGGER.error(f"Failed to validate ASH config: {e}")
         return get_default_config()
@@ -210,48 +213,195 @@ class ASHARPModel(BaseModel):
         #     self._aggregator.add_finding(finding)
         return super().model_post_init(context)
 
-    # def add_finding(self, finding: BaseFinding) -> None:
-    #     """Add a new finding to both the findings list and aggregator."""
-    #     self.findings.append(finding)
-    #     self._aggregator.add_finding(finding)
+    def to_flat_vulnerabilities(self) -> List[FlatVulnerability]:
+        """Convert the ASHARPModel to a list of flattened vulnerability objects.
 
-    # def deduplicate_findings(self) -> List[BaseFinding]:
-    #     """Remove duplicate findings based on key attributes."""
-    #     deduped = self._aggregator.deduplicate()
-    #     self.findings = deduped
-    #     return deduped
+        Returns:
+            List[FlatVulnerability]: A list of flattened vulnerability objects
+        """
+        flat_vulns = []
 
-    # def group_findings_by_type(self) -> Dict[str, List[BaseFinding]]:
-    #     """Group findings by their scanner rule ID."""
-    #     return self._aggregator.group_by_type()
+        # Process SARIF results if available
+        if self.sarif and self.sarif.runs and len(self.sarif.runs) > 0:
+            for run in self.sarif.runs:
+                if not run.results:
+                    continue
 
-    # def group_findings_by_severity(self) -> Dict[str, List[BaseFinding]]:
-    #     """Group findings by their severity level."""
-    #     return self._aggregator.group_by_severity()
+                # Get tool information
+                tool_name = "Unknown"
+                tool_type = "UNKNOWN"
 
-    # def add_scan_findings(self, scan_time: datetime):
-    #     """Add current findings to trend analysis."""
-    #     self._trend_analyzer.add_scan_findings(scan_time, self.findings)
+                if run.tool and run.tool.driver:
+                    tool_name = run.tool.driver.name
+                    # Try to determine tool type from properties
+                    if run.tool.driver.properties and hasattr(
+                        run.tool.driver.properties, "tags"
+                    ):
+                        for tag in run.tool.driver.properties.tags:
+                            if tag.upper() in [
+                                "SAST",
+                                "DAST",
+                                "SCA",
+                                "IAC",
+                                "SECRETS",
+                                "CONTAINER",
+                                "SBOM",
+                            ]:
+                                tool_type = tag.upper()
+                                break
 
-    # def get_finding_counts_over_time(self) -> Dict[datetime, int]:
-    #     """Get the count of findings at each scan time."""
-    #     return self._trend_analyzer.get_finding_counts_over_time()
+                # Process each result
+                for result in run.results:
+                    # Extract basic information
+                    severity = "UNKNOWN"
+                    if result.level:
+                        level_map = {
+                            "error": "HIGH",
+                            "warning": "MEDIUM",
+                            "note": "LOW",
+                            "none": "INFO",
+                        }
+                        severity = level_map.get(str(result.level).lower(), "MEDIUM")
 
-    # def get_severity_trends(self) -> Dict[str, Dict[datetime, int]]:
-    #     """Get finding counts by severity over time."""
-    #     return self._trend_analyzer.get_severity_trends()
+                    # Extract message
+                    description = ""
+                    if result.message:
+                        if hasattr(result.message, "text"):
+                            description = result.message.text
+                        elif hasattr(result.message, "root") and hasattr(
+                            result.message.root, "text"
+                        ):
+                            description = result.message.root.text
 
-    # def get_new_findings(
-    #     self, previous_scan: datetime, current_scan: datetime
-    # ) -> List[BaseFinding]:
-    #     """Get findings that appeared in current scan but not in previous scan."""
-    #     return self._trend_analyzer.get_new_findings(previous_scan, current_scan)
+                    # Extract location information
+                    file_path = None
+                    line_start = None
+                    line_end = None
 
-    # def get_resolved_findings(
-    #     self, previous_scan: datetime, current_scan: datetime
-    # ) -> List[BaseFinding]:
-    #     """Get findings that were in previous scan but not in current scan."""
-    #     return self._trend_analyzer.get_resolved_findings(previous_scan, current_scan)
+                    if result.locations and len(result.locations) > 0:
+                        location = result.locations[0]
+                        if location.physicalLocation:
+                            if (
+                                hasattr(location.physicalLocation, "artifactLocation")
+                                and location.physicalLocation.artifactLocation
+                                and location.physicalLocation.artifactLocation.uri
+                            ):
+                                file_path = (
+                                    location.physicalLocation.artifactLocation.uri
+                                )
+                            elif (
+                                hasattr(location.physicalLocation, "root")
+                                and location.physicalLocation.root
+                                and hasattr(
+                                    location.physicalLocation.root, "artifactLocation"
+                                )
+                                and location.physicalLocation.root.artifactLocation
+                                and location.physicalLocation.root.artifactLocation.uri
+                            ):
+                                file_path = (
+                                    location.physicalLocation.root.artifactLocation.uri
+                                )
+
+                            if (
+                                hasattr(location.physicalLocation, "region")
+                                and location.physicalLocation.region
+                            ):
+                                line_start = location.physicalLocation.region.startLine
+                                line_end = location.physicalLocation.region.endLine
+                            elif (
+                                hasattr(location.physicalLocation, "root")
+                                and location.physicalLocation.root
+                                and hasattr(location.physicalLocation.root, "region")
+                                and location.physicalLocation.root.region
+                            ):
+                                line_start = (
+                                    location.physicalLocation.root.region.startLine
+                                )
+                                line_end = location.physicalLocation.root.region.endLine
+
+                    # Extract additional properties
+                    properties = {}
+                    if result.properties:
+                        properties = result.properties.model_dump(exclude_none=True)
+
+                    # Extract tags
+                    tags = []
+                    if result.properties and hasattr(result.properties, "tags"):
+                        tags = result.properties.tags
+
+                    # Extract references
+                    references = []
+                    if hasattr(result, "relatedLocations") and result.relatedLocations:
+                        for loc in result.relatedLocations:
+                            if (
+                                loc.physicalLocation
+                                and loc.physicalLocation.artifactLocation
+                            ):
+                                references.append(
+                                    loc.physicalLocation.artifactLocation.uri
+                                )
+
+                    # Create the flattened vulnerability
+                    flat_vuln = FlatVulnerability(
+                        id=f"{tool_name}-{result.ruleId or 'unknown'}-{hash(description) % 10000}",
+                        title=result.ruleId or "Unknown Issue",
+                        description=description,
+                        severity=severity,
+                        scanner=tool_name,
+                        scanner_type=tool_type,
+                        rule_id=result.ruleId,
+                        file_path=file_path,
+                        line_start=line_start,
+                        line_end=line_end,
+                        tags=json.dumps(tags) if tags else None,
+                        properties=json.dumps(properties) if properties else None,
+                        references=json.dumps(references) if references else None,
+                        detected_at=datetime.now(timezone.utc).isoformat(),
+                        raw_data=json.dumps(result.model_dump(exclude_none=True)),
+                    )
+
+                    flat_vulns.append(flat_vuln)
+
+        # Process additional reports if available
+        for scanner_name, report_data in self.additional_reports.items():
+            for target_type, results in report_data.items():
+                if isinstance(results, dict) and "severity_counts" in results:
+                    # This is a summary report, not individual findings
+                    continue
+
+                # Try to extract findings from the report data
+                # This is a simplified approach - in a real implementation,
+                # you would need to handle different report formats
+                if isinstance(results, list):
+                    for finding in results:
+                        if not isinstance(finding, dict):
+                            continue
+
+                        flat_vuln = FlatVulnerability(
+                            id=f"{scanner_name}-{finding.get('id', hash(str(finding)) % 10000)}",
+                            title=finding.get("title", "Unknown Issue"),
+                            description=finding.get(
+                                "description", "No description available"
+                            ),
+                            severity=finding.get("severity", "MEDIUM").upper(),
+                            scanner=scanner_name,
+                            scanner_type=finding.get("type", "UNKNOWN"),
+                            rule_id=finding.get("rule_id"),
+                            file_path=finding.get("file_path"),
+                            line_start=finding.get("line_start"),
+                            line_end=finding.get("line_end"),
+                            cve_id=finding.get("cve_id"),
+                            cwe_id=finding.get("cwe_id"),
+                            fix_available=finding.get("fix_available"),
+                            detected_at=finding.get(
+                                "detected_at", datetime.now(timezone.utc).isoformat()
+                            ),
+                            raw_data=json.dumps(finding),
+                        )
+
+                        flat_vulns.append(flat_vuln)
+
+        return flat_vulns
 
     @classmethod
     def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "ASHARPModel":
@@ -316,7 +466,7 @@ class ASHARPModel(BaseModel):
         #     )
         # )
 
-        # ash_config: ASHConfig = self.ash_config
+        # ash_config: AshConfig = self.ash_config
 
         # for fmt in ash_config.output_formats:
         #     outfile = self.report(
@@ -347,56 +497,56 @@ class ASHARPModel(BaseModel):
 
         return cls.from_json(json_data)
 
-    def report(self, output_format: str, output_dir: Path | None = None) -> Path:
-        """Format ASH model using specified reporter."""
-        from automated_security_helper.reporters.ash_default import (
-            ASFFReporter,
-            CSVReporter,
-            CycloneDXReporter,
-            HTMLReporter,
-            JSONReporter,
-            JUnitXMLReporter,
-            SARIFReporter,
-            SPDXReporter,
-            TextReporter,
-            YAMLReporter,
-        )
+    # def report(self, output_format: str, output_dir: Path | None = None) -> Path:
+    #     """Format ASH model using specified reporter."""
+    #     from automated_security_helper.reporters.ash_default import (
+    #         ASFFReporter,
+    #         CSVReporter,
+    #         CycloneDXReporter,
+    #         HTMLReporter,
+    #         JSONReporter,
+    #         JUnitXMLReporter,
+    #         SARIFReporter,
+    #         SPDXReporter,
+    #         TextReporter,
+    #         YAMLReporter,
+    #     )
 
-        reporters = {
-            "asff": {"reporter": ASFFReporter(), "ext": "asff"},
-            "csv": {"reporter": CSVReporter(), "ext": "csv"},
-            "cyclonedx": {"reporter": CycloneDXReporter(), "ext": "cdx.json"},
-            "html": {"reporter": HTMLReporter(), "ext": "html"},
-            "json": {"reporter": JSONReporter(), "ext": "json"},
-            "junitxml": {"reporter": JUnitXMLReporter(), "ext": "junit.xml"},
-            "sarif": {"reporter": SARIFReporter(), "ext": "sarif"},
-            "spdx": {"reporter": SPDXReporter(), "ext": "spdx.json"},
-            "text": {"reporter": TextReporter(), "ext": "txt"},
-            "yaml": {"reporter": YAMLReporter(), "ext": "yaml"},
-        }
-        try:
-            if output_format not in reporters:
-                raise ValueError(f"Unsupported output format: {output_format}")
+    #     reporters = {
+    #         "asff": {"reporter": ASFFReporter(), "ext": "asff"},
+    #         "csv": {"reporter": CSVReporter(), "ext": "csv"},
+    #         "cyclonedx": {"reporter": CycloneDXReporter(), "ext": "cdx.json"},
+    #         "html": {"reporter": HTMLReporter(), "ext": "html"},
+    #         "json": {"reporter": JSONReporter(), "ext": "json"},
+    #         "junitxml": {"reporter": JUnitXMLReporter(), "ext": "junit.xml"},
+    #         "sarif": {"reporter": SARIFReporter(), "ext": "sarif"},
+    #         "spdx": {"reporter": SPDXReporter(), "ext": "spdx.json"},
+    #         "text": {"reporter": TextReporter(), "ext": "txt"},
+    #         "yaml": {"reporter": YAMLReporter(), "ext": "yaml"},
+    #     }
+    #     try:
+    #         if output_format not in reporters:
+    #             raise ValueError(f"Unsupported output format: {output_format}")
 
-            formatted = reporters[output_format]["reporter"].report(self)
-            if formatted is None:
-                ASH_LOGGER.error(
-                    f"Failed to format report with {output_format} reporter, returned empty string"
-                )
-            if output_dir is None:
-                return formatted
-            else:
-                output_dir = Path(output_dir)
-                output_dir.mkdir(parents=True, exist_ok=True)
-                output_filename = f"ash.{reporters[output_format]['ext']}"
-                output_file = output_dir.joinpath(output_filename)
-                ASH_LOGGER.info(f"Writing {output_format} report to {output_file}")
-                output_file.write_text(formatted)
-                return output_file
-        except Exception as e:
-            ASH_LOGGER.error(
-                f"Failed to format report with {output_format} reporter: {e}"
-            )
+    #         formatted = reporters[output_format]["reporter"].report(self)
+    #         if formatted is None:
+    #             ASH_LOGGER.error(
+    #                 f"Failed to format report with {output_format} reporter, returned empty string"
+    #             )
+    #         if output_dir is None:
+    #             return formatted
+    #         else:
+    #             output_dir = Path(output_dir)
+    #             output_dir.mkdir(parents=True, exist_ok=True)
+    #             output_filename = f"ash.{reporters[output_format]['ext']}"
+    #             output_file = output_dir.joinpath(output_filename)
+    #             ASH_LOGGER.info(f"Writing {output_format} report to {output_file}")
+    #             output_file.write_text(formatted)
+    #             return output_file
+    #     except Exception as e:
+    #         ASH_LOGGER.error(
+    #             f"Failed to format report with {output_format} reporter: {e}"
+    #         )
 
 
 if __name__ == "__main__":

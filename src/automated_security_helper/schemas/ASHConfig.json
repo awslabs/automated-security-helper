@@ -20,17 +20,36 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
+          "$ref": "#/$defs/ASFFReporterConfigOptions",
           "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+            "aws_account_id": "123456789012",
+            "aws_region": "us-east-1"
+          }
         }
       },
       "title": "ASFFReporterConfig",
       "type": "object"
     },
-    "AshGlobalDefaultsConfigSection": {
+    "ASFFReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "aws_account_id": {
+          "default": "123456789012",
+          "pattern": "^\\d{12}$",
+          "title": "Aws Account Id",
+          "type": "string"
+        },
+        "aws_region": {
+          "default": "us-east-1",
+          "pattern": "(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\\d{1}",
+          "title": "Aws Region",
+          "type": "string"
+        }
+      },
+      "title": "ASFFReporterConfigOptions",
+      "type": "object"
+    },
+    "AshConfigGlobalSettingsSection": {
       "additionalProperties": false,
       "properties": {
         "ignore_paths": {
@@ -56,7 +75,7 @@
           "type": "string"
         }
       },
-      "title": "AshGlobalDefaultsConfigSection",
+      "title": "AshConfigGlobalSettingsSection",
       "type": "object"
     },
     "BanditScannerConfig": {
@@ -204,7 +223,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -220,14 +239,17 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/CSVReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "CSVReporterConfig",
+      "type": "object"
+    },
+    "CSVReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "CSVReporterConfigOptions",
       "type": "object"
     },
     "CdkNagPacks": {
@@ -405,6 +427,7 @@
             "frameworks": [
               "all"
             ],
+            "offline": false,
             "severity_threshold": null,
             "skip_frameworks": [],
             "skip_path": []
@@ -506,6 +529,12 @@
           },
           "title": "Frameworks",
           "type": "array"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, disabling policy downloads",
+          "title": "Offline",
+          "type": "boolean"
         },
         "severity_threshold": {
           "anyOf": [
@@ -675,14 +704,17 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/CycloneDXReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "CycloneDXReporterConfig",
+      "type": "object"
+    },
+    "CycloneDXReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "CycloneDXReporterConfigOptions",
       "type": "object"
     },
     "DetectSecretsScannerConfig": {
@@ -834,14 +866,17 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/HTMLReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "HTMLReporterConfig",
+      "type": "object"
+    },
+    "HTMLReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "HTMLReporterConfigOptions",
       "type": "object"
     },
     "IgnorePathWithReason": {
@@ -869,12 +904,12 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
         "extension": {
-          "default": "json",
+          "default": "flat.json",
           "title": "Extension",
           "type": "string"
         },
@@ -885,14 +920,17 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/JSONReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "JSONReporterConfig",
+      "type": "object"
+    },
+    "JSONReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "JSONReporterConfigOptions",
       "type": "object"
     },
     "JUnitXMLReporterConfig": {
@@ -915,14 +953,17 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/JUnitXMLReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "JUnitXMLReporterConfig",
+      "type": "object"
+    },
+    "JUnitXMLReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "JUnitXMLReporterConfigOptions",
       "type": "object"
     },
     "NpmAuditScannerConfig": {
@@ -988,21 +1029,30 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/OCSFReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "OCSFReporterConfig",
       "type": "object"
     },
+    "OCSFReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "OCSFReporterConfigOptions",
+      "type": "object"
+    },
     "PluginContext": {
+      "additionalProperties": true,
       "description": "Context container for plugins to ensure consistent path information.",
       "properties": {
+        "config": {
+          "default": null,
+          "description": "ASH configuration",
+          "title": "Config"
+        },
         "output_dir": {
-          "description": "Output directory for results",
+          "description": "Primary output directory for all ASH results",
           "format": "path",
           "title": "Output Dir",
           "type": "string"
@@ -1045,7 +1095,8 @@
             "extension": "asff",
             "name": "asff",
             "options": {
-              "severity_threshold": null
+              "aws_account_id": "123456789012",
+              "aws_region": "us-east-1"
             }
           },
           "description": "Configure the options for the ASFF reporter"
@@ -1053,12 +1104,10 @@
         "csv": {
           "$ref": "#/$defs/CSVReporterConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "extension": "csv",
             "name": "csv",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the CSV reporter"
         },
@@ -1068,9 +1117,7 @@
             "enabled": true,
             "extension": "cdx.json",
             "name": "cyclonedx",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the CycloneDX reporter"
         },
@@ -1080,21 +1127,17 @@
             "enabled": true,
             "extension": "html",
             "name": "html",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the HTML reporter"
         },
         "json": {
           "$ref": "#/$defs/JSONReporterConfig",
           "default": {
-            "enabled": false,
-            "extension": "json",
+            "enabled": true,
+            "extension": "flat.json",
             "name": "json",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the JSON reporter"
         },
@@ -1104,9 +1147,7 @@
             "enabled": true,
             "extension": "junit.xml",
             "name": "junitxml",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the JUnit XML reporter"
         },
@@ -1116,9 +1157,7 @@
             "enabled": true,
             "extension": "ocsf.json",
             "name": "ocsf",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the OCSF reporter"
         },
@@ -1128,9 +1167,7 @@
             "enabled": true,
             "extension": "sarif",
             "name": "sarif",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the SARIF reporter"
         },
@@ -1140,9 +1177,7 @@
             "enabled": false,
             "extension": "spdx.json",
             "name": "spdx",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the SPDX reporter"
         },
@@ -1152,9 +1187,7 @@
             "enabled": true,
             "extension": "txt",
             "name": "text",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the Text reporter"
         },
@@ -1164,9 +1197,7 @@
             "enabled": false,
             "extension": "yaml",
             "name": "yaml",
-            "options": {
-              "severity_threshold": null
-            }
+            "options": {}
           },
           "description": "Configure the options for the YAML reporter"
         }
@@ -1234,14 +1265,17 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/SARIFReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "SARIFReporterConfig",
+      "type": "object"
+    },
+    "SARIFReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "SARIFReporterConfigOptions",
       "type": "object"
     },
     "SPDXReporterConfig": {
@@ -1264,14 +1298,17 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/SPDXReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "SPDXReporterConfig",
+      "type": "object"
+    },
+    "SPDXReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "SPDXReporterConfigOptions",
       "type": "object"
     },
     "ScannerConfigSegment": {
@@ -1342,6 +1379,7 @@
               "frameworks": [
                 "all"
               ],
+              "offline": false,
               "severity_threshold": null,
               "skip_frameworks": [],
               "skip_path": []
@@ -1532,19 +1570,6 @@
           "title": "Output",
           "type": "array"
         },
-        "output_dir": {
-          "anyOf": [
-            {
-              "format": "path",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Output Dir"
-        },
         "results_dir": {
           "anyOf": [
             {
@@ -1570,19 +1595,6 @@
           ],
           "default": null,
           "title": "Results File"
-        },
-        "source_dir": {
-          "anyOf": [
-            {
-              "format": "path",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Source Dir"
         },
         "start_time": {
           "anyOf": [
@@ -1622,19 +1634,6 @@
           ],
           "default": null,
           "title": "Tool Version"
-        },
-        "work_dir": {
-          "anyOf": [
-            {
-              "format": "path",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Work Dir"
         }
       },
       "title": "ScannerPluginBase",
@@ -1774,14 +1773,17 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/TextReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "TextReporterConfig",
+      "type": "object"
+    },
+    "TextReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "TextReporterConfigOptions",
       "type": "object"
     },
     "ToolArgs": {
@@ -1903,14 +1905,17 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/YAMLReporterConfigOptions",
+          "default": {}
         }
       },
       "title": "YAMLReporterConfig",
+      "type": "object"
+    },
+    "YAMLReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "YAMLReporterConfigOptions",
       "type": "object"
     }
   },
@@ -1954,7 +1959,7 @@
       "type": "boolean"
     },
     "global_settings": {
-      "$ref": "#/$defs/AshGlobalDefaultsConfigSection",
+      "$ref": "#/$defs/AshConfigGlobalSettingsSection",
       "default": {
         "ignore_paths": [],
         "severity_threshold": "MEDIUM"
@@ -1994,88 +1999,69 @@
           "extension": "asff",
           "name": "asff",
           "options": {
-            "severity_threshold": null
+            "aws_account_id": "123456789012",
+            "aws_region": "us-east-1"
           }
         },
         "csv": {
-          "enabled": false,
+          "enabled": true,
           "extension": "csv",
           "name": "csv",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         },
         "cyclonedx": {
           "enabled": true,
           "extension": "cdx.json",
           "name": "cyclonedx",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         },
         "html": {
           "enabled": true,
           "extension": "html",
           "name": "html",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         },
         "json": {
-          "enabled": false,
-          "extension": "json",
+          "enabled": true,
+          "extension": "flat.json",
           "name": "json",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         },
         "junitxml": {
           "enabled": true,
           "extension": "junit.xml",
           "name": "junitxml",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         },
         "ocsf": {
           "enabled": true,
           "extension": "ocsf.json",
           "name": "ocsf",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         },
         "sarif": {
           "enabled": true,
           "extension": "sarif",
           "name": "sarif",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         },
         "spdx": {
           "enabled": false,
           "extension": "spdx.json",
           "name": "spdx",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         },
         "text": {
           "enabled": true,
           "extension": "txt",
           "name": "text",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         },
         "yaml": {
           "enabled": false,
           "extension": "yaml",
           "name": "yaml",
-          "options": {
-            "severity_threshold": null
-          }
+          "options": {}
         }
       },
       "description": "Reporter configurations by name."
@@ -2127,6 +2113,7 @@
             "frameworks": [
               "all"
             ],
+            "offline": false,
             "severity_threshold": null,
             "skip_frameworks": [],
             "skip_path": []
@@ -2177,6 +2164,6 @@
       "description": "Scanner configurations by name."
     }
   },
-  "title": "ASHConfig",
+  "title": "AshConfig",
   "type": "object"
 }

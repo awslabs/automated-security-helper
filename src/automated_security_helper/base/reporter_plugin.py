@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -32,9 +33,6 @@ class ReporterPluginBase(BaseModel, Generic[T]):
     config: T | ReporterPluginConfigBase | None = None
     context: PluginContext | None = None
 
-    source_dir: Path | None = None
-    output_dir: Path | None = None
-
     output: List[str] = []
     errors: List[str] = []
 
@@ -49,22 +47,9 @@ class ReporterPluginBase(BaseModel, Generic[T]):
     def setup_paths(self) -> Self:
         """Set up default paths and initialize plugin configuration."""
         # Use context if provided, otherwise fall back to instance attributes
-        if self.context is not None:
-            ASH_LOGGER.debug(f"Using provided context for {self.__class__.__name__}")
-            self.source_dir = self.context.source_dir
-            self.output_dir = self.context.output_dir
-        else:
-            # Use default paths if none provided
-            if self.source_dir is None:
-                self.source_dir = Path(".")
-                ASH_LOGGER.verbose(
-                    f"({self.__class__.__name__}) Source directory was not provided! Defaulting to the current directory"
-                )
-            if self.output_dir is None:
-                ASH_LOGGER.verbose(
-                    f"({self.__class__.__name__}) Output directory was not provided! Defaulting to ash_output directory relative to the source directory."
-                )
-                self.output_dir = self.source_dir.joinpath("ash_output")
+        if self.context is None:
+            raise ScannerError(f"No context provided for {self.__class__.__name__}!")
+        ASH_LOGGER.debug(f"Using provided context for {self.__class__.__name__}")
         return self
 
     def configure(

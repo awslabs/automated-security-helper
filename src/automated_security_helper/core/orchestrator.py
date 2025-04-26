@@ -9,18 +9,22 @@ from typing import Annotated, Any, Dict, List, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 
 from automated_security_helper.core.progress import (
     ExecutionPhaseType,
     ExecutionStrategy,
 )
-from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.constants import (
+    ASH_CONFIG_FILE_NAMES,
+    ASH_WORK_DIR_NAME,
+)
 from automated_security_helper.core.execution_engine import (
     ScanExecutionEngine as ScanExecutionEngine,
 )
 
-from automated_security_helper.config.ash_config import ASHConfig
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import (
     ASHValidationError,
     ASHConfigValidationError,
@@ -46,7 +50,7 @@ class ASHScanOrchestrator(BaseModel):
         Path, Field(description="Working directory for scan operations")
     ] = None
     config: Annotated[
-        ASHConfig | None, Field(description="The resolved ASH configuration")
+        AshConfig | None, Field(description="The resolved ASH configuration")
     ] = None
 
     strategy: Annotated[
@@ -89,14 +93,7 @@ class ASHScanOrchestrator(BaseModel):
     # Core components
     execution_engine: Annotated[ScanExecutionEngine | None, Field()] = None
 
-    output_formats: List[ExportFormat] = [
-        ExportFormat.HTML,
-        ExportFormat.JSON,
-        ExportFormat.JUNITXML,
-        ExportFormat.SARIF,
-        ExportFormat.CYCLONEDX,
-        ExportFormat.OCSF,
-    ]
+    output_formats: List[ExportFormat] = []
 
     existing_results_path: Annotated[
         Optional[Path],
@@ -110,8 +107,6 @@ class ASHScanOrchestrator(BaseModel):
 
         self.config = self._load_config()
 
-        ASH_LOGGER.verbose(f"self.config.output_formats: {self.config.output_formats}")
-        ASH_LOGGER.verbose(f"self.output_formats: {self.output_formats}")
         ASH_LOGGER.verbose("Setting up working directories")
         if self.source_dir is None:
             ASH_LOGGER.warning(
@@ -148,11 +143,14 @@ class ASHScanOrchestrator(BaseModel):
             exec_engine_params = {"asharp_model": asharp_model}
 
         self.execution_engine = ScanExecutionEngine(
-            source_dir=self.source_dir,
-            output_dir=self.output_dir,
+            context=PluginContext(
+                source_dir=self.source_dir,
+                output_dir=self.output_dir,
+                work_dir=self.output_dir.joinpath(ASH_WORK_DIR_NAME),
+                config=self.config,
+            ),
             strategy=self.strategy,
             enabled_scanners=self.enabled_scanners,
-            config=self.config,
             show_progress=self.show_progress,
             global_ignore_paths=self.config.global_settings.ignore_paths,
             color_system=self.color_system,
@@ -195,7 +193,7 @@ class ASHScanOrchestrator(BaseModel):
             ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
             raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
 
-    def _load_config(self) -> ASHConfig:
+    def _load_config(self) -> AshConfig:
         """Load configuration from file or return default configuration."""
         try:
             config = get_default_config()
@@ -233,7 +231,7 @@ class ASHScanOrchestrator(BaseModel):
                         raise ValueError("Configuration must be a dictionary")
 
                     ASH_LOGGER.debug("Transforming file config")
-                    config = ASHConfig(**config_data)
+                    config = AshConfig(**config_data)
                     ASH_LOGGER.debug(f"Loaded config from file: {config}")
                 except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
                     ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
@@ -273,7 +271,6 @@ class ASHScanOrchestrator(BaseModel):
         ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
         ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")
         ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")
-        ASH_LOGGER.verbose(f"Output formats: {self.config.output_formats}")
         ASH_LOGGER.verbose(f"Executing phases: {phases}")
 
         try:
@@ -285,12 +282,14 @@ class ASHScanOrchestrator(BaseModel):
             if self.execution_engine is None:
                 ASH_LOGGER.debug("Creating execution engine")
                 self.execution_engine = ScanExecutionEngine(
-                    source_dir=self.source_dir,
-                    output_dir=self.output_dir,
-                    work_dir=self.work_dir,
+                    context=PluginContext(
+                        source_dir=self.source_dir,
+                        output_dir=self.output_dir,
+                        work_dir=self.output_dir.joinpath(ASH_WORK_DIR_NAME),
+                        config=self.config,
+                    ),
                     strategy=self.strategy,
                     enabled_scanners=self.enabled_scanners,
-                    config=self.config,
                     show_progress=self.show_progress,
                     global_ignore_paths=self.config.global_settings.ignore_paths,
                     color_system=self.color_system,

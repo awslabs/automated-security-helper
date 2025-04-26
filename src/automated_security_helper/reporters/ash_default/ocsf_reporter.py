@@ -17,6 +17,7 @@ class OCSFReporterConfig(ReporterPluginConfigBase):
     name: Literal["ocsf"] = "ocsf"
     extension: str = "ocsf.json"
     enabled: bool = True
+    options: OCSFReporterConfigOptions = OCSFReporterConfigOptions()
 
 
 class OCSFReporter(ReporterPluginBase[OCSFReporterConfig]):

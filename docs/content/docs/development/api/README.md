@@ -79,7 +79,7 @@
 - [`scanner_plugin.ScannerPluginConfigBase`](./base.scanner_plugin.md#class-scannerpluginconfigbase)
 - [`cli.AshBuildTarget`](./cli.md#class-ashbuildtarget): An enumeration.
 - [`cli.Strategy`](./cli.md#class-strategy): An enumeration.
-- [`ash_config.ASHConfig`](./config.ash_config.md#class-ashconfig): Main configuration model for Automated Security Helper.
+- [`ash_config.AshConfig`](./config.ash_config.md#class-ashconfig): Main configuration model for Automated Security Helper.
 - [`ash_config.BuildConfig`](./config.ash_config.md#class-buildconfig): Configuration model for build-time settings.
 - [`ash_config.ScannerConfigSegment`](./config.ash_config.md#class-scannerconfigsegment)
 - [`ash_config.ScannerTypeConfig`](./config.ash_config.md#class-scannertypeconfig): Configuration model for scanner type specific settings.

@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import List
 
 from automated_security_helper.base.engine_phase import EnginePhase
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -82,14 +81,7 @@ class ConvertPhase(EnginePhase):
             )
 
             converter = converter_config.plugin_class(
-                source_dir=self.source_dir,
-                output_dir=self.output_dir,
-                work_dir=self.work_dir,
-                context=PluginContext(
-                    source_dir=self.source_dir,
-                    output_dir=self.output_dir,
-                    work_dir=self.work_dir,
-                ),
+                context=self.plugin_context,
             )
             out = converter.convert()
 

@@ -15,6 +15,7 @@ from automated_security_helper.converters.ash_default.jupyter_converter import (
     JupyterConverter,
     JupyterConverterConfig,
 )
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 
 
 class TestArchiveConverter:
@@ -62,7 +63,7 @@ class TestArchiveConverter:
         assert converter.config == config
         assert converter.source_dir == temp_dir
         assert converter.output_dir == temp_dir / "output"
-        assert converter.work_dir == temp_dir / "output" / "converted"
+        assert converter.work_dir == temp_dir / "output" / ASH_WORK_DIR_NAME
 
     def test_archive_converter_validate(self, temp_dir):
         """Test validate method."""

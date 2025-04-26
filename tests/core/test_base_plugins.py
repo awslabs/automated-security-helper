@@ -17,6 +17,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
     ScannerError,
 )
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolArgs,
@@ -48,7 +49,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter()
         assert converter.source_dir == Path(".")
         assert converter.output_dir == Path("ash_output")
-        assert converter.work_dir == Path("ash_output/converted")
+        assert converter.work_dir == Path(f"ash_output/{ASH_WORK_DIR_NAME}")
 
     def test_setup_paths_custom(self):
         """Test setup_paths with custom values."""
@@ -57,7 +58,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter(source_dir=source, output_dir=output)
         assert converter.source_dir == source
         assert converter.output_dir == output
-        assert converter.work_dir == output.joinpath("converted")
+        assert converter.work_dir == output.joinpath(ASH_WORK_DIR_NAME)
 
     def test_setup_paths_string_conversion(self):
         """Test setup_paths converts string paths to Path objects."""
@@ -235,7 +236,7 @@ class TestScannerPlugin:
         scanner = self.DummyScanner(config=config, source_dir=tmp_path)
         assert scanner.source_dir == tmp_path
         assert scanner.output_dir == tmp_path.joinpath("ash_output")
-        assert scanner.work_dir == scanner.output_dir.joinpath("converted")
+        assert scanner.work_dir == scanner.output_dir.joinpath(ASH_WORK_DIR_NAME)
         assert scanner.results_dir == scanner.output_dir.joinpath("scanners").joinpath(
             config.name
         )

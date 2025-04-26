@@ -202,7 +202,7 @@ class ReporterConfigSegment(BaseModel):
     ] = YAMLReporterConfig()
 
 
-class AshGlobalDefaultsConfigSection(BaseModel):
+class AshConfigGlobalSettingsSection(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -222,7 +222,7 @@ class AshGlobalDefaultsConfigSection(BaseModel):
     ] = []
 
 
-class ASHConfig(BaseModel):
+class AshConfig(BaseModel):
     """Main configuration model for Automated Security Helper."""
 
     model_config = ConfigDict(
@@ -303,11 +303,11 @@ class ASHConfig(BaseModel):
 
     # Legacy global settings (deprecated)
     global_settings: Annotated[
-        AshGlobalDefaultsConfigSection,
+        AshConfigGlobalSettingsSection,
         Field(
             description="Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
         ),
-    ] = AshGlobalDefaultsConfigSection()
+    ] = AshConfigGlobalSettingsSection()
 
     external_reports_to_include: Annotated[
         List[str],
@@ -330,7 +330,7 @@ class ASHConfig(BaseModel):
     ] = False
 
     @classmethod
-    def from_file(cls, config_path: Path) -> "ASHConfig":
+    def from_file(cls, config_path: Path) -> "AshConfig":
         """Load configuration from a file."""
         with open(config_path, "r") as f:
             # Using `yaml.safe_load()` as it handles both JSON and YAML data the same.

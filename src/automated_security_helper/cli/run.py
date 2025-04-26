@@ -10,7 +10,10 @@ import json
 import sys
 from pathlib import Path
 
-from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.constants import (
+    ASH_CONFIG_FILE_NAMES,
+    ASH_WORK_DIR_NAME,
+)
 from automated_security_helper.models.core import ExportFormat
 
 
@@ -75,6 +78,8 @@ def run(
     output_formats: Annotated[
         List[ExportFormat],
         typer.Option(
+            "--output-formats",
+            "-o",
             help="The output formats to use",
         ),
     ] = [
@@ -163,7 +168,7 @@ def run(
         orchestrator = ASHScanOrchestrator(
             source_dir=source_dir,
             output_dir=output_dir,
-            work_dir=output_dir.joinpath("converted"),
+            work_dir=output_dir.joinpath(ASH_WORK_DIR_NAME),
             enabled_scanners=scanners,
             config_path=config,
             verbose=verbose or debug,

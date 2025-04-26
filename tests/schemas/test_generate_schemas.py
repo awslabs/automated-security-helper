@@ -11,13 +11,13 @@ class TestSchemaGeneration:
         # Test generating schema for a single model
         schema = generate_schemas("dict")
         assert isinstance(schema, dict)
-        assert "ASHConfig" in schema
+        assert "AshConfig" in schema
         assert "ASHARPModel" in schema
 
         # Validate schema structure
-        assert "type" in schema["ASHConfig"]
-        assert "properties" in schema["ASHConfig"]
-        assert isinstance(schema["ASHConfig"]["properties"], dict)
+        assert "type" in schema["AshConfig"]
+        assert "properties" in schema["AshConfig"]
+        assert isinstance(schema["AshConfig"]["properties"], dict)
 
         assert "type" in schema["ASHARPModel"]
         assert "properties" in schema["ASHARPModel"]

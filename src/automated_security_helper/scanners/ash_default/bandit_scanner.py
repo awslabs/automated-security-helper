@@ -143,14 +143,18 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def _process_config_options(self):
         # Bandit config path
         possible_config_paths: Dict[str, Dict[str, str | int | float | bool | None]] = {
-            f"{self.source_dir}/.bandit": [
-                ToolExtraArg(key="--ini", value=f"{self.source_dir}/.bandit")
+            f"{self.context.source_dir}/.bandit": [
+                ToolExtraArg(key="--ini", value=f"{self.context.source_dir}/.bandit")
             ],
-            f"{self.source_dir}/bandit.yaml": [
-                ToolExtraArg(key="--configfile", value=f"{self.source_dir}/bandit.yaml")
+            f"{self.context.source_dir}/bandit.yaml": [
+                ToolExtraArg(
+                    key="--configfile", value=f"{self.context.source_dir}/bandit.yaml"
+                )
             ],
-            f"{self.source_dir}/bandit.toml": [
-                ToolExtraArg(key="--configfile", value=f"{self.source_dir}/bandit.toml")
+            f"{self.context.source_dir}/bandit.toml": [
+                ToolExtraArg(
+                    key="--configfile", value=f"{self.context.source_dir}/bandit.toml"
+                )
             ],
         }
 

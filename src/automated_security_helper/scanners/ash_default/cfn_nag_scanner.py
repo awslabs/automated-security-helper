@@ -85,7 +85,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         )
         tool_version = self._run_subprocess(
             command=[self.command, "--version"],
-            results_dir=self.output_dir,
+            results_dir=self.context.output_dir,
             stdout_preference="return",
             stderr_preference="return",
         )
@@ -149,7 +149,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             # Find all files to scan from the scan set
             scannable = scan_set(
                 source=target,
-                output=self.output_dir if target == self.source_dir else self.work_dir,
+                output=(
+                    self.context.output_dir
+                    if target == self.context.source_dir
+                    else self.context.work_dir
+                ),
                 # filter_pattern=r"\.(yaml|yml|json)$",
             )
             ASH_LOGGER.debug(

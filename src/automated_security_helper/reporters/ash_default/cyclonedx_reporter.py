@@ -16,6 +16,7 @@ class CycloneDXReporterConfig(ReporterPluginConfigBase):
     name: Literal["cyclonedx"] = "cyclonedx"
     extension: str = "cdx.json"
     enabled: bool = True
+    options: CycloneDXReporterConfigOptions = CycloneDXReporterConfigOptions()
 
 
 class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):

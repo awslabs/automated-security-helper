@@ -10,7 +10,10 @@ import zipfile
 
 from pydantic import Field
 
-from automated_security_helper.core.constants import KNOWN_SCANNABLE_EXTENSIONS
+from automated_security_helper.core.constants import (
+    ASH_WORK_DIR_NAME,
+    KNOWN_SCANNABLE_EXTENSIONS,
+)
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
     ConverterPluginConfigBase,
@@ -44,8 +47,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     """Converter implementation for Archive file extraction."""
 
     def model_post_init(self, context):
-        self.work_dir = (
-            self.output_dir.joinpath("converted")
+        self.context.work_dir = (
+            self.context.output_dir.joinpath(ASH_WORK_DIR_NAME)
             .joinpath("converters")
             .joinpath("archive")
         )
@@ -83,12 +86,12 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     ) -> List[Path]:
         # TODO : Convert utils/identifyipynb.sh script to python using nbconvert as lib
         ASH_LOGGER.debug(
-            f"Searching for archive files in search_path within the ASH scan set: {self.source_dir}"
+            f"Searching for archive files in search_path within the ASH scan set: {self.context.source_dir}"
         )
         # Find all archive files to scan from the scan set
         archive_files = scan_set(
-            source=self.source_dir,
-            output=self.output_dir,
+            source=self.context.source_dir,
+            output=self.context.output_dir,
         )
         archive_files = [
             f.strip()
@@ -100,7 +103,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         for archive_file in archive_files:
             short_archive_file = get_shortest_name(archive_file)
             normalized_archive_file = get_normalized_filename(short_archive_file)
-            target_path = self.work_dir.joinpath(self.config.name).joinpath(
+            target_path = self.context.work_dir.joinpath(self.config.name).joinpath(
                 normalized_archive_file
             )
             ASH_LOGGER.verbose(

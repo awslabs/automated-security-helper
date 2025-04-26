@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=./src/automated_security_helper/schemas/ASHConfig.json
+# yaml-language-server: $schema=./src/automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
 global_settings:
@@ -9,8 +9,6 @@ global_settings:
     - path: 'tests'
       reason: This is test data that is used during unit testing only and is not part of the core application.
     - path: .venv
-      reason: This path contains .gitignore'd cache data used by dev/build tools.
-    - path: .git
       reason: This path contains .gitignore'd cache data used by dev/build tools.
     - path: .ruff
       reason: This path contains .gitignore'd cache data used by dev/build tools.

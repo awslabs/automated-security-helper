@@ -4,7 +4,7 @@
 """Module containing the generic security scanner implementation.
 
 This security scanner depends on a valid ScannerPluginConfig to be provided in the
-`build.custom_scanners` section of an ASHConfig instance or ASH configuration YAML/JSON file.
+`build.custom_scanners` section of an AshConfig instance or ASH configuration YAML/JSON file.
 """
 
 import json

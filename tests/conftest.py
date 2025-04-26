@@ -6,7 +6,12 @@ import shutil
 import pytest
 
 # Core imports needed for basic fixtures
-from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.constants import (
+    ASH_DOCS_URL,
+    ASH_REPO_URL,
+    ASH_WORK_DIR_NAME,
+)
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -77,6 +82,17 @@ def test_output_dir() -> Path:
     return TEST_OUTPUT_DIR
 
 
+@pytest.fixture
+def test_plugin_context() -> PluginContext:
+    """Create a test plugin context"""
+    return PluginContext(
+        source_dir=TEST_SOURCE_DIR,
+        output_dir=TEST_OUTPUT_DIR,
+        work_dir=TEST_OUTPUT_DIR.joinpath(ASH_WORK_DIR_NAME),
+        config=ash_config(),
+    )
+
+
 # @pytest.fixture
 # def sample_config():
 #     return {
@@ -86,7 +102,7 @@ def test_output_dir() -> Path:
 
 
 # @pytest.fixture
-# def config_file(ash_config: ASHConfig):
+# def config_file(ash_config: AshConfig):
 #     # Create a temporary config file
 #     config_file = TEST_SOURCE_DIR.joinpath("ash.yaml")
 #     with open(config_file, "w") as f:
@@ -144,11 +160,11 @@ def mock_scanner_plugin():
 
 @pytest.fixture
 def ash_config(mock_scanner_plugin):
-    """Create a test ASHConfig object based on default ash.yaml settings."""
+    """Create a test AshConfig object based on default ash.yaml settings."""
     # Lazy load required classes
-    ASHConfig, BuildConfig, ScannerConfigSegment = lazy_import(
+    AshConfig, BuildConfig, ScannerConfigSegment = lazy_import(
         "automated_security_helper.config.ash_config",
-        "ASHConfig",
+        "AshConfig",
         "BuildConfig",
         "ScannerConfigSegment",
     )
@@ -216,7 +232,7 @@ def ash_config(mock_scanner_plugin):
             type="SBOM",
         ),
     }
-    conf = ASHConfig(
+    conf = AshConfig(
         project_name="automated-security-helper",
         build=BuildConfig(
             build_mode="ONLINE",
