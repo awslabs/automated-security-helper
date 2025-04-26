@@ -12,6 +12,7 @@ tests/test_data/scanners/cdk/test.yaml_cdk_nag_results/cdk_nag_results_*/
 test_output.json
 tests/pytest-temp/
 output/
+.*q/
 
 ### macOS ###
 # General

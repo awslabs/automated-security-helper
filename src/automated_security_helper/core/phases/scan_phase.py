@@ -596,13 +596,17 @@ class ScanPhase(EnginePhase):
             "finding_count": results.finding_count,
             "exit_code": results.exit_code,
             "status": results.status,
-            "raw_results": results.raw_results,
+            # "raw_results": results.raw_results,
         }
 
         # Process the raw results based on type
         if isinstance(results.raw_results, SarifReport):
             self.asharp_model.sarif.merge_sarif_report(results.raw_results)
-        elif isinstance(results.raw_results, ASHARPModel):
-            self.asharp_model.merge_model(results.raw_results)
         elif isinstance(results.raw_results, CycloneDXReport):
             self.asharp_model.cyclonedx = results.raw_results
+        elif isinstance(results.raw_results, ASHARPModel):
+            self.asharp_model.merge_model(results.raw_results)
+        else:
+            self.asharp_model.additional_reports[scanner_name][results.target_type][
+                "raw_results"
+            ] = results.raw_results

@@ -4,6 +4,7 @@ from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.progress import ExecutionPhase
+from automated_security_helper.reporters.ash_default.ocsf_reporter import OCSFReporter
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -90,6 +91,10 @@ class ReportPhase(EnginePhase):
                 "reporter": SARIFReporter(context=plugin_context),
                 "name": "SARIF Reporter",
             },
+            "ocsf": {
+                "reporter": OCSFReporter(context=plugin_context),
+                "name": "OCSF Reporter",
+            },
             "spdx": {
                 "reporter": SPDXReporter(context=plugin_context),
                 "name": "SPDX Reporter",
@@ -107,6 +112,8 @@ class ReportPhase(EnginePhase):
         # Filter reporters based on the configured output formats
         active_reporters = {}
         for fmt in output_formats:
+            if hasattr(fmt, "value"):
+                fmt = fmt.value
             fmt_str = str(fmt).lower()
             if fmt_str in available_reporters:
                 active_reporters[fmt_str] = available_reporters[fmt_str]
@@ -199,6 +206,8 @@ class ReportPhase(EnginePhase):
                     output_filename = "ash.sarif"
                 elif fmt == "spdx":
                     output_filename = "ash.spdx.json"
+                elif fmt == "ocsf":
+                    output_filename = "ash.ocsf.json"
 
                 output_file = report_dir.joinpath(output_filename)
                 ASH_LOGGER.info(f"Writing {fmt} report to {output_file}")

@@ -85,6 +85,7 @@ def run(
             ExportFormat.JSON,
             ExportFormat.HTML,
             ExportFormat.JUNITXML,
+            ExportFormat.OCSF,
         ]
     ],
     cleanup: Annotated[
@@ -124,7 +125,6 @@ def run(
 
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
     from automated_security_helper.core.progress import ExecutionStrategy
-    from automated_security_helper.models.core import ExportFormat
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
     from automated_security_helper.models.asharp_model import ASHARPModel
     from automated_security_helper.utils.log import get_logger
@@ -157,13 +157,6 @@ def run(
             source_dir=source_dir,
             output_dir=output_dir,
             work_dir=output_dir.joinpath("converted"),
-            scan_output_format=[
-                ExportFormat.HTML,
-                ExportFormat.JSON,
-                ExportFormat.TEXT,
-                ExportFormat.YAML,
-                ExportFormat.JUNITXML,
-            ],
             enabled_scanners=scanners,
             config_path=config,
             verbose=verbose or debug,

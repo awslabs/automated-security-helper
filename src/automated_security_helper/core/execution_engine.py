@@ -376,7 +376,7 @@ class ScanExecutionEngine:
                         source_dir=self.source_dir,
                         output_dir=self.output_dir,
                         work_dir=self.work_dir,
-                        config=self._config,
+                        config=config or self._config,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )

@@ -6,6 +6,8 @@ global_settings:
   ignore_paths:
     - path: 'tests/test_data'
       reason: This is test data that is used during unit testing only and is not part of the core application.
+    - path: 'tests'
+      reason: This is test data that is used during unit testing only and is not part of the core application.
     - path: .venv
       reason: This path contains .gitignore'd cache data used by dev/build tools.
     - path: .git
@@ -24,8 +26,8 @@ output_formats:
   - junitxml
   - html
   - cyclonedx
-  - asff
   - ocsf
+  - asff
   - text
 scanners:
   bandit:
@@ -33,7 +35,6 @@ scanners:
     options:
       confidence_level: all
       ignore_nosec: false
-      excluded_paths: []
   cdk-nag:
     enabled: true
     options:

@@ -195,7 +195,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
                 ),
             ]
         )
-        return [item for item in args if item is not None]
+        return [item for item in args if item is not None and str(item).strip() != ""]
 
     def _pre_scan(
         self,

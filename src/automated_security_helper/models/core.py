@@ -26,8 +26,10 @@ class ExportFormat(str, Enum):
     JUNITXML = "junitxml"
     SARIF = "sarif"
     ASFF = "asff"
+    OCSF = "ocsf"
     CYCLONEDX = "cyclonedx"
     SPDX = "spdx"
+    CUSTOM = "custom"
 
 
 class ScanStatistics(BaseModel):
