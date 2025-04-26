@@ -242,36 +242,36 @@ class ASHConfig(BaseModel):
         Field(description="Build-time configuration settings"),
     ] = BuildConfig()
 
-    output_formats: Annotated[
-        List[
-            Literal[
-                "asff",
-                "csv",
-                "cyclonedx",
-                "html",
-                "json",
-                "junitxml",
-                "ocsf",
-                "sarif",
-                "spdx",
-                "text",
-                "yaml",
-            ]
-        ],
-        Field(description="Format for scanner results output"),
-    ] = [
-        "asff",
-        "csv",
-        "cyclonedx",
-        "html",
-        "json",
-        "junitxml",
-        "ocsf",
-        "sarif",
-        "spdx",
-        "text",
-        "yaml",
-    ]
+    # output_formats: Annotated[
+    #     List[
+    #         Literal[
+    #             "asff",
+    #             "csv",
+    #             "cyclonedx",
+    #             "html",
+    #             "json",
+    #             "junitxml",
+    #             "ocsf",
+    #             "sarif",
+    #             "spdx",
+    #             "text",
+    #             "yaml",
+    #         ] | str
+    #     ],
+    #     Field(description="Format for scanner results output"),
+    # ] = [
+    #     "asff",
+    #     "csv",
+    #     "cyclonedx",
+    #     "html",
+    #     "json",
+    #     "junitxml",
+    #     "ocsf",
+    #     "sarif",
+    #     "spdx",
+    #     "text",
+    #     "yaml",
+    # ]
 
     converters: Annotated[
         Dict[str, bool],

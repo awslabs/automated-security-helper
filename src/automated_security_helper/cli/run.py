@@ -104,6 +104,13 @@ def run(
         Phases.scan,
         Phases.report,
     ],
+    existing_results: Annotated[
+        str,
+        typer.Option(
+            "--existing-results",
+            help="Path to an existing ash_aggregated_results.json file. If provided, the scan phase will be skipped and reports will be generated from this file.",
+        ),
+    ] = None,
     version: Annotated[
         bool,
         typer.Option(
@@ -180,6 +187,12 @@ def run(
                 is not None  # Neither is running in a CI pipeline
             ),
             color_system="auto" if color else None,
+            offline=(
+                offline
+                if offline is not None
+                else os.environ.get("ASH_OFFLINE", "NO").upper() in ["YES", "1", "TRUE"]
+            ),
+            existing_results_path=Path(existing_results) if existing_results else None,
         )
 
         # Determine which phases to run. Process them in required order to build the

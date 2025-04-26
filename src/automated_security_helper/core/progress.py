@@ -157,7 +157,7 @@ class LiveProgressDisplay:
 
     def start(self):
         """Start the live display if progress is enabled."""
-        if self.show_progress:
+        if self.show_progress and (self.live is None):
             try:
                 # Use auto_refresh=True and vertical_overflow="visible" to allow the panel to adjust its height
                 print("Setting Live setup", file=sys.stderr)

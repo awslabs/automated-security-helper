@@ -1980,40 +1980,6 @@
       "title": "Output Dir",
       "type": "string"
     },
-    "output_formats": {
-      "default": [
-        "asff",
-        "csv",
-        "cyclonedx",
-        "html",
-        "json",
-        "junitxml",
-        "ocsf",
-        "sarif",
-        "spdx",
-        "text",
-        "yaml"
-      ],
-      "description": "Format for scanner results output",
-      "items": {
-        "enum": [
-          "asff",
-          "csv",
-          "cyclonedx",
-          "html",
-          "json",
-          "junitxml",
-          "ocsf",
-          "sarif",
-          "spdx",
-          "text",
-          "yaml"
-        ],
-        "type": "string"
-      },
-      "title": "Output Formats",
-      "type": "array"
-    },
     "project_name": {
       "default": "ash-target",
       "description": "Name of the project being scanned",

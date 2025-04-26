@@ -25,6 +25,7 @@ from automated_security_helper.core.exceptions import (
     ASHValidationError,
     ASHConfigValidationError,
 )
+from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -97,6 +98,11 @@ class ASHScanOrchestrator(BaseModel):
         ExportFormat.OCSF,
     ]
 
+    existing_results_path: Annotated[
+        Optional[Path],
+        Field(description="Path to existing ash_aggregated_results.json file"),
+    ] = None
+
     def model_post_init(self, context):
         """Post initialization configuration."""
         super().model_post_init(context)
@@ -125,11 +131,21 @@ class ASHScanOrchestrator(BaseModel):
 
         self.ensure_directories()
 
-        for old_file in [
-            file for file in self.output_dir.glob("*.*") if "ash.log" not in file.name
-        ]:
-            ASH_LOGGER.debug(f"Removing old file: {old_file}")
-            old_file.unlink()
+        # Don't delete existing files if we're using existing results
+        if self.existing_results_path is None:
+            for old_file in [
+                file
+                for file in self.output_dir.glob("*.*")
+                if "ash.log" not in file.name
+            ]:
+                ASH_LOGGER.debug(f"Removing old file: {old_file}")
+                old_file.unlink()
+            exec_engine_params = {}
+        else:
+            asharp_model = ASHARPModel.model_validate_json(
+                Path(self.existing_results_path).read_text()
+            )
+            exec_engine_params = {"asharp_model": asharp_model}
 
         self.execution_engine = ScanExecutionEngine(
             source_dir=self.source_dir,
@@ -142,6 +158,7 @@ class ASHScanOrchestrator(BaseModel):
             color_system=self.color_system,
             verbose=self.verbose,
             debug=self.debug,
+            **exec_engine_params,
         )
 
         ASH_LOGGER.info("ASH Orchestrator and ScanExecutionEngine initialized")
@@ -159,14 +176,21 @@ class ASHScanOrchestrator(BaseModel):
                 f"Creating output directory if it does not exist: {self.output_dir}"
             )
             self.output_dir.mkdir(parents=True, exist_ok=True)
-            for working_dir in ["reports", "scanners", "converted"]:
-                path_working_dir = self.output_dir.joinpath(working_dir)
-                if path_working_dir.exists():
-                    ASH_LOGGER.verbose(
-                        f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
-                    )
-                    shutil.rmtree(path_working_dir)
-                path_working_dir.mkdir(parents=True, exist_ok=True)
+
+            # If we're using existing results, only ensure the reports directory exists
+            if self.existing_results_path and self.existing_results_path.exists():
+                path_reports_dir = self.output_dir.joinpath("reports")
+                path_reports_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                # Otherwise, set up all working directories
+                for working_dir in ["reports", "scanners", "converted"]:
+                    path_working_dir = self.output_dir.joinpath(working_dir)
+                    if path_working_dir.exists() and self.existing_results_path is None:
+                        ASH_LOGGER.verbose(
+                            f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
+                        )
+                        shutil.rmtree(path_working_dir)
+                    path_working_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
             raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
@@ -268,14 +292,49 @@ class ASHScanOrchestrator(BaseModel):
                     enabled_scanners=self.enabled_scanners,
                     config=self.config,
                     show_progress=self.show_progress,
-                    global_ignore_paths=self.global_ignore_paths,
+                    global_ignore_paths=self.config.global_settings.ignore_paths,
                     color_system=self.color_system,
                     verbose=self.verbose,
                     debug=self.debug,
                 )
 
-            # Identify files to scan
-            if "convert" in phases or "scan" in phases:
+            # If existing results path is provided, load the model from it
+            if self.existing_results_path and self.existing_results_path.exists():
+                ASH_LOGGER.info(
+                    f"Loading existing results from {self.existing_results_path}"
+                )
+                try:
+                    from automated_security_helper.models.asharp_model import (
+                        ASHARPModel,
+                    )
+
+                    with open(self.existing_results_path, "r") as f:
+                        model_data = json.load(f)
+
+                    # Load the model from the existing results
+                    asharp_model = ASHARPModel.from_json(model_data)
+
+                    # Update the execution engine's model
+                    if hasattr(self.execution_engine, "_asharp_model"):
+                        self.execution_engine._asharp_model = asharp_model
+
+                    # When using existing results, only run the report phase
+                    ASH_LOGGER.info(
+                        "Using existing results - only running report phase"
+                    )
+                    phases = ["report"]
+
+                    # Ensure the reports directory exists but don't clean up any other directories
+                    reports_dir = self.output_dir.joinpath("reports")
+                    reports_dir.mkdir(parents=True, exist_ok=True)
+
+                except Exception as e:
+                    ASH_LOGGER.error(f"Failed to load existing results: {str(e)}")
+                    raise ASHValidationError(
+                        f"Failed to load existing results: {str(e)}"
+                    )
+            # Only identify files to scan if we're not using existing results
+            elif "convert" in phases or "scan" in phases:
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")
                 self.source_scan_set = scan_set(
                     source=self.source_dir,

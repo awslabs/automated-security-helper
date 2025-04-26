@@ -2,6 +2,7 @@
 
 import multiprocessing
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -163,7 +164,7 @@ class ScanExecutionEngine:
 
         # Initialize base components
         self._completed_scanners = []
-        self._results = {"scanners": {}}
+        self._results = self._asharp_model
         self._progress = None
         self._max_workers = min(4, multiprocessing.cpu_count())
 
@@ -194,11 +195,13 @@ class ScanExecutionEngine:
         self._enabled_from_config = []
         for key, val in self._scanner_factory.available_scanners().items():
             val_instance = val(
-                config=self._config.get_plugin_config(
-                    plugin_type=PluginType.scanner, plugin_name=key
-                )
-                if self._config is not None
-                else None,
+                config=(
+                    self._config.get_plugin_config(
+                        plugin_type=PluginType.scanner, plugin_name=key
+                    )
+                    if self._config is not None
+                    else None
+                ),
                 context=PluginContext(
                     source_dir=self.source_dir,
                     output_dir=self.output_dir,
@@ -330,6 +333,38 @@ class ScanExecutionEngine:
         ASH_LOGGER.info(f"Executing phases: {', '.join(ordered_phases)}")
 
         # Start the progress display before executing any phases
+        # Only start if it's not already started
+        if (
+            not hasattr(self.progress_display, "live")
+            or self.progress_display.live is None
+        ):
+            self.progress_display.start()
+
+        # If we're only running the report phase (likely with existing results),
+        # we don't need to set up the work directory or clean anything up
+        report_only = len(ordered_phases) == 1 and ordered_phases[0] == "report"
+
+        # Only create directories if we're not in report-only mode
+        if not report_only:
+            # Ensure work directory exists
+            if self.work_dir:
+                self.work_dir.mkdir(parents=True, exist_ok=True)
+
+            # Clean up existing directories if needed
+            for working_dir in ["scanners", "converted"]:
+                path_working_dir = self.output_dir.joinpath(working_dir)
+                if path_working_dir.exists():
+                    ASH_LOGGER.verbose(
+                        f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
+                    )
+                    shutil.rmtree(path_working_dir)
+                path_working_dir.mkdir(parents=True, exist_ok=True)
+
+        # Always ensure reports directory exists
+        reports_dir = self.output_dir.joinpath("reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        # Start the progress display before executing any phases
         self.progress_display.start()
 
         try:
@@ -383,6 +418,11 @@ class ScanExecutionEngine:
                     report_phase.execute(
                         report_dir=self.output_dir.joinpath("reports"),
                         plugin_registry=self._plugin_registry,
+                        cli_output_formats=(
+                            self._config.output_formats
+                            if hasattr(self._config, "output_formats")
+                            else None
+                        ),
                     )
 
             # Return the results

@@ -21,14 +21,6 @@ global_settings:
 build:
   build_mode: ONLINE
   custom_scanners: []
-output_formats:
-  - sarif
-  - junitxml
-  - html
-  - cyclonedx
-  - ocsf
-  - asff
-  - text
 reporters:
   asff:
     enabled: false

@@ -3,10 +3,7 @@
 from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.base.reporter_plugin import (
-    ReporterPluginBase,
-    ReporterPluginConfigBase,
-)
+from automated_security_helper.base.reporter_plugin import ReporterPluginBase
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -21,13 +18,18 @@ class ReportPhase(EnginePhase):
         return "report"
 
     def execute(
-        self, report_dir: Path, plugin_registry: PluginRegistry = None, **kwargs
+        self,
+        report_dir: Path,
+        plugin_registry: PluginRegistry = None,
+        cli_output_formats=None,
+        **kwargs,
     ) -> None:
         """Execute the Report phase.
 
         Args:
             report_dir(Path): The directory to save reports to.
             plugin_registry: Registry of plugins to use
+            cli_output_formats: Output formats specified via CLI, which override config
             **kwargs: Additional arguments
         """
         ASH_LOGGER.debug("Entering: ReportPhase.execute()")
@@ -41,6 +43,16 @@ class ReportPhase(EnginePhase):
 
         # Print progress update
         ASH_LOGGER.info("Preparing report data...")
+
+        # Get output formats from config
+        output_formats = getattr(self.config, "output_formats", [])
+
+        # If CLI output formats are provided, they override the config
+        cli_specified = False
+        if cli_output_formats:
+            cli_specified = True
+            output_formats = cli_output_formats
+            ASH_LOGGER.info(f"Using CLI-specified output formats: {output_formats}")
 
         # Create plugin context
         plugin_context = PluginContext(
@@ -64,40 +76,109 @@ class ReportPhase(EnginePhase):
         # Filter reporters based on configuration
         active_reporters = {}
 
-        for reporter_name, reporter_plugin in registered_reporters.items():
-            if reporter_plugin.enabled:
-                ASH_LOGGER.verbose(f"Enabled reporter {reporter_name} from registry")
-                active_reporters[reporter_plugin.name] = reporter_plugin.plugin_class(
-                    config=reporter_plugin.plugin_config,
-                    context=plugin_context,
-                    source_dir=self.source_dir,
-                    output_dir=self.output_dir,
-                )
-            else:
-                ASH_LOGGER.warning(
-                    f"Reporter {reporter_name} is disabled in config, skipping"
-                )
+        # If CLI specified formats, only use those formats
+        # Otherwise, use the config-based approach
+        if cli_specified:
+            # Process only CLI-specified formats
+            for fmt in output_formats:
+                if hasattr(fmt, "value"):
+                    fmt = fmt.value
+                fmt_str = str(fmt).lower()
 
-        # First, check the reporters block in the config
-        # if hasattr(self.config, "reporters") and self.config.reporters:
-        #     for reporter_name, reporter_config in self.config.reporters.model_dump(mode="json").items():
-        #         reporter_name = reporter_name.lower()
-        #         if reporter_name in registered_reporters and reporter_config.enabled:
-        #             # Get the reporter class from the registry
-        #             reporter_plugin = registered_reporters[reporter_name]
-        #             reporter_class = reporter_plugin.plugin_class
+                # Try to find the reporter in the registry
+                reporter_found = False
+                for reporter_name, reporter_plugin in registered_reporters.items():
+                    if (
+                        reporter_name.lower() == fmt_str
+                        or reporter_plugin.name.lower() == fmt_str
+                    ):
+                        # Get reporter config if available
+                        reporter_config = reporter_plugin.plugin_config
 
-        #             # Create an instance with the context
-        #             reporter_instance = reporter_class(context=plugin_context)
+                        # Create reporter instance
+                        reporter_class = reporter_plugin.plugin_class
+                        reporter_instance = reporter_class(
+                            context=plugin_context, config=reporter_config
+                        )
 
-        #             # Configure the reporter with its config from the reporters block
-        #             reporter_instance.configure(reporter_config)
+                        active_reporters[fmt_str] = {
+                            "reporter": reporter_instance,
+                            "name": reporter_config.name,
+                        }
+                        reporter_found = True
+                        ASH_LOGGER.debug(
+                            f"Enabled reporter {fmt_str} from CLI arguments"
+                        )
+                        break
 
-        #             active_reporters[reporter_name] = {
-        #                 "reporter": reporter_instance,
-        #                 "name": reporter_plugin.name
-        #             }
-        #             ASH_LOGGER.verbose(f"Enabled reporter {reporter_name} from reporters config block")
+                if not reporter_found:
+                    ASH_LOGGER.warning(f"No reporter found for format: {fmt_str}")
+        else:
+            # First, check the reporters block in the config
+            if hasattr(self.config, "reporters") and self.config.reporters:
+                for reporter_name, reporter_config in self.config.reporters.items():
+                    reporter_name = reporter_name.lower()
+                    if (
+                        reporter_name in registered_reporters
+                        and reporter_config.enabled
+                    ):
+                        # Get the reporter class from the registry
+                        reporter_plugin = registered_reporters[reporter_name]
+                        reporter_class = reporter_plugin.plugin_class
+
+                        # Create an instance with the context
+                        reporter_instance = reporter_class(context=plugin_context)
+
+                        # Configure the reporter with its config from the reporters block
+                        reporter_instance.configure(reporter_config)
+
+                        active_reporters[reporter_name] = {
+                            "reporter": reporter_instance,
+                            "name": reporter_plugin.name,
+                        }
+                        ASH_LOGGER.debug(
+                            f"Enabled reporter {reporter_name} from reporters config block"
+                        )
+
+            # Then, add any reporters from output_formats that aren't already added
+            # This maintains backward compatibility
+            for fmt in output_formats:
+                if hasattr(fmt, "value"):
+                    fmt = fmt.value
+                fmt_str = str(fmt).lower()
+
+                # Skip if already added
+                if fmt_str in active_reporters:
+                    continue
+
+                # Try to find the reporter in the registry
+                reporter_found = False
+                for reporter_name, reporter_plugin in registered_reporters.items():
+                    if (
+                        reporter_name.lower() == fmt_str
+                        or reporter_plugin.name.lower() == fmt_str
+                    ):
+                        # Get reporter config if available
+                        reporter_config = reporter_plugin.plugin_config
+
+                        # Create reporter instance
+                        reporter_class = reporter_plugin.plugin_class
+                        reporter_instance = reporter_class(
+                            context=plugin_context, config=reporter_config
+                        )
+
+                        active_reporters[fmt_str] = {
+                            "reporter": reporter_instance,
+                            "name": reporter_config.name,
+                        }
+                        reporter_found = True
+                        ASH_LOGGER.debug(
+                            f"Enabled reporter {fmt_str} from output_formats list"
+                        )
+                        break
+
+                if not reporter_found:
+                    ASH_LOGGER.warning(f"No reporter found for format: {fmt_str}")
 
         if not active_reporters:
             ASH_LOGGER.warning("No active reporters found")
@@ -127,11 +208,9 @@ class ReportPhase(EnginePhase):
         total_reporters = len(active_reporters)
         report_dir.mkdir(parents=True, exist_ok=True)
 
-        reporter: ReporterPluginBase
-        for reporter_class_name, reporter in active_reporters.items():
-            reporter_config: ReporterPluginConfigBase = reporter.config
-            reporter_name = reporter_config.name
-            fmt = reporter_config.extension
+        for fmt, reporter_info in active_reporters.items():
+            reporter: ReporterPluginBase = reporter_info["reporter"]
+            reporter_name = reporter_info["name"]
 
             # Create task for this reporter
             task_description = f"[magenta]({reporter_name}) Generating {fmt} report..."
@@ -148,7 +227,7 @@ class ReportPhase(EnginePhase):
                 description=f"[blue]({reporter_name}) Starting {fmt} report generation...",
             )
 
-            ASH_LOGGER.verbose(f"Starting {fmt} report generation with {reporter_name}")
+            ASH_LOGGER.info(f"Starting {fmt} report generation with {reporter_name}")
 
             try:
                 # Generate report with this reporter
@@ -163,6 +242,9 @@ class ReportPhase(EnginePhase):
                 )
 
                 # Generate the report
+                reporter.source_dir = self.source_dir
+                reporter.output_dir = self.output_dir
+                reporter.context = plugin_context
                 formatted = reporter.report(self.asharp_model)
                 if formatted is None:
                     ASH_LOGGER.error(
@@ -171,14 +253,14 @@ class ReportPhase(EnginePhase):
                     raise ValueError(f"Reporter returned empty result for {fmt}")
 
                 # Determine output filename based on reporter's extension if available
-                output_filename = f"ash.{fmt}"
+                output_filename = f"ash.{reporter.config.extension if reporter.config.extension else fmt}"
                 if hasattr(reporter, "config") and hasattr(
                     reporter.config, "extension"
                 ):
                     output_filename = f"ash.{reporter.config.extension}"
 
                 output_file = report_dir.joinpath(output_filename)
-                ASH_LOGGER.verbose(f"Writing {fmt} report to {output_file}")
+                ASH_LOGGER.info(f"Writing {fmt} report to {output_file}")
                 output_file.write_text(formatted)
 
                 # Update reporter task to show completion
