@@ -24,25 +24,25 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
-class JupyterNotebookConverterConfigOptions(ConverterOptionsBase):
+class JupyterConverterConfigOptions(ConverterOptionsBase):
     pass
 
 
-class JupyterNotebookConverterConfig(ConverterPluginConfigBase):
+class JupyterConverterConfig(ConverterPluginConfigBase):
     """Jupyter Notebook (.ipynb) to Python converter configuration."""
 
     name: Literal["jupyter"] = "jupyter"
     enabled: bool = True
     options: Annotated[
-        JupyterNotebookConverterConfigOptions,
+        JupyterConverterConfigOptions,
         Field(description="Configure Jupyter Notebook converter"),
-    ] = JupyterNotebookConverterConfigOptions()
+    ] = JupyterConverterConfigOptions()
 
 
-class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfig]):
+class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     """Converter implementation for Jupyter notebooks security scanning."""
 
-    config: JupyterNotebookConverterConfig = JupyterNotebookConverterConfig()
+    config: JupyterConverterConfig = JupyterConverterConfig()
 
     def model_post_init(self, context):
         self.work_dir = (
@@ -52,7 +52,7 @@ class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfi
         )
         self.tool_version = version("nbconvert")
         if self.config is None:
-            self.config = JupyterNotebookConverterConfig()
+            self.config = JupyterConverterConfig()
         return super().model_post_init(context)
 
     def validate(self):

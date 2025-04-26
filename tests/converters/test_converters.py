@@ -12,8 +12,8 @@ from automated_security_helper.converters.ash_default.archive_converter import (
     ArchiveConverterConfig,
 )
 from automated_security_helper.converters.ash_default.jupyter_converter import (
-    JupyterNotebookConverter,
-    JupyterNotebookConverterConfig,
+    JupyterConverter,
+    JupyterConverterConfig,
 )
 
 
@@ -130,8 +130,8 @@ class TestArchiveConverter:
         assert not (extracted_dir / "test.txt").exists()
 
 
-class TestJupyterNotebookConverter:
-    """Test cases for JupyterNotebookConverter."""
+class TestJupyterConverter:
+    """Test cases for JupyterConverter."""
 
     @pytest.fixture
     def temp_dir(self):
@@ -152,9 +152,9 @@ class TestJupyterNotebookConverter:
         return notebook_path
 
     def test_jupyter_converter_init(self, temp_dir):
-        """Test JupyterNotebookConverter initialization."""
-        config = JupyterNotebookConverterConfig()
-        converter = JupyterNotebookConverter(
+        """Test JupyterConverter initialization."""
+        config = JupyterConverterConfig()
+        converter = JupyterConverter(
             source_dir=temp_dir, output_dir=temp_dir / "output", config=config
         )
         assert converter.config == config
@@ -164,19 +164,19 @@ class TestJupyterNotebookConverter:
 
     def test_jupyter_converter_validate(self, temp_dir):
         """Test validate method."""
-        converter = JupyterNotebookConverter(
+        converter = JupyterConverter(
             source_dir=temp_dir,
             output_dir=temp_dir / "output",
-            config=JupyterNotebookConverterConfig(),
+            config=JupyterConverterConfig(),
         )
         assert converter.validate() is True
 
     def test_jupyter_converter_convert(self, temp_dir, sample_notebook):
         """Test convert method."""
-        converter = JupyterNotebookConverter(
+        converter = JupyterConverter(
             source_dir=temp_dir,
             output_dir=temp_dir / "output",
-            config=JupyterNotebookConverterConfig(),
+            config=JupyterConverterConfig(),
         )
         results = converter.convert()
         assert len(results) == 1

@@ -28,7 +28,7 @@ class ConverterPluginBase(BaseModel, Generic[T]):
         extra="allow", arbitrary_types_allowed=True, use_enum_values=True
     )
 
-    config: T | PluginConfigBase | None = None
+    config: T | ConverterPluginConfigBase | None = None
     context: PluginContext | None = None
 
     source_dir: Path | None = None

@@ -1,8 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from pydantic import Field
 import yaml
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -11,13 +12,19 @@ from automated_security_helper.base.reporter_plugin import (
 
 
 class ASFFReporterConfigOptions(ReporterOptionsBase):
-    pass
+    aws_account_id: Annotated[str, Field(pattern=r"^\d{12}$")] = "123456789012"
+    aws_region: Annotated[
+        str,
+        Field(
+            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}"
+        ),
+    ] = "us-east-1"
 
 
 class ASFFReporterConfig(ReporterPluginConfigBase):
     name: Literal["asff"] = "asff"
     extension: str = "asff"
-    enabled: bool = True
+    enabled: bool = False
 
 
 class ASFFReporter(ReporterPluginBase[ASFFReporterConfig]):

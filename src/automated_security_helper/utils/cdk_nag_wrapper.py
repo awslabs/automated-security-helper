@@ -264,7 +264,7 @@ def run_cdk_nag_against_cfn_template(
                         Level.warning
                         if line.compliance == "Non-Compliant"
                         and line.rule_level != "Error"
-                        else Level.note
+                        else Level.none
                     )
                 ),
                 kind=(

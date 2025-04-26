@@ -3,8 +3,12 @@
 from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 from automated_security_helper.core.progress import ExecutionPhase
-from automated_security_helper.reporters.ash_default.ocsf_reporter import OCSFReporter
+from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -16,11 +20,14 @@ class ReportPhase(EnginePhase):
         """Return the name of this phase."""
         return "report"
 
-    def execute(self, report_dir: Path, **kwargs) -> None:
+    def execute(
+        self, report_dir: Path, plugin_registry: PluginRegistry = None, **kwargs
+    ) -> None:
         """Execute the Report phase.
 
         Args:
             report_dir(Path): The directory to save reports to.
+            plugin_registry: Registry of plugins to use
             **kwargs: Additional arguments
         """
         ASH_LOGGER.debug("Entering: ReportPhase.execute()")
@@ -35,111 +42,83 @@ class ReportPhase(EnginePhase):
         # Print progress update
         ASH_LOGGER.info("Preparing report data...")
 
-        # Get output formats from config
-        output_formats = getattr(self.config, "output_formats", [])
-        if not output_formats:
-            ASH_LOGGER.warning("No output formats specified in configuration")
-            self.update_progress(100, "No output formats specified")
-            return
-
-        # Get the appropriate reporters
-        from automated_security_helper.reporters.ash_default import (
-            ASFFReporter,
-            CSVReporter,
-            CycloneDXReporter,
-            HTMLReporter,
-            JSONReporter,
-            JUnitXMLReporter,
-            SARIFReporter,
-            SPDXReporter,
-            TextReporter,
-            YAMLReporter,
-        )
-
+        # Create plugin context
         plugin_context = PluginContext(
             source_dir=self.source_dir,
             output_dir=self.output_dir,
             work_dir=self.work_dir,
         )
 
-        available_reporters = {
-            "asff": {
-                "reporter": ASFFReporter(context=plugin_context),
-                "name": "ASFF Reporter",
-            },
-            "csv": {
-                "reporter": CSVReporter(context=plugin_context),
-                "name": "CSV Reporter",
-            },
-            "cyclonedx": {
-                "reporter": CycloneDXReporter(context=plugin_context),
-                "name": "CycloneDX Reporter",
-            },
-            "html": {
-                "reporter": HTMLReporter(context=plugin_context),
-                "name": "HTML Reporter",
-            },
-            "json": {
-                "reporter": JSONReporter(context=plugin_context),
-                "name": "JSON Reporter",
-            },
-            "junitxml": {
-                "reporter": JUnitXMLReporter(context=plugin_context),
-                "name": "JUnit XML Reporter",
-            },
-            "sarif": {
-                "reporter": SARIFReporter(context=plugin_context),
-                "name": "SARIF Reporter",
-            },
-            "ocsf": {
-                "reporter": OCSFReporter(context=plugin_context),
-                "name": "OCSF Reporter",
-            },
-            "spdx": {
-                "reporter": SPDXReporter(context=plugin_context),
-                "name": "SPDX Reporter",
-            },
-            "text": {
-                "reporter": TextReporter(context=plugin_context),
-                "name": "Text Reporter",
-            },
-            "yaml": {
-                "reporter": YAMLReporter(context=plugin_context),
-                "name": "YAML Reporter",
-            },
-        }
+        # Get all registered reporter plugins
+        registered_reporters = {}
+        if plugin_registry:
+            registered_reporters = plugin_registry.get_plugin(
+                plugin_type=PluginType.reporter
+            )
 
-        # Filter reporters based on the configured output formats
+        if not registered_reporters:
+            ASH_LOGGER.warning("No reporter plugins registered")
+            self.update_progress(100, "No reporter plugins registered")
+            return
+
+        # Filter reporters based on configuration
         active_reporters = {}
-        for fmt in output_formats:
-            if hasattr(fmt, "value"):
-                fmt = fmt.value
-            fmt_str = str(fmt).lower()
-            if fmt_str in available_reporters:
-                active_reporters[fmt_str] = available_reporters[fmt_str]
+
+        for reporter_name, reporter_plugin in registered_reporters.items():
+            if reporter_plugin.enabled:
+                ASH_LOGGER.verbose(f"Enabled reporter {reporter_name} from registry")
+                active_reporters[reporter_plugin.name] = reporter_plugin.plugin_class(
+                    config=reporter_plugin.plugin_config,
+                    context=plugin_context,
+                    source_dir=self.source_dir,
+                    output_dir=self.output_dir,
+                )
+            else:
+                ASH_LOGGER.warning(
+                    f"Reporter {reporter_name} is disabled in config, skipping"
+                )
+
+        # First, check the reporters block in the config
+        # if hasattr(self.config, "reporters") and self.config.reporters:
+        #     for reporter_name, reporter_config in self.config.reporters.model_dump(mode="json").items():
+        #         reporter_name = reporter_name.lower()
+        #         if reporter_name in registered_reporters and reporter_config.enabled:
+        #             # Get the reporter class from the registry
+        #             reporter_plugin = registered_reporters[reporter_name]
+        #             reporter_class = reporter_plugin.plugin_class
+
+        #             # Create an instance with the context
+        #             reporter_instance = reporter_class(context=plugin_context)
+
+        #             # Configure the reporter with its config from the reporters block
+        #             reporter_instance.configure(reporter_config)
+
+        #             active_reporters[reporter_name] = {
+        #                 "reporter": reporter_instance,
+        #                 "name": reporter_plugin.name
+        #             }
+        #             ASH_LOGGER.verbose(f"Enabled reporter {reporter_name} from reporters config block")
 
         if not active_reporters:
-            ASH_LOGGER.warning(
-                f"No matching reporters found for formats: {output_formats}"
-            )
-            self.update_progress(100, "No matching reporters found")
+            ASH_LOGGER.warning("No active reporters found")
+            self.update_progress(100, "No active reporters found")
             return
 
         # Update progress
-        self.update_progress(20, f"Found {len(active_reporters)} matching reporters")
+        self.update_progress(20, f"Found {len(active_reporters)} active reporters")
 
         ASH_LOGGER.info(
-            f"Found {len(active_reporters)} matching reporters for formats: {', '.join(output_formats)}"
+            f"Found {len(active_reporters)} active reporters: {', '.join(active_reporters.keys())}"
         )
 
         # Update progress
         self.update_progress(
             30,
-            f"Generating reports in formats: {', '.join([str(fmt) for fmt in output_formats])}",
+            f"Generating reports in formats: {', '.join(active_reporters.keys())}",
         )
 
         ASH_LOGGER.info(
-            f"Generating reports in formats: {', '.join([str(fmt) for fmt in output_formats])}"
+            f"Generating reports in formats: {', '.join(active_reporters.keys())}"
         )
 
         # Generate reports
@@ -148,9 +127,11 @@ class ReportPhase(EnginePhase):
         total_reporters = len(active_reporters)
         report_dir.mkdir(parents=True, exist_ok=True)
 
-        for fmt, reporter_info in active_reporters.items():
-            reporter = reporter_info["reporter"]
-            reporter_name = reporter_info["name"]
+        reporter: ReporterPluginBase
+        for reporter_class_name, reporter in active_reporters.items():
+            reporter_config: ReporterPluginConfigBase = reporter.config
+            reporter_name = reporter_config.name
+            fmt = reporter_config.extension
 
             # Create task for this reporter
             task_description = f"[magenta]({reporter_name}) Generating {fmt} report..."
@@ -167,7 +148,7 @@ class ReportPhase(EnginePhase):
                 description=f"[blue]({reporter_name}) Starting {fmt} report generation...",
             )
 
-            ASH_LOGGER.info(f"Starting {fmt} report generation with {reporter_name}")
+            ASH_LOGGER.verbose(f"Starting {fmt} report generation with {reporter_name}")
 
             try:
                 # Generate report with this reporter
@@ -182,13 +163,6 @@ class ReportPhase(EnginePhase):
                 )
 
                 # Generate the report
-                reporter.source_dir = self.source_dir
-                reporter.output_dir = self.output_dir
-                reporter.context = PluginContext(
-                    source_dir=self.source_dir,
-                    output_dir=self.output_dir,
-                    work_dir=self.work_dir,
-                )
                 formatted = reporter.report(self.asharp_model)
                 if formatted is None:
                     ASH_LOGGER.error(
@@ -196,21 +170,15 @@ class ReportPhase(EnginePhase):
                     )
                     raise ValueError(f"Reporter returned empty result for {fmt}")
 
-                # Write the report to a file
+                # Determine output filename based on reporter's extension if available
                 output_filename = f"ash.{fmt}"
-                if fmt == "cyclonedx":
-                    output_filename = "ash.cdx.json"
-                elif fmt == "junitxml":
-                    output_filename = "ash.junit.xml"
-                elif fmt == "sarif":
-                    output_filename = "ash.sarif"
-                elif fmt == "spdx":
-                    output_filename = "ash.spdx.json"
-                elif fmt == "ocsf":
-                    output_filename = "ash.ocsf.json"
+                if hasattr(reporter, "config") and hasattr(
+                    reporter.config, "extension"
+                ):
+                    output_filename = f"ash.{reporter.config.extension}"
 
                 output_file = report_dir.joinpath(output_filename)
-                ASH_LOGGER.info(f"Writing {fmt} report to {output_file}")
+                ASH_LOGGER.verbose(f"Writing {fmt} report to {output_file}")
                 output_file.write_text(formatted)
 
                 # Update reporter task to show completion
@@ -254,9 +222,3 @@ class ReportPhase(EnginePhase):
         ASH_LOGGER.info(
             f"✅ Generated reports with {completed_reporters}/{total_reporters} reporters"
         )
-
-        # Add summary row
-        # self.add_summary(
-        #     "Complete",
-        #     f"Generated reports with {completed_reporters}/{total_reporters} reporters",
-        # )

@@ -17,7 +17,7 @@ class YAMLReporterConfigOptions(ReporterOptionsBase):
 class YAMLReporterConfig(ReporterPluginConfigBase):
     name: Literal["yaml"] = "yaml"
     extension: str = "yaml"
-    enabled: bool = True
+    enabled: bool = False
 
 
 class YAMLReporter(ReporterPluginBase[YAMLReporterConfig]):

@@ -17,7 +17,7 @@ class CSVReporterConfigOptions(ReporterOptionsBase):
 class CSVReporterConfig(ReporterPluginConfigBase):
     name: Literal["csv"] = "csv"
     extension: str = "csv"
-    enabled: bool = True
+    enabled: bool = False
 
 
 class CSVReporter(ReporterPluginBase[CSVReporterConfig]):

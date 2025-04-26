@@ -5,7 +5,7 @@ from automated_security_helper.converters.ash_default.archive_converter import (
     ArchiveConverter,
 )
 from automated_security_helper.converters.ash_default.jupyter_converter import (
-    JupyterNotebookConverter,
+    JupyterConverter,
 )
 
-__all__ = ["ArchiveConverter", "JupyterNotebookConverter"]
+__all__ = ["ArchiveConverter", "JupyterConverter"]

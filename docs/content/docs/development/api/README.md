@@ -93,7 +93,7 @@
 - [`archive_converter.ArchiveConverter`](./converters.ash_default.archive_converter.md#class-archiveconverter): Converter implementation for Archive file extraction.
 - [`archive_converter.ArchiveConverterConfig`](./converters.ash_default.archive_converter.md#class-archiveconverterconfig): Archive (ZIP/TAR/GZIP/etc) converter configuration.
 - [`archive_converter.ArchiveConverterConfigOptions`](./converters.ash_default.archive_converter.md#class-archiveconverterconfigoptions)
-- [`jupyter_converter.JupyterNotebookConverter`](./converters.ash_default.jupyter_converter.md#class-jupyternotebookconverter): Converter implementation for Jupyter notebooks security scanning.
+- [`jupyter_converter.JupyterConverter`](./converters.ash_default.jupyter_converter.md#class-jupyternotebookconverter): Converter implementation for Jupyter notebooks security scanning.
 - [`jupyter_converter.JupyterNotebookConverterConfig`](./converters.ash_default.jupyter_converter.md#class-jupyternotebookconverterconfig): Jupyter Notebook (.ipynb) to Python converter configuration.
 - [`jupyter_converter.JupyterNotebookConverterConfigOptions`](./converters.ash_default.jupyter_converter.md#class-jupyternotebookconverterconfigoptions)
 - [`exceptions.ASHValidationError`](./core.exceptions.md#class-ashvalidationerror): Exception raised when an ASH component fails to validate.

@@ -29,7 +29,7 @@ class ReporterPluginBase(BaseModel, Generic[T]):
     model_config = ConfigDict(extra="allow")
 
     # Required fields that should be set in child classes
-    config: T | PluginConfigBase | None = None
+    config: T | ReporterPluginConfigBase | None = None
     context: PluginContext | None = None
 
     source_dir: Path | None = None

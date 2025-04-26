@@ -16,7 +16,7 @@ class SPDXReporterConfigOptions(ReporterOptionsBase):
 class SPDXReporterConfig(ReporterPluginConfigBase):
     name: Literal["spdx"] = "spdx"
     extension: str = "spdx.json"
-    enabled: bool = True
+    enabled: bool = False
 
 
 class SPDXReporter(ReporterPluginBase[SPDXReporterConfig]):

@@ -16,7 +16,7 @@ class JSONReporterConfigOptions(ReporterOptionsBase):
 class JSONReporterConfig(ReporterPluginConfigBase):
     name: Literal["json"] = "json"
     extension: str = "json"
-    enabled: bool = True
+    enabled: bool = False
 
 
 class JSONReporter(ReporterPluginBase[JSONReporterConfig]):
