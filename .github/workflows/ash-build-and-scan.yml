@@ -87,65 +87,43 @@ jobs:
             --source-dir $(pwd) \
             --output-dir ash_output \
             --config ./.ash.yaml \
-            --strategy parallel \
-            --no-cleanup \
             --build-target ci \
-            --verbose | \
-              tee ash_stdout.txt
+            --verbose
 
           # cat the markdown report and add it to the summary and step report
           ASH_MD_REPORT=`cat ash_output/reports/ash.md`
 
-          # Add the
-          echo $ASH_MD_REPORT | tee -a "${GITHUB_STEP_SUMMARY}"
+          # Add the Markdown summary to the step summary
+          cat ash_output/reports/ash.md >> "${GITHUB_STEP_SUMMARY}"
 
-          # Write the summary markdown to the GITHUB_OUTPUT
-          {
-            echo 'ASH_OUTPUT<<EOF'
-            echo "$ASH_MD_REPORT"
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
+          # # Exit with the highest return code from ASH
+          # set -e
+          # typeset -i ASH_EXIT_CODE
+          # # ASH_EXIT_CODE=`sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt`
+          # ASH_EXIT_CODE=`perl -ne 'print "$1\n" if /Highest return code is ([[:digit:]]+)/' ash_stdout.txt`
+          # echo "Highest return code found is '$ASH_EXIT_CODE'"
+          # if [ $ASH_EXIT_CODE -eq 0 ]; then
+          #   echo "ASH scan succeeded"
+          #   exit 0
+          # else
+          #   echo "ASH scan failed"
+          #   exit $ASH_EXIT_CODE
+          # fi
 
-          # Exit with the highest return code from ASH
-          set -e
-          typeset -i ASH_EXIT_CODE
-          # ASH_EXIT_CODE=`sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt`
-          ASH_EXIT_CODE=`perl -ne 'print "$1\n" if /Highest return code is ([[:digit:]]+)/' ash_stdout.txt`
-          echo "Highest return code found is '$ASH_EXIT_CODE'"
-          if [ $ASH_EXIT_CODE -eq 0 ]; then
-            echo "ASH scan succeeded"
-            exit 0
-          else
-            echo "ASH scan failed"
-            exit $ASH_EXIT_CODE
-          fi
+      - name: Show ash_output tree
+        if: always()
+        continue-on-error: false
+        run: |
+          tree ash_output
 
-      - name: Post ASH output as PR comment
+      - name: Post ASH MarkdownReporter output as PR comment
         uses: mshick/add-pr-comment@v2
         # This does not work for fork runs without setting up a proxy
         # Info: https://github.com/mshick/add-pr-comment#proxy-for-fork-based-prshttps://github.com/mshick/add-pr-comment#proxy-for-fork-based-prs
         if: github.repository_owner == 'awslabs'
         continue-on-error: true
         with:
-          message: |
-            ${{ steps.ash.outputs.ASH_OUTPUT }}
-
-      - name: Collect summary
-        uses: actions/upload-artifact@v4
-        if: always()
-        continue-on-error: true
-        with:
-          name: Summary
-          path: "${{ env.SUMMARY_FILE }}"
-
-      - name: Collect ash_stdout
-        uses: actions/upload-artifact@v4
-        if: always()
-        continue-on-error: true
-        with:
-          name: ash_stdout
-          path: ash_stdout.txt
-          if-no-files-found: error
+          message-path: ash_output/reports/ash.md
 
       - name: Publish JUnit Test Report
         uses: mikepenz/action-junit-report@v5

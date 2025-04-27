@@ -680,14 +680,45 @@ def check_field_presence_in_reports(
         # Check presence in flat reports
         if flat_reports:
             for report_type, report_data in flat_reports.items():
-                # This is a simplified check - in a real implementation,
-                # you would need to map SARIF fields to flat report fields
                 presence_info[path]["in_flat"][report_type] = False
 
-                # For demonstration, we'll just check if any field in the flat report
-                # contains the last part of the SARIF path
-                if path.split(".")[-1] in str(report_data):
-                    presence_info[path]["in_flat"][report_type] = True
+                # Get the mapping for this report type if available
+                reporter_mappings = get_reporter_mappings()
+                if (
+                    report_type in reporter_mappings
+                    and path in reporter_mappings[report_type]
+                ):
+                    mapped_field = reporter_mappings[report_type][path]
+
+                    # Check if the mapped field exists in the flat report
+                    if isinstance(report_data, dict):
+                        # For nested fields in JSON-like formats
+                        field_parts = mapped_field.split(".")
+                        current = report_data
+                        field_exists = True
+
+                        for part in field_parts:
+                            if part in current:
+                                current = current[part]
+                            else:
+                                field_exists = False
+                                break
+
+                        presence_info[path]["in_flat"][report_type] = field_exists
+                    elif isinstance(report_data, str):
+                        # For text-based formats, check if the field name appears in the content
+                        # This is a simplistic approach and might need refinement
+                        presence_info[path]["in_flat"][report_type] = (
+                            mapped_field in report_data
+                        )
+                else:
+                    # Fallback to checking if the last part of the path exists in the report
+                    # This is a heuristic approach and might not be accurate for all cases
+                    field_name = path.split(".")[-1]
+                    if isinstance(report_data, dict) and field_name in report_data:
+                        presence_info[path]["in_flat"][report_type] = True
+                    elif isinstance(report_data, str) and field_name in report_data:
+                        presence_info[path]["in_flat"][report_type] = True
 
     # Add reporter mappings if available
     reporter_mappings = get_reporter_mappings()
@@ -703,22 +734,129 @@ def get_reporter_mappings() -> Dict[str, Dict[str, str]]:
     """
     Get field mappings from registered reporters.
 
+    This function collects SARIF field mappings from all registered reporter plugins.
+    Each reporter can define how it maps SARIF fields to its own output format.
+
     Returns:
         Dictionary mapping reporter names to their field mappings
     """
     mappings = {}
 
-    # This would be implemented to collect mappings from reporter plugins
-    # For now, return a sample mapping for demonstration
-    mappings["ocsf"] = {
-        "runs[0].tool.driver.rules[0].id": "vulnerabilities[0].cve.uid",
-        "runs[0].results[0].message.text": "vulnerabilities[0].desc",
-    }
+    # Try to import reporter plugins dynamically
+    try:
+        from automated_security_helper.reporters.ash_default import (
+            ASFFReporter,
+            CSVReporter,
+            CycloneDXReporter,
+            HTMLReporter,
+            FlatJSONReporter,
+            JUnitXMLReporter,
+            MarkdownReporter,
+            OCSFReporter,
+            SARIFReporter,
+            SPDXReporter,
+            TextReporter,
+            YAMLReporter,
+        )
 
-    mappings["asff"] = {
-        "runs[0].results[0].ruleId": "Findings[0].Types[0]",
-        "runs[0].results[0].message.text": "Findings[0].Description",
-    }
+        # Define mappings for each reporter
+        # OCSF mappings
+        mappings["ocsf"] = {
+            "runs[0].tool.driver.rules[0].id": "vulnerabilities[0].cve.uid",
+            "runs[0].results[0].message.text": "vulnerabilities[0].desc",
+            "runs[0].results[0].ruleId": "vulnerabilities[0].title",
+            "runs[0].results[0].level": "severity",
+            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "affected_code[0].file.path",
+            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "affected_code[0].start_line",
+            "runs[0].results[0].locations[0].physicalLocation.region.endLine": "affected_code[0].end_line",
+        }
+
+        # ASFF mappings
+        mappings["asff"] = {
+            "runs[0].results[0].ruleId": "Findings[0].Types[0]",
+            "runs[0].results[0].message.text": "Findings[0].Description",
+            "runs[0].results[0].level": "Findings[0].Severity.Label",
+            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "Findings[0].Resources[0].Details.AwsEc2Instance.Path",
+            "runs[0].tool.driver.name": "Findings[0].ProductFields.aws/securityhub/ProductName",
+        }
+
+        # CSV mappings
+        mappings["csv"] = {
+            "runs[0].results[0].ruleId": "Rule ID",
+            "runs[0].results[0].message.text": "Description",
+            "runs[0].results[0].level": "Severity",
+            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "File Path",
+            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "Line Start",
+            "runs[0].tool.driver.name": "Scanner",
+        }
+
+        # Flat JSON mappings
+        mappings["flat-json"] = {
+            "runs[0].results[0].ruleId": "rule_id",
+            "runs[0].results[0].message.text": "description",
+            "runs[0].results[0].level": "severity",
+            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "file_path",
+            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "line_start",
+            "runs[0].results[0].locations[0].physicalLocation.region.endLine": "line_end",
+            "runs[0].tool.driver.name": "scanner",
+        }
+
+        # JUnit XML mappings
+        mappings["junitxml"] = {
+            "runs[0].results[0].ruleId": "testcase.classname",
+            "runs[0].results[0].message.text": "testcase.name",
+            "runs[0].results[0].level": "testcase.result.type",
+            "runs[0].tool.driver.name": "testsuite.name",
+        }
+
+        # Markdown mappings
+        mappings["markdown"] = {
+            "runs[0].results[0].ruleId": "Finding.title",
+            "runs[0].results[0].message.text": "Finding.description",
+            "runs[0].results[0].level": "Finding.severity",
+            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "Finding.location",
+            "runs[0].tool.driver.name": "Finding.scanner",
+        }
+
+        # HTML mappings
+        mappings["html"] = {
+            "runs[0].results[0].ruleId": "table.row.rule",
+            "runs[0].results[0].message.text": "table.row.message",
+            "runs[0].results[0].level": "table.row.severity",
+            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "table.row.location",
+            "runs[0].tool.driver.name": "table.section.scanner",
+        }
+
+        # Try to get mappings from reporter instances if they have a sarif_field_mappings attribute
+        reporters = [
+            ASFFReporter(),
+            CSVReporter(),
+            CycloneDXReporter(),
+            HTMLReporter(),
+            FlatJSONReporter(),
+            JUnitXMLReporter(),
+            MarkdownReporter(),
+            OCSFReporter(),
+            SARIFReporter(),
+            SPDXReporter(),
+            TextReporter(),
+            YAMLReporter(),
+        ]
+
+        for reporter in reporters:
+            if hasattr(reporter, "sarif_field_mappings") and callable(
+                getattr(reporter, "sarif_field_mappings")
+            ):
+                reporter_name = reporter.__class__.__name__.replace(
+                    "Reporter", ""
+                ).lower()
+                reporter_mappings = reporter.sarif_field_mappings()
+                if reporter_mappings:
+                    mappings[reporter_name] = reporter_mappings
+
+    except ImportError:
+        # If we can't import reporters, just use the static mappings defined above
+        pass
 
     return mappings
 
@@ -744,13 +882,18 @@ def generate_enhanced_html_report(
     generate_html_report(validation_results, output_path)
 
 
-def generate_html_report(validation_results: Dict, output_path: str) -> None:
+def generate_html_report(
+    validation_results: Dict,
+    output_path: str,
+    field_presence: Dict[str, Dict[str, Any]] = None,
+) -> None:
     """
     Generate a comprehensive HTML report showing SARIF field analysis and validation results.
 
     Args:
         validation_results: Validation results dictionary
         output_path: Path to write the HTML report
+        field_presence: Optional dictionary with field presence information
     """
     html = []
     html.append("<!DOCTYPE html>")
@@ -973,6 +1116,8 @@ def generate_html_report(validation_results: Dict, output_path: str) -> None:
 
     # Collect all fields from all scanners
     all_fields_by_path = {}
+
+    # First, add fields from validation_results
     for scanner, importance_categories in validation_results["missing_fields"].items():
         for importance, fields in importance_categories.items():
             for field_info in fields:
@@ -985,6 +1130,34 @@ def generate_html_report(validation_results: Dict, output_path: str) -> None:
                     }
                 else:
                     all_fields_by_path[path]["scanners"].add(scanner)
+
+    # Then, if field_presence is provided, add or update with that information
+    if field_presence:
+        for path, info in field_presence.items():
+            if path not in all_fields_by_path:
+                all_fields_by_path[path] = {
+                    "scanners": set(info.get("scanners", [])),
+                    "type": set(info.get("type", [])),
+                    "in_aggregate": info.get("in_aggregate", False),
+                    "in_flat": info.get("in_flat", {}),
+                    "reporter_mappings": info.get("reporter_mappings", {}),
+                }
+            else:
+                # Update existing entry with more accurate information
+                all_fields_by_path[path]["scanners"].update(
+                    set(info.get("scanners", []))
+                )
+                all_fields_by_path[path]["type"].update(set(info.get("type", [])))
+                all_fields_by_path[path]["in_aggregate"] = info.get(
+                    "in_aggregate", all_fields_by_path[path].get("in_aggregate", False)
+                )
+                all_fields_by_path[path]["in_flat"] = info.get(
+                    "in_flat", all_fields_by_path[path].get("in_flat", {})
+                )
+                all_fields_by_path[path]["reporter_mappings"] = info.get(
+                    "reporter_mappings",
+                    all_fields_by_path[path].get("reporter_mappings", {}),
+                )
 
     # Sort fields by path for better readability
     for path in sorted(all_fields_by_path.keys()):
@@ -1009,9 +1182,35 @@ def generate_html_report(validation_results: Dict, output_path: str) -> None:
         html.append(f"        <td class='field-path'>{path}</td>")
         html.append(f"        <td>{scanners_list}</td>")
         html.append(f"        <td>{field_type}</td>")
-        html.append(
-            f"        <td class='{'present' if info['in_aggregate'] else 'missing'}'>{info['in_aggregate']}</td>"
-        )
+
+        # In Aggregate column with proper styling
+        in_agg_class = "present" if info.get("in_aggregate", False) else "missing"
+        in_agg_text = "Yes" if info.get("in_aggregate", False) else "No"
+        html.append(f"        <td class='{in_agg_class}'>{in_agg_text}</td>")
+
+        # Reporter Mappings column
+        mappings_html = ""
+
+        # First, check for explicit reporter mappings in the field info
+        if info.get("reporter_mappings"):
+            for reporter, target_path in info["reporter_mappings"].items():
+                mappings_html += (
+                    f"<div class='reporter-mapping'>{reporter}: {target_path}</div>"
+                )
+
+        # Then check the global reporter mappings
+        else:
+            for reporter, mappings in reporter_mappings.items():
+                if path in mappings:
+                    mappings_html += f"<div class='reporter-mapping'>{reporter}: {mappings[path]}</div>"
+
+        # Add flat report presence indicators if available
+        if info.get("in_flat"):
+            for report_type, present in info["in_flat"].items():
+                presence_class = "present" if present else "missing"
+                presence_text = "✓" if present else "✗"
+                mappings_html += f"<div class='{presence_class}'>In {report_type}: {presence_text}</div>"
+
         html.append(f"        <td>{mappings_html}</td>")
         html.append("      </tr>")
 

@@ -16,6 +16,7 @@ from rich.table import Table
 
 from automated_security_helper.utils.analyze_sarif_fields import (
     analyze_sarif_file,
+    check_field_presence_in_reports,
     extract_field_paths,
     get_message_text,
     locations_match,
@@ -47,9 +48,9 @@ EXPECTED_TRANSFORMATIONS = [
 
 
 @inspect_app.command(
-    name="report-fidelity",
+    name="sarif-fields",
     help="""
-The `inspect report-fidelity` command analyzes SARIF reports to understand field usage across different scanners and ensure fields are preserved during aggregation.
+The `inspect sarif-fields` command analyzes SARIF reports to understand field usage across different scanners and ensure fields are preserved during aggregation.
 
 This command:
 1. Extracts field paths from the original SARIF reports
@@ -78,6 +79,12 @@ def analyze_sarif_fields(
             help="Path to aggregated SARIF report for validation",
         ),
     ] = None,
+    flat_reports_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            help="Directory containing flat report formats (CSV, JSON) for field mapping analysis",
+        ),
+    ] = None,
 ):
     """
     Analyze SARIF fields across different scanners to understand their schema.
@@ -88,6 +95,7 @@ def analyze_sarif_fields(
     3. Outputs results in both JSON and CSV formats
     4. Validates that fields from original scanner reports are preserved in the aggregated report
     5. Generates a comprehensive HTML report with field analysis and validation results
+    6. Analyzes how SARIF fields map to different flat report formats
     """
     console = Console()
 
@@ -163,10 +171,49 @@ def analyze_sarif_fields(
         with open(aggregated_sarif, "r") as f:
             aggregated_report = json.load(f)
 
+        # Load flat reports if provided
+        flat_reports = {}
+        if flat_reports_dir and os.path.exists(flat_reports_dir):
+            console.print(f"Loading flat reports from: [cyan]{flat_reports_dir}[/cyan]")
+
+            # Look for CSV files
+            csv_files = glob.glob(os.path.join(flat_reports_dir, "*.csv"))
+            for csv_file in csv_files:
+                report_name = os.path.basename(csv_file).replace(".csv", "")
+                with open(csv_file, "r") as f:
+                    flat_reports[report_name] = f.read()
+                console.print(f"  - Loaded CSV report: [cyan]{report_name}[/cyan]")
+
+            # Look for JSON files
+            json_files = glob.glob(os.path.join(flat_reports_dir, "*.json"))
+            for json_file in json_files:
+                # Skip SARIF files
+                if json_file.endswith(".sarif"):
+                    continue
+
+                report_name = os.path.basename(json_file).replace(".json", "")
+                try:
+                    with open(json_file, "r") as f:
+                        flat_reports[report_name] = json.load(f)
+                    console.print(f"  - Loaded JSON report: [cyan]{report_name}[/cyan]")
+                except json.JSONDecodeError:
+                    console.print(
+                        f"  - [yellow]Failed to parse JSON file: {json_file}[/yellow]"
+                    )
+
         # Validate
         validation_results = validate_sarif_aggregation(
             scanner_reports, aggregated_report
         )
+
+        # Check field presence in reports
+        field_presence = {}
+        for field_paths, scanner_name in all_field_paths:
+            field_presence.update(
+                check_field_presence_in_reports(
+                    field_paths, aggregated_report, flat_reports
+                )
+            )
 
         # Write validation results
         validation_path = os.path.join(output_dir, "sarif_validation.json")
@@ -224,7 +271,7 @@ def analyze_sarif_fields(
 
         # Generate a comprehensive HTML report with field analysis and validation results
         html_report_path = os.path.join(output_dir, "sarif_validation_report.html")
-        generate_html_report(validation_results, html_report_path)
+        generate_html_report(validation_results, html_report_path, field_presence)
 
         console.print("Wrote validation results to:")
         console.print(f"  - [cyan]{validation_path}[/cyan]")
