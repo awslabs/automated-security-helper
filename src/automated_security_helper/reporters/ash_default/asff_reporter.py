@@ -31,6 +31,11 @@ class ASFFReporterConfig(ReporterPluginConfigBase):
 class ASFFReporter(ReporterPluginBase[ASFFReporterConfig]):
     """Formats results as Amazon Security Finding Format (ASFF)."""
 
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = ASFFReporterConfig()
+        return super().model_post_init(context)
+
     def report(self, model: Any) -> str:
         """Format ASH model in Amazon Security Finding Format (ASFF)."""
         from automated_security_helper.models.asharp_model import ASHARPModel

@@ -21,7 +21,7 @@ build:
   custom_scanners: []
 reporters:
   asff:
-    enabled: true
+    enabled: false
   csv:
     enabled: true
   cyclonedx:

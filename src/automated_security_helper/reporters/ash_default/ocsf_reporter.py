@@ -23,6 +23,11 @@ class OCSFReporterConfig(ReporterPluginConfigBase):
 class OCSFReporter(ReporterPluginBase[OCSFReporterConfig]):
     """Formats results as Open Cybersecurity Schema Framework (OCSF) format."""
 
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = OCSFReporterConfig()
+        return super().model_post_init(context)
+
     def report(self, model: Any) -> str:
         """Format ASH model in Open Cybersecurity Schema Framework (OCSF) format."""
         from automated_security_helper.models.asharp_model import ASHARPModel

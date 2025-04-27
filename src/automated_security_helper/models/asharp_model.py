@@ -282,14 +282,6 @@ class ASHARPModel(BaseModel):
                         location = result.locations[0]
                         if location.physicalLocation:
                             if (
-                                hasattr(location.physicalLocation, "artifactLocation")
-                                and location.physicalLocation.artifactLocation
-                                and location.physicalLocation.artifactLocation.uri
-                            ):
-                                file_path = (
-                                    location.physicalLocation.artifactLocation.uri
-                                )
-                            elif (
                                 hasattr(location.physicalLocation, "root")
                                 and location.physicalLocation.root
                                 and hasattr(
@@ -303,12 +295,6 @@ class ASHARPModel(BaseModel):
                                 )
 
                             if (
-                                hasattr(location.physicalLocation, "region")
-                                and location.physicalLocation.region
-                            ):
-                                line_start = location.physicalLocation.region.startLine
-                                line_end = location.physicalLocation.region.endLine
-                            elif (
                                 hasattr(location.physicalLocation, "root")
                                 and location.physicalLocation.root
                                 and hasattr(location.physicalLocation.root, "region")
@@ -335,10 +321,12 @@ class ASHARPModel(BaseModel):
                         for loc in result.relatedLocations:
                             if (
                                 loc.physicalLocation
-                                and loc.physicalLocation.artifactLocation
+                                and loc.physicalLocation.root
+                                and loc.physicalLocation.root.artifactLocation
+                                and loc.physicalLocation.root.artifactLocation.uri
                             ):
                                 references.append(
-                                    loc.physicalLocation.artifactLocation.uri
+                                    loc.physicalLocation.root.artifactLocation.uri
                                 )
 
                     # Create the flattened vulnerability

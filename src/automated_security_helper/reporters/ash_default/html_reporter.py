@@ -25,6 +25,11 @@ class HTMLReporterConfig(ReporterPluginConfigBase):
 class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
     """Formats results as HTML."""
 
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = HTMLReporterConfig()
+        return super().model_post_init(context)
+
     def report(self, model: Any) -> str:
         """Format ASH model as HTML string with comprehensive styling and organization."""
         from automated_security_helper.models.asharp_model import ASHARPModel

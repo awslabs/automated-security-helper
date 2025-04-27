@@ -23,6 +23,11 @@ class SPDXReporterConfig(ReporterPluginConfigBase):
 class SPDXReporter(ReporterPluginBase[SPDXReporterConfig]):
     """Formats results as SPDX."""
 
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = SPDXReporterConfig()
+        return super().model_post_init(context)
+
     def report(self, model: Any) -> str:
         """Format ASH model in SPDX."""
         from automated_security_helper.models.asharp_model import ASHARPModel

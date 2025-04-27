@@ -15,6 +15,7 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sarif_utils import sanitize_sarif_paths
 
 
 class ScanPhase(EnginePhase):
@@ -598,7 +599,74 @@ class ScanPhase(EnginePhase):
 
         # Process the raw results based on type
         if isinstance(results.raw_results, SarifReport):
-            self.asharp_model.sarif.merge_sarif_report(results.raw_results)
+            # Sanitize paths in SARIF report to be relative to source directory
+            sanitized_sarif = sanitize_sarif_paths(
+                results.raw_results, self.plugin_context.source_dir
+            )
+            # Attach scanner details to the SARIF report
+            scanner_version = None
+
+            # Try to get scanner version from different sources
+            if (
+                hasattr(results, "metadata")
+                and results.metadata
+                and "scanner_version" in results.metadata
+            ):
+                scanner_version = results.metadata["scanner_version"]
+            elif hasattr(results.raw_results, "tool_version"):
+                scanner_version = results.raw_results.tool_version
+
+            # Build invocation details from metadata
+            invocation_details = {}
+
+            # If there's command execution info available, add it to invocation details
+            if hasattr(results, "metadata") and results.metadata:
+                if "command_line" in results.metadata:
+                    invocation_details["command_line"] = results.metadata[
+                        "command_line"
+                    ]
+                if "working_directory" in results.metadata:
+                    invocation_details["working_directory"] = results.metadata[
+                        "working_directory"
+                    ]
+                if "arguments" in results.metadata:
+                    invocation_details["arguments"] = results.metadata["arguments"]
+                if "exit_code" in results.metadata or hasattr(results, "exit_code"):
+                    invocation_details["exit_code"] = results.metadata.get(
+                        "exit_code", results.exit_code
+                    )
+                if "duration" in results.metadata or hasattr(results, "duration"):
+                    invocation_details["duration"] = results.metadata.get(
+                        "duration", results.duration
+                    )
+
+            # Add scanner execution details if available
+            if hasattr(results, "start_time") and results.start_time:
+                invocation_details["start_time"] = (
+                    results.start_time.isoformat()
+                    if hasattr(results.start_time, "isoformat")
+                    else str(results.start_time)
+                )
+            if hasattr(results, "end_time") and results.end_time:
+                invocation_details["end_time"] = (
+                    results.end_time.isoformat()
+                    if hasattr(results.end_time, "isoformat")
+                    else str(results.end_time)
+                )
+
+            # Attach scanner details before merging
+            sanitized_sarif.attach_scanner_details(
+                scanner_name=results.scanner_name,
+                scanner_version=scanner_version,
+                invocation_details=invocation_details if invocation_details else None,
+            )
+
+            # Log the scanner details for debugging
+            ASH_LOGGER.debug(
+                f"Attached scanner details for {results.scanner_name} v{scanner_version} with invocation details: {invocation_details}"
+            )
+
+            self.asharp_model.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(results.raw_results, CycloneDXReport):
             self.asharp_model.cyclonedx = results.raw_results
         elif isinstance(results.raw_results, ASHARPModel):

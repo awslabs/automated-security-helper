@@ -31,6 +31,8 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
     def model_post_init(self, context):
         with warnings.catch_warnings():
             defusedxml.defuse_stdlib()
+        if self.config is None:
+            self.config = JUnitXMLReporterConfig()
         return super().model_post_init(context)
 
     def report(self, model: Any) -> str:

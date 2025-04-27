@@ -24,6 +24,11 @@ class FlatJSONReporterConfig(ReporterPluginConfigBase):
 class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
     """Formats results as a flattened JSON array of findings."""
 
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = FlatJSONReporterConfig()
+        return super().model_post_init(context)
+
     def report(self, model: Any) -> str:
         """Format ASH model as JSON string."""
         from automated_security_helper.models.asharp_model import ASHARPModel

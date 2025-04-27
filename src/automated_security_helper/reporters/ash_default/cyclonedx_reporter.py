@@ -22,6 +22,11 @@ class CycloneDXReporterConfig(ReporterPluginConfigBase):
 class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
     """Formats results as CycloneDX."""
 
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = CycloneDXReporterConfig()
+        return super().model_post_init(context)
+
     def report(self, model: Any) -> str:
         """Format ASH model in CycloneDX."""
         from automated_security_helper.models.asharp_model import ASHARPModel

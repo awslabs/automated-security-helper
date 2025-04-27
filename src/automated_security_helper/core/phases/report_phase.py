@@ -114,29 +114,46 @@ class ReportPhase(EnginePhase):
                 for (
                     reporter_name,
                     reporter_config,
-                ) in self.plugin_context.config.reporters.items():
+                ) in self.plugin_context.config.reporters.model_dump(
+                    by_alias=True
+                ).items():
                     reporter_name = reporter_name.lower()
-                    if (
-                        reporter_name in registered_reporters
-                        and reporter_config.enabled
-                    ):
-                        # Get the reporter class from the registry
+                    # Check if this reporter is in the registry and is enabled
+                    if reporter_name in registered_reporters:
+                        # Get the reporter plugin from the registry
                         reporter_plugin = registered_reporters[reporter_name]
-                        reporter_class = reporter_plugin.plugin_class
 
-                        # Create an instance with the context
-                        reporter_instance = reporter_class(context=self.plugin_context)
+                        # Check if the reporter is enabled in the config
+                        if hasattr(reporter_config, "enabled"):
+                            is_enabled = reporter_config.enabled
+                        elif (
+                            isinstance(reporter_config, dict)
+                            and "enabled" in reporter_config
+                        ):
+                            is_enabled = reporter_config["enabled"]
+                        else:
+                            # Default to enabled if not specified
+                            is_enabled = True
 
-                        # Configure the reporter with its config from the reporters block
-                        reporter_instance.configure(reporter_config)
+                        if is_enabled:
+                            # Get the reporter class from the registry
+                            reporter_class = reporter_plugin.plugin_class
 
-                        active_reporters[reporter_name] = {
-                            "reporter": reporter_instance,
-                            "name": reporter_plugin.name,
-                        }
-                        ASH_LOGGER.debug(
-                            f"Enabled reporter {reporter_name} from reporters config block"
-                        )
+                            # Create an instance with the context
+                            reporter_instance = reporter_class(
+                                context=self.plugin_context
+                            )
+
+                            # Configure the reporter with its config from the reporters block
+                            reporter_instance.configure(reporter_config)
+
+                            active_reporters[reporter_name] = {
+                                "reporter": reporter_instance,
+                                "name": reporter_plugin.name,
+                            }
+                            ASH_LOGGER.debug(
+                                f"Enabled reporter {reporter_name} from reporters config block"
+                            )
 
             # Then, add any reporters from output_formats that aren't already added
             # This maintains backward compatibility
@@ -177,6 +194,38 @@ class ReportPhase(EnginePhase):
 
                 if not reporter_found:
                     ASH_LOGGER.warning(f"No reporter found for format: {fmt_str}")
+
+            # If no reporters were specified in config or CLI, use all enabled reporters from registry
+            if not active_reporters:
+                ASH_LOGGER.info(
+                    "No reporters specified in config or CLI, using all enabled reporters"
+                )
+                for reporter_name, reporter_plugin in registered_reporters.items():
+                    # Get reporter config if available
+                    reporter_config = reporter_plugin.plugin_config
+
+                    # Check if the reporter is enabled
+                    is_enabled = True
+                    if hasattr(reporter_config, "enabled"):
+                        is_enabled = reporter_config.enabled
+
+                    if is_enabled:
+                        # Create reporter instance
+                        reporter_class: type[ReporterPluginBase] = (
+                            reporter_plugin.plugin_class
+                        )
+                        reporter_instance: ReporterPluginBase = reporter_class(
+                            context=self.plugin_context,
+                            config=reporter_config,
+                        )
+
+                        active_reporters[reporter_name] = {
+                            "reporter": reporter_instance,
+                            "name": reporter_instance.config.name,
+                        }
+                        ASH_LOGGER.debug(
+                            f"Enabled reporter {reporter_name} from registry (default)"
+                        )
 
         if not active_reporters:
             ASH_LOGGER.warning("No active reporters found")
@@ -225,7 +274,7 @@ class ReportPhase(EnginePhase):
                 description=f"[blue]({reporter_name}) Starting {fmt} report generation...",
             )
 
-            ASH_LOGGER.info(f"Starting {fmt} report generation with {reporter_name}")
+            ASH_LOGGER.verbose(f"Starting {fmt} report generation with {reporter_name}")
 
             try:
                 # Generate report with this reporter
@@ -249,7 +298,7 @@ class ReportPhase(EnginePhase):
                     raise ValueError(f"Reporter returned empty result for {fmt}")
 
                 # Determine output filename based on reporter's extension if available
-                output_filename = f"ash.{reporter.config.extension if reporter.config.extension else fmt}"
+                output_filename = f"ash.{fmt}"
                 if hasattr(reporter, "config") and hasattr(
                     reporter.config, "extension"
                 ):
@@ -267,7 +316,7 @@ class ReportPhase(EnginePhase):
                     description=f"[green]({reporter_name}) {fmt.upper()} report generated",
                 )
 
-                ASH_LOGGER.info(
+                ASH_LOGGER.verbose(
                     f"✅ {fmt.upper()} report generated successfully with {reporter_name}"
                 )
 
