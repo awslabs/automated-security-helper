@@ -31,20 +31,24 @@ def test_bandit_scanner_init(test_plugin_context):
     assert scanner.args.format_arg_value == "sarif"
 
 
-def test_bandit_scanner_configure(test_plugin_context):
+def test_bandit_scanner_configure(test_plugin_context, test_source_dir):
     """Test BanditScanner configuration."""
+    test_config_file = test_source_dir.joinpath(".bandit")
+    test_config_file.touch()
     scanner = BanditScanner(
         context=test_plugin_context,
         config=BanditScannerConfig(
             options=BanditScannerConfigOptions(
-                config_file=".bandit",
-                skip_path=[IgnorePathWithReason(path="tests/*", reason="Test files")],
+                config_file=test_config_file,
+                excluded_paths=[
+                    IgnorePathWithReason(path="tests/*", reason="Test files")
+                ],
             )
         ),
     )
-    assert scanner.config.options.config_file == ".bandit"
-    assert len(scanner.config.options.skip_path) == 1
-    assert scanner.config.options.skip_path[0].path == "tests/*"
+    assert scanner.config.options.config_file.name == ".bandit"
+    assert len(scanner.config.options.excluded_paths) == 1
+    assert scanner.config.options.excluded_paths[0].path == "tests/*"
 
 
 def test_bandit_scanner_validate(test_bandit_scanner):
@@ -71,7 +75,7 @@ def test_process_config_options_with_config_files(
         context=test_plugin_context,
         config=BanditScannerConfig(
             options=BanditScannerConfigOptions(
-                config_file=config_path.as_posix(),
+                config_file=config_path,
             )
         ),
     )

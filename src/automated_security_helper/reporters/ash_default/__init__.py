@@ -13,6 +13,9 @@ from automated_security_helper.reporters.ash_default.flatjson_reporter import (
 from automated_security_helper.reporters.ash_default.junitxml_reporter import (
     JUnitXMLReporter,
 )
+from automated_security_helper.reporters.ash_default.markdown_reporter import (
+    MarkdownReporter,
+)
 from automated_security_helper.reporters.ash_default.ocsf_reporter import OCSFReporter
 from automated_security_helper.reporters.ash_default.sarif_reporter import SARIFReporter
 from automated_security_helper.reporters.ash_default.spdx_reporter import SPDXReporter
@@ -27,6 +30,7 @@ __all__ = [
     "FlatJSONReporter",
     "JSONReporter",  # Alias for FlatJSONReporter
     "JUnitXMLReporter",
+    "MarkdownReporter",
     "OCSFReporter",
     "SARIFReporter",
     "SPDXReporter",

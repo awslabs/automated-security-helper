@@ -24,6 +24,7 @@ class ExportFormat(str, Enum):
     HTML = "html"
     DICT = "dict"
     JUNITXML = "junitxml"
+    MARKDOWN = "markdown"
     SARIF = "sarif"
     ASFF = "asff"
     OCSF = "ocsf"

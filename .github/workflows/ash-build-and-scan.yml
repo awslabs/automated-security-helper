@@ -31,13 +31,13 @@ jobs:
     env:
       IMG_NAME: ${{ github.repository }}
       ARCH: ubuntu-latest
-      SUMMARY_FILE: "ASH Scan Result Summary - ubuntu-latest.md"
+      SUMMARY_FILE: "ASH Scan Results Summary.md"
     permissions:
       actions: read
       checks: write
       contents: write
       id-token: write
-      security-events: read
+      security-events: write
       pull-requests: write
       statuses: write
     steps:
@@ -93,27 +93,16 @@ jobs:
             --verbose | \
               tee ash_stdout.txt
 
-          # cat the output contents to build the summary markdown
-          # strip out the color codes from the output
-          ASH_STDOUT=$(cat ash_stdout.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-          # ASH_AGG_RESULTS=$(cat ash_output/ash_aggregated_results.json | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-          ASH_AGG_RESULTS=$(tree ash_output)
+          # cat the markdown report and add it to the summary and step report
+          ASH_MD_REPORT=`cat ash_output/reports/ash.md`
 
-          # Write the summary markdown to a file
-          cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
-          <details>
-            <summary>ASH Scan Artifact Tree</summary>
-
-            \`\`\`bash
-            ${ASH_AGG_RESULTS}
-            \`\`\`
-          </details>
-          EOF
+          # Add the
+          echo $ASH_MD_REPORT | tee -a "${GITHUB_STEP_SUMMARY}"
 
           # Write the summary markdown to the GITHUB_OUTPUT
           {
             echo 'ASH_OUTPUT<<EOF'
-            cat "${{ env.SUMMARY_FILE }}"
+            echo "$ASH_MD_REPORT"
             echo EOF
           } >> "$GITHUB_OUTPUT"
 

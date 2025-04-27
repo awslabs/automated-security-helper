@@ -329,13 +329,44 @@ class ASHARPModel(BaseModel):
                                     loc.physicalLocation.root.artifactLocation.uri
                                 )
 
+                    # Try to get the actual scanner name from properties
+                    actual_scanner = tool_name
+                    if result.properties and hasattr(result.properties, "scanner_name"):
+                        actual_scanner = result.properties.scanner_name
+                    elif result.properties and hasattr(
+                        result.properties, "scanner_details"
+                    ):
+                        if hasattr(result.properties.scanner_details, "tool_name"):
+                            actual_scanner = result.properties.scanner_details.tool_name
+
+                    # If we have tags that might indicate the scanner, use those as a fallback
+                    if (
+                        actual_scanner == "AWS Labs - Automated Security Helper"
+                        and tags
+                    ):
+                        for tag in tags:
+                            # Common scanner names that might appear in tags
+                            if tag.lower() in [
+                                "bandit",
+                                "semgrep",
+                                "checkov",
+                                "cfn-nag",
+                                "cdk-nag",
+                                "detect-secrets",
+                                "grype",
+                                "syft",
+                                "npm-audit",
+                            ]:
+                                actual_scanner = tag.capitalize()
+                                break
+
                     # Create the flattened vulnerability
                     flat_vuln = FlatVulnerability(
-                        id=f"{tool_name}-{result.ruleId or 'unknown'}-{hash(description) % 10000}",
+                        id=f"{actual_scanner}-{result.ruleId or 'unknown'}-{hash(description) % 10000}",
                         title=result.ruleId or "Unknown Issue",
                         description=description,
                         severity=severity,
-                        scanner=tool_name,
+                        scanner=actual_scanner,
                         scanner_type=tool_type,
                         rule_id=result.ruleId,
                         file_path=file_path,
