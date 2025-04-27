@@ -3,7 +3,7 @@
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/converters/ash_default/jupyter_converter.py#L0"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 # <kbd>module</kbd> `converters.ash_default.jupyter_converter`
-Module containing the JupyterScanner implementation. 
+Module containing the JupyterScanner implementation.
 
 
 
@@ -21,23 +21,23 @@ Module containing the JupyterScanner implementation.
 
 #### <kbd>property</kbd> model_extra
 
-Get extra fields set during validation. 
+Get extra fields set during validation.
 
 
 
 **Returns:**
-  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`. 
+  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`.
 
 ---
 
 #### <kbd>property</kbd> model_fields_set
 
-Returns the set of fields that have been explicitly set on this model instance. 
+Returns the set of fields that have been explicitly set on this model instance.
 
 
 
 **Returns:**
-  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults. 
+  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults.
 
 
 
@@ -47,30 +47,30 @@ Returns the set of fields that have been explicitly set on this model instance.
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/converters/ash_default/jupyter_converter.py#L28"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>class</kbd> `JupyterNotebookConverterConfig`
-Jupyter Notebook (.ipynb) to Python converter configuration. 
+Jupyter Notebook (.ipynb) to Python converter configuration.
 
 
 ---
 
 #### <kbd>property</kbd> model_extra
 
-Get extra fields set during validation. 
+Get extra fields set during validation.
 
 
 
 **Returns:**
-  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`. 
+  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`.
 
 ---
 
 #### <kbd>property</kbd> model_fields_set
 
-Returns the set of fields that have been explicitly set on this model instance. 
+Returns the set of fields that have been explicitly set on this model instance.
 
 
 
 **Returns:**
-  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults. 
+  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults.
 
 
 
@@ -79,31 +79,31 @@ Returns the set of fields that have been explicitly set on this model instance.
 
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/converters/ash_default/jupyter_converter.py#L39"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
-## <kbd>class</kbd> `JupyterNotebookConverter`
-Converter implementation for Jupyter notebooks security scanning. 
+## <kbd>class</kbd> `JupyterConverter`
+Converter implementation for Jupyter notebooks security scanning.
 
 
 ---
 
 #### <kbd>property</kbd> model_extra
 
-Get extra fields set during validation. 
+Get extra fields set during validation.
 
 
 
 **Returns:**
-  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`. 
+  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`.
 
 ---
 
 #### <kbd>property</kbd> model_fields_set
 
-Returns the set of fields that have been explicitly set on this model instance. 
+Returns the set of fields that have been explicitly set on this model instance.
 
 
 
 **Returns:**
-  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults. 
+  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults.
 
 
 

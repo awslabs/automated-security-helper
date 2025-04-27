@@ -7,7 +7,9 @@ from automated_security_helper.reporters.ash_default.cyclonedx_reporter import (
     CycloneDXReporter,
 )
 from automated_security_helper.reporters.ash_default.html_reporter import HTMLReporter
-from automated_security_helper.reporters.ash_default.json_reporter import JSONReporter
+from automated_security_helper.reporters.ash_default.flatjson_reporter import (
+    FlatJSONReporter as JSONReporter,
+)
 from automated_security_helper.reporters.ash_default.junitxml_reporter import (
     JUnitXMLReporter,
 )
@@ -22,7 +24,8 @@ __all__ = [
     "CSVReporter",
     "CycloneDXReporter",
     "HTMLReporter",
-    "JSONReporter",
+    "FlatJSONReporter",
+    "JSONReporter",  # Alias for FlatJSONReporter
     "JUnitXMLReporter",
     "OCSFReporter",
     "SARIFReporter",

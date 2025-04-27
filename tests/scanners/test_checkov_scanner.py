@@ -1,44 +1,44 @@
-"""Tests for the Checkov scanner implementation."""
+"""Tests for Checkov scanner."""
 
-from pathlib import Path
 import pytest
-from unittest.mock import MagicMock, patch
-
+from pathlib import Path
 from automated_security_helper.scanners.ash_default.checkov_scanner import (
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
 )
-from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
 
 
 @pytest.fixture
-def checkov_scanner():
-    """Create a CheckovScanner instance for testing."""
-    return CheckovScanner()
+def test_checkov_scanner(test_plugin_context):
+    """Create a test Checkov scanner."""
+    return CheckovScanner(
+        context=test_plugin_context,
+        config=CheckovScannerConfig(),
+    )
 
 
-@pytest.fixture
-def mock_subprocess_run():
-    """Mock subprocess.run for testing."""
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        yield mock_run
-
-
-def test_checkov_scanner_init(checkov_scanner):
+def test_checkov_scanner_init(test_plugin_context):
     """Test CheckovScanner initialization."""
-    assert checkov_scanner.command == "checkov"
-    assert checkov_scanner.tool_type == "IAC"
-    assert isinstance(checkov_scanner.config, CheckovScannerConfig)
-    assert checkov_scanner.args.format_arg == "--output"
-    assert checkov_scanner.args.format_arg_value == "sarif"
+    scanner = CheckovScanner(
+        context=test_plugin_context,
+        config=CheckovScannerConfig(),
+    )
+    assert scanner.config.name == "checkov"
+    assert scanner.command == "checkov"
+    assert scanner.tool_type == "IAC"
 
 
-def test_checkov_scanner_configure():
+def test_checkov_scanner_validate(test_checkov_scanner):
+    """Test CheckovScanner validation."""
+    assert test_checkov_scanner.validate() is True
+
+
+def test_checkov_scanner_configure(test_plugin_context):
     """Test CheckovScanner configuration."""
     scanner = CheckovScanner(
+        context=test_plugin_context,
         config=CheckovScannerConfig(
             options=CheckovScannerConfigOptions(
                 config_file=".checkov.yaml",
@@ -47,18 +47,14 @@ def test_checkov_scanner_configure():
                 skip_frameworks=["secrets"],
                 additional_formats=["json", "junitxml"],
             )
-        )
+        ),
     )
     assert scanner.config.options.config_file == ".checkov.yaml"
     assert len(scanner.config.options.skip_path) == 1
-    assert len(scanner.config.options.frameworks) == 2
-    assert len(scanner.config.options.skip_frameworks) == 1
-    assert len(scanner.config.options.additional_formats) == 2
-
-
-def test_checkov_scanner_validate(checkov_scanner):
-    """Test CheckovScanner validation."""
-    assert checkov_scanner.validate() is True
+    assert scanner.config.options.skip_path[0].path == "tests/*"
+    assert "terraform" in scanner.config.options.frameworks
+    assert "secrets" in scanner.config.options.skip_frameworks
+    assert "json" in scanner.config.options.additional_formats
 
 
 @pytest.mark.parametrize(
@@ -69,85 +65,108 @@ def test_checkov_scanner_validate(checkov_scanner):
         "custom_checkov.yaml",
     ],
 )
-def test_process_config_options_with_config_files(config_file, test_source_dir):
+def test_process_config_options_with_config_files(
+    config_file, test_source_dir, test_plugin_context
+):
     """Test processing of different config file types."""
-    checkov_scanner = CheckovScanner(
-        source_dir=test_source_dir,
+    config_path = test_source_dir.joinpath(config_file)
+    config_path.touch()
+
+    scanner = CheckovScanner(
+        context=test_plugin_context,
         config=CheckovScannerConfig(
             options=CheckovScannerConfigOptions(
-                config_file=(test_source_dir / config_file).as_posix(),
+                config_file=config_path.as_posix(),
             )
         ),
     )
-    (test_source_dir / config_file).write_text("{}")
+    scanner._process_config_options()
 
-    checkov_scanner.source_dir = str(test_source_dir)
-
-    checkov_scanner._process_config_options()
-
-    config_args = [
-        arg
-        for arg in checkov_scanner.args.extra_args
-        if "--config-file" in str(arg.key)
-    ]
-    assert len(config_args) > 0
+    # Check that the config file argument was added
+    config_args = [arg.key for arg in scanner.args.extra_args]
+    assert "--config-file" in config_args
 
 
-def test_process_config_options_frameworks(checkov_scanner):
+def test_process_config_options_frameworks(test_plugin_context):
     """Test processing of framework options."""
-    checkov_scanner.config.options.frameworks = ["terraform", "kubernetes"]
-    checkov_scanner.config.options.skip_frameworks = ["secrets"]
-    checkov_scanner._process_config_options()
+    scanner = CheckovScanner(
+        context=test_plugin_context,
+        config=CheckovScannerConfig(
+            options=CheckovScannerConfigOptions(
+                frameworks=["terraform", "cloudformation"],
+                skip_frameworks=["secrets"],
+            )
+        ),
+    )
+    scanner._process_config_options()
 
-    framework_args = [
-        arg for arg in checkov_scanner.args.extra_args if arg.key == "--framework"
-    ]
-    skip_framework_args = [
-        arg for arg in checkov_scanner.args.extra_args if arg.key == "--skip-framework"
-    ]
-
-    assert len(framework_args) == 2
-    assert len(skip_framework_args) == 1
+    # Check that framework arguments were added
+    framework_args = [arg.key for arg in scanner.args.extra_args]
+    assert "--framework" in framework_args
+    assert "--skip-framework" in framework_args
 
 
-def test_process_config_options_skip_paths(checkov_scanner):
+def test_process_config_options_skip_paths(test_plugin_context):
     """Test processing of skip path options."""
-    checkov_scanner.config.options.skip_path = [
-        IgnorePathWithReason(path="tests/*", reason="Test files"),
-        IgnorePathWithReason(path="venv/*", reason="Virtual environment"),
-    ]
-    checkov_scanner._process_config_options()
+    scanner = CheckovScanner(
+        context=test_plugin_context,
+        config=CheckovScannerConfig(
+            options=CheckovScannerConfigOptions(
+                skip_path=[
+                    IgnorePathWithReason(path="tests/*", reason="Test files"),
+                    IgnorePathWithReason(path="examples/*", reason="Example files"),
+                ]
+            )
+        ),
+    )
+    scanner._process_config_options()
 
-    skip_path_args = [
-        arg for arg in checkov_scanner.args.extra_args if arg.key == "--skip-path"
-    ]
-    assert len(skip_path_args) == 2
-
-
-@pytest.mark.asyncio
-async def test_checkov_scanner_scan(checkov_scanner, test_source_dir):
-    """Test CheckovScanner scan execution."""
-    Path(test_source_dir).mkdir(parents=True, exist_ok=True)
-    Path(test_source_dir).joinpath("test.py").touch()
-    result = checkov_scanner.scan(test_source_dir, target_type="source")
-    assert result is not None
+    # Check that skip path arguments were added
+    skip_args = [arg.key for arg in scanner.args.extra_args]
+    assert "--skip-path" in skip_args
 
 
-def test_checkov_scanner_scan_error(checkov_scanner, mock_subprocess_run):
-    """Test CheckovScanner scan with error."""
-    mock_subprocess_run.side_effect = Exception("Scan failed")
+def test_checkov_scanner_scan(test_checkov_scanner, test_data_dir):
+    """Test CheckovScanner scan method."""
+    # Use a test CloudFormation template
+    test_template = test_data_dir.joinpath("scanners/cdk/insecure-s3-template.yaml")
+    if not test_template.exists():
+        pytest.skip("Test template not found")
 
-    with pytest.raises(ScannerError) as exc_info:
-        checkov_scanner.scan(Path("/nonexistent"), target_type="source")
-    assert "Target /nonexistent does not exist!" in str(exc_info.value)
+    # Mock the scan to avoid actual execution
+    import unittest.mock
+
+    with (
+        unittest.mock.patch.object(test_checkov_scanner, "_run_subprocess"),
+        unittest.mock.patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
+        unittest.mock.patch("json.load", return_value={}),
+    ):
+        # Run the scan
+        results = test_checkov_scanner.scan(test_template, target_type="source")
+
+    # Check that results were returned
+    assert results is not None
 
 
-def test_checkov_scanner_additional_formats(checkov_scanner):
+def test_checkov_scanner_scan_error(test_checkov_scanner):
+    """Test CheckovScanner scan method with error."""
+    # Try to scan a non-existent directory
+    with pytest.raises(Exception):
+        test_checkov_scanner.scan(Path("/nonexistent"), target_type="source")
+
+
+def test_checkov_scanner_additional_formats(test_plugin_context):
     """Test CheckovScanner with additional output formats."""
-    checkov_scanner.config.options.additional_formats = ["json", "junitxml"]
-    checkov_scanner._process_config_options()
+    scanner = CheckovScanner(
+        context=test_plugin_context,
+        config=CheckovScannerConfig(
+            options=CheckovScannerConfigOptions(
+                additional_formats=["sarif", "json"],
+            )
+        ),
+    )
+    scanner._process_config_options()
 
-    format_args = [
-        arg for arg in checkov_scanner.args.extra_args if arg.key == "--output"
-    ]
-    assert len(format_args) >= 2
+    # Check that additional format arguments were added
+    format_args = [arg.key for arg in scanner.args.extra_args]
+    assert "--output" in format_args

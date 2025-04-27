@@ -16,10 +16,16 @@ class CycloneDXReporterConfig(ReporterPluginConfigBase):
     name: Literal["cyclonedx"] = "cyclonedx"
     extension: str = "cdx.json"
     enabled: bool = True
+    options: CycloneDXReporterConfigOptions = CycloneDXReporterConfigOptions()
 
 
 class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
     """Formats results as CycloneDX."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = CycloneDXReporterConfig()
+        return super().model_post_init(context)
 
     def report(self, model: Any) -> str:
         """Format ASH model in CycloneDX."""

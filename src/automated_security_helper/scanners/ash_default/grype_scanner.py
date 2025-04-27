@@ -1,6 +1,7 @@
 """Module containing the Grype security scanner implementation."""
 
 import json
+import os
 from pathlib import Path
 import shutil
 from typing import Annotated, List, Literal
@@ -37,6 +38,12 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
     severity_threshold: Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None = (
         None
     )
+    offline: Annotated[
+        bool,
+        Field(
+            description="Run in offline mode, disabling database updates and validation",
+        ),
+    ] = False
 
 
 class GrypeScannerConfig(ScannerPluginConfigBase):
@@ -99,6 +106,16 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                     )
                 )
                 break
+
+        # Handle offline mode
+        if self.config.options.offline:
+            # Add environment variables for offline mode
+            os.environ["GRYPE_DB_VALIDATE_AGE"] = "false"
+            os.environ["GRYPE_DB_AUTO_UPDATE"] = "false"
+            os.environ["GRYPE_CHECK_FOR_APP_UPDATE"] = "false"
+            ASH_LOGGER.info(
+                "Running Grype in offline mode - database updates and validation disabled"
+            )
 
         return super()._process_config_options()
 

@@ -11,6 +11,6 @@ class ASHValidationError(Exception):
 
 
 class ASHConfigValidationError(ASHValidationError):
-    """Exception raised when an ASHConfig is invalid."""
+    """Exception raised when an AshConfig is invalid."""
 
     pass

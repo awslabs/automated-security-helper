@@ -9,7 +9,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 
 
-class SPDXReporterConfigOptions(ReporterOptionsBase):
+class TextReporterConfigOptions(ReporterOptionsBase):
     pass
 
 
@@ -17,10 +17,16 @@ class TextReporterConfig(ReporterPluginConfigBase):
     name: Literal["text"] = "text"
     extension: str = "txt"
     enabled: bool = True
+    options: TextReporterConfigOptions = TextReporterConfigOptions()
 
 
 class TextReporter(ReporterPluginBase[TextReporterConfig]):
     """Formats results as text."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = TextReporterConfig()
+        return super().model_post_init(context)
 
     def report(self, model: Any) -> str:
         """Format ASH model as text string."""

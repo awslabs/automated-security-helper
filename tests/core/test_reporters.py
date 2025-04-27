@@ -1,63 +1,61 @@
-"""Unit tests for output formatter module."""
+"""Tests for reporter plugins."""
 
-import json
+from automated_security_helper.reporters.ash_default.flatjson_reporter import (
+    FlatJSONReporter,
+)
+from automated_security_helper.reporters.ash_default.html_reporter import HTMLReporter
+from automated_security_helper.reporters.ash_default.csv_reporter import CSVReporter
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.reporters.ash_default import CSVReporter
-from automated_security_helper.reporters.ash_default import HTMLReporter
-from automated_security_helper.reporters.ash_default import JSONReporter
 
 
 class TestJSONFormatter:
-    """Test cases for JSON formatter."""
+    """Test cases for JSONReporter."""
 
-    def test_json_formatter(self, sample_ash_model: ASHARPModel):
+    def test_json_formatter(self, sample_ash_model: ASHARPModel, test_plugin_context):
         """Test JSON formatter output structure."""
-        formatter = JSONReporter()
-        output = formatter.report(sample_ash_model)
-
-        # Verify output is valid JSON
-        parsed = json.loads(output)
-        assert "sarif" in parsed
-        assert "cyclonedx" in parsed
-        assert "additional_reports" in parsed
-        assert "ash_config" in parsed
-        assert "metadata" in parsed
+        formatter = FlatJSONReporter(context=test_plugin_context)
+        result = formatter.report(sample_ash_model)
+        assert result is not None
+        assert isinstance(result, str)
+        assert result.startswith("[")
+        assert result.endswith("]")
+        assert "id" in result
+        assert "severity" in result
 
 
 class TestHTMLFormatter:
-    """Test cases for HTML formatter."""
+    """Test cases for HTMLReporter."""
 
-    def test_html_formatter(self, sample_ash_model):
+    def test_html_formatter(self, sample_ash_model, test_plugin_context):
         """Test HTML formatter output structure."""
-        formatter = HTMLReporter()
-        output = formatter.report(sample_ash_model)
-
-        # Verify basic HTML structure
-        assert "<!DOCTYPE html>" in output
-        assert "<html>" in output
-        assert "<title>ASH Results</title>" in output
-        assert "<h1>Security Scan Results</h1>" in output
-
-        # Verify content is included and properly escaped
-        assert "<td>CKV_AWS_53</td>" in output
-        assert "&lt;" not in output  # Verify no double-escaping
+        formatter = HTMLReporter(context=test_plugin_context)
+        result = formatter.report(sample_ash_model)
+        assert result is not None
+        assert isinstance(result, str)
+        assert result.startswith("\n<!DOCTYPE html>")
+        assert "<html>" in result
+        assert "</html>" in result
+        assert "<table>" in result
 
 
 class TestCSVFormatter:
-    """Test cases for CSV formatter."""
+    """Test cases for CSVReporter."""
 
-    def test_csv_formatter(self, sample_ash_model):
+    def test_csv_formatter(self, sample_ash_model, test_plugin_context):
         """Test CSV formatter output structure."""
-        formatter = CSVReporter()
-        output = formatter.report(sample_ash_model)
+        formatter = CSVReporter(context=test_plugin_context)
+        result = formatter.report(sample_ash_model)
+        assert result is not None
+        assert isinstance(result, str)
 
-        # Verify CSV structure
-        lines = output.strip().split("\n")
-        assert len(lines) >= 1  # At least header row
-
-        # Verify header row
+        # Check for header row
+        lines = result.strip().split("\n")
+        assert len(lines) >= 1
         header = lines[0].split(",")
-        assert "Finding ID" in header
-        assert "Severity" in header
-        assert "Description" in header
-        assert "Location" in header
+
+        # Verify expected columns are present
+        expected_columns = ["ID", "Title", "Description", "Severity", "Scanner"]
+        for col in expected_columns:
+            assert any(col.lower() in h.lower() for h in header), (
+                f"Column {col} not found in header"
+            )

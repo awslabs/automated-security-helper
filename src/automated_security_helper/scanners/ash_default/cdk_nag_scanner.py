@@ -14,8 +14,6 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
-    Kind,
-    Level,
     MultiformatMessageString,
     PropertyBag,
     ReportingDescriptor,
@@ -109,23 +107,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # this far then we know we're in a valid runtime for this scanner.
         return True
 
-    def _map_severity_to_level(self, severity: str) -> Level:
-        """Map severity to SARIF level."""
-        if severity == "CRITICAL":
-            return Level.error
-        elif severity == "MEDIUM":
-            return Level.warning
-        return Level.note
-
-    def _map_status_to_kind(self, status: str) -> Kind:
-        """Map IaCVulnerability status to SARIF kind."""
-        status_to_kind = {
-            "OPEN": Kind.fail,
-            "RISK_ACCEPTED": Kind.review,
-            "INFORMATIONAL": Kind.informational,
-        }
-        return status_to_kind.get(status, Kind.fail)
-
     def scan(
         self,
         target: Path,
@@ -155,8 +136,16 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Find all JSON/YAML files to scan from the scan set
         scannable = scan_set(
-            source=self.work_dir if target_type == "converted" else self.source_dir,
-            output=self.work_dir if target_type == "converted" else self.output_dir,
+            source=(
+                self.context.work_dir
+                if target_type == "converted"
+                else self.context.source_dir
+            ),
+            output=(
+                self.context.work_dir
+                if target_type == "converted"
+                else self.context.output_dir
+            ),
         )
         ASH_LOGGER.debug(
             f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"
@@ -286,7 +275,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             exitCode=0,
                             exitCodeDescription="\n".join(self.errors),
                             workingDirectory=ArtifactLocation(
-                                uri=get_shortest_name(input=self.source_dir),
+                                uri=get_shortest_name(input=self.context.source_dir),
                             ),
                             properties=PropertyBag(
                                 tool=tool,

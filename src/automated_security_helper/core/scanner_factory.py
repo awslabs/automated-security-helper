@@ -1,11 +1,10 @@
 """Module containing the ScannerFactory class for creating scanner instances."""
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, Type, Union
+from typing import Callable, Dict, Type, Union
 
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.config.ash_config import ASHConfig
-from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 
 from automated_security_helper.core.plugin_registry import RegisteredPlugin
@@ -18,42 +17,36 @@ class ScannerFactory:
 
     def __init__(
         self,
-        config: ASHConfig = None,
         plugin_context: PluginContext = None,
-        source_dir: Path = None,
-        output_dir: Path = None,
         registered_scanner_plugins: Dict[str, RegisteredPlugin] = {},
     ) -> None:
         """Initialize the scanner factory with empty scanner registry.
 
         Args:
-            config: Optional ASHConfig instance to load custom scanner configurations
+            config: Optional AshConfig instance to load custom scanner configurations
         """
-        self.config = config
         self.default_scanners = set()
         self._scanners: Dict[
             str, Union[Type[ScannerPluginBase], Callable[[], ScannerPluginBase]]
         ] = {}
         self._registered_scanner_plugins = registered_scanner_plugins
         self.plugin_context = plugin_context
-        self.source_dir = source_dir
-        self.output_dir = output_dir
         self._register_default_scanners()
         self._register_config_scanners()
 
     def _register_config_scanners(self) -> None:
-        """Register scanners from the ASHConfig.
+        """Register scanners from the AshConfig.
 
         This includes:
         - Custom build-time scanners from ash.yaml
         - Custom scanners from sast.scanners and sbom.scanners sections
         """
-        if not self.config:
+        if not self.plugin_context.config:
             ASH_LOGGER.debug("No config provided, skipping config scanner registration")
             return
 
         # Register build-time scanners
-        for scanner in self.config.build.custom_scanners:
+        for scanner in self.plugin_context.config.build.custom_scanners:
             try:
                 self.default_scanners.add(scanner.config.name)
                 if scanner.config.name in self._scanners:
@@ -77,9 +70,10 @@ class ScannerFactory:
                 ASH_LOGGER.warning(
                     f"Could not register build-time scanner {scanner.config.name}: {str(e)}"
                 )
-        for scanner_name, scanner_config in self.config.scanners.model_dump(
-            by_alias=True
-        ).items():
+        for (
+            scanner_name,
+            scanner_config,
+        ) in self.plugin_context.config.scanners.model_dump(by_alias=True).items():
             try:
                 self.default_scanners.add(scanner_name)
                 if scanner_name in self._scanners:
@@ -91,8 +85,6 @@ class ScannerFactory:
                     name=scanner_name,
                     config=scanner_config,
                     context=self.plugin_context,
-                    source_dir=self.source_dir,
-                    output_dir=self.output_dir,
                 )
                 self.register_scanner(scanner_name, scanner_class)
                 ASH_LOGGER.debug(
@@ -108,7 +100,7 @@ class ScannerFactory:
 
         This includes:
         - All classes that extend ScannerPlugin in automated_security_helper.base.scanner_plugin
-        - Any custom scanners from ASHConfig if provided
+        - Any custom scanners from AshConfig if provided
         """
         # Iterate through all .py files in the scanners directory
         for scanner_name, reg_plugin in self._registered_scanner_plugins.items():
@@ -119,8 +111,6 @@ class ScannerFactory:
                 if callable(scanner_class):
                     scanner_class = scanner_class(
                         context=self.plugin_context,
-                        source_dir=self.source_dir,
-                        output_dir=self.output_dir,
                     )
                 self._scanners[scanner_name] = scanner_class
             except ValueError:
@@ -184,9 +174,6 @@ class ScannerFactory:
     def create_scanner(
         self,
         scanner_name: str,
-        config: Optional[ScannerPluginBase | ScannerPluginConfigBase] = None,
-        source_dir: Optional[Path] = None,
-        output_dir: Optional[Path] = None,
     ) -> ScannerPluginBase:
         """Create a scanner instance of the specified type with optional configuration.
 
@@ -217,46 +204,44 @@ class ScannerFactory:
             raise ValueError("Unable to determine scanner class")
 
         # Create plugin context
-        from automated_security_helper.base.plugin_context import PluginContext
-
-        context = PluginContext(
-            source_dir=source_dir or self.source_dir,
-            output_dir=output_dir or self.output_dir,
-        )
 
         ASH_LOGGER.debug(
-            f"Creating scanner '{scanner_name}' with context: source_dir={context.source_dir}, output_dir={context.output_dir}"
+            f"Creating scanner '{scanner_name}' with context: source_dir={self.plugin_context.source_dir}, output_dir={self.plugin_context.output_dir}"
         )
 
         # Create and configure scanner instance
         if callable(scanner_class):
             instance = scanner_class(
-                source_dir=source_dir,
-                output_dir=output_dir,
-                context=context,
+                context=self.plugin_context,
             )
         else:
             # Create a new instance rather than modifying the class
             try:
                 # Try to create a new instance of the same class
                 instance = type(scanner_class)(
-                    source_dir=source_dir,
-                    output_dir=output_dir,
-                    context=context,
+                    context=self.plugin_context,
                 )
             except Exception as e:
                 ASH_LOGGER.warning(
                     f"Failed to create new instance of {type(scanner_class).__name__}: {e}"
                 )
                 # Fall back to modifying the existing instance
-                setattr(scanner_class, "source_dir", source_dir)
-                setattr(scanner_class, "output_dir", output_dir)
-                setattr(scanner_class, "context", context)
+                setattr(scanner_class, "context", self.plugin_context)
                 instance = scanner_class
 
         # Configure the instance if needed
         if config is not None and hasattr(instance, "configure"):
             instance.configure(config)
+
+        # Apply offline mode if set in the orchestrator
+        if (
+            hasattr(self.plugin_context.config, "offline")
+            and self.plugin_context.config.offline
+        ):
+            if hasattr(instance, "config") and hasattr(instance.config, "options"):
+                if hasattr(instance.config.options, "offline"):
+                    instance.config.options.offline = True
+                    ASH_LOGGER.debug(f"Setting offline mode for scanner {scanner_name}")
 
         return instance
 
@@ -282,6 +267,13 @@ class ScannerFactory:
 
 
 if __name__ == "__main__":
-    config = ASHConfig
-    factory = ScannerFactory()
+    config = AshConfig()
+    factory = ScannerFactory(
+        plugin_context=PluginContext(
+            source_dir=Path.cwd(),
+            output_dir=Path.cwd() / "output",
+            work_dir=Path.cwd() / "output" / "workdir",
+            config=config,
+        )
+    )
     ASH_LOGGER.info("[__main__] ScannerFactory initialized")

@@ -18,7 +18,7 @@ class ExportFormat(str, Enum):
     """Supported export formats."""
 
     TEXT = "text"
-    JSON = "json"
+    FLAT_JSON = "flat-json"
     YAML = "yaml"
     CSV = "csv"
     HTML = "html"
@@ -26,8 +26,10 @@ class ExportFormat(str, Enum):
     JUNITXML = "junitxml"
     SARIF = "sarif"
     ASFF = "asff"
+    OCSF = "ocsf"
     CYCLONEDX = "cyclonedx"
     SPDX = "spdx"
+    CUSTOM = "custom"
 
 
 class ScanStatistics(BaseModel):

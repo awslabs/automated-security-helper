@@ -6,7 +6,6 @@ from typing import Dict, List, Any
 from pathlib import Path
 
 from automated_security_helper.base.engine_phase import EnginePhase
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.core.scanner_factory import ScannerFactory
 from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
@@ -14,7 +13,9 @@ from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sarif_utils import sanitize_sarif_paths
 
 
 class ScanPhase(EnginePhase):
@@ -88,20 +89,14 @@ class ScanPhase(EnginePhase):
                         # Add scanner to execution queue with default target
                         scanner_plugin_class_instance = scanner_plugin_class(
                             config=(
-                                self.config.get_plugin_config(
+                                self.plugin_context.config.get_plugin_config(
                                     plugin_type=PluginType.scanner,
                                     plugin_name=scanner_name,
                                 )
-                                if self.config is not None
+                                if self.plugin_context.config is not None
                                 else None
                             ),
-                            context=PluginContext(
-                                source_dir=self.source_dir,
-                                output_dir=self.output_dir,
-                                work_dir=self.work_dir,
-                            ),
-                            source_dir=self.source_dir,
-                            output_dir=self.output_dir,
+                            context=self.plugin_context,
                         )
                         if (
                             hasattr(scanner_plugin_class_instance.config, "enabled")
@@ -117,8 +112,14 @@ class ScanPhase(EnginePhase):
                                     scanner_name,
                                     scanner_plugin_class_instance,
                                     [
-                                        {"path": self.source_dir, "type": "source"},
-                                        {"path": self.work_dir, "type": "converted"},
+                                        {
+                                            "path": self.plugin_context.source_dir,
+                                            "type": "source",
+                                        },
+                                        {
+                                            "path": self.plugin_context.work_dir,
+                                            "type": "converted",
+                                        },
                                     ],
                                 )
                             )
@@ -141,9 +142,11 @@ class ScanPhase(EnginePhase):
             self.update_progress(90, "Finalizing scan results...")
 
             # Save ASHARPModel as JSON alongside results if output_dir is configured
-            if self.output_dir:
-                ASH_LOGGER.debug(f"Saving ASHARPModel to {self.output_dir}")
-                self.asharp_model.save_model(self.output_dir)
+            if self.plugin_context.output_dir:
+                ASH_LOGGER.debug(
+                    f"Saving ASHARPModel to {self.plugin_context.output_dir}"
+                )
+                self.asharp_model.save_model(self.plugin_context.output_dir)
 
             # Update progress to 100%
             self.update_progress(
@@ -167,7 +170,7 @@ class ScanPhase(EnginePhase):
             ASH_LOGGER.error(f"Execution failed: {str(e)}")
             raise
 
-    def _extract_metrics_from_sarif(self, sarif_report):
+    def _extract_metrics_from_sarif(self, sarif_report: SarifReport):
         """Extract severity metrics from a SARIF report.
 
         Args:
@@ -253,19 +256,14 @@ class ScanPhase(EnginePhase):
                             not hasattr(scanner_plugin, "context")
                             or scanner_plugin.context is None
                         ):
-                            scanner_plugin.context = PluginContext(
-                                source_dir=self.source_dir,
-                                output_dir=self.output_dir,
-                                work_dir=self.work_dir,
-                            )
+                            scanner_plugin.context = self.plugin_context
 
                         # Ensure scanner output paths are set correctly
-                        scanner_plugin.source_dir = self.source_dir
-                        scanner_plugin.output_dir = self.output_dir
-                        scanner_plugin.work_dir = self.work_dir
-                        scanner_plugin.results_dir = self.output_dir.joinpath(
-                            "scanners"
-                        ).joinpath(scanner_config.name)
+                        scanner_plugin.results_dir = (
+                            self.plugin_context.output_dir.joinpath(
+                                "scanners"
+                            ).joinpath(scanner_config.name)
+                        )
 
                         raw_results = scanner_plugin.scan(
                             target=scan_target,
@@ -286,7 +284,7 @@ class ScanPhase(EnginePhase):
                         "output": scanner_plugin.output,
                     }
                 finally:
-                    ASH_LOGGER.debug(
+                    ASH_LOGGER.trace(
                         f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}"
                     )
                     if raw_results is None:
@@ -596,13 +594,84 @@ class ScanPhase(EnginePhase):
             "finding_count": results.finding_count,
             "exit_code": results.exit_code,
             "status": results.status,
-            "raw_results": results.raw_results,
+            # "raw_results": results.raw_results,
         }
 
         # Process the raw results based on type
         if isinstance(results.raw_results, SarifReport):
-            self.asharp_model.sarif.merge_sarif_report(results.raw_results)
-        elif isinstance(results.raw_results, ASHARPModel):
-            self.asharp_model.merge_model(results.raw_results)
+            # Sanitize paths in SARIF report to be relative to source directory
+            sanitized_sarif = sanitize_sarif_paths(
+                results.raw_results, self.plugin_context.source_dir
+            )
+            # Attach scanner details to the SARIF report
+            scanner_version = None
+
+            # Try to get scanner version from different sources
+            if (
+                hasattr(results, "metadata")
+                and results.metadata
+                and "scanner_version" in results.metadata
+            ):
+                scanner_version = results.metadata["scanner_version"]
+            elif hasattr(results.raw_results, "tool_version"):
+                scanner_version = results.raw_results.tool_version
+
+            # Build invocation details from metadata
+            invocation_details = {}
+
+            # If there's command execution info available, add it to invocation details
+            if hasattr(results, "metadata") and results.metadata:
+                if "command_line" in results.metadata:
+                    invocation_details["command_line"] = results.metadata[
+                        "command_line"
+                    ]
+                if "working_directory" in results.metadata:
+                    invocation_details["working_directory"] = results.metadata[
+                        "working_directory"
+                    ]
+                if "arguments" in results.metadata:
+                    invocation_details["arguments"] = results.metadata["arguments"]
+                if "exit_code" in results.metadata or hasattr(results, "exit_code"):
+                    invocation_details["exit_code"] = results.metadata.get(
+                        "exit_code", results.exit_code
+                    )
+                if "duration" in results.metadata or hasattr(results, "duration"):
+                    invocation_details["duration"] = results.metadata.get(
+                        "duration", results.duration
+                    )
+
+            # Add scanner execution details if available
+            if hasattr(results, "start_time") and results.start_time:
+                invocation_details["start_time"] = (
+                    results.start_time.isoformat()
+                    if hasattr(results.start_time, "isoformat")
+                    else str(results.start_time)
+                )
+            if hasattr(results, "end_time") and results.end_time:
+                invocation_details["end_time"] = (
+                    results.end_time.isoformat()
+                    if hasattr(results.end_time, "isoformat")
+                    else str(results.end_time)
+                )
+
+            # Attach scanner details before merging
+            sanitized_sarif.attach_scanner_details(
+                scanner_name=results.scanner_name,
+                scanner_version=scanner_version,
+                invocation_details=invocation_details if invocation_details else None,
+            )
+
+            # Log the scanner details for debugging
+            ASH_LOGGER.debug(
+                f"Attached scanner details for {results.scanner_name} v{scanner_version} with invocation details: {invocation_details}"
+            )
+
+            self.asharp_model.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(results.raw_results, CycloneDXReport):
             self.asharp_model.cyclonedx = results.raw_results
+        elif isinstance(results.raw_results, ASHARPModel):
+            self.asharp_model.merge_model(results.raw_results)
+        else:
+            self.asharp_model.additional_reports[scanner_name][results.target_type][
+                "raw_results"
+            ] = results.raw_results

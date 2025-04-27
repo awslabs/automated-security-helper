@@ -21,6 +21,36 @@ from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.reporters.ash_default.asff_reporter import (
     ASFFReporterConfig,
 )
+from automated_security_helper.reporters.ash_default.csv_reporter import (
+    CSVReporterConfig,
+)
+from automated_security_helper.reporters.ash_default.cyclonedx_reporter import (
+    CycloneDXReporterConfig,
+)
+from automated_security_helper.reporters.ash_default.html_reporter import (
+    HTMLReporterConfig,
+)
+from automated_security_helper.reporters.ash_default.flatjson_reporter import (
+    FlatJSONReporterConfig,
+)
+from automated_security_helper.reporters.ash_default.junitxml_reporter import (
+    JUnitXMLReporterConfig,
+)
+from automated_security_helper.reporters.ash_default.ocsf_reporter import (
+    OCSFReporterConfig,
+)
+from automated_security_helper.reporters.ash_default.spdx_reporter import (
+    SPDXReporterConfig,
+)
+from automated_security_helper.reporters.ash_default.text_reporter import (
+    TextReporterConfig,
+)
+from automated_security_helper.reporters.ash_default.yaml_reporter import (
+    YAMLReporterConfig,
+)
+from automated_security_helper.reporters.ash_default.sarif_reporter import (
+    SARIFReporterConfig,
+)
 from automated_security_helper.scanners.ash_default.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -129,14 +159,53 @@ class ReporterConfigSegment(BaseModel):
         ASFFReporterConfig,
         Field(description="Configure the options for the ASFF reporter"),
     ] = ASFFReporterConfig()
+    csv: Annotated[
+        CSVReporterConfig,
+        Field(description="Configure the options for the CSV reporter"),
+    ] = CSVReporterConfig()
+    cyclonedx: Annotated[
+        CycloneDXReporterConfig,
+        Field(description="Configure the options for the CycloneDX reporter"),
+    ] = CycloneDXReporterConfig()
+    # Do the same for html, json, junitxml, ocsf, sarif, spdx, text, and yaml
+    html: Annotated[
+        HTMLReporterConfig,
+        Field(description="Configure the options for the HTML reporter"),
+    ] = HTMLReporterConfig()
+    flat_json: Annotated[
+        FlatJSONReporterConfig,
+        Field(
+            description="Configure the options for the Flat JSON reporter",
+            alias="flat-json",
+        ),
+    ] = FlatJSONReporterConfig()
+    junitxml: Annotated[
+        JUnitXMLReporterConfig,
+        Field(description="Configure the options for the JUnit XML reporter"),
+    ] = JUnitXMLReporterConfig()
+    ocsf: Annotated[
+        OCSFReporterConfig,
+        Field(description="Configure the options for the OCSF reporter"),
+    ] = OCSFReporterConfig()
+    sarif: Annotated[
+        SARIFReporterConfig,
+        Field(description="Configure the options for the SARIF reporter"),
+    ] = SARIFReporterConfig()
+    spdx: Annotated[
+        SPDXReporterConfig,
+        Field(description="Configure the options for the SPDX reporter"),
+    ] = SPDXReporterConfig()
+    text: Annotated[
+        TextReporterConfig,
+        Field(description="Configure the options for the Text reporter"),
+    ] = TextReporterConfig()
+    yaml: Annotated[
+        YAMLReporterConfig,
+        Field(description="Configure the options for the YAML reporter"),
+    ] = YAMLReporterConfig()
 
-    asff: Annotated[
-        ASFFReporterConfig,
-        Field(description="Configure the options for the ASFF reporter"),
-    ] = ASFFReporterConfig()
 
-
-class AshGlobalDefaultsConfigSection(BaseModel):
+class AshConfigGlobalSettingsSection(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
@@ -156,7 +225,7 @@ class AshGlobalDefaultsConfigSection(BaseModel):
     ] = []
 
 
-class ASHConfig(BaseModel):
+class AshConfig(BaseModel):
     """Main configuration model for Automated Security Helper."""
 
     model_config = ConfigDict(
@@ -176,36 +245,36 @@ class ASHConfig(BaseModel):
         Field(description="Build-time configuration settings"),
     ] = BuildConfig()
 
-    output_formats: Annotated[
-        List[
-            Literal[
-                "asff",
-                "csv",
-                "cyclonedx",
-                "html",
-                "json",
-                "junitxml",
-                "ocsf",
-                "sarif",
-                "spdx",
-                "text",
-                "yaml",
-            ]
-        ],
-        Field(description="Format for scanner results output"),
-    ] = [
-        "asff",
-        "csv",
-        "cyclonedx",
-        "html",
-        "json",
-        "junitxml",
-        "ocsf",
-        "sarif",
-        "spdx",
-        "text",
-        "yaml",
-    ]
+    # output_formats: Annotated[
+    #     List[
+    #         Literal[
+    #             "asff",
+    #             "csv",
+    #             "cyclonedx",
+    #             "html",
+    #             "json",
+    #             "junitxml",
+    #             "ocsf",
+    #             "sarif",
+    #             "spdx",
+    #             "text",
+    #             "yaml",
+    #         ] | str
+    #     ],
+    #     Field(description="Format for scanner results output"),
+    # ] = [
+    #     "asff",
+    #     "csv",
+    #     "cyclonedx",
+    #     "html",
+    #     "json",
+    #     "junitxml",
+    #     "ocsf",
+    #     "sarif",
+    #     "spdx",
+    #     "text",
+    #     "yaml",
+    # ]
 
     converters: Annotated[
         Dict[str, bool],
@@ -219,13 +288,13 @@ class ASHConfig(BaseModel):
 
     scanners: Annotated[
         ScannerConfigSegment,
-        Field(description="Scanner configurations by type"),
+        Field(description="Scanner configurations by name."),
     ] = ScannerConfigSegment()
 
     reporters: Annotated[
-        Dict[str, ReporterPluginConfigBase],
-        Field(),
-    ] = {}
+        ReporterConfigSegment,
+        Field(description="Reporter configurations by name."),
+    ] = ReporterConfigSegment()
 
     # General scan settings
     fail_on_findings: Annotated[
@@ -237,11 +306,11 @@ class ASHConfig(BaseModel):
 
     # Legacy global settings (deprecated)
     global_settings: Annotated[
-        AshGlobalDefaultsConfigSection,
+        AshConfigGlobalSettingsSection,
         Field(
             description="Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
         ),
-    ] = AshGlobalDefaultsConfigSection()
+    ] = AshConfigGlobalSettingsSection()
 
     external_reports_to_include: Annotated[
         List[str],
@@ -264,7 +333,7 @@ class ASHConfig(BaseModel):
     ] = False
 
     @classmethod
-    def from_file(cls, config_path: Path) -> "ASHConfig":
+    def from_file(cls, config_path: Path) -> "AshConfig":
         """Load configuration from a file."""
         with open(config_path, "r") as f:
             # Using `yaml.safe_load()` as it handles both JSON and YAML data the same.
@@ -316,7 +385,10 @@ class ASHConfig(BaseModel):
         # for class names.
         og_plugin_name = plugin_name
         plugin_name = re.sub(
-            r"Scanner(Config)?", "", plugin_name, flags=re.IGNORECASE
+            r"(Converter|Scanner|Reporter)(Config)?",
+            "",
+            plugin_name,
+            flags=re.IGNORECASE,
         ).lower()
         # if plugin_type == "builder":
         #     for item in self.build.custom_scanners:
@@ -328,8 +400,16 @@ class ASHConfig(BaseModel):
         #         ]:
         #             found = item
         #             break
-        if plugin_type == "scanner":
-            item_dict = self.scanners.model_dump(by_alias=True)
+        if plugin_type in ["scanner", "reporter"]:
+            item_dict = (
+                self.scanners.model_dump(by_alias=True)
+                if plugin_type == "scanner"
+                else (
+                    self.reporters.model_dump(by_alias=True)
+                    if plugin_type == "reporter"
+                    else {}
+                )
+            )
             key_map = {}
             for item_name, item in item_dict.items():
                 if found is not None:
@@ -347,7 +427,6 @@ class ASHConfig(BaseModel):
                     )
                 ):
                     key_map[possible] = item_name
-
             # Try direct match first
             if plugin_name in item_dict:
                 ASH_LOGGER.debug(
@@ -360,33 +439,7 @@ class ASHConfig(BaseModel):
                     f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
                 )
                 found = item_dict[key_map[plugin_name]]
-            # else:
-            #     item: ScannerPluginConfigBase
-            #     for item_name, item in self.scanners.model_dump(by_alias=True).items():
-            #         if isinstance(item, dict):
-            #             item = ScannerPluginConfigBase(**item)
-            #         possible = list(
-            #             sorted(
-            #                 set(
-            #                     [
-            #                         item_name,
-            #                         item.name,
-            #                         re.sub(
-            #                             r"\W", "", item_name, flags=re.IGNORECASE
-            #                         ).lower(),
-            #                         re.sub(
-            #                             r"\W", "", item.name, flags=re.IGNORECASE
-            #                         ).lower(),
-            #                     ]
-            #                 )
-            #             )
-            #         )
-            #         ASH_LOGGER.debug(
-            #             f"(item_name: {item_name}) Searching from plugin_name '{plugin_name}' in possible members: {possible}"
-            #         )
-            #         if plugin_name in possible:
-            #             found = item
-            #             break
+
         if plugin_type == "converter":
             item_dict = self.converters
             key_map = {}
@@ -411,29 +464,40 @@ class ASHConfig(BaseModel):
                     f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
                 )
                 found = ConverterPluginConfigBase(
-                    name=item_name, enabled=item_dict[key_map[plugin_name]]["enabled"]
+                    name=item_name, enabled=item_dict[key_map[plugin_name]]
                 )
-            # for item_name, enabled in self.converters.items():
-            #     if plugin_name == item_name:
-            #         found = ConverterPluginConfigBase(name=item_name, enabled=enabled)
-            #         break
-        if plugin_type == "reporter":
-            for item_name in self.output_formats:
-                if plugin_name in list(
-                    sorted(
-                        set(
-                            [
-                                item_name,
-                                re.sub(
-                                    r"\W", "", item_name, flags=re.IGNORECASE
-                                ).lower(),
-                            ]
-                        )
-                    )
-                ):
-                    found = ReporterPluginConfigBase(name=item_name, enabled=True)
-                    break
 
+        # if plugin_type == "reporter":
+        #     item_dict = self.reporters.model_dump(by_alias=True)
+        #     key_map = {}
+        #     for item_name, item in item_dict.items():
+        #         if found is not None:
+        #             break
+        #         for possible in list(
+        #             sorted(
+        #                 set(
+        #                     [
+        #                         item_name,
+        #                         re.sub(
+        #                             r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
+        #                         ).lower(),
+        #                     ]
+        #                 )
+        #             )
+        #         ):
+        #             key_map[possible] = item_name
+        #     # Try direct match first
+        #     if plugin_name in item_dict:
+        #         ASH_LOGGER.debug(
+        #             f"Found {plugin_type} plugin {og_plugin_name} with direct match"
+        #         )
+        #         found = item_dict[plugin_name]
+        #     # Then try normalized match
+        #     elif plugin_name in key_map:
+        #         ASH_LOGGER.debug(
+        #             f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
+        #         )
+        #         found = item_dict[key_map[plugin_name]]
         if found is not None:
             ASH_LOGGER.debug(
                 f"Found config for {plugin_type} plugin {og_plugin_name}: {found}"

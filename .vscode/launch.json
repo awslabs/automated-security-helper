@@ -15,18 +15,17 @@
         "--output-dir",
         "${workspaceFolder}/ash_output",
         "--config",
-        "${workspaceFolder}/ash.yaml",
-        "--strategy",
-        "parallel",
-        "--scanners",
-        "cdk-nag",
+        "${workspaceFolder}/.ash.yaml",
         "--verbose",
         "--no-progress",
         "--no-cleanup"
       ],
       "console": "integratedTerminal",
+      "env": {
+        "PATH": "${workspaceFolder}/.venv/bin:${env.PATH}"
+      },
       "name": "ASH: Test CLI",
-      "program": "${workspaceFolder}/src/automated_security_helper/cli.py",
+      "program": "${workspaceFolder}/src/automated_security_helper/cli/main.py",
       "request": "launch",
       "type": "debugpy"
     },

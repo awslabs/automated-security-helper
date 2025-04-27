@@ -4,6 +4,7 @@
 from typing import Literal
 from pathlib import Path
 
+ASH_WORK_DIR_NAME = "converted"
 
 ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
 ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"

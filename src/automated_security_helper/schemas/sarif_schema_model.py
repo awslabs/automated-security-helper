@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 import json
+from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, RootModel
@@ -2361,6 +2362,44 @@ class SarifReport(BaseModel):
         self.field_schema = "https://json.schemastore.org/sarif-2.1.0.json"
         self.version = "2.1.0"
         return super().model_post_init(context)
+
+    def sanitize_paths(self, source_dir: str | Path) -> "SarifReport":
+        """
+        Sanitize paths in SARIF report to be relative to the source directory.
+
+        Args:
+            source_dir: The source directory to make paths relative to
+
+        Returns:
+            The sanitized SARIF report (self)
+        """
+        from automated_security_helper.utils.sarif_utils import sanitize_sarif_paths
+
+        return sanitize_sarif_paths(self, source_dir)
+
+    def attach_scanner_details(
+        self,
+        scanner_name: str,
+        scanner_version: str = None,
+        invocation_details: dict = None,
+    ) -> "SarifReport":
+        """
+        Attach scanner details to the SARIF report.
+
+        Args:
+            scanner_name: Name of the scanner
+            scanner_version: Version of the scanner (optional)
+            invocation_details: Dictionary with invocation details (optional)
+                Can include keys like 'command_line', 'arguments', 'working_directory', etc.
+
+        Returns:
+            The updated SARIF report (self)
+        """
+        from automated_security_helper.utils.sarif_utils import attach_scanner_details
+
+        return attach_scanner_details(
+            self, scanner_name, scanner_version, invocation_details
+        )
 
     def merge_sarif_report(
         self,

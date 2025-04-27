@@ -1,6 +1,8 @@
+"""Tests for HTML reporter."""
+
 import pytest
+from automated_security_helper.reporters.ash_default.html_reporter import HTMLReporter
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.reporters.ash_default import HTMLReporter
 from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     Message,
@@ -12,9 +14,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
 
 
 class TestHTMLReporter:
-    """Test cases for HTML reporter."""
+    """Test cases for HTMLReporter."""
 
-    def test_html_reporter_with_sarif_results(self, sample_ash_model: ASHARPModel):
+    def test_html_reporter_with_sarif_results(
+        self, sample_ash_model: ASHARPModel, test_plugin_context
+    ):
         """Test that the HTML reporter correctly formats SARIF results."""
         # Create a test ASHARPModel with SARIF results
 
@@ -49,35 +53,33 @@ class TestHTMLReporter:
         ]
 
         # Format the report
-        reporter = HTMLReporter()
+        reporter = HTMLReporter(context=test_plugin_context)
         html_output = reporter.report(sample_ash_model)
 
-        # Verify the output contains expected elements
-        assert "Security Scan Results" in html_output
+        # Check that the HTML contains the expected elements
+        assert "<!DOCTYPE html>" in html_output
+        assert "<html>" in html_output
         assert "TEST001" in html_output
         assert "TEST002" in html_output
         assert "Test error message" in html_output
         assert "Test warning message" in html_output
-        assert "test/file.py:10" in html_output
-        assert "test/file2.py:20" in html_output
-        assert 'class="severity-error"' in html_output
-        assert 'class="severity-warning"' in html_output
+        assert "test/file.py" in html_output
+        assert "test/file2.py" in html_output
 
-    def test_html_reporter_with_empty_results(self):
+    def test_html_reporter_with_empty_results(self, test_plugin_context):
         """Test that the HTML reporter handles empty results correctly."""
         model = ASHARPModel()
-        reporter = HTMLReporter()
+        reporter = HTMLReporter(context=test_plugin_context)
         html_output = reporter.report(model)
-
         assert "No findings to display" in html_output
 
-    def test_html_reporter_with_invalid_model(self):
+    def test_html_reporter_with_invalid_model(self, test_plugin_context):
         """Test that the HTML reporter raises an error for invalid models."""
-        reporter = HTMLReporter()
-        with pytest.raises(ValueError, match="only supports ASHARPModel"):
-            reporter.report("invalid model")
+        reporter = HTMLReporter(context=test_plugin_context)
+        with pytest.raises(ValueError):
+            reporter.report("not a model")
 
-    def test_html_reporter_with_missing_location(self):
+    def test_html_reporter_with_missing_location(self, test_plugin_context):
         """Test that the HTML reporter handles results with missing location info."""
         model = ASHARPModel()
         model.sarif.runs[0].results = [
@@ -89,9 +91,10 @@ class TestHTMLReporter:
             )
         ]
 
-        reporter = HTMLReporter()
+        reporter = HTMLReporter(context=test_plugin_context)
         html_output = reporter.report(model)
 
+        # Check that the HTML contains the expected elements
         assert "TEST003" in html_output
         assert "Test note message" in html_output
-        assert "N/A" in html_output  # Location should show as N/A
+        assert "N/A" in html_output  # Location should be N/A

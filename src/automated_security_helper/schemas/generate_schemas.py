@@ -7,7 +7,7 @@ from typing import Literal
 def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
     """Generate JSON schemas for the models."""
     from pathlib import Path
-    from automated_security_helper.config.ash_config import ASHConfig
+    from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.models.asharp_model import ASHARPModel
     import json
 
@@ -15,7 +15,7 @@ def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
     # create schemas dir if not existing
     schemas_dir = cur_file_path.parent
     resp = {}
-    for model in [ASHConfig, ASHARPModel]:
+    for model in [AshConfig, ASHARPModel]:
         json_schema_path = schemas_dir.joinpath(f"{model.__name__}.json").resolve()
         schema = model.model_json_schema()
         if output == "dict":

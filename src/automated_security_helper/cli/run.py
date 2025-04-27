@@ -10,7 +10,10 @@ import json
 import sys
 from pathlib import Path
 
-from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.constants import (
+    ASH_CONFIG_FILE_NAMES,
+    ASH_WORK_DIR_NAME,
+)
 from automated_security_helper.models.core import ExportFormat
 
 
@@ -75,18 +78,11 @@ def run(
     output_formats: Annotated[
         List[ExportFormat],
         typer.Option(
+            "--output-formats",
+            "-o",
             help="The output formats to use",
         ),
-    ] = [
-        e.value
-        for e in [
-            ExportFormat.SARIF,
-            ExportFormat.CYCLONEDX,
-            ExportFormat.JSON,
-            ExportFormat.HTML,
-            ExportFormat.JUNITXML,
-        ]
-    ],
+    ] = [],
     cleanup: Annotated[
         bool,
         typer.Option(
@@ -103,6 +99,13 @@ def run(
         Phases.scan,
         Phases.report,
     ],
+    existing_results: Annotated[
+        str,
+        typer.Option(
+            "--existing-results",
+            help="Path to an existing ash_aggregated_results.json file. If provided, the scan phase will be skipped and reports will be generated from this file.",
+        ),
+    ] = None,
     version: Annotated[
         bool,
         typer.Option(
@@ -124,7 +127,6 @@ def run(
 
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
     from automated_security_helper.core.progress import ExecutionStrategy
-    from automated_security_helper.models.core import ExportFormat
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
     from automated_security_helper.models.asharp_model import ASHARPModel
     from automated_security_helper.utils.log import get_logger
@@ -156,14 +158,7 @@ def run(
         orchestrator = ASHScanOrchestrator(
             source_dir=source_dir,
             output_dir=output_dir,
-            work_dir=output_dir.joinpath("converted"),
-            scan_output_format=[
-                ExportFormat.HTML,
-                ExportFormat.JSON,
-                ExportFormat.TEXT,
-                ExportFormat.YAML,
-                ExportFormat.JUNITXML,
-            ],
+            work_dir=output_dir.joinpath(ASH_WORK_DIR_NAME),
             enabled_scanners=scanners,
             config_path=config,
             verbose=verbose or debug,
@@ -187,6 +182,12 @@ def run(
                 is not None  # Neither is running in a CI pipeline
             ),
             color_system="auto" if color else None,
+            offline=(
+                offline
+                if offline is not None
+                else os.environ.get("ASH_OFFLINE", "NO").upper() in ["YES", "1", "TRUE"]
+            ),
+            existing_results_path=Path(existing_results) if existing_results else None,
         )
 
         # Determine which phases to run. Process them in required order to build the

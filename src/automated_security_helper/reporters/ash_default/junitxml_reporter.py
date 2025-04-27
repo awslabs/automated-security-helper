@@ -22,6 +22,7 @@ class JUnitXMLReporterConfig(ReporterPluginConfigBase):
     name: Literal["junitxml"] = "junitxml"
     extension: str = "junit.xml"
     enabled: bool = True
+    options: JUnitXMLReporterConfigOptions = JUnitXMLReporterConfigOptions()
 
 
 class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
@@ -30,6 +31,8 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
     def model_post_init(self, context):
         with warnings.catch_warnings():
             defusedxml.defuse_stdlib()
+        if self.config is None:
+            self.config = JUnitXMLReporterConfig()
         return super().model_post_init(context)
 
     def report(self, model: Any) -> str:
@@ -39,7 +42,7 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         Failed findings are represented as failed tests with appropriate error messages.
         """
         from automated_security_helper.models.asharp_model import ASHARPModel
-        from automated_security_helper.config.ash_config import ASHConfig
+        from automated_security_helper.config.ash_config import AshConfig
 
         if not isinstance(model, ASHARPModel):
             raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
@@ -53,7 +56,7 @@ class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         )
 
         report = JUnitXml(name="ASH Scan Report")
-        ash_config: ASHConfig = ASHConfig.model_validate(model.ash_config)
+        ash_config: AshConfig = AshConfig.model_validate(model.ash_config)
         test_suite = TestSuite(
             name="ASH Scan - " + ash_config.project_name,
         )

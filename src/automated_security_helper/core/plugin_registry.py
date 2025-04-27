@@ -21,7 +21,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.config.ash_config import ASHConfig
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -60,7 +60,7 @@ class RegisteredPlugin(BaseModel):
 class PluginRegistry(BaseModel):
     """Registry for plugins."""
 
-    config: ASHConfig | None = None
+    config: AshConfig | None = None
     plugin_context: PluginContext | None = None
     registered_plugins: Dict[str, Dict[str, RegisteredPlugin]] = {}
 
@@ -82,7 +82,7 @@ class PluginRegistry(BaseModel):
         return super().model_post_init(context)
 
     def discover_plugins(
-        self, plug_type: str, package: str = None, config: ASHConfig | None = None
+        self, plug_type: str, package: str = None, config: AshConfig | None = None
     ) -> dict:
         """Discover plugins and register them."""
         state_dict: dict = {}

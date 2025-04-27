@@ -1,10 +1,9 @@
 """Base class for execution engine phases."""
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any, Optional
 
-from automated_security_helper.config.ash_config import ASHConfig
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.models.asharp_model import ASHARPModel
 
@@ -14,10 +13,7 @@ class EnginePhase(ABC):
 
     def __init__(
         self,
-        source_dir: Path,
-        output_dir: Path,
-        work_dir: Path,
-        config: Optional[ASHConfig] = None,
+        plugin_context: PluginContext,
         progress_display: Optional[Any] = None,
         asharp_model: Optional[ASHARPModel] = None,
     ):
@@ -27,14 +23,11 @@ class EnginePhase(ABC):
             source_dir: Source directory to scan
             output_dir: Output directory for scan results
             work_dir: Working directory for temporary files
-            config: Optional ASHConfig to use for configuration
+            config: Optional AshConfig to use for configuration
             progress_display: Progress display to use for reporting progress
             asharp_model: ASHARPModel to update with results
         """
-        self.source_dir = source_dir
-        self.output_dir = output_dir
-        self.work_dir = work_dir
-        self.config = config
+        self.plugin_context = plugin_context
         self.progress_display = progress_display
         self.asharp_model = asharp_model or ASHARPModel()
         self.phase_task = None

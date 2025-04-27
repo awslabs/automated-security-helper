@@ -4,7 +4,6 @@
 import os
 import inspect
 import re
-import shutil
 import json
 from pathlib import Path
 from typing import Dict, List, Literal
@@ -130,9 +129,6 @@ def run_cdk_nag_against_cfn_template(
     ASH_LOGGER.debug(f"cdk nag outdir pre: {outdir.__str__()}")
     outdir = outdir.joinpath(clean_template_filename)
     ASH_LOGGER.debug(f"cdk nag outdir post: {outdir.__str__()}")
-    ASH_LOGGER.debug("Cleaning up outdir")
-    if outdir.exists():
-        shutil.rmtree(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     ASH_LOGGER.debug("outdir cleaned, creating CDK wrapper app")
 
@@ -264,7 +260,7 @@ def run_cdk_nag_against_cfn_template(
                         Level.warning
                         if line.compliance == "Non-Compliant"
                         and line.rule_level != "Error"
-                        else Level.note
+                        else Level.none
                     )
                 ),
                 kind=(

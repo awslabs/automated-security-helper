@@ -28,7 +28,7 @@ def generate_metrics_table(
         Table: Rich table with scanner metrics
     """
     # Create a table
-    table = Table(title="ASH Scan Results Summary", expand=True, min_width=100)
+    table = Table(title="ASH Scan Results Summary", expand=True, min_width=120)
 
     # Add columns
     table.add_column("Scanner", style="cyan")
@@ -43,13 +43,13 @@ def generate_metrics_table(
 
     # Get global severity threshold from config
     global_threshold = ASH_DEFAULT_SEVERITY_LEVEL
-    from automated_security_helper.config.ash_config import ASHConfig
+    from automated_security_helper.config.ash_config import AshConfig
 
     try:
-        ash_conf: ASHConfig = asharp_model.ash_config
+        ash_conf: AshConfig = asharp_model.ash_config
     except Exception as e:
         ASH_LOGGER.error(f"Error loading config, using default: {e}")
-        ash_conf = ASHConfig()
+        ash_conf = AshConfig()
 
     # Check for global_settings.severity_threshold first (new structure)
     if (

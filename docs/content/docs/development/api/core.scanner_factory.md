@@ -3,7 +3,7 @@
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/core/scanner_factory.py#L0"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 # <kbd>module</kbd> `core.scanner_factory`
-Module containing the ScannerFactory class for creating scanner instances. 
+Module containing the ScannerFactory class for creating scanner instances.
 
 
 
@@ -12,7 +12,7 @@ Module containing the ScannerFactory class for creating scanner instances.
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/core/scanner_factory.py#L15"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
 ## <kbd>class</kbd> `ScannerFactory`
-Factory class for creating and configuring scanner instances. 
+Factory class for creating and configuring scanner instances.
 
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/core/scanner_factory.py#L18"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
@@ -20,18 +20,18 @@ Factory class for creating and configuring scanner instances.
 
 ```python
 __init__(
-    config: ASHConfig = None,
+    config: AshConfig = None,
     registered_scanner_plugins: Dict[str, RegisteredPlugin] = {}
 ) → None
 ```
 
-Initialize the scanner factory with empty scanner registry. 
+Initialize the scanner factory with empty scanner registry.
 
 
 
 **Args:**
- 
- - <b>`config`</b>:  Optional ASHConfig instance to load custom scanner configurations 
+
+ - <b>`config`</b>:  Optional AshConfig instance to load custom scanner configurations
 
 
 
@@ -46,18 +46,18 @@ Initialize the scanner factory with empty scanner registry.
 available_scanners() → Dict[str, Type[ScannerPluginBase]]
 ```
 
-Get dictionary of all registered scanners. 
+Get dictionary of all registered scanners.
 
 
 
 **Returns:**
-  Dictionary mapping scanner names to scanner classes 
+  Dictionary mapping scanner names to scanner classes
 
 
 
 **Raises:**
- 
- - <b>`TypeError`</b>:  If scanner class cannot be determined for any scanner 
+
+ - <b>`TypeError`</b>:  If scanner class cannot be determined for any scanner
 
 ---
 
@@ -74,26 +74,26 @@ create_scanner(
 ) → ScannerPluginBase
 ```
 
-Create a scanner instance of the specified type with optional configuration. 
+Create a scanner instance of the specified type with optional configuration.
 
 
 
 **Args:**
- 
- - <b>`scanner_type`</b>:  Type of scanner to create (name, class, config object, or dict) 
- - <b>`config`</b>:  Optional configuration for the scanner 
+
+ - <b>`scanner_type`</b>:  Type of scanner to create (name, class, config object, or dict)
+ - <b>`config`</b>:  Optional configuration for the scanner
 
 
 
 **Returns:**
- An instance of the requested scanner type 
+ An instance of the requested scanner type
 
 
 
 **Raises:**
- 
- - <b>`ValueError`</b>:  If scanner type is not registered 
- - <b>`TypeError`</b>:  If scanner type is invalid 
+
+ - <b>`ValueError`</b>:  If scanner type is not registered
+ - <b>`TypeError`</b>:  If scanner type is invalid
 
 ---
 
@@ -105,25 +105,25 @@ Create a scanner instance of the specified type with optional configuration.
 get_scanner_class(scanner_name: str) → Type[ScannerPluginBase]
 ```
 
-Get the scanner class for a given name. 
+Get the scanner class for a given name.
 
 
 
 **Args:**
- 
- - <b>`scanner_name`</b>:  Name of scanner to retrieve (will be normalized) 
+
+ - <b>`scanner_name`</b>:  Name of scanner to retrieve (will be normalized)
 
 
 
 **Returns:**
- The scanner class 
+ The scanner class
 
 
 
 **Raises:**
- 
- - <b>`ValueError`</b>:  If scanner_name is not registered 
- - <b>`TypeError`</b>:  If stored value is not a scanner class 
+
+ - <b>`ValueError`</b>:  If scanner_name is not registered
+ - <b>`TypeError`</b>:  If stored value is not a scanner class
 
 ---
 
@@ -138,23 +138,23 @@ register_scanner(
 ) → None
 ```
 
-Register a scanner with the factory. 
+Register a scanner with the factory.
 
-The scanner name will be normalized to lowercase. Both the original name and base name without 'scanner' suffix (if present) will be registered. 
+The scanner name will be normalized to lowercase. Both the original name and base name without 'scanner' suffix (if present) will be registered.
 
 
 
 **Args:**
- 
- - <b>`scanner_name`</b>:  Name of scanner to register (will be normalized) 
- - <b>`scanner_input`</b>:  Scanner class or factory function to register 
+
+ - <b>`scanner_name`</b>:  Name of scanner to register (will be normalized)
+ - <b>`scanner_input`</b>:  Scanner class or factory function to register
 
 
 
 **Raises:**
- 
- - <b>`ValueError`</b>:  If scanner name is empty or already registered 
- - <b>`TypeError`</b>:  If scanner input is not valid 
+
+ - <b>`ValueError`</b>:  If scanner name is empty or already registered
+ - <b>`TypeError`</b>:  If scanner input is not valid
 
 
 

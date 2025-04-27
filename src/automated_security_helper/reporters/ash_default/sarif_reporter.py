@@ -18,10 +18,16 @@ class SARIFReporterConfig(ReporterPluginConfigBase):
     name: Literal["sarif"] = "sarif"
     extension: str = "sarif"
     enabled: bool = True
+    options: SARIFReporterConfigOptions = SARIFReporterConfigOptions()
 
 
 class SARIFReporter(ReporterPluginBase[SARIFReporterConfig]):
     """Formats results as SARIF."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = SARIFReporterConfig()
+        return super().model_post_init(context)
 
     def report(self, model: Any) -> str:
         """Format ASH model in SARIF."""

@@ -1,38 +1,40 @@
 """Module containing the PluginContext class for sharing context between plugins."""
 
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Annotated, Optional
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Annotated, Any
+
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 
 
 class PluginContext(BaseModel):
     """Context container for plugins to ensure consistent path information."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
     source_dir: Annotated[Path, Field(description="Source directory to scan")]
-    output_dir: Annotated[Path, Field(description="Output directory for results")]
+    output_dir: Annotated[
+        Path, Field(description="Primary output directory for all ASH results")
+    ]
     work_dir: Annotated[
         Path, Field(description="Working directory for temporary files")
     ] = None
+    config: Annotated[Any, Field(description="ASH configuration")] = None
 
-    def __init__(
-        self,
-        source_dir: Path,
-        output_dir: Path,
-        work_dir: Optional[Path] = None,
-        **data,
-    ):
-        """Initialize the plugin context with required paths.
-
-        Args:
-            source_dir: Source directory to scan
-            output_dir: Output directory for results
-            work_dir: Working directory for temporary files (defaults to output_dir/converted)
-        """
-        if work_dir is None:
-            work_dir = output_dir.joinpath("converted")
-
-        super().__init__(
-            source_dir=source_dir, output_dir=output_dir, work_dir=work_dir, **data
+    @field_validator("config")
+    def validate_config(cls, value):
+        from automated_security_helper.config.ash_config import (
+            AshConfig,
         )
+
+        if value is None:
+            return AshConfig()
+        elif not isinstance(value, AshConfig):
+            return AshConfig.model_validate(value)
+        else:
+            return value
+
+    def model_post_init(self, context):
+        if self.work_dir is None:
+            self.work_dir = self.output_dir.joinpath(ASH_WORK_DIR_NAME)
+        return super().model_post_init(context)

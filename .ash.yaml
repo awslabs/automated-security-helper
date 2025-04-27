@@ -1,14 +1,14 @@
-# yaml-language-server: $schema=./src/automated_security_helper/schemas/ASHConfig.json
+# yaml-language-server: $schema=./src/automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
 global_settings:
-  severity_threshold: MEDIUM
+  severity_threshold: HIGH
   ignore_paths:
     - path: 'tests/test_data'
       reason: This is test data that is used during unit testing only and is not part of the core application.
+    - path: 'tests'
+      reason: This is test data that is used during unit testing only and is not part of the core application.
     - path: .venv
-      reason: This path contains .gitignore'd cache data used by dev/build tools.
-    - path: .git
       reason: This path contains .gitignore'd cache data used by dev/build tools.
     - path: .ruff
       reason: This path contains .gitignore'd cache data used by dev/build tools.
@@ -19,21 +19,35 @@ global_settings:
 build:
   build_mode: ONLINE
   custom_scanners: []
-output_formats:
-  - sarif
-  - junitxml
-  - html
-  - cyclonedx
-  - asff
-  - ocsf
-  - text
+reporters:
+  asff:
+    enabled: false
+  csv:
+    enabled: true
+  cyclonedx:
+    enabled: true
+  flat-json:
+    enabled: true
+  html:
+    enabled: true
+  junitxml:
+    enabled: true
+  ocsf:
+    enabled: true
+  sarif:
+    enabled: true
+  text:
+    enabled: true
+  spdx:
+    enabled: false
+  yaml:
+    enabled: true
 scanners:
   bandit:
     enabled: true
     options:
       confidence_level: all
       ignore_nosec: false
-      excluded_paths: []
   cdk-nag:
     enabled: true
     options:

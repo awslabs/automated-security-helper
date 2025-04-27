@@ -5,7 +5,7 @@ import json
 import logging
 from pathlib import Path
 import shutil
-from typing import Annotated, Dict, List, Literal
+from typing import Annotated, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -32,6 +32,13 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class BanditScannerConfigOptions(ScannerOptionsBase):
+    config_file: Annotated[
+        str,
+        Field(
+            description="Path to the Bandit configuration file. Defaults to None.",
+            default=None,
+        ),
+    ] = None
     confidence_level: Annotated[
         Literal["all", "low", "medium", "high"],
         Field(description="Confidence level for Bandit findings"),
@@ -142,22 +149,38 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
     def _process_config_options(self):
         # Bandit config path
-        possible_config_paths: Dict[str, Dict[str, str | int | float | bool | None]] = {
-            f"{self.source_dir}/.bandit": [
-                ToolExtraArg(key="--ini", value=f"{self.source_dir}/.bandit")
+        possible_config_paths = {
+            f"{self.context.source_dir}/.bandit": [
+                ToolExtraArg(key="--ini", value=f"{self.context.source_dir}/.bandit")
             ],
-            f"{self.source_dir}/bandit.yaml": [
-                ToolExtraArg(key="--configfile", value=f"{self.source_dir}/bandit.yaml")
+            f"{self.context.source_dir}/bandit.yaml": [
+                ToolExtraArg(
+                    key="--configfile", value=f"{self.context.source_dir}/bandit.yaml"
+                )
             ],
-            f"{self.source_dir}/bandit.toml": [
-                ToolExtraArg(key="--configfile", value=f"{self.source_dir}/bandit.toml")
+            f"{self.context.source_dir}/bandit.toml": [
+                ToolExtraArg(
+                    key="--configfile", value=f"{self.context.source_dir}/bandit.toml"
+                )
             ],
         }
 
-        for conf_path, extra_arg_list in possible_config_paths.items():
-            if Path(conf_path).exists():
-                self.args.extra_args.extend(extra_arg_list)
-                break
+        if self.config.options.config_file is not None:
+            if self.config.options.config_file.endswith(".bandit"):
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--ini", value=self.config.options.config_file)
+                )
+            else:
+                self.args.extra_args.append(
+                    ToolExtraArg(
+                        key="--configfile", value=self.config.options.config_file
+                    )
+                )
+        else:
+            for conf_path, extra_arg_list in possible_config_paths.items():
+                if Path(conf_path).exists():
+                    self.args.extra_args.extend(extra_arg_list)
+                    break
 
         for item in ['--exclude="*venv/*"', '--exclude=".venv/*"']:
             self.args.extra_args.append(ToolExtraArg(key=item, value=None))
@@ -176,9 +199,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
             )
             self.args.extra_args.append(
-                ToolExtraArg(
-                    key=f'--exclude="{item.path}"',
-                )
+                ToolExtraArg(key=f'--exclude="{item.path}"', value=None)
             )
 
         return super()._process_config_options()

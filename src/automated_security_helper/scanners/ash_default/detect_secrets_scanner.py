@@ -172,7 +172,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # Find all files to scan from the scan set
             scannable = scan_set(
                 source=target,
-                output=self.output_dir,  # Always use the configured output_dir
+                output=self.context.output_dir,  # Always use the configured output_dir
                 # filter_pattern=r"\.(yaml|yml|json)$",
             )
             ASH_LOGGER.debug(
@@ -273,6 +273,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             with open(results_file, "w") as fp:
                 report_str = sarif_report.model_dump_json()
                 fp.write(report_str)
+
+            # Set exit code to 0 when no findings are found
+            if len(results) == 0:
+                self.exit_code = 0
 
             return sarif_report
 

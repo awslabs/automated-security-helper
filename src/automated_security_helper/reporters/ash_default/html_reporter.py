@@ -19,10 +19,16 @@ class HTMLReporterConfig(ReporterPluginConfigBase):
     name: Literal["html"] = "html"
     extension: str = "html"
     enabled: bool = True
+    options: HTMLReporterConfigOptions = HTMLReporterConfigOptions()
 
 
 class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
     """Formats results as HTML."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = HTMLReporterConfig()
+        return super().model_post_init(context)
 
     def report(self, model: Any) -> str:
         """Format ASH model as HTML string with comprehensive styling and organization."""

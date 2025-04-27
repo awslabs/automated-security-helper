@@ -165,7 +165,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 format_arg_value=f"cyclonedx-json={results_file.as_posix()}",
                 scan_path_arg=None,
                 extra_args=[
-                    ToolExtraArg(key="--base-path", value=self.source_dir.as_posix()),
+                    ToolExtraArg(
+                        key="--base-path", value=self.context.source_dir.as_posix()
+                    ),
                 ],
             )
             conf: SyftScannerConfig = self.config

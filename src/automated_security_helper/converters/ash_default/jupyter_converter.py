@@ -18,41 +18,42 @@ from automated_security_helper.base.converter_plugin import (
 from automated_security_helper.base.options import (
     ConverterOptionsBase,
 )
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
 
 
-class JupyterNotebookConverterConfigOptions(ConverterOptionsBase):
+class JupyterConverterConfigOptions(ConverterOptionsBase):
     pass
 
 
-class JupyterNotebookConverterConfig(ConverterPluginConfigBase):
+class JupyterConverterConfig(ConverterPluginConfigBase):
     """Jupyter Notebook (.ipynb) to Python converter configuration."""
 
     name: Literal["jupyter"] = "jupyter"
     enabled: bool = True
     options: Annotated[
-        JupyterNotebookConverterConfigOptions,
+        JupyterConverterConfigOptions,
         Field(description="Configure Jupyter Notebook converter"),
-    ] = JupyterNotebookConverterConfigOptions()
+    ] = JupyterConverterConfigOptions()
 
 
-class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfig]):
+class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     """Converter implementation for Jupyter notebooks security scanning."""
 
-    config: JupyterNotebookConverterConfig = JupyterNotebookConverterConfig()
+    config: JupyterConverterConfig = JupyterConverterConfig()
 
     def model_post_init(self, context):
-        self.work_dir = (
-            self.output_dir.joinpath("converted")
+        self.context.work_dir = (
+            self.context.output_dir.joinpath(ASH_WORK_DIR_NAME)
             .joinpath("converters")
             .joinpath("jupyter")
         )
         self.tool_version = version("nbconvert")
         if self.config is None:
-            self.config = JupyterNotebookConverterConfig()
+            self.config = JupyterConverterConfig()
         return super().model_post_init(context)
 
     def validate(self):
@@ -65,12 +66,12 @@ class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfi
     ) -> List[Path]:
         # TODO : Convert utils/identifyipynb.sh script to python using nbconvert as lib
         ASH_LOGGER.debug(
-            f"Searching for .ipynb files in search_path within the ASH scan set: {self.source_dir}"
+            f"Searching for .ipynb files in search_path within the ASH scan set: {self.context.source_dir}"
         )
         # Find all JSON/YAML files to scan from the scan set
         ipynb_files = scan_set(
-            source=self.source_dir,
-            output=self.output_dir,
+            source=self.context.source_dir,
+            output=self.context.output_dir,
             # filter_pattern=r"\.(ipynb)",
         )
         ipynb_files = [f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")]
@@ -83,7 +84,7 @@ class JupyterNotebookConverter(ConverterPluginBase[JupyterNotebookConverterConfi
             short_file_name = get_shortest_name(ipynb_file)
             normalized_file_name = get_normalized_filename(short_file_name)
             py_file = (
-                self.work_dir.joinpath(self.config.name)
+                self.context.work_dir.joinpath(self.config.name)
                 .joinpath(normalized_file_name)
                 .joinpath(ipynb_file)
                 .with_suffix(".py")

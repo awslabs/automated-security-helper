@@ -39,7 +39,12 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 
 
 class NpmAuditScannerConfigOptions(ScannerOptionsBase):
-    pass
+    offline: Annotated[
+        bool,
+        Field(
+            description="Run in offline mode, using locally cached data",
+        ),
+    ] = False
 
 
 class NpmAuditScannerConfig(ScannerPluginConfigBase):
@@ -261,8 +266,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             # Find all JSON/YAML files to scan from the scan set
             scannable = scan_set(
-                source=self.work_dir if target_type == "converted" else self.source_dir,
-                output=self.work_dir if target_type == "converted" else self.output_dir,
+                source=self.context.work_dir
+                if target_type == "converted"
+                else self.context.source_dir,
+                output=self.context.work_dir
+                if target_type == "converted"
+                else self.context.output_dir,
             )
             scannable = [
                 f.strip()
@@ -330,7 +339,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             binary = "pnpm"
                         else:
                             binary = "npm"
+
                         cmd = [binary, "audit", "--json"]
+
+                        # Add offline mode if enabled
+                        if self.config.options.offline:
+                            cmd.append("--offline")
+                            ASH_LOGGER.info(f"Running {binary} audit in offline mode")
+
                         result = self._run_subprocess(
                             command=cmd,
                             results_dir=target_results_dir,

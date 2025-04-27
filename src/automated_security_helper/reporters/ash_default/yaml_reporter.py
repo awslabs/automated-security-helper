@@ -17,11 +17,17 @@ class YAMLReporterConfigOptions(ReporterOptionsBase):
 class YAMLReporterConfig(ReporterPluginConfigBase):
     name: Literal["yaml"] = "yaml"
     extension: str = "yaml"
-    enabled: bool = True
+    enabled: bool = False
+    options: YAMLReporterConfigOptions = YAMLReporterConfigOptions()
 
 
 class YAMLReporter(ReporterPluginBase[YAMLReporterConfig]):
     """Formats results as YAML."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = YAMLReporterConfig()
+        return super().model_post_init(context)
 
     def report(self, model: Any) -> str:
         """Format ASH model as YAML string."""
