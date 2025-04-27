@@ -17,6 +17,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
     ScannerError,
 )
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -44,53 +45,64 @@ class TestConverterPlugin:
         def convert(self, target: Path | str) -> list[Path]:
             return [Path("test.txt")]
 
-    def test_setup_paths_default(self):
+    def test_setup_paths_default(self, test_plugin_context):
         """Test setup_paths with default values."""
-        converter = self.DummyConverter()
-        assert converter.source_dir == Path(".")
-        assert converter.output_dir == Path("ash_output")
-        assert converter.work_dir == Path(f"ash_output/{ASH_WORK_DIR_NAME}")
+        converter = self.DummyConverter(context=test_plugin_context)
+        assert converter.context.source_dir == test_plugin_context.source_dir
+        assert converter.context.output_dir == test_plugin_context.output_dir
+        assert converter.context.work_dir == test_plugin_context.work_dir
 
-    def test_setup_paths_custom(self):
+    def test_setup_paths_custom(self, test_plugin_context):
         """Test setup_paths with custom values."""
         source = Path("/custom/source")
         output = Path("/custom/output")
-        converter = self.DummyConverter(source_dir=source, output_dir=output)
-        assert converter.source_dir == source
-        assert converter.output_dir == output
-        assert converter.work_dir == output.joinpath(ASH_WORK_DIR_NAME)
-
-    def test_setup_paths_string_conversion(self):
-        """Test setup_paths converts string paths to Path objects."""
-        converter = self.DummyConverter(
-            source_dir="/test/source", output_dir="/test/output"
+        # Create a custom context with the specified paths
+        custom_context = PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=output.joinpath(ASH_WORK_DIR_NAME),
+            config=test_plugin_context.config,
         )
-        assert isinstance(converter.source_dir, Path)
-        assert isinstance(converter.output_dir, Path)
-        assert isinstance(converter.work_dir, Path)
+        converter = self.DummyConverter(context=custom_context)
+        assert converter.context.source_dir == source
+        assert converter.context.output_dir == output
+        assert converter.context.work_dir == output.joinpath(ASH_WORK_DIR_NAME)
 
-    def test_configure_with_config(self):
+    def test_setup_paths_string_conversion(self, test_plugin_context):
+        """Test setup_paths converts string paths to Path objects."""
+        # Create a custom context with string paths
+        custom_context = PluginContext(
+            source_dir="/test/source",
+            output_dir="/test/output",
+            config=test_plugin_context.config,
+        )
+        converter = self.DummyConverter(context=custom_context)
+        assert isinstance(converter.context.source_dir, Path)
+        assert isinstance(converter.context.output_dir, Path)
+        assert isinstance(converter.context.work_dir, Path)
+
+    def test_configure_with_config(self, test_plugin_context):
         """Test configure method with config."""
-        converter = self.DummyConverter()
+        converter = self.DummyConverter(context=test_plugin_context)
         config = self.DummyConfig()
         converter.configure(config)
         assert converter.config == config
 
-    def test_configure_without_config(self):
+    def test_configure_without_config(self, test_plugin_context):
         """Test configure method without config."""
-        converter = self.DummyConverter()
+        converter = self.DummyConverter(context=test_plugin_context)
         original_config = converter.config
         converter.configure(None)
         assert converter.config == original_config
 
-    def test_validate_implementation(self):
+    def test_validate_implementation(self, test_plugin_context):
         """Test validate method implementation."""
-        converter = self.DummyConverter()
+        converter = self.DummyConverter(context=test_plugin_context)
         assert converter.validate() is True
 
-    def test_convert_implementation(self):
+    def test_convert_implementation(self, test_plugin_context):
         """Test convert method implementation."""
-        converter = self.DummyConverter()
+        converter = self.DummyConverter(context=test_plugin_context)
         result = converter.convert("test.txt")
         assert isinstance(result, list)
         assert all(isinstance(p, Path) for p in result)
@@ -126,56 +138,59 @@ class TestReporterPlugin:
         def report(self, model: ASHARPModel) -> str:
             return '{"report": "complete"}'
 
-    def test_setup_paths_default(self):
+    def test_setup_paths_default(self, test_plugin_context):
         """Test setup_paths with default values."""
-        reporter = self.DummyReporter()
-        assert reporter.source_dir == Path(".")
-        assert reporter.output_dir == Path("ash_output")
+        reporter = self.DummyReporter(context=test_plugin_context)
+        assert reporter.context.source_dir == test_plugin_context.source_dir
+        assert reporter.context.output_dir == test_plugin_context.output_dir
 
-    def test_setup_paths_custom(self):
+    def test_setup_paths_custom(self, test_plugin_context):
         """Test setup_paths with custom values."""
         source = Path("/custom/source")
         output = Path("/custom/output")
-        reporter = self.DummyReporter(source_dir=source, output_dir=output)
-        assert reporter.source_dir == source
-        assert reporter.output_dir == output
+        custom_context = PluginContext(
+            source_dir=source, output_dir=output, config=test_plugin_context.config
+        )
+        reporter = self.DummyReporter(context=custom_context)
+        assert reporter.context.source_dir == source
+        assert reporter.context.output_dir == output
 
-    def test_configure_with_config(self):
+    def test_configure_with_config(self, test_plugin_context):
         """Test configure method with config."""
-        reporter = self.DummyReporter()
+        reporter = self.DummyReporter(context=test_plugin_context)
         config = self.DummyConfig()
         reporter.configure(config)
         assert reporter._config == config
 
-    def test_validate_implementation(self):
+    def test_validate_implementation(self, test_plugin_context):
         """Test validate method implementation."""
-        reporter = self.DummyReporter()
+        reporter = self.DummyReporter(context=test_plugin_context)
         assert reporter.validate() is True
 
-    def test_pre_report(self):
+    def test_pre_report(self, test_plugin_context):
         """Test _pre_report sets start time."""
-        reporter = self.DummyReporter()
+        reporter = self.DummyReporter(context=test_plugin_context)
         reporter._pre_report()
         assert reporter.start_time is not None
         assert isinstance(reporter.start_time, datetime)
 
-    def test_post_report(self):
+    def test_post_report(self, test_plugin_context):
         """Test _post_report sets end time."""
-        reporter = self.DummyReporter()
+        reporter = self.DummyReporter(context=test_plugin_context)
         reporter._post_report()
         assert reporter.end_time is not None
         assert isinstance(reporter.end_time, datetime)
 
-    def test_report_with_model(self):
+    def test_report_with_model(self, test_plugin_context):
         """Test report method with ASHARPModel."""
-        reporter = self.DummyReporter()
+        reporter = self.DummyReporter(context=test_plugin_context)
         model = ASHARPModel(findings=[], metadata={})
         result = reporter.report(model)
         assert result == '{"report": "complete"}'
 
-    def test_report_end_to_end(self):
+    def test_report_end_to_end(self, test_plugin_context):
         """Test report method end to end with ASHARPModel."""
-        reporter = self.DummyReporter()
+        reporter = self.DummyReporter(context=test_plugin_context)
         model = ASHARPModel(findings=[], metadata={})
 
         reporter._pre_report()
@@ -225,71 +240,78 @@ class TestScannerPlugin:
             self.output.append("hello world")
             return SarifReport(runs=[])
 
-    def test_model_post_init_no_config(self):
+    def test_model_post_init_no_config(self, test_plugin_context):
         """Test model_post_init with no config raises error."""
         with pytest.raises(ScannerError):
-            self.DummyScanner()
+            self.DummyScanner(context=test_plugin_context)
 
-    def test_model_post_init_with_config(self, tmp_path):
+    def test_model_post_init_with_config(self, tmp_path, test_plugin_context):
         """Test model_post_init with config."""
         config = self.DummyConfig()
-        scanner = self.DummyScanner(config=config, source_dir=tmp_path)
-        assert scanner.source_dir == tmp_path
-        assert scanner.output_dir == tmp_path.joinpath("ash_output")
-        assert scanner.work_dir == scanner.output_dir.joinpath(ASH_WORK_DIR_NAME)
-        assert scanner.results_dir == scanner.output_dir.joinpath("scanners").joinpath(
-            config.name
-        )
+        scanner = self.DummyScanner(config=config, context=test_plugin_context)
+        assert scanner.context.source_dir == test_plugin_context.source_dir
+        assert scanner.context.output_dir == test_plugin_context.output_dir
+        assert scanner.context.work_dir == test_plugin_context.work_dir
+        assert scanner.results_dir == scanner.context.output_dir.joinpath(
+            "scanners"
+        ).joinpath(config.name)
 
-    def test_process_config_options(self):
+    def test_process_config_options(self, test_plugin_context):
         """Test _process_config_options does nothing by default."""
         config = self.DummyConfig()
-        scanner = self.DummyScanner(config=config)
+        scanner = self.DummyScanner(config=config, context=test_plugin_context)
         scanner._process_config_options()  # Should not raise any error
 
-    def test_resolve_arguments_basic(self):
+    def test_resolve_arguments_basic(self, test_plugin_context):
         """Test _resolve_arguments with basic configuration."""
         config = self.DummyConfig()
-        scanner = self.DummyScanner(config=config, command="dummy-scan")
+        scanner = self.DummyScanner(
+            config=config, context=test_plugin_context, command="dummy-scan"
+        )
         args = scanner._resolve_arguments("test.txt")
         assert args[0] == "dummy-scan"  # Command
         assert "test.txt" in args  # Target path
 
-    def test_resolve_arguments_with_extra_args(self):
+    def test_resolve_arguments_with_extra_args(self, test_plugin_context):
         """Test _resolve_arguments with extra arguments."""
         config = self.DummyConfig()
         scanner = self.DummyScanner(
             config=config,
+            context=test_plugin_context,
             command="dummy-scan",
-            args=ToolArgs(extra_args=[{"key": "--debug", "value": "true"}]),
+            args=ToolArgs(extra_args=[ToolExtraArg(key="--debug", value="true")]),
         )
         args = scanner._resolve_arguments("test.txt")
         assert "--debug" in args
         assert "true" in args
 
-    def test_pre_scan_invalid_target(self):
+    def test_pre_scan_invalid_target(self, test_plugin_context):
         """Test _pre_scan with invalid target."""
         config = self.DummyConfig()
-        scanner = self.DummyScanner(config=config)
+        scanner = self.DummyScanner(context=test_plugin_context, config=config)
         with pytest.raises(ScannerError):
             scanner._pre_scan(Path("nonexistent.txt"), target_type="converted")
 
-    def test_pre_scan_creates_dirs(self, tmp_path):
+    def test_pre_scan_creates_dirs(self, tmp_path, test_plugin_context):
         """Test _pre_scan creates necessary directories."""
         config = self.DummyConfig()
         scanner = self.DummyScanner(
-            config=config, source_dir=tmp_path, output_dir=tmp_path.joinpath("output")
+            context=test_plugin_context,
+            config=config,
         )
         test_file = tmp_path.joinpath("test.txt")
         test_file.touch()
         scanner._pre_scan(test_file, target_type="converted")
-        assert scanner.work_dir.exists()
+        assert scanner.context.work_dir.exists()
         assert scanner.results_dir.exists()
 
-    def test_post_scan_sets_end_time(self, tmp_path):
+    def test_post_scan_sets_end_time(self, tmp_path, test_plugin_context):
         """Test _post_scan sets end_time."""
         config = self.DummyConfig()
-        scanner = self.DummyScanner(config=config)
+        scanner = self.DummyScanner(
+            context=test_plugin_context,
+            config=config,
+        )
         test_file = tmp_path.joinpath("test.txt")
         test_file.touch()
         scanner._pre_scan(
@@ -304,10 +326,11 @@ class TestScannerPlugin:
         )
         assert scanner.end_time is not None
 
-    def test_run_subprocess_success(self, test_source_dir):
+    def test_run_subprocess_success(self, test_source_dir, test_plugin_context):
         """Test _run_subprocess with successful command."""
         config = self.DummyConfig()
         scanner = self.DummyScanner(
+            context=test_plugin_context,
             config=config,
             command="echo",
             args=ToolArgs(extra_args=[ToolExtraArg(key="hello", value="world")]),
@@ -316,19 +339,24 @@ class TestScannerPlugin:
         assert scanner.exit_code == 0
         assert len(scanner.output) > 0
 
-    def test_run_subprocess_failure(self, test_source_dir):
+    def test_run_subprocess_failure(self, test_source_dir, test_plugin_context):
         """Test _run_subprocess with failing command."""
         config = self.DummyConfig()
-        scanner = self.DummyScanner(config=config, command="nonexistent-command")
+        scanner = self.DummyScanner(
+            context=test_plugin_context,
+            config=config,
+            command="nonexistent-command",
+        )
         final_args = scanner._resolve_arguments(test_source_dir)
         scanner._run_subprocess(final_args)
         assert scanner.exit_code == 1
         assert len(scanner.errors) > 0
 
-    def test_run_subprocess_with_stdout_stderr(self, tmp_path):
+    def test_run_subprocess_with_stdout_stderr(self, tmp_path, test_plugin_context):
         """Test _run_subprocess with stdout and stderr output."""
         config = self.DummyConfig()
         scanner = self.DummyScanner(
+            context=test_plugin_context,
             config=config,
             command="python",
             args=ToolArgs(
@@ -358,10 +386,14 @@ class TestScannerPlugin:
             Path(tmp_path).joinpath(f"{scanner.__class__.__name__}.stderr.log").exists()
         )
 
-    def test_run_subprocess_binary_not_found(self, test_source_dir):
+    def test_run_subprocess_binary_not_found(self, test_plugin_context):
         """Test _run_subprocess when binary is not found."""
         config = self.DummyConfig()
-        scanner = self.DummyScanner(config=config, command="nonexistent-binary")
+        scanner = self.DummyScanner(
+            context=test_plugin_context,
+            config=config,
+            command="nonexistent-binary",
+        )
         scanner._run_subprocess(["nonexistent-binary"])
         assert scanner.exit_code == 1
         assert len(scanner.errors) > 0

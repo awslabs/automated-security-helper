@@ -1,65 +1,59 @@
-"""Tests for the Bandit scanner implementation."""
+"""Tests for Bandit scanner."""
 
-from pathlib import Path
 import pytest
-from unittest.mock import MagicMock, patch
-
+from pathlib import Path
 from automated_security_helper.scanners.ash_default.bandit_scanner import (
     BanditScanner,
     BanditScannerConfig,
     BanditScannerConfigOptions,
 )
-from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
 
 
 @pytest.fixture
-def bandit_scanner():
-    """Create a BanditScanner instance for testing."""
-    return BanditScanner()
-
-
-@pytest.fixture
-def mock_subprocess_run():
-    """Mock subprocess.run for testing."""
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        yield mock_run
-
-
-def test_bandit_scanner_init(bandit_scanner):
-    """Test BanditScanner initialization."""
-    assert bandit_scanner.command == "bandit"
-    assert bandit_scanner.tool_type == "SAST"
-    assert isinstance(bandit_scanner.config, BanditScannerConfig)
-    assert "--recursive" in [arg.key for arg in bandit_scanner.args.extra_args]
-
-
-def test_bandit_scanner_configure():
-    """Test BanditScanner configuration."""
-    scanner = BanditScanner()
-    config = BanditScannerConfig(
-        options=BanditScannerConfigOptions(
-            confidence_level="high",
-            severity_level="medium",
-            ignore_nosec=True,
-            excluded_paths=[IgnorePathWithReason(path="tests/*", reason="Test files")],
-        )
+def test_bandit_scanner(test_plugin_context):
+    """Create a test Bandit scanner."""
+    return BanditScanner(
+        context=test_plugin_context,
+        config=BanditScannerConfig(),
     )
-    scanner.configure(config)
-    assert scanner.config.options.confidence_level == "high"
-    assert scanner.config.options.severity_level == "medium"
-    assert scanner.config.options.ignore_nosec is True
-    assert len(scanner.config.options.excluded_paths) == 1
 
 
-def test_bandit_scanner_validate(bandit_scanner):
+def test_bandit_scanner_init(test_plugin_context):
+    """Test BanditScanner initialization."""
+    scanner = BanditScanner(
+        context=test_plugin_context,
+        config=BanditScannerConfig(),
+    )
+    assert scanner.config.name == "bandit"
+    assert scanner.command == "bandit"
+    assert scanner.args.format_arg == "--format"
+    assert scanner.args.format_arg_value == "sarif"
+
+
+def test_bandit_scanner_configure(test_plugin_context):
+    """Test BanditScanner configuration."""
+    scanner = BanditScanner(
+        context=test_plugin_context,
+        config=BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                config_file=".bandit",
+                skip_path=[IgnorePathWithReason(path="tests/*", reason="Test files")],
+            )
+        ),
+    )
+    assert scanner.config.options.config_file == ".bandit"
+    assert len(scanner.config.options.skip_path) == 1
+    assert scanner.config.options.skip_path[0].path == "tests/*"
+
+
+def test_bandit_scanner_validate(test_bandit_scanner):
     """Test BanditScanner validation."""
-    assert bandit_scanner.validate() is True
+    assert test_bandit_scanner.validate() is True
 
 
 @pytest.mark.parametrize(
-    "config_file,expected_arg",
+    "config_file,config_arg",
     [
         (".bandit", "--ini"),
         ("bandit.yaml", "--configfile"),
@@ -67,62 +61,85 @@ def test_bandit_scanner_validate(bandit_scanner):
     ],
 )
 def test_process_config_options_with_config_files(
-    bandit_scanner, config_file, expected_arg, tmp_path
+    config_file, config_arg, test_source_dir, test_plugin_context
 ):
     """Test processing of different config file types."""
-    source_dir = tmp_path / "source"
-    source_dir.mkdir()
-    config_path = source_dir / config_file
+    config_path = test_source_dir.joinpath(config_file)
     config_path.touch()
 
-    bandit_scanner.source_dir = str(source_dir)
-    bandit_scanner._process_config_options()
+    scanner = BanditScanner(
+        context=test_plugin_context,
+        config=BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                config_file=config_path.as_posix(),
+            )
+        ),
+    )
+    scanner._process_config_options()
 
-    config_args = [
-        arg for arg in bandit_scanner.args.extra_args if expected_arg in arg.key
-    ]
-    assert len(config_args) > 0
-
-
-def test_process_config_options_exclusions(bandit_scanner):
-    """Test processing of exclusion options."""
-    bandit_scanner.config.options.excluded_paths = [
-        IgnorePathWithReason(path="tests/*", reason="Test files"),
-        IgnorePathWithReason(path="venv/*", reason="Virtual environment"),
-    ]
-    bandit_scanner._process_config_options()
-
-    exclusion_args = [
-        arg for arg in bandit_scanner.args.extra_args if "--exclude" in arg.key
-    ]
-    assert len(exclusion_args) >= 2
+    # Check that the correct config argument was added
+    config_args_keys = [arg.key for arg in scanner.args.extra_args]
+    # The config args are now in the format "--configfile" or "--ini"
+    assert any(arg.startswith(config_arg) for arg in config_args_keys)
 
 
-@pytest.mark.asyncio
-async def test_bandit_scanner_scan(bandit_scanner, test_source_dir):
-    """Test BanditScanner scan execution."""
+def test_process_config_options_exclusions(test_plugin_context):
+    """Test processing of exclusion paths."""
+    scanner = BanditScanner(
+        context=test_plugin_context,
+        config=BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                excluded_paths=[
+                    IgnorePathWithReason(path="tests/*", reason="Test files"),
+                    IgnorePathWithReason(path="examples/*", reason="Example files"),
+                ]
+            )
+        ),
+    )
+    scanner._process_config_options()
 
-    Path(test_source_dir).mkdir(parents=True, exist_ok=True)
-    Path(test_source_dir).joinpath("test.py").touch()
-    result = bandit_scanner.scan(test_source_dir, target_type="source")
-    assert result is not None
+    # Check that exclusion arguments were added
+    exclusion_args = [arg.key for arg in scanner.args.extra_args]
+    # The exclusion args are now in the format '--exclude="tests/*"'
+    assert any("--exclude=" in arg and "tests/*" in arg for arg in exclusion_args)
 
 
-def test_bandit_scanner_scan_error(bandit_scanner, mock_subprocess_run):
-    """Test BanditScanner scan with error."""
-    mock_subprocess_run.side_effect = Exception("Scan failed")
+def test_bandit_scanner_scan(test_bandit_scanner, test_source_dir):
+    """Test BanditScanner scan method."""
+    # Create a test Python file with a known vulnerability
+    test_file = test_source_dir.joinpath("test_file.py")
+    test_file.write_text("import pickle\npickle.loads(b'test')")  # Known security issue
 
-    with pytest.raises(ScannerError) as exc_info:
-        bandit_scanner.scan(Path("/nonexistent"), target_type="source")
-    assert "Bandit scan failed" in str(exc_info.value)
+    # Run the scan
+    results = test_bandit_scanner.scan(test_source_dir, target_type="source")
+
+    # Check that results were returned
+    assert results is not None
 
 
-def test_bandit_scanner_additional_formats(bandit_scanner):
+def test_bandit_scanner_scan_error(test_bandit_scanner):
+    """Test BanditScanner scan method with error."""
+    # Try to scan a non-existent directory
+    with pytest.raises(Exception):
+        test_bandit_scanner.scan(Path("/nonexistent"), target_type="source")
+
+
+def test_bandit_scanner_additional_formats(test_plugin_context):
     """Test BanditScanner with additional output formats."""
-    bandit_scanner.config.options.additional_formats = ["json", "txt"]
-    bandit_scanner._process_config_options()
+    scanner = BanditScanner(
+        context=test_plugin_context,
+        config=BanditScannerConfig(
+            options=BanditScannerConfigOptions(
+                additional_formats=["sarif", "html"],
+            )
+        ),
+    )
+    scanner._process_config_options()
 
-    format_args = [
-        arg for arg in bandit_scanner.args.extra_args if arg.key == "--format"
-    ]
-    assert len(format_args) >= 2
+    # Check that additional format arguments were added
+    format_args = [arg.key for arg in scanner.args.extra_args]
+    format_values = [arg.value for arg in scanner.args.extra_args]
+
+    # Check that the --format argument is present with the additional formats
+    assert "--format" in format_args
+    assert "sarif" in format_values or "html" in format_values

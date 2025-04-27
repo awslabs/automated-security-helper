@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
@@ -13,9 +15,12 @@ from automated_security_helper.schemas.sarif_schema_model import Level, Kind
 
 
 @pytest.fixture
-def detect_secrets_scanner():
+def detect_secrets_scanner(test_plugin_context):
     """Create a DetectSecretsScanner instance for testing."""
-    return DetectSecretsScanner()
+    return DetectSecretsScanner(
+        context=test_plugin_context,
+        config=DetectSecretsScannerConfig(),
+    )
 
 
 @pytest.fixture
@@ -120,8 +125,12 @@ def test_detect_secrets_scanner_with_no_findings(
     target_dir = tmp_path / "target"
     target_dir.mkdir()
 
-    detect_secrets_scanner.source_dir = str(target_dir)
-    detect_secrets_scanner.output_dir = str(tmp_path / "output")
+    detect_secrets_scanner.context = PluginContext(
+        source_dir=target_dir,
+        output_dir=tmp_path / "output",
+        work_dir=tmp_path / "output" / ASH_WORK_DIR_NAME,
+        config=None,
+    )
 
     result = detect_secrets_scanner.scan(target_dir, target_type="source")
 

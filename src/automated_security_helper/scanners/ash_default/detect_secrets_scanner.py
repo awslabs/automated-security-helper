@@ -274,6 +274,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 report_str = sarif_report.model_dump_json()
                 fp.write(report_str)
 
+            # Set exit code to 0 when no findings are found
+            if len(results) == 0:
+                self.exit_code = 0
+
             return sarif_report
 
         except Exception as e:

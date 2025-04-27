@@ -61,7 +61,7 @@ class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
             return output.getvalue()
 
         # Get all field names from the first vulnerability
-        fields = list(flat_vulns[0].model_fields.keys())
+        fields = list(flat_vulns[0].__class__.model_fields.keys())
 
         # Write header row
         writer.writerow(fields)

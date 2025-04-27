@@ -30,8 +30,8 @@ from automated_security_helper.reporters.ash_default.cyclonedx_reporter import (
 from automated_security_helper.reporters.ash_default.html_reporter import (
     HTMLReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.json_reporter import (
-    JSONReporterConfig,
+from automated_security_helper.reporters.ash_default.flatjson_reporter import (
+    FlatJSONReporterConfig,
 )
 from automated_security_helper.reporters.ash_default.junitxml_reporter import (
     JUnitXMLReporterConfig,
@@ -172,10 +172,13 @@ class ReporterConfigSegment(BaseModel):
         HTMLReporterConfig,
         Field(description="Configure the options for the HTML reporter"),
     ] = HTMLReporterConfig()
-    json: Annotated[
-        JSONReporterConfig,
-        Field(description="Configure the options for the JSON reporter"),
-    ] = JSONReporterConfig()
+    flat_json: Annotated[
+        FlatJSONReporterConfig,
+        Field(
+            description="Configure the options for the Flat JSON reporter",
+            alias="flat-json",
+        ),
+    ] = FlatJSONReporterConfig()
     junitxml: Annotated[
         JUnitXMLReporterConfig,
         Field(description="Configure the options for the JUnit XML reporter"),

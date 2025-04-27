@@ -133,8 +133,14 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
             self._run_subprocess(final_args)
 
             # Parse JSON output
-            scanner_results = json.loads("".join(self.output))
-            results = scanner_results.get("results", {})
+            try:
+                scanner_results = json.loads("".join(self.output))
+                results = scanner_results.get("results", {})
+            except json.JSONDecodeError:
+                # If the output is not valid JSON, create an empty result structure
+                scanner_results = {"results": []}
+                results = []
+
             ASH_LOGGER.debug(f"({scanner_name}) Found {len(results)} results")
 
             self._post_scan(
@@ -234,4 +240,4 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
                     f"{scanner_name} scan failed: {str(e)}. Additional error output: {error_output}"
                 )
             else:
-                raise ScannerError(f"{scanner_name} scan failed: {str(e)}.")
+                raise ScannerError(f"{scanner_name} scan failed: {str(e)}")

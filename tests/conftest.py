@@ -85,18 +85,22 @@ def test_output_dir() -> Path:
 @pytest.fixture
 def test_plugin_context() -> PluginContext:
     """Create a test plugin context"""
+    from automated_security_helper.config.ash_config import AshConfig
+
     return PluginContext(
         source_dir=TEST_SOURCE_DIR,
         output_dir=TEST_OUTPUT_DIR,
         work_dir=TEST_OUTPUT_DIR.joinpath(ASH_WORK_DIR_NAME),
-        config=ash_config(),
+        config=AshConfig(),
     )
 
 
-# @pytest.fixture
-# def sample_config():
-#     return {
-#         "scanners": {"bandit": {"type": "static", "config_file": "bandit.yaml"}},
+@pytest.fixture
+def test_data_dir() -> Path:
+    """Return the test data directory."""
+    return TEST_DATA_DIR
+
+
 #         "parsers": {"bandit": {"format": "json"}},
 #     }
 
@@ -159,7 +163,7 @@ def mock_scanner_plugin():
 
 
 @pytest.fixture
-def ash_config(mock_scanner_plugin):
+def ash_config():
     """Create a test AshConfig object based on default ash.yaml settings."""
     # Lazy load required classes
     AshConfig, BuildConfig, ScannerConfigSegment = lazy_import(

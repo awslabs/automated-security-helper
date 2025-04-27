@@ -364,6 +364,8 @@ class ASHARPModel(BaseModel):
 
         # Process additional reports if available
         for scanner_name, report_data in self.additional_reports.items():
+            if report_data is None:
+                continue
             for target_type, results in report_data.items():
                 if isinstance(results, dict) and "severity_counts" in results:
                     # This is a summary report, not individual findings

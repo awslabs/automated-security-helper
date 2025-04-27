@@ -82,17 +82,7 @@ def run(
             "-o",
             help="The output formats to use",
         ),
-    ] = [
-        e.value
-        for e in [
-            ExportFormat.SARIF,
-            ExportFormat.CYCLONEDX,
-            ExportFormat.JSON,
-            ExportFormat.HTML,
-            ExportFormat.JUNITXML,
-            ExportFormat.OCSF,
-        ]
-    ],
+    ] = [],
     cleanup: Annotated[
         bool,
         typer.Option(

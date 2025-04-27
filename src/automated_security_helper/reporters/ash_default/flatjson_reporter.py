@@ -10,19 +10,19 @@ from automated_security_helper.base.reporter_plugin import (
 )
 
 
-class JSONReporterConfigOptions(ReporterOptionsBase):
+class FlatJSONReporterConfigOptions(ReporterOptionsBase):
     pass
 
 
-class JSONReporterConfig(ReporterPluginConfigBase):
-    name: Literal["json"] = "json"
+class FlatJSONReporterConfig(ReporterPluginConfigBase):
+    name: Literal["flat-json"] = "flat-json"
     extension: str = "flat.json"
     enabled: bool = True
-    options: JSONReporterConfigOptions = JSONReporterConfigOptions()
+    options: FlatJSONReporterConfigOptions = FlatJSONReporterConfigOptions()
 
 
-class JSONReporter(ReporterPluginBase[JSONReporterConfig]):
-    """Formats results as JSON."""
+class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
+    """Formats results as a flattened JSON array of findings."""
 
     def report(self, model: Any) -> str:
         """Format ASH model as JSON string."""

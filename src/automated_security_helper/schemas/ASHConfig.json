@@ -97,6 +97,7 @@
           "default": {
             "additional_formats": [],
             "confidence_level": "all",
+            "config_file": null,
             "excluded_paths": [],
             "ignore_nosec": false,
             "severity_threshold": null
@@ -139,6 +140,12 @@
             "high"
           ],
           "title": "Confidence Level",
+          "type": "string"
+        },
+        "config_file": {
+          "default": null,
+          "description": "Path to the Bandit configuration file. Defaults to None.",
+          "title": "Config File",
           "type": "string"
         },
         "excluded_paths": {
@@ -803,6 +810,39 @@
       "title": "DetectSecretsScannerConfigOptions",
       "type": "object"
     },
+    "FlatJSONReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "flat.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "flat-json",
+          "default": "flat-json",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/FlatJSONReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "FlatJSONReporterConfig",
+      "type": "object"
+    },
+    "FlatJSONReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "FlatJSONReporterConfigOptions",
+      "type": "object"
+    },
     "GrypeScannerConfig": {
       "additionalProperties": true,
       "description": "Grype SAST scanner configuration.",
@@ -898,39 +938,6 @@
         "reason"
       ],
       "title": "IgnorePathWithReason",
-      "type": "object"
-    },
-    "JSONReporterConfig": {
-      "additionalProperties": true,
-      "properties": {
-        "enabled": {
-          "default": true,
-          "title": "Enabled",
-          "type": "boolean"
-        },
-        "extension": {
-          "default": "flat.json",
-          "title": "Extension",
-          "type": "string"
-        },
-        "name": {
-          "const": "json",
-          "default": "json",
-          "title": "Name",
-          "type": "string"
-        },
-        "options": {
-          "$ref": "#/$defs/JSONReporterConfigOptions",
-          "default": {}
-        }
-      },
-      "title": "JSONReporterConfig",
-      "type": "object"
-    },
-    "JSONReporterConfigOptions": {
-      "additionalProperties": true,
-      "properties": {},
-      "title": "JSONReporterConfigOptions",
       "type": "object"
     },
     "JUnitXMLReporterConfig": {
@@ -1121,6 +1128,16 @@
           },
           "description": "Configure the options for the CycloneDX reporter"
         },
+        "flat-json": {
+          "$ref": "#/$defs/FlatJSONReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "flat.json",
+            "name": "flat-json",
+            "options": {}
+          },
+          "description": "Configure the options for the Flat JSON reporter"
+        },
         "html": {
           "$ref": "#/$defs/HTMLReporterConfig",
           "default": {
@@ -1130,16 +1147,6 @@
             "options": {}
           },
           "description": "Configure the options for the HTML reporter"
-        },
-        "json": {
-          "$ref": "#/$defs/JSONReporterConfig",
-          "default": {
-            "enabled": true,
-            "extension": "flat.json",
-            "name": "json",
-            "options": {}
-          },
-          "description": "Configure the options for the JSON reporter"
         },
         "junitxml": {
           "$ref": "#/$defs/JUnitXMLReporterConfig",
@@ -1329,6 +1336,7 @@
             "options": {
               "additional_formats": [],
               "confidence_level": "all",
+              "config_file": null,
               "excluded_paths": [],
               "ignore_nosec": false,
               "severity_threshold": null
@@ -2015,16 +2023,16 @@
           "name": "cyclonedx",
           "options": {}
         },
+        "flat-json": {
+          "enabled": true,
+          "extension": "flat.json",
+          "name": "flat-json",
+          "options": {}
+        },
         "html": {
           "enabled": true,
           "extension": "html",
           "name": "html",
-          "options": {}
-        },
-        "json": {
-          "enabled": true,
-          "extension": "flat.json",
-          "name": "json",
           "options": {}
         },
         "junitxml": {
@@ -2075,6 +2083,7 @@
           "options": {
             "additional_formats": [],
             "confidence_level": "all",
+            "config_file": null,
             "excluded_paths": [],
             "ignore_nosec": false,
             "severity_threshold": null

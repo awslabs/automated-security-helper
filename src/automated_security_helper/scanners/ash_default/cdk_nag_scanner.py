@@ -14,8 +14,6 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
-    Kind,
-    Level,
     MultiformatMessageString,
     PropertyBag,
     ReportingDescriptor,
@@ -108,23 +106,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # CDK Nag scanner is built into this Python module, if the Python import got
         # this far then we know we're in a valid runtime for this scanner.
         return True
-
-    def _map_severity_to_level(self, severity: str) -> Level:
-        """Map severity to SARIF level."""
-        if severity == "CRITICAL":
-            return Level.error
-        elif severity == "MEDIUM":
-            return Level.warning
-        return Level.note
-
-    def _map_status_to_kind(self, status: str) -> Kind:
-        """Map IaCVulnerability status to SARIF kind."""
-        status_to_kind = {
-            "OPEN": Kind.fail,
-            "RISK_ACCEPTED": Kind.review,
-            "INFORMATIONAL": Kind.informational,
-        }
-        return status_to_kind.get(status, Kind.fail)
 
     def scan(
         self,

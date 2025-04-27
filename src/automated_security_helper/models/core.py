@@ -18,7 +18,7 @@ class ExportFormat(str, Enum):
     """Supported export formats."""
 
     TEXT = "text"
-    JSON = "json"
+    FLAT_JSON = "flat-json"
     YAML = "yaml"
     CSV = "csv"
     HTML = "html"

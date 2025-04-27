@@ -21,38 +21,27 @@ build:
   custom_scanners: []
 reporters:
   asff:
-    enabled: false
-    extension: asff
+    enabled: true
   csv:
-    enabled: false
-    extension: csv
+    enabled: true
   cyclonedx:
     enabled: true
-    extension: cdx.json
+  flat-json:
+    enabled: true
   html:
     enabled: true
-    extension: html
   junitxml:
     enabled: true
-    extension: junit.xml
   ocsf:
     enabled: true
-    extension: ocsf.json
   sarif:
     enabled: true
-    extension: sarif
   text:
     enabled: true
-    extension: txt
-  json:
-    enabled: false
-    extension: json
   spdx:
     enabled: false
-    extension: spdx.json
   yaml:
-    enabled: false
-    extension: yaml
+    enabled: true
 scanners:
   bandit:
     enabled: true
