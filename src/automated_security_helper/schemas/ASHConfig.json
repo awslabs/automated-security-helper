@@ -156,7 +156,7 @@
             }
           ],
           "default": null,
-          "description": "Path to the Bandit configuration file. Defaults to None.",
+          "description": "Path to Bandit configuration file, relative to current source directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`, and `bandit.toml` in the root of the source directory if this is left empty.",
           "title": "Config File"
         },
         "excluded_paths": {
