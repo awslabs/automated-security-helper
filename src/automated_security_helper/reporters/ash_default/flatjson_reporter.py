@@ -62,4 +62,5 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
                 for vuln in flat_vulns
             ],
             indent=2,
+            default=str,
         )

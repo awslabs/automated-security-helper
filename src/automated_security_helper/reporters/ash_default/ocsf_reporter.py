@@ -191,12 +191,10 @@ class OCSFReporter(ReporterPluginBase[OCSFReporterConfig]):
             )
 
             # Convert to JSON
-            return json.dumps(
-                vulnerability_finding.model_dump(
-                    # by_alias=True,
-                    # exclude_none=True,
-                    # exclude_unset=True,
-                )
+            return vulnerability_finding.model_dump_json(
+                # by_alias=True,
+                # exclude_none=True,
+                # exclude_unset=True,
             )
         except Exception as e:
             ASH_LOGGER.error(f"Failed to create OCSF report: {str(e)}")
@@ -216,4 +214,5 @@ class OCSFReporter(ReporterPluginBase[OCSFReporterConfig]):
                     "vulnerabilities_count": len(vulnerabilities),
                 },
                 indent=2,
+                default=str,
             )

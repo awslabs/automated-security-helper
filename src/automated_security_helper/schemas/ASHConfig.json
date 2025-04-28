@@ -994,7 +994,7 @@
           "type": "boolean"
         },
         "extension": {
-          "default": "md",
+          "default": "summary.md",
           "title": "Extension",
           "type": "string"
         },
@@ -1246,7 +1246,7 @@
           "$ref": "#/$defs/MarkdownReporterConfig",
           "default": {
             "enabled": true,
-            "extension": "md",
+            "extension": "summary.md",
             "name": "markdown",
             "options": {
               "include_detailed_findings": true,
@@ -1293,9 +1293,15 @@
           "$ref": "#/$defs/TextReporterConfig",
           "default": {
             "enabled": true,
-            "extension": "txt",
+            "extension": "summary.txt",
             "name": "text",
-            "options": {}
+            "options": {
+              "include_detailed_findings": false,
+              "include_findings_table": false,
+              "include_summary": true,
+              "max_detailed_findings": 20,
+              "top_hotspots_limit": 20
+            }
           },
           "description": "Configure the options for the Text reporter"
         },
@@ -1864,6 +1870,7 @@
     },
     "TextReporterConfig": {
       "additionalProperties": true,
+      "description": "Configuration for the Text reporter.",
       "properties": {
         "enabled": {
           "default": true,
@@ -1871,7 +1878,7 @@
           "type": "boolean"
         },
         "extension": {
-          "default": "txt",
+          "default": "summary.txt",
           "title": "Extension",
           "type": "string"
         },
@@ -1883,7 +1890,13 @@
         },
         "options": {
           "$ref": "#/$defs/TextReporterConfigOptions",
-          "default": {}
+          "default": {
+            "include_detailed_findings": false,
+            "include_findings_table": false,
+            "include_summary": true,
+            "max_detailed_findings": 20,
+            "top_hotspots_limit": 20
+          }
         }
       },
       "title": "TextReporterConfig",
@@ -1891,7 +1904,34 @@
     },
     "TextReporterConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "description": "Configuration options for the Text reporter.",
+      "properties": {
+        "include_detailed_findings": {
+          "default": false,
+          "title": "Include Detailed Findings",
+          "type": "boolean"
+        },
+        "include_findings_table": {
+          "default": false,
+          "title": "Include Findings Table",
+          "type": "boolean"
+        },
+        "include_summary": {
+          "default": true,
+          "title": "Include Summary",
+          "type": "boolean"
+        },
+        "max_detailed_findings": {
+          "default": 20,
+          "title": "Max Detailed Findings",
+          "type": "integer"
+        },
+        "top_hotspots_limit": {
+          "default": 20,
+          "title": "Top Hotspots Limit",
+          "type": "integer"
+        }
+      },
       "title": "TextReporterConfigOptions",
       "type": "object"
     },
@@ -2144,7 +2184,7 @@
         },
         "markdown": {
           "enabled": true,
-          "extension": "md",
+          "extension": "summary.md",
           "name": "markdown",
           "options": {
             "include_detailed_findings": true,
@@ -2175,9 +2215,15 @@
         },
         "text": {
           "enabled": true,
-          "extension": "txt",
+          "extension": "summary.txt",
           "name": "text",
-          "options": {}
+          "options": {
+            "include_detailed_findings": false,
+            "include_findings_table": false,
+            "include_summary": true,
+            "max_detailed_findings": 20,
+            "top_hotspots_limit": 20
+          }
         },
         "yaml": {
           "enabled": false,
