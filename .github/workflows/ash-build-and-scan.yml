@@ -56,33 +56,9 @@ jobs:
         with:
           platforms: "linux/${{ env.ARCH }}"
 
-      # - name: Set container metadata
-      #   id: metadata
-      #   uses: docker/metadata-action@v5
-      #   with:
-      #     images: ${{ env.IMG_NAME }}
-      #     tags: |
-      #       type=raw,value=latest
-      #       type=raw,value=${{ env.ARCH }}
-      #       type=raw,value={{sha}},enable=${{ github.ref_type != 'tag' }}
-
-      # - name: Build image
-      #   uses: docker/build-push-action@v5
-      #   with:
-      #     context: '.'
-      #     push: false
-      #     tags: ${{ steps.metadata.outputs.tags }}
-      #     labels: ${{ steps.metadata.outputs.labels }}
-
       - name: Run ASH against itself
         id: ash
         run: |-
-          # Disable exit on error
-          set +e
-
-          tree .
-
-          # Run ASH against itself
           ./ash \
             --build-target ci \
             --source-dir $(pwd) \
@@ -90,27 +66,12 @@ jobs:
             --inspect \
             --verbose
 
-          # Add the Markdown summary to the step summary
-          cat .ash/ash_output/reports/ash.summary.md >> "${GITHUB_STEP_SUMMARY}"
-
-          # # Exit with the highest return code from ASH
-          # set -e
-          # typeset -i ASH_EXIT_CODE
-          # # ASH_EXIT_CODE=`sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt`
-          # ASH_EXIT_CODE=`perl -ne 'print "$1\n" if /Highest return code is ([[:digit:]]+)/' ash_stdout.txt`
-          # echo "Highest return code found is '$ASH_EXIT_CODE'"
-          # if [ $ASH_EXIT_CODE -eq 0 ]; then
-          #   echo "ASH scan succeeded"
-          #   exit 0
-          # else
-          #   echo "ASH scan failed"
-          #   exit $ASH_EXIT_CODE
-          # fi
-
-      - name: Show .ash/ash_output tree
+      - name: Update step summary
         if: always()
         continue-on-error: false
-        run: |
+        run: |-
+          # Add the Markdown summary to the step summary
+          cat .ash/ash_output/reports/ash.summary.md >> "${GITHUB_STEP_SUMMARY}"
           tree .ash/ash_output
 
       - name: Post ASH MarkdownReporter output as PR comment
