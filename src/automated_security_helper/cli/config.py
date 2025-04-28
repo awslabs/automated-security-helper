@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from enum import Enum
+import os
 from pathlib import Path
 from typing import Annotated
 import yaml
@@ -16,7 +17,8 @@ config_app = typer.Typer(
     help="ASH configuration management",
     pretty_exceptions_enable=True,
     pretty_exceptions_short=True,
-    pretty_exceptions_show_locals=True,
+    pretty_exceptions_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
+    in ["YES", "1", "TRUE"],
 )
 
 

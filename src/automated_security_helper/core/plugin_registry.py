@@ -60,12 +60,13 @@ class RegisteredPlugin(BaseModel):
 class PluginRegistry(BaseModel):
     """Registry for plugins."""
 
-    config: AshConfig | None = None
     plugin_context: PluginContext | None = None
     registered_plugins: Dict[str, Dict[str, RegisteredPlugin]] = {}
 
     def model_post_init(self, context):
         ASH_LOGGER.info("Discovering ASH plugins...")
+        if self.plugin_context.config is None:
+            self.plugin_context.config = get_default_config()
         for plugin_type in [e.name for e in PluginType]:
             self.registered_plugins[plugin_type] = self.discover_plugins(
                 plug_type=plugin_type
@@ -89,10 +90,6 @@ class PluginRegistry(BaseModel):
         # We need to make sure that the discovered classes are actually plugins by
         # confirming if they extend the base class along with existing in the correct
         # plugin namespace.
-        if config is not None:
-            self.config = config
-        if self.config is None:
-            self.config = get_default_config()
         if package is None:
             package = f"automated_security_helper.{plug_type}s"
             ASH_LOGGER.debug(
@@ -158,7 +155,7 @@ class PluginRegistry(BaseModel):
                     f"Found {plug_type} plugin: {plugin_name} ({plugin_module_full_name}.{_name})"
                 )
 
-                plugin_config = self.config.get_plugin_config(
+                plugin_config = self.plugin_context.config.get_plugin_config(
                     plugin_type=plug_type,
                     plugin_name=plugin_name,
                 )

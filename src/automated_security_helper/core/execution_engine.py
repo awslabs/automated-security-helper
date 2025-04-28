@@ -164,7 +164,7 @@ class ScanExecutionEngine:
         self._registered_scanners = {}
         self._initialized = False
         self._plugin_registry = PluginRegistry(
-            config=self._context.config,
+            plugin_context=self._context,
         )
         self._scanner_factory = ScannerFactory(
             plugin_context=self._context,
