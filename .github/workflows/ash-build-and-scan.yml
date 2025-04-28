@@ -88,6 +88,7 @@ jobs:
             --output-dir ash_output \
             --config ./.ash.yaml \
             --build-target ci \
+            --inspect \
             --verbose
 
           # cat the markdown report and add it to the summary and step report

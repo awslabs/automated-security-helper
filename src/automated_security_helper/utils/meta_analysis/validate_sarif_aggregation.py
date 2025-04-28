@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.analyze_sarif_fields import (
+from automated_security_helper.utils.meta_analysis import (
     SCANNER_NAME_MAP,
 )
 from automated_security_helper.utils.meta_analysis.compare_result_fields import (

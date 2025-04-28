@@ -93,6 +93,13 @@ class BuildConfig(BaseModel):
     ] = []
 
 
+class InspectConfig(BaseModel):
+    """Configuration for the inspect phase."""
+
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = False
+
+
 class ScannerTypeConfig(BaseModel):
     """Configuration model for scanner type specific settings."""
 

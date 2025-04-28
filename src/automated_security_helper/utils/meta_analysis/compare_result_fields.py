@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.analyze_sarif_fields import (
+from automated_security_helper.utils.meta_analysis import (
     EXPECTED_TRANSFORMATIONS,
 )
 from automated_security_helper.utils.meta_analysis.categorize_field_importance import (

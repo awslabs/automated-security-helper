@@ -452,7 +452,7 @@ def analyze_sarif_fields(
         console.print(table)
 
         # Scanner-specific results table
-        scanner_table = Table(title="Scanner-Specific Results")
+        scanner_table = Table(title="Scanner-Specific SARIF Emission Results")
         scanner_table.add_column("Scanner", style="cyan")
         scanner_table.add_column("Matched/Total", style="green")
         scanner_table.add_column("Match Rate", style="yellow")

@@ -46,11 +46,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     config: JupyterConverterConfig = JupyterConverterConfig()
 
     def model_post_init(self, context):
-        self.context.work_dir = (
-            self.context.output_dir.joinpath(ASH_WORK_DIR_NAME)
-            .joinpath("converters")
-            .joinpath("jupyter")
-        )
+        self.context.work_dir = self.context.output_dir.joinpath(
+            ASH_WORK_DIR_NAME
+        ).joinpath("jupyter")
         self.tool_version = version("nbconvert")
         if self.config is None:
             self.config = JupyterConverterConfig()

@@ -27,7 +27,7 @@ from rich.progress import (
 )
 
 
-ExecutionPhaseType = Literal["convert", "scan", "report"]
+ExecutionPhaseType = Literal["convert", "scan", "report", "inspect"]
 
 
 class ExecutionPhase(str, Enum):
@@ -36,6 +36,7 @@ class ExecutionPhase(str, Enum):
     CONVERT = "convert"
     SCAN = "scan"
     REPORT = "report"
+    INSPECT = "inspect"
 
 
 class ExecutionStrategy(str, Enum):

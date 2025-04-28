@@ -21,6 +21,7 @@ class Phases(str, Enum):
     convert = "convert"
     scan = "scan"
     report = "report"
+    inspect = "inspect"
 
 
 class Strategy(str, Enum):
@@ -92,13 +93,19 @@ def run(
     phases: Annotated[
         List[Phases],
         typer.Option(
-            help="The phases to run. Defaults to all phases.",
+            help="The phases to run. Defaults to all phases except inspect.",
         ),
     ] = [
         Phases.convert,
         Phases.scan,
         Phases.report,
     ],
+    inspect: Annotated[
+        bool,
+        typer.Option(
+            help="Enable inspection of SARIF fields after running. This adds the inspect phase to the execution.",
+        ),
+    ] = False,
     existing_results: Annotated[
         str,
         typer.Option(
@@ -199,6 +206,14 @@ def run(
             phases_to_run.append("scan")
         if Phases.report in phases:
             phases_to_run.append("report")
+        if Phases.inspect in phases or inspect:
+            phases_to_run.append("inspect")
+
+            # If inspect is enabled via command line, update the config
+            if inspect and orchestrator.config:
+                if not hasattr(orchestrator.config, "inspect"):
+                    setattr(orchestrator.config, "inspect", {})
+                orchestrator.config.inspect["enabled"] = True
 
         # Default to all phases if none specified
         if not phases_to_run:

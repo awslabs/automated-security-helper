@@ -248,9 +248,10 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         """
         self.end_time = datetime.now(timezone.utc)
 
-        ec_color = "bold green" if self.exit_code == 0 else "bold red"
+        # ec_color = "bold green" if self.exit_code == 0 else "bold red"
         self._scanner_log(
-            f"Scan completed in {(self.end_time - self.start_time).total_seconds()} seconds with an exit code of [{ec_color}]{self.exit_code}[/{ec_color}]",
+            f"Scan completed in {(self.end_time - self.start_time).total_seconds()} seconds",
+            # f"Scan completed in {(self.end_time - self.start_time).total_seconds()} seconds with an exit code of [{ec_color}]{self.exit_code}[/{ec_color}]",
             target_type=target_type,
             level=logging.INFO,
         )

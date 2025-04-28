@@ -181,7 +181,7 @@ class ASHScanOrchestrator(BaseModel):
                 path_reports_dir.mkdir(parents=True, exist_ok=True)
             else:
                 # Otherwise, set up all working directories
-                for working_dir in ["reports", "scanners", "converted"]:
+                for working_dir in ["analysis", "reports", "scanners", "converted"]:
                     path_working_dir = self.output_dir.joinpath(working_dir)
                     if path_working_dir.exists() and self.existing_results_path is None:
                         ASH_LOGGER.verbose(
@@ -321,7 +321,14 @@ class ASHScanOrchestrator(BaseModel):
                     ASH_LOGGER.info(
                         "Using existing results - only running report phase"
                     )
-                    phases = ["report"]
+                    phases = [
+                        phase
+                        for phase in [
+                            "report",
+                            "inspect" if "inspect" in phases else None,
+                        ]
+                        if phase is not None
+                    ]
 
                     # Ensure the reports directory exists but don't clean up any other directories
                     reports_dir = self.output_dir.joinpath("reports")

@@ -47,11 +47,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     """Converter implementation for Archive file extraction."""
 
     def model_post_init(self, context):
-        self.context.work_dir = (
-            self.context.output_dir.joinpath(ASH_WORK_DIR_NAME)
-            .joinpath("converters")
-            .joinpath("archive")
-        )
+        self.context.work_dir = self.context.output_dir.joinpath(
+            ASH_WORK_DIR_NAME
+        ).joinpath("archive")
         if self.config is None:
             self.config = ArchiveConverterConfig()
         return super().model_post_init(context)
