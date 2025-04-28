@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import re
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from typing import Annotated, Any, List, Dict, Literal, Self
+from typing import Annotated, Any, List, Dict, Literal
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
@@ -353,7 +353,7 @@ class AshConfig(BaseModel):
     ] = False
 
     @classmethod
-    def from_file(cls, config_path: Path) -> Self:
+    def from_file(cls, config_path: Path) -> "AshConfig":
         """Load configuration from a file."""
         with open(config_path, "r") as f:
             # Using `yaml.safe_load()` as it handles both JSON and YAML data the same.
@@ -365,7 +365,7 @@ class AshConfig(BaseModel):
         cls,
         config_path: Path | str | None = None,
         source_dir: Path | None = Path.cwd(),
-    ) -> Self:
+    ) -> "AshConfig":
         """Load configuration from file or return default configuration."""
         try:
             config = get_default_config()
