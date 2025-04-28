@@ -27,7 +27,8 @@ image_app = typer.Typer(
     help="Build and run ASH container image",
     pretty_exceptions_enable=True,
     pretty_exceptions_short=True,
-    pretty_exceptions_show_locals=True,
+    pretty_exceptions_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
+    in ["YES", "1", "TRUE"],
 )
 
 
