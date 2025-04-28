@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 from automated_security_helper.reporters.ash_default.asff_reporter import ASFFReporter
 from automated_security_helper.reporters.ash_default.csv_reporter import CSVReporter
 from automated_security_helper.reporters.ash_default.cyclonedx_reporter import (
@@ -17,6 +14,9 @@ from automated_security_helper.reporters.ash_default.markdown_reporter import (
     MarkdownReporter,
 )
 from automated_security_helper.reporters.ash_default.ocsf_reporter import OCSFReporter
+from automated_security_helper.reporters.ash_default.report_content_emitter import (
+    ReportContentEmitter,
+)
 from automated_security_helper.reporters.ash_default.sarif_reporter import SARIFReporter
 from automated_security_helper.reporters.ash_default.spdx_reporter import SPDXReporter
 from automated_security_helper.reporters.ash_default.text_reporter import TextReporter
@@ -32,6 +32,7 @@ __all__ = [
     "JUnitXMLReporter",
     "MarkdownReporter",
     "OCSFReporter",
+    "ReportContentEmitter",
     "SARIFReporter",
     "SPDXReporter",
     "TextReporter",

@@ -372,11 +372,15 @@ class ASHARPModel(BaseModel):
                         file_path=file_path,
                         line_start=line_start,
                         line_end=line_end,
-                        tags=json.dumps(tags) if tags else None,
-                        properties=json.dumps(properties) if properties else None,
-                        references=json.dumps(references) if references else None,
+                        tags=json.dumps(tags, default=str) if tags else None,
+                        properties=json.dumps(properties, default=str)
+                        if properties
+                        else None,
+                        references=json.dumps(references, default=str)
+                        if references
+                        else None,
                         detected_at=datetime.now(timezone.utc).isoformat(),
-                        raw_data=json.dumps(result.model_dump(exclude_none=True)),
+                        raw_data=result.model_dump_json(exclude_none=True),
                     )
 
                     flat_vulns.append(flat_vuln)
@@ -417,7 +421,7 @@ class ASHARPModel(BaseModel):
                             detected_at=finding.get(
                                 "detected_at", datetime.now(timezone.utc).isoformat()
                             ),
-                            raw_data=json.dumps(finding),
+                            raw_data=json.dumps(finding, default=str),
                         )
 
                         flat_vulns.append(flat_vuln)
