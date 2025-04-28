@@ -61,16 +61,30 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
         md_parts = []
 
         # Add report header
-        md_parts.append(
-            f"# ASH Security Scan Report\nReport run time: {datetime.now(timezone.utc).strftime('%Y-%m-%d - %H:%M (UTC)')}\n"
-        )
+        metadata = emitter.get_metadata()
+        md_parts.append("# ASH Security Scan Report\n")
+        md_parts.append(f"- **Report generated**: {metadata['report_time']}")
+        # Add time delta if available
+        if metadata.get("time_delta"):
+            days = metadata["time_delta"].days
+            hours, remainder = divmod(metadata["time_delta"].seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+
+            if days > 0:
+                delta_str = f"{days} day{'s' if days != 1 else ''}, {hours} hour{'s' if hours != 1 else ''}"
+            elif hours > 0:
+                delta_str = f"{hours} hour{'s' if hours != 1 else ''}, {minutes} minute{'s' if minutes != 1 else ''}"
+            else:
+                delta_str = f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+            md_parts.append(f"- **Time since scan**: {delta_str}")
+        md_parts.append("")
 
         # Add metadata section
         md_parts.append("## Scan Metadata\n")
-        metadata = emitter.get_metadata()
         md_parts.append(f"- **Project**: {metadata['project']}")
-        md_parts.append(f"- **Generated**: {metadata['generated_at']}")
-        md_parts.append(f"- **Tool Version**: {metadata['tool_version']}")
+        md_parts.append(f"- **Scan executed**: {metadata['scan_time']}")
+        md_parts.append(f"- **ASH version**: {metadata['tool_version']}")
         md_parts.append("")
 
         # Add summary section if enabled
@@ -122,12 +136,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             if top_hotspots:
                 md_parts.append(f"### Top {len(top_hotspots)} Hotspots\n")
                 md_parts.append("Files with the highest number of security findings:\n")
-                md_parts.append("| File Location | Finding Count |")
-                md_parts.append("| --- | ---: |")
+                md_parts.append("| Finding Count | File Location |")
+                md_parts.append("| ---: | --- |")
                 for hotspot in top_hotspots:
                     # Escape pipe characters in markdown table
                     safe_location = hotspot["location"].replace("|", "\\|")
-                    md_parts.append(f"| {safe_location} | {hotspot['count']} |")
+                    md_parts.append(f"| {hotspot['count']} | {safe_location} |")
                 md_parts.append("")
 
         # Add findings table if enabled

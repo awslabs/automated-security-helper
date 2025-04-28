@@ -60,18 +60,31 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
         # Add report header
         text_parts.append("ASH SECURITY SCAN REPORT")
         text_parts.append("=======================")
-        text_parts.append(
-            f"Report run time: {datetime.now(timezone.utc).strftime('%Y-%m-%d - %H:%M (UTC)')}"
-        )
+        metadata = emitter.get_metadata()
+        text_parts.append(f"Report generated: {metadata['report_time']}")
+        # Add time delta if available
+        if metadata.get("time_delta"):
+            days = metadata["time_delta"].days
+            hours, remainder = divmod(metadata["time_delta"].seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+
+            if days > 0:
+                delta_str = f"{days} day{'s' if days != 1 else ''}, {hours} hour{'s' if hours != 1 else ''}"
+            elif hours > 0:
+                delta_str = f"{hours} hour{'s' if hours != 1 else ''}, {minutes} minute{'s' if minutes != 1 else ''}"
+            else:
+                delta_str = f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+            text_parts.append(f"Time since scan: {delta_str}")
+
         text_parts.append("")
 
         # Add metadata section
         text_parts.append("SCAN METADATA")
         text_parts.append("------------")
-        metadata = emitter.get_metadata()
         text_parts.append(f"Project: {metadata['project']}")
-        text_parts.append(f"Generated: {metadata['generated_at']}")
-        text_parts.append(f"Tool Version: {metadata['tool_version']}")
+        text_parts.append(f"Scan executed: {metadata['scan_time']}")
+        text_parts.append(f"ASH version: {metadata['tool_version']}")
         text_parts.append("")
 
         # Add summary section if enabled
@@ -135,11 +148,11 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 text_parts.append(f"Top {len(top_hotspots)} Hotspots:")
                 text_parts.append("Files with the highest number of security findings:")
                 text_parts.append("")
-                text_parts.append(f"{'File Location':<60} {'Finding Count':>12}")
-                text_parts.append(f"{'-' * 60} {'-' * 12}")
+                text_parts.append(f"{'Finding Count':>12} {'File Location':<60}")
+                text_parts.append(f"{'-' * 12} {'-' * 60}")
                 for hotspot in top_hotspots:
                     text_parts.append(
-                        f"{hotspot['location']:<60} {hotspot['count']:>12}"
+                        f"{hotspot['count']:>12} {hotspot['location']:<60}"
                     )
                 text_parts.append("")
 

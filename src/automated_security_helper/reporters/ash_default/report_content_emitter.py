@@ -41,15 +41,45 @@ class ReportContentEmitter:
         ):
             self.global_threshold = self.ash_conf.global_settings.severity_threshold
 
-    def get_metadata(self) -> Dict[str, str]:
+    def get_metadata(self) -> Dict[str, Any]:
         """Get report metadata as a dictionary."""
+        # Get current time for report generation
+        current_time = datetime.now(timezone.utc)
+        current_time_str = current_time.isoformat(timespec="seconds")
+
+        # Parse the scan generation time if available
+        scan_time_str = self.model.metadata.generated_at or "Unknown"
+        time_delta = None
+
+        if scan_time_str != "Unknown":
+            try:
+                # Try to parse the scan time string to calculate delta
+                # Handle different possible formats
+                for fmt in [
+                    "%Y-%m-%dT%H:%M:%S",
+                    "%Y-%m-%d - %H:%M (UTC)",
+                    "%Y-%m-%d %H:%M:%S",
+                ]:
+                    try:
+                        scan_time = datetime.strptime(
+                            scan_time_str.split("+")[0].split(".")[0], fmt
+                        )
+                        if fmt != "%Y-%m-%d - %H:%M (UTC)":
+                            scan_time = scan_time.replace(tzinfo=timezone.utc)
+                        time_delta = current_time - scan_time
+                        break
+                    except ValueError:
+                        continue
+            except Exception:
+                # If parsing fails, we'll just not show the delta
+                pass
+
         return {
             "project": self.model.metadata.project_name or "Unknown",
-            "generated_at": self.model.metadata.generated_at or "Unknown",
+            "scan_time": scan_time_str,
+            "report_time": current_time_str,
             "tool_version": self.model.metadata.tool_version or "Unknown",
-            "current_time": datetime.now(timezone.utc).strftime(
-                "%Y-%m-%d - %H:%M (UTC)"
-            ),
+            "time_delta": time_delta,
         }
 
     def get_scanner_results(self) -> List[Dict[str, Any]]:
