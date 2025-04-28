@@ -95,6 +95,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             item
             for item in [
                 self.config.options.baseline_file,
+                ".ash/.secrets.baseline",
                 ".secrets.baseline",
             ]
             if item is not None
@@ -288,6 +289,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 if __name__ == "__main__":
     scanner = DetectSecretsScanner(
         source_dir=Path.cwd(),
-        output_dir=Path.cwd().joinpath("ash_output"),
+        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
     )
     scanner.scan(target=Path.cwd())

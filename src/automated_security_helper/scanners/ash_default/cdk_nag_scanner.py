@@ -318,7 +318,7 @@ if __name__ == "__main__":
     ASH_LOGGER.debug("Running cdk-nag via __main__")
     scanner = CdkNagScanner(
         source_dir=Path.cwd(),
-        output_dir=Path.cwd().joinpath("ash_output"),
+        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
         config=CdkNagScannerConfig(
             options=CdkNagScannerConfigOptions(
                 nag_packs=CdkNagPacks(

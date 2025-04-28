@@ -371,7 +371,7 @@ if __name__ == "__main__":
             "PCIDSS321Checks",
         ],
         outdir=Path(__file__)
-        .parent.parent.parent.parent.joinpath("ash_output")
+        .parent.parent.parent.parent.joinpath(".ash", "ash_output")
         .joinpath("scanners")
         .joinpath("cdknag"),
     )

@@ -44,7 +44,7 @@ class ASHScanOrchestrator(BaseModel):
         Path.cwd()
     )
     output_dir: Annotated[Path, Field(description="Output directory for results")] = (
-        Path.cwd().joinpath("ash_output")
+        Path.cwd().joinpath(".ash", "ash_output")
     )
     work_dir: Annotated[
         Path, Field(description="Working directory for scan operations")
@@ -118,9 +118,9 @@ class ASHScanOrchestrator(BaseModel):
 
         if self.output_dir is None:
             ASH_LOGGER.verbose(
-                "No explicit output directory provided, using 'ash_output' within the source directory."
+                "No explicit output directory provided, using '.ash/ash_output' within the source directory."
             )
-            self.output_dir = self.source_dir.joinpath("ash_output")
+            self.output_dir = self.source_dir.joinpath(".ash", "ash_output")
         elif not isinstance(self.output_dir, Path):
             self.output_dir = Path(self.output_dir)
 

@@ -2128,12 +2128,6 @@
       "title": "No Cleanup",
       "type": "boolean"
     },
-    "output_dir": {
-      "default": "ash_output",
-      "description": "Directory to store scan outputs",
-      "title": "Output Dir",
-      "type": "string"
-    },
     "project_name": {
       "default": "ash-target",
       "description": "Name of the project being scanned",

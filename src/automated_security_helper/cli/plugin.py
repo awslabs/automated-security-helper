@@ -52,7 +52,7 @@ def list_plugins(
         console = Console()
         plugin_context = PluginContext(
             source_dir=Path.cwd(),
-            output_dir=Path.cwd().joinpath("ash_output"),
+            output_dir=Path.cwd().joinpath(".ash", "ash_output"),
         )
         plugin_registry = PluginRegistry(plugin_context=plugin_context)
         plugins = {

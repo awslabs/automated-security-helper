@@ -339,11 +339,6 @@ class AshConfig(BaseModel):
         ),
     ] = []
 
-    output_dir: Annotated[
-        str,
-        Field(description="Directory to store scan outputs"),
-    ] = "ash_output"
-
     max_concurrent_scanners: Annotated[
         int, Field(description="Maximum number of scanners to run concurrently", ge=1)
     ] = 4
@@ -374,12 +369,18 @@ class AshConfig(BaseModel):
                     "No configuration file provided, checking for default paths"
                 )
                 for item in ASH_CONFIG_FILE_NAMES:
-                    config_path = source_dir.joinpath(item)
-                    if config_path.exists():
-                        config_path = config_path
-                        ASH_LOGGER.verbose(
-                            f"Found configuration file at: {config_path.as_posix()}"
-                        )
+                    possible_config_paths = [
+                        source_dir.joinpath(item),
+                        source_dir.joinpath(".ash", item),
+                    ]
+                    for possible_config_path in possible_config_paths:
+                        if possible_config_path.exists():
+                            config_path = possible_config_path
+                            ASH_LOGGER.verbose(
+                                f"Found configuration file at: {possible_config_path.as_posix()}"
+                            )
+                            break
+                    if config_path:
                         break
                 ASH_LOGGER.verbose(
                     "Configuration file not found or provided, using default config"

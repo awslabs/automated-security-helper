@@ -170,7 +170,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             for item in [
                 self.config.options.config_file,
                 ".checkov.yaml",
+                ".ash/.checkov.yaml",
                 ".checkov.yml",
+                ".ash/.checkov.yml",
             ]
             if item is not None
         ]

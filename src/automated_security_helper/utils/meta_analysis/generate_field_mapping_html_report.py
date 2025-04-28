@@ -343,19 +343,19 @@ def generate_html_report(
         jq_query = generate_jq_query(path)
 
         # Find an example file that contains this field
-        example_file = "ash_output/reports/ash.sarif"  # Default to aggregated file
+        example_file = ".ash/ash_output/reports/ash.sarif"  # Default to aggregated file
 
         # If we have scanner information, use it to provide a more specific path
         if info["scanners"]:
             for scanner in info["scanners"]:
                 if scanner != "ash-aggregated":  # Prefer original scanner files
                     # Use the correct path structure
-                    example_file = f"ash_output/scanners/{scanner}/**/*.sarif"
+                    example_file = f".ash/ash_output/scanners/{scanner}/**/*.sarif"
                     break
 
         # For fields that are only in the aggregated report
         if len(info["scanners"]) == 1 and "ash-aggregated" in info["scanners"]:
-            example_file = "ash_output/reports/ash.sarif"
+            example_file = ".ash/ash_output/reports/ash.sarif"
 
         jq_command = f"jq '{jq_query}' {example_file}"
 

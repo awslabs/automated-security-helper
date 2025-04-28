@@ -9,6 +9,7 @@ import os
 import glob
 import json
 import csv
+from pathlib import Path
 from typing import Annotated, Dict, List, Optional
 import typer
 from rich.console import Console
@@ -116,7 +117,8 @@ def analyze_sarif_fields(
 
     # Set default output directory if not provided
     if output_dir is None:
-        output_dir = os.path.join(os.getcwd(), "ash_output", "inspect")
+        output_dir = Path.cwd().joinpath(".ash", "ash_output", "inspect")
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # Find all SARIF files
     sarif_files = glob.glob(os.path.join(sarif_dir, "**/*.sarif"), recursive=True)

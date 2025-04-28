@@ -13,6 +13,7 @@ test_output.json
 tests/pytest-temp/
 output/
 .*q/
+.envrc
 
 ### macOS ###
 # General

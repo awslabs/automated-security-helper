@@ -237,7 +237,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 if __name__ == "__main__":
     scanner = SyftScanner(
         source_dir=Path.cwd(),
-        output_dir=Path.cwd().joinpath("ash_output"),
+        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
     )
     report = scanner.scan(target=scanner.source_dir)
 
@@ -247,6 +247,6 @@ if __name__ == "__main__":
         exclude_unset=True,
     )
     with open(
-        Path.cwd().joinpath("ash_output").joinpath("cfn_nag_results.sarif"), "w"
+        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"), "w"
     ) as f:
         f.write(report_json)

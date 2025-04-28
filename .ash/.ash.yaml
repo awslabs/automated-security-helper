@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=./src/automated_security_helper/schemas/AshConfig.json
+# yaml-language-server: $schema=../src/automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
 global_settings:
@@ -69,6 +69,8 @@ scanners:
       skip_path: []
   detect-secrets:
     enabled: true
+    options:
+      baseline_file: .ash/.secrets.baseline
   npm-audit:
     enabled: true
   grype:
