@@ -36,6 +36,9 @@ from automated_security_helper.reporters.ash_default.flatjson_reporter import (
 from automated_security_helper.reporters.ash_default.junitxml_reporter import (
     JUnitXMLReporterConfig,
 )
+from automated_security_helper.reporters.ash_default.markdown_reporter import (
+    MarkdownReporterConfig,
+)
 from automated_security_helper.reporters.ash_default.ocsf_reporter import (
     OCSFReporterConfig,
 )
@@ -88,6 +91,13 @@ class BuildConfig(BaseModel):
         List[ScannerPluginBase],
         Field(description="Scanner configurations by type"),
     ] = []
+
+
+class InspectConfig(BaseModel):
+    """Configuration for the inspect phase."""
+
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = False
 
 
 class ScannerTypeConfig(BaseModel):
@@ -183,6 +193,10 @@ class ReporterConfigSegment(BaseModel):
         JUnitXMLReporterConfig,
         Field(description="Configure the options for the JUnit XML reporter"),
     ] = JUnitXMLReporterConfig()
+    markdown: Annotated[
+        MarkdownReporterConfig,
+        Field(description="Configure the options for the Markdown reporter"),
+    ] = MarkdownReporterConfig()
     ocsf: Annotated[
         OCSFReporterConfig,
         Field(description="Configure the options for the OCSF reporter"),

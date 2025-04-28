@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 from typing import Annotated, List, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
@@ -33,10 +33,9 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 class BanditScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
-        str,
+        Path | str | None,
         Field(
-            description="Path to the Bandit configuration file. Defaults to None.",
-            default=None,
+            description="Path to Bandit configuration file, relative to current source directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`, and `bandit.toml` in the root of the source directory if this is left empty.",
         ),
     ] = None
     confidence_level: Annotated[
@@ -70,6 +69,14 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         ],
         Field(description="List of additional formats to output"),
     ] = []
+
+    @field_validator("config_file")
+    def validate_config_file(cls, v):
+        if v is not None:
+            if not Path(v).exists():
+                raise ValueError(f"Config file {v} does not exist")
+            return Path(v)
+        return v
 
 
 class BanditScannerConfig(ScannerPluginConfigBase):
@@ -166,15 +173,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         }
 
         if self.config.options.config_file is not None:
-            if self.config.options.config_file.endswith(".bandit"):
+            config_file_path = Path(self.config.options.config_file)
+            if config_file_path.name == ".bandit":
                 self.args.extra_args.append(
-                    ToolExtraArg(key="--ini", value=self.config.options.config_file)
+                    ToolExtraArg(key="--ini", value=config_file_path.as_posix())
                 )
             else:
                 self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--configfile", value=self.config.options.config_file
-                    )
+                    ToolExtraArg(key="--configfile", value=config_file_path.as_posix())
                 )
         else:
             for conf_path, extra_arg_list in possible_config_paths.items():

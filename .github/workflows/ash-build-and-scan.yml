@@ -31,13 +31,13 @@ jobs:
     env:
       IMG_NAME: ${{ github.repository }}
       ARCH: ubuntu-latest
-      SUMMARY_FILE: "ASH Scan Result Summary - ubuntu-latest.md"
+      SUMMARY_FILE: "ASH Scan Results Summary.md"
     permissions:
       actions: read
       checks: write
       contents: write
       id-token: write
-      security-events: read
+      security-events: write
       pull-requests: write
       statuses: write
     steps:
@@ -87,76 +87,44 @@ jobs:
             --source-dir $(pwd) \
             --output-dir ash_output \
             --config ./.ash.yaml \
-            --strategy parallel \
-            --no-cleanup \
             --build-target ci \
-            --verbose | \
-              tee ash_stdout.txt
+            --inspect \
+            --verbose
 
-          # cat the output contents to build the summary markdown
-          # strip out the color codes from the output
-          ASH_STDOUT=$(cat ash_stdout.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-          # ASH_AGG_RESULTS=$(cat ash_output/ash_aggregated_results.json | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-          ASH_AGG_RESULTS=$(tree ash_output)
+          # cat the markdown report and add it to the summary and step report
+          ASH_MD_REPORT=`cat ash_output/reports/ash.md`
 
-          # Write the summary markdown to a file
-          cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
-          <details>
-            <summary>ASH Scan Artifact Tree</summary>
+          # Add the Markdown summary to the step summary
+          cat ash_output/reports/ash.md >> "${GITHUB_STEP_SUMMARY}"
 
-            \`\`\`bash
-            ${ASH_AGG_RESULTS}
-            \`\`\`
-          </details>
-          EOF
+          # # Exit with the highest return code from ASH
+          # set -e
+          # typeset -i ASH_EXIT_CODE
+          # # ASH_EXIT_CODE=`sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt`
+          # ASH_EXIT_CODE=`perl -ne 'print "$1\n" if /Highest return code is ([[:digit:]]+)/' ash_stdout.txt`
+          # echo "Highest return code found is '$ASH_EXIT_CODE'"
+          # if [ $ASH_EXIT_CODE -eq 0 ]; then
+          #   echo "ASH scan succeeded"
+          #   exit 0
+          # else
+          #   echo "ASH scan failed"
+          #   exit $ASH_EXIT_CODE
+          # fi
 
-          # Write the summary markdown to the GITHUB_OUTPUT
-          {
-            echo 'ASH_OUTPUT<<EOF'
-            cat "${{ env.SUMMARY_FILE }}"
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
+      - name: Show ash_output tree
+        if: always()
+        continue-on-error: false
+        run: |
+          tree ash_output
 
-          # Exit with the highest return code from ASH
-          set -e
-          typeset -i ASH_EXIT_CODE
-          # ASH_EXIT_CODE=`sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt`
-          ASH_EXIT_CODE=`perl -ne 'print "$1\n" if /Highest return code is ([[:digit:]]+)/' ash_stdout.txt`
-          echo "Highest return code found is '$ASH_EXIT_CODE'"
-          if [ $ASH_EXIT_CODE -eq 0 ]; then
-            echo "ASH scan succeeded"
-            exit 0
-          else
-            echo "ASH scan failed"
-            exit $ASH_EXIT_CODE
-          fi
-
-      - name: Post ASH output as PR comment
+      - name: Post ASH MarkdownReporter output as PR comment
         uses: mshick/add-pr-comment@v2
         # This does not work for fork runs without setting up a proxy
         # Info: https://github.com/mshick/add-pr-comment#proxy-for-fork-based-prshttps://github.com/mshick/add-pr-comment#proxy-for-fork-based-prs
         if: github.repository_owner == 'awslabs'
         continue-on-error: true
         with:
-          message: |
-            ${{ steps.ash.outputs.ASH_OUTPUT }}
-
-      - name: Collect summary
-        uses: actions/upload-artifact@v4
-        if: always()
-        continue-on-error: true
-        with:
-          name: Summary
-          path: "${{ env.SUMMARY_FILE }}"
-
-      - name: Collect ash_stdout
-        uses: actions/upload-artifact@v4
-        if: always()
-        continue-on-error: true
-        with:
-          name: ash_stdout
-          path: ash_stdout.txt
-          if-no-files-found: error
+          message-path: ash_output/reports/ash.md
 
       - name: Publish JUnit Test Report
         uses: mikepenz/action-junit-report@v5

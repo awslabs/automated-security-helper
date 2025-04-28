@@ -143,10 +143,21 @@
           "type": "string"
         },
         "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
-          "description": "Path to the Bandit configuration file. Defaults to None.",
-          "title": "Config File",
-          "type": "string"
+          "description": "Path to Bandit configuration file, relative to current source directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`, and `bandit.toml` in the root of the source directory if this is left empty.",
+          "title": "Config File"
         },
         "excluded_paths": {
           "default": [],
@@ -973,6 +984,79 @@
       "title": "JUnitXMLReporterConfigOptions",
       "type": "object"
     },
+    "MarkdownReporterConfig": {
+      "additionalProperties": true,
+      "description": "Configuration for the Markdown reporter.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "md",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "markdown",
+          "default": "markdown",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/MarkdownReporterConfigOptions",
+          "default": {
+            "include_detailed_findings": true,
+            "include_findings_table": false,
+            "include_summary": true,
+            "max_detailed_findings": 20,
+            "top_hotspots_limit": 10,
+            "use_collapsible_details": true
+          }
+        }
+      },
+      "title": "MarkdownReporterConfig",
+      "type": "object"
+    },
+    "MarkdownReporterConfigOptions": {
+      "additionalProperties": true,
+      "description": "Configuration options for the Markdown reporter.",
+      "properties": {
+        "include_detailed_findings": {
+          "default": true,
+          "title": "Include Detailed Findings",
+          "type": "boolean"
+        },
+        "include_findings_table": {
+          "default": false,
+          "title": "Include Findings Table",
+          "type": "boolean"
+        },
+        "include_summary": {
+          "default": true,
+          "title": "Include Summary",
+          "type": "boolean"
+        },
+        "max_detailed_findings": {
+          "default": 20,
+          "title": "Max Detailed Findings",
+          "type": "integer"
+        },
+        "top_hotspots_limit": {
+          "default": 10,
+          "title": "Top Hotspots Limit",
+          "type": "integer"
+        },
+        "use_collapsible_details": {
+          "default": true,
+          "title": "Use Collapsible Details",
+          "type": "boolean"
+        }
+      },
+      "title": "MarkdownReporterConfigOptions",
+      "type": "object"
+    },
     "NpmAuditScannerConfig": {
       "additionalProperties": true,
       "description": "JS/TS Dependency scanner configuration.",
@@ -1157,6 +1241,23 @@
             "options": {}
           },
           "description": "Configure the options for the JUnit XML reporter"
+        },
+        "markdown": {
+          "$ref": "#/$defs/MarkdownReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "md",
+            "name": "markdown",
+            "options": {
+              "include_detailed_findings": true,
+              "include_findings_table": false,
+              "include_summary": true,
+              "max_detailed_findings": 20,
+              "top_hotspots_limit": 10,
+              "use_collapsible_details": true
+            }
+          },
+          "description": "Configure the options for the Markdown reporter"
         },
         "ocsf": {
           "$ref": "#/$defs/OCSFReporterConfig",
@@ -2040,6 +2141,19 @@
           "extension": "junit.xml",
           "name": "junitxml",
           "options": {}
+        },
+        "markdown": {
+          "enabled": true,
+          "extension": "md",
+          "name": "markdown",
+          "options": {
+            "include_detailed_findings": true,
+            "include_findings_table": false,
+            "include_summary": true,
+            "max_detailed_findings": 20,
+            "top_hotspots_limit": 10,
+            "use_collapsible_details": true
+          }
         },
         "ocsf": {
           "enabled": true,

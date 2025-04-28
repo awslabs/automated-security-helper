@@ -66,6 +66,20 @@ class ReporterPluginBase(BaseModel, Generic[T]):
     def _post_report(self) -> None:
         self.end_time = datetime.now(timezone.utc)
 
+    def sarif_field_mappings(self) -> dict[str, str] | None:
+        """
+        Get mappings from SARIF fields to this reporter's output format.
+
+        This method should be implemented by reporter classes to provide
+        information about how SARIF fields map to their specific output format.
+
+        Returns:
+            Optional[Dict[str, str]]: Dictionary mapping SARIF field paths to
+                                     reporter-specific field paths, or None if
+                                     no mappings are available.
+        """
+        return None
+
     ### Methods that require implementation by plugins.
     @abstractmethod
     def report(self, model: ASHARPModel) -> str | None:

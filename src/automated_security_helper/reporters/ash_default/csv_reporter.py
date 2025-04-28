@@ -27,6 +27,23 @@ class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
             self.config = CSVReporterConfig()
         return super().model_post_init(context)
 
+    def sarif_field_mappings(self) -> dict[str, str] | None:
+        """
+        Get mappings from SARIF fields to CSV column headers.
+
+        Returns:
+            Dict[str, str]: Dictionary mapping SARIF field paths to CSV column headers
+        """
+        return {
+            "runs[0].results[0].ruleId": "Rule ID",
+            "runs[0].results[0].message.text": "Description",
+            "runs[0].results[0].level": "Severity",
+            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "File Path",
+            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "Line Start",
+            "runs[0].results[0].locations[0].physicalLocation.region.endLine": "Line End",
+            "runs[0].tool.driver.name": "Scanner",
+        }
+
     def report(self, model: Any) -> str:
         """Format ASH model as CSV string."""
         from automated_security_helper.models.asharp_model import ASHARPModel

@@ -2,18 +2,17 @@
 
 import multiprocessing
 import os
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
 
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.metrics_table import display_metrics_table
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
 from automated_security_helper.core.phases.scan_phase import ScanPhase
+from automated_security_helper.core.phases.inspect_phase import InspectPhase
 from automated_security_helper.core.progress import (
     ExecutionPhase,
     ExecutionPhaseType,
@@ -135,6 +134,7 @@ class ScanExecutionEngine:
             ExecutionPhase.CONVERT: None,
             ExecutionPhase.SCAN: None,
             ExecutionPhase.REPORT: None,
+            ExecutionPhase.INSPECT: None,
         }
 
         # Initialize basic configuration
@@ -309,6 +309,8 @@ class ScanExecutionEngine:
             ordered_phases.append("scan")
         if "report" in phases:
             ordered_phases.append("report")
+        if "inspect" in phases:
+            ordered_phases.append("inspect")
 
         ASH_LOGGER.info(f"Executing phases: {ordered_phases}")
 
@@ -326,23 +328,13 @@ class ScanExecutionEngine:
 
         # If we're only running the report phase (likely with existing results),
         # we don't need to set up the work directory or clean anything up
-        report_only = len(ordered_phases) == 1 and ordered_phases[0] == "report"
+        report_only = len(ordered_phases) in [1, 2] and ordered_phases[0] == "report"
 
         # Only create directories if we're not in report-only mode
         if not report_only:
             # Ensure work directory exists
             if self._context.work_dir:
                 self._context.work_dir.mkdir(parents=True, exist_ok=True)
-
-            # Clean up existing directories if needed
-            for working_dir in ["scanners", ASH_WORK_DIR_NAME]:
-                path_working_dir = self._context.output_dir.joinpath(working_dir)
-                if path_working_dir.exists():
-                    ASH_LOGGER.verbose(
-                        f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
-                    )
-                    shutil.rmtree(path_working_dir)
-                path_working_dir.mkdir(parents=True, exist_ok=True)
 
         # Always ensure reports directory exists
         reports_dir = self._context.output_dir.joinpath("reports")
@@ -399,6 +391,15 @@ class ScanExecutionEngine:
                             else None
                         ),
                     )
+
+                elif phase_name == "inspect":
+                    # Create and execute the Inspect phase
+                    inspect_phase = InspectPhase(
+                        plugin_context=self._context,
+                        progress_display=self.progress_display,
+                        asharp_model=self._asharp_model,
+                    )
+                    inspect_phase.execute()
 
             # Return the results
             return self._results

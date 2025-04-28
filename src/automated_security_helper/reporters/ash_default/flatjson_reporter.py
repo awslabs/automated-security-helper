@@ -29,6 +29,25 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
             self.config = FlatJSONReporterConfig()
         return super().model_post_init(context)
 
+    def sarif_field_mappings(self) -> dict[str, str] | None:
+        """
+        Get mappings from SARIF fields to flat JSON fields.
+
+        Returns:
+            Dict[str, str]: Dictionary mapping SARIF field paths to flat JSON fields
+        """
+        return {
+            "runs[0].results[0].ruleId": "rule_id",
+            "runs[0].results[0].message.text": "description",
+            "runs[0].results[0].level": "severity",
+            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "file_path",
+            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "line_start",
+            "runs[0].results[0].locations[0].physicalLocation.region.endLine": "line_end",
+            "runs[0].tool.driver.name": "scanner",
+            "runs[0].tool.driver.version": "scanner_version",
+            "runs[0].results[0].properties.tags": "tags",
+        }
+
     def report(self, model: Any) -> str:
         """Format ASH model as JSON string."""
         from automated_security_helper.models.asharp_model import ASHARPModel
