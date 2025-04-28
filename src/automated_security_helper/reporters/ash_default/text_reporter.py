@@ -101,7 +101,19 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 "- Threshold: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL)"
             )
             text_parts.append(
-                "  - Values in parentheses indicate where the threshold is set: 'global' (project default), 'config' (scanner config), or 'scanner' (scanner implementation)"
+                "  - Values in parentheses indicate where the threshold is set in order of precedence:"
+            )
+            text_parts.append(
+                "    - 'env' (ASH_SEVERITY_THRESHOLD environment variable)"
+            )
+            text_parts.append(
+                "    - 'config' (scanner config section in the ASH_CONFIG used)"
+            )
+            text_parts.append(
+                "    - 'scanner' (default configuration in the plugin, if explicitly set)"
+            )
+            text_parts.append(
+                "    - 'global' (global_settings section in the ASH_CONFIG used)"
             )
             text_parts.append(
                 "- Result: PASS = No findings at or above threshold, FAIL = Findings at or above threshold"

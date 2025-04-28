@@ -100,7 +100,17 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 "- **Threshold**: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL)"
             )
             md_parts.append(
-                "  - Values in parentheses indicate where the threshold is set: `global` (project default), `config` (scanner config), or `scanner` (scanner implementation)"
+                "  - Values in parentheses indicate where the threshold is set in order of precedence:"
+            )
+            md_parts.append("    - `env` (ASH_SEVERITY_THRESHOLD environment variable)")
+            md_parts.append(
+                "    - `config` (scanner config section in the ASH_CONFIG used)"
+            )
+            md_parts.append(
+                "    - `scanner` (default configuration in the plugin, if explicitly set)"
+            )
+            md_parts.append(
+                "    - `global` (global_settings section in the ASH_CONFIG used)"
             )
             md_parts.append(
                 "- **Result**: ✅ Passed = No findings at or above threshold, ❌ Failed = Findings at or above threshold"

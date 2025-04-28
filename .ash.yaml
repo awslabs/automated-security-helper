@@ -2,7 +2,7 @@
 project_name: automated-security-helper
 fail_on_findings: true
 global_settings:
-  severity_threshold: HIGH
+  severity_threshold: MEDIUM
   ignore_paths:
     - path: 'tests/test_data'
       reason: This is test data that is used during unit testing only and is not part of the core application.
