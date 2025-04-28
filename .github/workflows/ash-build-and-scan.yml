@@ -84,10 +84,9 @@ jobs:
 
           # Run ASH against itself
           ./ash \
+            --build-target ci \
             --source-dir $(pwd) \
             --output-dir .ash/ash_output \
-            --config ./.ash.yaml \
-            --build-target ci \
             --inspect \
             --verbose
 
