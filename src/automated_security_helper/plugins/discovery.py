@@ -3,31 +3,33 @@
 
 import importlib
 import pkgutil
+from typing import List
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-def discover_plugins(namespace="ash_plugins"):
+def discover_plugins(plugin_modules: List[str] = []):
     """Discover plugins in the given namespace"""
     discovered = {"converters": [], "scanners": [], "reporters": []}
 
     # Look for packages with the ash_plugins namespace
     for finder, name, ispkg in pkgutil.iter_modules():
-        if name.startswith(namespace) and ispkg:
-            try:
-                module = importlib.import_module(name)
-                # The import itself should trigger plugin registration
-                # via the AshPlugin metaclass
-                ASH_LOGGER.info(f"Discovered plugin package: {name}")
+        for namespace in plugin_modules:
+            if name.startswith(namespace) and ispkg:
+                try:
+                    module = importlib.import_module(name)
+                    # The import itself should trigger plugin registration
+                    # via the AshPlugin metaclass
+                    ASH_LOGGER.info(f"Discovered plugin package: {name}")
 
-                # Track what was discovered
-                if hasattr(module, "ASH_CONVERTERS"):
-                    discovered["converters"].extend(module.ASH_CONVERTERS)
-                if hasattr(module, "ASH_SCANNERS"):
-                    discovered["scanners"].extend(module.ASH_SCANNERS)
-                if hasattr(module, "ASH_REPORTERS"):
-                    discovered["reporters"].extend(module.ASH_REPORTERS)
+                    # Track what was discovered
+                    if hasattr(module, "ASH_CONVERTERS"):
+                        discovered["converters"].extend(module.ASH_CONVERTERS)
+                    if hasattr(module, "ASH_SCANNERS"):
+                        discovered["scanners"].extend(module.ASH_SCANNERS)
+                    if hasattr(module, "ASH_REPORTERS"):
+                        discovered["reporters"].extend(module.ASH_REPORTERS)
 
-            except ImportError as e:
-                ASH_LOGGER.warning(f"Failed to import plugin {name}: {e}")
+                except ImportError as e:
+                    ASH_LOGGER.warning(f"Failed to import plugin {name}: {e}")
 
     return discovered

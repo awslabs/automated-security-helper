@@ -1,12 +1,16 @@
 """Base class for execution engine phases."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, List, Optional
 
+from automated_security_helper.base.converter_plugin import ConverterPluginBase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.reporter_plugin import ReporterPluginBase
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class EnginePhase(ABC):
@@ -15,6 +19,9 @@ class EnginePhase(ABC):
     def __init__(
         self,
         plugin_context: PluginContext,
+        plugins: List[
+            ConverterPluginBase | ScannerPluginBase | ReporterPluginBase
+        ] = [],
         progress_display: Optional[Any] = None,
         asharp_model: Optional[ASHARPModel] = None,
     ):
@@ -26,6 +33,7 @@ class EnginePhase(ABC):
             asharp_model: ASHARPModel to update with results
         """
         self.plugin_context = plugin_context
+        self.plugins = plugins
         self.progress_display = progress_display
         self.asharp_model = asharp_model or ASHARPModel()
         self.phase_task = None
@@ -52,6 +60,9 @@ class EnginePhase(ABC):
             "plugin_context": self.plugin_context,
             **kwargs,
         }
+        ASH_LOGGER.debug(
+            f"EnginePhase.notify_event: Notifying event {event_type} from phase {self.phase_name}"
+        )
         return ash_plugin_manager.notify(event_type, **event_data)
 
     def execute(self, **kwargs) -> Any:
@@ -71,13 +82,18 @@ class EnginePhase(ABC):
 
         # Notify phase start
         start_event = f"{self.phase_name.upper()}_START"
+        ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {start_event} event")
         self.notify_event(start_event, **kwargs)
 
         # Execute the phase-specific logic
+        ASH_LOGGER.debug(
+            f"EnginePhase.execute: Executing phase-specific logic for {self.phase_name}"
+        )
         results = self._execute_phase(**kwargs)
 
         # Notify phase complete
         complete_event = f"{self.phase_name.upper()}_COMPLETE"
+        ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {complete_event} event")
         self.notify_event(complete_event, results=results, **kwargs)
 
         # Update progress to complete

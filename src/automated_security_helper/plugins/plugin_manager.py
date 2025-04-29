@@ -98,15 +98,29 @@ class AshPluginManager(BaseModel):
             self._subscribers[event_type] = []
 
         self._subscribers[event_type].append(callback)
+        ASH_LOGGER.debug(
+            f"Subscribed callback to event {event_type}. Total subscribers for this event: {len(self._subscribers[event_type])}"
+        )
         return callback  # Return for decorator usage
 
     def notify(self, event_type, *args, **kwargs):
         """Notify all subscribers of an event"""
-        if not hasattr(self, "_subscribers") or event_type not in self._subscribers:
+        if not hasattr(self, "_subscribers"):
+            ASH_LOGGER.debug(f"No subscribers dictionary exists for event {event_type}")
             return []
 
+        if event_type not in self._subscribers:
+            ASH_LOGGER.debug(f"No subscribers for event {event_type}")
+            return []
+
+        ASH_LOGGER.debug(
+            f"Notifying {len(self._subscribers[event_type])} subscribers of event {event_type}"
+        )
         results = []
         for callback in self._subscribers[event_type]:
+            ASH_LOGGER.debug(
+                f"Calling subscriber callback {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}"
+            )
             results.append(callback(*args, **kwargs))
 
         return results
@@ -126,8 +140,6 @@ class AshPluginManager(BaseModel):
             plugin_module_class: The plugin class to register
             plugin_module_path: Path to the module containing the plugin
             plugin_module_version: Optional version of the plugin
-            plugin_module_description: Optional description of the plugin
-            plugin_module_author: Optional author of the plugin
             plugin_module_enabled: Whether the plugin is enabled
         """
         # If plugin_module_class is a string, use it directly as the name
@@ -158,7 +170,7 @@ class AshPluginManager(BaseModel):
                 and plugin_module_name in self.plugin_library.reporters
             )
         ):
-            ASH_LOGGER.error(
+            ASH_LOGGER.warning(
                 f"Plugin module '{plugin_module_name}' already registered. Skipping."
             )
             return

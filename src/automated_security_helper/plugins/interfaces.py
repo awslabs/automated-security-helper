@@ -1,10 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from automated_security_helper.plugins import AshPluginInterface
 
-
-class IConverter(metaclass=AshPluginInterface):
+class IConverter:
     """Interface for converter plugins"""
 
     def convert(self, target):
@@ -16,7 +14,7 @@ class IConverter(metaclass=AshPluginInterface):
         pass
 
 
-class IScanner(metaclass=AshPluginInterface):
+class IScanner:
     """Interface for scanner plugins"""
 
     def scan(self, target, target_type, global_ignore_paths=None, config=None):
@@ -28,7 +26,7 @@ class IScanner(metaclass=AshPluginInterface):
         pass
 
 
-class IReporter(metaclass=AshPluginInterface):
+class IReporter:
     """Interface for reporter plugins"""
 
     def report(self, model):

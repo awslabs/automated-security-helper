@@ -59,7 +59,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         return True
 
     def inspect_members(self, members: List[str | zipfile.ZipInfo | tarfile.TarInfo]):
-        ASH_LOGGER.debug(f"Inspecting {len(members)} members from archive")
+        ASH_LOGGER.verbose(f"Inspecting {len(members)} members from archive")
         filtered_members = []
         for member in members:
             if isinstance(member, tarfile.TarInfo):
@@ -74,7 +74,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 )
                 continue
             if member_ext in KNOWN_SCANNABLE_EXTENSIONS:
-                ASH_LOGGER.debug(f"Found .{member_ext} file: {member}")
+                ASH_LOGGER.verbose(f"Found .{member_ext} file: {member}")
                 filtered_members.append(member)
         return filtered_members
 
@@ -92,8 +92,22 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             f"Searching for archive files in search_path within the ASH scan set: {self.context.source_dir}"
         )
 
-        # If target is provided, only convert that file if it's an archive
-        if target:
+        # If target is provided and it's a directory, find archives within it
+        if target and Path(target).is_dir():
+            ASH_LOGGER.debug(f"Target is a directory: {target}")
+            # Find all archive files to scan from the scan set
+            archive_files = scan_set(
+                source=self.context.source_dir,
+                output=self.context.output_dir,
+            )
+            archive_files = [
+                f.strip()
+                for f in archive_files
+                if f.strip().split(".")[-1] in ["zip", "tar", "gz"]
+            ]
+        # If target is provided and it's a file, only convert that file if it's an archive
+        elif target and Path(target).is_file():
+            ASH_LOGGER.debug(f"Target is a file: {target}")
             archive_files = [str(target)]
         else:
             # Find all archive files to scan from the scan set
@@ -111,33 +125,49 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         results: List[Path] = []
 
         for archive_file in archive_files:
-            short_archive_file = get_shortest_name(archive_file)
-            normalized_archive_file = get_normalized_filename(short_archive_file)
-            target_path = self.context.work_dir.joinpath(self.config.name).joinpath(
-                normalized_archive_file
-            )
-            ASH_LOGGER.verbose(
-                f"Extracting {archive_file} contents to target_path: {Path(target_path).as_posix()}"
-            )
-            # Extract ZIP to target path after inspecting members
-            if archive_file.endswith(".zip") and zipfile.is_zipfile(archive_file):
-                with zipfile.ZipFile(archive_file, "r") as zip_ref:
-                    zip_ref.extractall(
-                        path=target_path,
-                        members=self.inspect_members(zip_ref.filelist),
-                    )
-            # Extract Tarball to target path after inspecting members
-            elif tarfile.is_tarfile(archive_file):
-                with tarfile.open(archive_file, "r") as tar_ref:
-                    tar_ref.extractall(
-                        path=target_path,
-                        members=self.inspect_members(tar_ref.getmembers()),
-                    )
-            else:
-                ASH_LOGGER.debug(f"Skipping unsupported archive format: {archive_file}")
-                continue
+            try:
+                # Skip directories
+                if Path(archive_file).is_dir():
+                    ASH_LOGGER.debug(f"Skipping directory: {archive_file}")
+                    continue
 
-            # Add the extracted directory to results
-            results.append(target_path)
+                short_archive_file = get_shortest_name(archive_file)
+                normalized_archive_file = get_normalized_filename(short_archive_file)
+                target_path = self.context.work_dir.joinpath(self.config.name).joinpath(
+                    normalized_archive_file
+                )
+                ASH_LOGGER.verbose(
+                    f"Extracting {archive_file} contents to target_path: {Path(target_path).as_posix()}"
+                )
+
+                # Create target directory if it doesn't exist
+                target_path.mkdir(parents=True, exist_ok=True)
+
+                # Extract ZIP to target path after inspecting members
+                if archive_file.endswith(".zip") and zipfile.is_zipfile(archive_file):
+                    with zipfile.ZipFile(archive_file, "r") as zip_ref:
+                        zip_ref.extractall(
+                            path=target_path,
+                            members=self.inspect_members(zip_ref.filelist),
+                        )
+                # Extract Tarball to target path after inspecting members
+                elif tarfile.is_tarfile(archive_file):
+                    with tarfile.open(archive_file, "r") as tar_ref:
+                        tar_ref.extractall(
+                            path=target_path,
+                            members=self.inspect_members(tar_ref.getmembers()),
+                        )
+                else:
+                    ASH_LOGGER.debug(
+                        f"Skipping unsupported archive format: {archive_file}"
+                    )
+                    continue
+
+                # Add the extracted directory to results
+                results.append(target_path)
+            except IsADirectoryError:
+                ASH_LOGGER.debug(f"Skipping directory: {archive_file}")
+            except Exception as e:
+                ASH_LOGGER.error(f"Error processing archive {archive_file}: {e}")
 
         return results

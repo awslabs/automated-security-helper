@@ -76,7 +76,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         # Use context if provided, otherwise fall back to instance attributes
         if self.context is None:
             raise ScannerError(f"No context provided for {self.__class__.__name__}!")
-        ASH_LOGGER.debug(f"Using provided context for {self.__class__.__name__}")
+        ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
 
         # Set up results directory based on output directory
         self.results_dir = self.context.output_dir.joinpath("scanners").joinpath(
@@ -85,7 +85,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
 
         self._process_config_options()
 
-        ASH_LOGGER.debug(
+        ASH_LOGGER.trace(
             f"Scanner {self.config.name} initialized with source_dir={self.context.source_dir}, output_dir={self.context.output_dir}"
         )
         return super().model_post_init(context)
@@ -328,7 +328,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         except Exception as e:
             self.errors.append(str(e))
             # show full stack trace in warning
-            ASH_LOGGER.debug(f"({self.config.name}) Error running {command}: {e}")
+            ASH_LOGGER.trace(f"({self.config.name}) Error running {command}: {e}")
             self.exit_code = 1
 
     ### Methods that require implementation by plugins.

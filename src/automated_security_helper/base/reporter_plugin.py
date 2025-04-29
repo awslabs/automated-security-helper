@@ -49,7 +49,7 @@ class ReporterPluginBase(BaseModel, Generic[T]):
         # Use context if provided, otherwise fall back to instance attributes
         if self.context is None:
             raise ScannerError(f"No context provided for {self.__class__.__name__}!")
-        ASH_LOGGER.debug(f"Using provided context for {self.__class__.__name__}")
+        ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
         return self
 
     def configure(

@@ -411,7 +411,9 @@ class AshConfig(BaseModel):
             # case self.config_path is resolved from a default location.
             # Do not use `else:` here!
             if config_path:
-                ASH_LOGGER.debug(f"Loading configuration from {config_path.as_posix()}")
+                ASH_LOGGER.verbose(
+                    f"Loading configuration from {config_path.as_posix()}"
+                )
                 try:
                     with open(config_path, "r") as f:
                         if str(config_path).endswith(".json"):
@@ -422,7 +424,7 @@ class AshConfig(BaseModel):
                     if not isinstance(config_data, dict):
                         raise ValueError("Configuration must be a dictionary")
 
-                    ASH_LOGGER.debug("Transforming file config")
+                    ASH_LOGGER.verbose("Validating file config")
                     config = cls.model_validate(config_data)
                     ASH_LOGGER.debug(f"Loaded config from file: {config}")
                 except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:

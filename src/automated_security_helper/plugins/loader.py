@@ -24,6 +24,9 @@ def load_internal_plugins():
 
             # Track loaded plugins
             if hasattr(module, "ASH_CONVERTERS"):
+                ASH_LOGGER.debug(
+                    f"Found {len(module.ASH_CONVERTERS)} converters in {module_name}"
+                )
                 loaded_plugins["converters"].extend(module.ASH_CONVERTERS)
                 # Register each converter with the plugin manager
                 from automated_security_helper.plugins.decorators import (
@@ -33,9 +36,15 @@ def load_internal_plugins():
                 for converter_class in module.ASH_CONVERTERS:
                     # Apply decorator if not already applied
                     if not hasattr(converter_class, "ash_plugin_type"):
+                        ASH_LOGGER.debug(
+                            f"Applying ash_converter_plugin decorator to {converter_class.__name__}"
+                        )
                         converter_class = ash_converter_plugin(converter_class)
 
             if hasattr(module, "ASH_SCANNERS"):
+                ASH_LOGGER.debug(
+                    f"Found {len(module.ASH_SCANNERS)} scanners in {module_name}"
+                )
                 loaded_plugins["scanners"].extend(module.ASH_SCANNERS)
                 # Register each scanner with the plugin manager
                 from automated_security_helper.plugins.decorators import (
@@ -45,6 +54,9 @@ def load_internal_plugins():
                 for scanner_class in module.ASH_SCANNERS:
                     # Apply decorator if not already applied
                     if not hasattr(scanner_class, "ash_plugin_type"):
+                        ASH_LOGGER.debug(
+                            f"Applying ash_scanner_plugin decorator to {scanner_class.__name__}"
+                        )
                         scanner_class = ash_scanner_plugin(scanner_class)
 
             if hasattr(module, "ASH_REPORTERS"):
@@ -57,6 +69,9 @@ def load_internal_plugins():
                 for reporter_class in module.ASH_REPORTERS:
                     # Apply decorator if not already applied
                     if not hasattr(reporter_class, "ash_plugin_type"):
+                        ASH_LOGGER.debug(
+                            f"Applying ash_reporter_plugin decorator to {reporter_class.__name__}"
+                        )
                         reporter_class = ash_reporter_plugin(reporter_class)
 
         except ImportError as e:
@@ -92,5 +107,17 @@ def load_plugins() -> Dict[str, List[Any]]:
         f"{len(all_plugins['scanners'])} scanners, and "
         f"{len(all_plugins['reporters'])} reporters"
     )
+
+    # Register adapters for all plugins
+    from automated_security_helper.plugins.adapters import (
+        register_converter_adapters,
+        register_scanner_adapters,
+        register_reporter_adapters,
+    )
+
+    ASH_LOGGER.debug("Registering adapters for all loaded plugins")
+    register_converter_adapters(all_plugins["converters"])
+    register_scanner_adapters(all_plugins["scanners"])
+    register_reporter_adapters(all_plugins["reporters"])
 
     return all_plugins

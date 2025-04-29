@@ -76,41 +76,53 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             f"Searching for .ipynb files in search_path within the ASH scan set: {self.context.source_dir}"
         )
 
-        # If target is provided, only convert that file if it's a notebook
-        if target:
+        # If target is provided and it's a directory, find notebooks within it
+        if target and Path(target).is_dir():
+            ASH_LOGGER.debug(f"Target is a directory: {target}")
+            # Find all notebook files to scan from the scan set
+            ipynb_files = scan_set(
+                source=Path(target),
+                output=self.context.output_dir,
+            )
+            ipynb_files = [
+                f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")
+            ]
+        # If target is provided and it's a file, only convert if it's a notebook
+        elif target and Path(target).is_file():
+            ASH_LOGGER.debug(f"Target is a file: {target}")
             target_path = Path(target)
             if target_path.suffix == ".ipynb":
                 ipynb_files = [str(target_path)]
             else:
                 return []
         else:
-            # Find all JSON/YAML files to scan from the scan set
+            # Find all notebook files to scan from the scan set
             ipynb_files = scan_set(
                 source=self.context.source_dir,
                 output=self.context.output_dir,
-                # filter_pattern=r"\.(ipynb)",
             )
             ipynb_files = [
                 f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")
             ]
 
-        ASH_LOGGER.verbose(f"Found {len(ipynb_files)} .ipynb files in scan set.")
+        ASH_LOGGER.debug(f"Found {len(ipynb_files)} .ipynb files in scan set.")
         py_exporter: PythonExporter = PythonExporter()
         results: List[Path] = []
 
         for ipynb_file in ipynb_files:
-            ASH_LOGGER.debug(f"Converting {ipynb_file} to .py")
-            short_ipynb_file = get_shortest_name(ipynb_file)
-            normalized_ipynb_file = get_normalized_filename(short_ipynb_file)
-            # Ensure the target path has a .py extension
-            target_path = self.context.work_dir.joinpath(
-                normalized_ipynb_file.replace(".ipynb", "") + ".py"
-            )
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            ASH_LOGGER.verbose(
-                f"Converting {ipynb_file} to target_path: {Path(target_path).as_posix()}"
-            )
             try:
+                ASH_LOGGER.debug(f"Converting {ipynb_file} to .py")
+                short_ipynb_file = get_shortest_name(ipynb_file)
+                normalized_ipynb_file = get_normalized_filename(short_ipynb_file)
+                # Ensure the target path has a .py extension
+                target_path = self.context.work_dir.joinpath(
+                    normalized_ipynb_file.replace(".ipynb", "") + ".py"
+                )
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                ASH_LOGGER.verbose(
+                    f"Converting {ipynb_file} to target_path: {Path(target_path).as_posix()}"
+                )
+
                 with open(ipynb_file, "r") as f:
                     (python_code, _) = py_exporter.from_file(f)
                     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,5 +131,10 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     results.append(target_path)
             except Exception as e:
                 ASH_LOGGER.error(f"Error converting {ipynb_file}: {e}")
+                import traceback
+
+                ASH_LOGGER.debug(
+                    f"Jupyter conversion error traceback: {traceback.format_exc()}"
+                )
 
         return results

@@ -27,7 +27,7 @@ from automated_security_helper.plugins.adapters import (
 )
 from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.plugins.interfaces import IScanner
+from automated_security_helper.plugins.interfaces import IConverter, IReporter, IScanner
 
 # Define valid execution phases
 from automated_security_helper.config.ash_config import (
@@ -57,7 +57,7 @@ class ScanExecutionEngine:
         color_system: str = "auto",
         verbose: bool = False,
         debug: bool = False,
-        discover_external_plugins: bool = True,
+        ash_plugin_modules: List[str] = [],
     ):
         """Initialize the execution engine.
 
@@ -119,15 +119,25 @@ class ScanExecutionEngine:
         ]
 
         # Discover external plugins if enabled
-        if discover_external_plugins:
-            discovered_plugins = discover_plugins()
+        if len(ash_plugin_modules) > 0:
+            discovered_plugins = discover_plugins(plugin_modules=ash_plugin_modules)
 
             # Register adapters for discovered plugins
             if discovered_plugins.get("converters"):
+                ASH_LOGGER.debug(
+                    f"Registering {len(discovered_plugins['converters'])} discovered converter plugins"
+                )
                 register_converter_adapters(discovered_plugins["converters"])
             if discovered_plugins.get("scanners"):
+                ASH_LOGGER.debug(
+                    f"Registering {len(discovered_plugins['scanners'])} discovered scanner plugins"
+                )
                 register_scanner_adapters(discovered_plugins["scanners"])
             if discovered_plugins.get("reporters"):
+                ASH_LOGGER.debug(
+                    f"Registering {len(discovered_plugins['reporters'])} discovered reporter plugins"
+                )
+                register_reporter_adapters(discovered_plugins["reporters"])
                 register_reporter_adapters(discovered_plugins["reporters"])
 
         # Config can override environment
@@ -192,8 +202,13 @@ class ScanExecutionEngine:
         self._initialized = False
 
         # Get all scanner plugins
-        scanner_plugins = ash_plugin_manager.plugin_modules(IScanner)
-        ASH_LOGGER.debug(f"Found {len(scanner_plugins)} scanner plugins")
+        self.plugins = {
+            "converter": ash_plugin_manager.plugin_modules(IConverter),
+            "scanner": ash_plugin_manager.plugin_modules(IScanner),
+            "reporter": ash_plugin_manager.plugin_modules(IReporter),
+        }
+        for k, v in self.plugins.items():
+            ASH_LOGGER.verbose(f"Found {len(v)} {k} plugins")
 
     def _register_custom_scanners(self):
         """Register custom scanners from configuration."""
@@ -245,7 +260,7 @@ class ScanExecutionEngine:
             raise ValueError("Scanner name cannot be empty")
 
         # Get all scanner plugins
-        scanner_plugins = ash_plugin_manager.plugin_modules(IScanner)
+        scanner_plugins = self.plugins.get("scanner", [])
 
         # Find the scanner by name
         for scanner_class in scanner_plugins:
@@ -254,11 +269,13 @@ class ScanExecutionEngine:
                 # Create and return the scanner instance
                 scanner = scanner_class(
                     context=self._context,
-                    config=self._context.config.get_plugin_config(
-                        plugin_type="scanner", plugin_name=lookup_name
-                    )
-                    if self._context.config
-                    else None,
+                    config=(
+                        self._context.config.get_plugin_config(
+                            plugin_type="scanner", plugin_name=lookup_name
+                        )
+                        if self._context.config
+                        else None
+                    ),
                 )
                 return scanner
 
@@ -355,6 +372,7 @@ class ScanExecutionEngine:
                 if phase_name == "convert":
                     # Create and execute the Convert phase
                     convert_phase = ConvertPhase(
+                        plugins=ash_plugin_manager.plugin_modules(IConverter),
                         plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
@@ -364,6 +382,7 @@ class ScanExecutionEngine:
                 elif phase_name == "scan":
                     # Create and execute the Scan phase
                     scan_phase = ScanPhase(
+                        plugins=ash_plugin_manager.plugin_modules(IScanner),
                         plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
@@ -380,6 +399,7 @@ class ScanExecutionEngine:
                 elif phase_name == "report":
                     # Create and execute the Report phase
                     report_phase = ReportPhase(
+                        plugins=ash_plugin_manager.plugin_modules(IReporter),
                         plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
@@ -396,6 +416,7 @@ class ScanExecutionEngine:
                 elif phase_name == "inspect":
                     # Create and execute the Inspect phase
                     inspect_phase = InspectPhase(
+                        plugins=[],  # No plugin support for the Inspect phase at this time.
                         plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
