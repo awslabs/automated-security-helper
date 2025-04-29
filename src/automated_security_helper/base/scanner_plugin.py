@@ -24,7 +24,10 @@ T = TypeVar("T", bound=ScannerPluginConfigBase)
 
 
 class ScannerPluginBase(BaseModel, Generic[T]):
-    """Base class for all scanner plugins."""
+    """Base class for all scanner plugins.
+
+    Plugin implementations
+    """
 
     model_config = ConfigDict(extra="allow")
 

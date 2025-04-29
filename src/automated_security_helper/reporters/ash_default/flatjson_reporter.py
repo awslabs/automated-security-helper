@@ -8,6 +8,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class FlatJSONReporterConfigOptions(ReporterOptionsBase):
@@ -21,6 +22,7 @@ class FlatJSONReporterConfig(ReporterPluginConfigBase):
     options: FlatJSONReporterConfigOptions = FlatJSONReporterConfigOptions()
 
 
+@ash_reporter_plugin
 class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
     """Formats results as a flattened JSON array of findings."""
 

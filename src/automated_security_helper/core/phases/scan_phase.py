@@ -7,15 +7,18 @@ from pathlib import Path
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.progress import ExecutionPhase
-from automated_security_helper.core.scanner_factory import ScannerFactory
-from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.plugins.interfaces import IScanner
+from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import sanitize_sarif_paths
+
+
+"""Implementation of the Scan phase."""
 
 
 class ScanPhase(EnginePhase):
@@ -26,10 +29,8 @@ class ScanPhase(EnginePhase):
         """Return the name of this phase."""
         return "scan"
 
-    def execute(
+    def _execute_phase(
         self,
-        scanner_factory: ScannerFactory,
-        plugin_registry: PluginRegistry,
         enabled_scanners: List[str] = None,
         parallel: bool = True,
         max_workers: int = 4,
@@ -39,8 +40,6 @@ class ScanPhase(EnginePhase):
         """Execute the Scan phase.
 
         Args:
-            scanner_factory: Factory for creating scanners
-            plugin_registry: Registry of plugins to use
             enabled_scanners: List of scanner names to enable
             parallel: Whether to run scanners in parallel
             max_workers: Maximum number of worker threads for parallel execution
@@ -71,59 +70,62 @@ class ScanPhase(EnginePhase):
             # Build queue of scanner tuples for execution
             self._queue = multiprocessing.Queue()
 
-            # Get all enabled scanners
-            scanner_configs = scanner_factory.available_scanners()
-            ASH_LOGGER.debug(f"Scanner configs: {scanner_configs}")
+            # Get all scanner plugins
+            scanner_plugins = ash_plugin_manager.plugin_modules(IScanner)
+            ASH_LOGGER.debug(f"Found {len(scanner_plugins)} scanner plugins")
 
             # Update progress
             self.update_progress(
-                20, f"Found {len(scanner_configs)} scanner configurations"
+                20, f"Found {len(scanner_plugins)} scanner configurations"
             )
 
             final_enabled_scanners = set()
 
             # Process scanners
-            if scanner_configs:
-                for scanner_name, scanner_plugin_class in scanner_configs.items():
-                    if scanner_plugin_class:
-                        # Add scanner to execution queue with default target
-                        scanner_plugin_class_instance = scanner_plugin_class(
-                            config=(
-                                self.plugin_context.config.get_plugin_config(
-                                    plugin_type=PluginType.scanner,
-                                    plugin_name=scanner_name,
-                                )
-                                if self.plugin_context.config is not None
-                                else None
-                            ),
-                            context=self.plugin_context,
+            if scanner_plugins:
+                for scanner_class in scanner_plugins:
+                    scanner_name = getattr(scanner_class, "__name__", "Unknown").lower()
+
+                    # Create scanner instance
+                    scanner_instance = scanner_class(
+                        config=(
+                            self.plugin_context.config.get_plugin_config(
+                                plugin_type="scanner",
+                                plugin_name=scanner_name,
+                            )
+                            if self.plugin_context.config is not None
+                            else None
+                        ),
+                        context=self.plugin_context,
+                    )
+
+                    # Check if scanner is enabled
+                    if (
+                        hasattr(scanner_instance.config, "enabled")
+                        and bool(scanner_instance.config.enabled)
+                        and (
+                            not enabled_scanners
+                            or scanner_name.lower().strip() in enabled_scanners
                         )
-                        if (
-                            hasattr(scanner_plugin_class_instance.config, "enabled")
-                            and bool(scanner_plugin_class_instance.config.enabled)
-                            and (
-                                not enabled_scanners
-                                or scanner_name.lower().strip() in enabled_scanners
+                    ):
+                        # Add a single task per scanner that will handle both source and converted directories
+                        self._queue.put(
+                            (
+                                scanner_name,
+                                scanner_instance,
+                                [
+                                    {
+                                        "path": self.plugin_context.source_dir,
+                                        "type": "source",
+                                    },
+                                    {
+                                        "path": self.plugin_context.work_dir,
+                                        "type": "converted",
+                                    },
+                                ],
                             )
-                        ):
-                            # Add a single task per scanner that will handle both source and converted directories
-                            self._queue.put(
-                                (
-                                    scanner_name,
-                                    scanner_plugin_class_instance,
-                                    [
-                                        {
-                                            "path": self.plugin_context.source_dir,
-                                            "type": "source",
-                                        },
-                                        {
-                                            "path": self.plugin_context.work_dir,
-                                            "type": "converted",
-                                        },
-                                    ],
-                                )
-                            )
-                            final_enabled_scanners.add(scanner_name)
+                        )
+                        final_enabled_scanners.add(scanner_name)
 
             # Update progress
             self.update_progress(

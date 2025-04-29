@@ -15,6 +15,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -62,6 +63,7 @@ class SyftScannerConfig(ScannerPluginConfigBase):
     ] = SyftScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     """SyftScanner implements IaC scanning using Syft."""
 

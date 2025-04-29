@@ -49,6 +49,36 @@
       "title": "ASFFReporterConfigOptions",
       "type": "object"
     },
+    "ArchiveConverterConfig": {
+      "additionalProperties": true,
+      "description": "Archive (ZIP/TAR/GZIP/etc) converter configuration.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "archive",
+          "default": "archive",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ArchiveConverterConfigOptions",
+          "default": {},
+          "description": "Configure Archive converter"
+        }
+      },
+      "title": "ArchiveConverterConfig",
+      "type": "object"
+    },
+    "ArchiveConverterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "ArchiveConverterConfigOptions",
+      "type": "object"
+    },
     "AshConfigGlobalSettingsSection": {
       "additionalProperties": false,
       "properties": {
@@ -634,6 +664,66 @@
       "title": "CheckovScannerConfigOptions",
       "type": "object"
     },
+    "ConverterConfigSegment": {
+      "additionalProperties": {
+        "anyOf": [
+          {},
+          {
+            "$ref": "#/$defs/ConverterPluginConfigBase"
+          }
+        ]
+      },
+      "properties": {
+        "archive": {
+          "$ref": "#/$defs/ArchiveConverterConfig",
+          "default": {
+            "enabled": true,
+            "name": "archive",
+            "options": {}
+          },
+          "description": "Configure the options for the ArchiveConverter"
+        },
+        "jupyter": {
+          "$ref": "#/$defs/JupyterConverterConfig",
+          "default": {
+            "enabled": true,
+            "name": "jupyter",
+            "options": {}
+          },
+          "description": "Configure the options for the JupyterConverter"
+        }
+      },
+      "title": "ConverterConfigSegment",
+      "type": "object"
+    },
+    "ConverterPluginConfigBase": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "default": null,
+          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z][\\w-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ScannerOptionsBase",
+          "default": {
+            "severity_threshold": null
+          },
+          "description": "Scanner options"
+        }
+      },
+      "title": "ConverterPluginConfigBase",
+      "type": "object"
+    },
     "CustomScannerConfig": {
       "additionalProperties": true,
       "description": "Custom scanner configuration.",
@@ -735,6 +825,152 @@
       "title": "CycloneDXReporterConfigOptions",
       "type": "object"
     },
+    "DetectSecretsScanSettings": {
+      "additionalProperties": true,
+      "properties": {
+        "filters_used": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DetectSecretsScanSettingsFiltersUsed"
+          },
+          "title": "Filters Used",
+          "type": "array"
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generated At"
+        },
+        "plugins_used": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DetectSecretsScanSettingsPluginsUsed"
+          },
+          "title": "Plugins Used",
+          "type": "array"
+        },
+        "results": {
+          "$ref": "#/$defs/DetectSecretsScanSettingsResults",
+          "default": {}
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "title": "DetectSecretsScanSettings",
+      "type": "object"
+    },
+    "DetectSecretsScanSettingsFiltersUsed": {
+      "additionalProperties": true,
+      "properties": {
+        "keyword_exclude": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keyword Exclude"
+        },
+        "min_level": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Level"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        }
+      },
+      "title": "DetectSecretsScanSettingsFiltersUsed",
+      "type": "object"
+    },
+    "DetectSecretsScanSettingsPluginsUsed": {
+      "additionalProperties": true,
+      "properties": {
+        "keyword_exclude": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keyword Exclude"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        }
+      },
+      "title": "DetectSecretsScanSettingsPluginsUsed",
+      "type": "object"
+    },
+    "DetectSecretsScanSettingsResults": {
+      "additionalProperties": {
+        "items": {},
+        "type": "array"
+      },
+      "properties": {},
+      "title": "DetectSecretsScanSettingsResults",
+      "type": "object"
+    },
     "DetectSecretsScannerConfig": {
       "additionalProperties": true,
       "properties": {
@@ -753,7 +989,13 @@
           "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
           "default": {
             "baseline_file": null,
-            "scan_settings": {},
+            "scan_settings": {
+              "filters_used": [],
+              "generated_at": null,
+              "plugins_used": [],
+              "results": {},
+              "version": null
+            },
             "severity_threshold": null
           },
           "description": "Configure detect-secrets scanner"
@@ -783,19 +1025,15 @@
           "title": "Baseline File"
         },
         "scan_settings": {
-          "additionalProperties": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "type": "array"
+          "$ref": "#/$defs/DetectSecretsScanSettings",
+          "default": {
+            "filters_used": [],
+            "generated_at": null,
+            "plugins_used": [],
+            "results": {},
+            "version": null
           },
-          "default": {},
-          "description": "Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
-          "title": "Scan Settings",
-          "type": "object"
+          "description": "Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file"
         },
         "severity_threshold": {
           "anyOf": [
@@ -982,6 +1220,36 @@
       "additionalProperties": true,
       "properties": {},
       "title": "JUnitXMLReporterConfigOptions",
+      "type": "object"
+    },
+    "JupyterConverterConfig": {
+      "additionalProperties": true,
+      "description": "Jupyter Notebook (.ipynb) to Python converter configuration.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "jupyter",
+          "default": "jupyter",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/JupyterConverterConfigOptions",
+          "default": {},
+          "description": "Configure Jupyter Notebook converter"
+        }
+      },
+      "title": "JupyterConverterConfig",
+      "type": "object"
+    },
+    "JupyterConverterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "JupyterConverterConfigOptions",
       "type": "object"
     },
     "MarkdownReporterConfig": {
@@ -1509,7 +1777,13 @@
             "name": "detect-secrets",
             "options": {
               "baseline_file": null,
-              "scan_settings": {},
+              "scan_settings": {
+                "filters_used": [],
+                "generated_at": null,
+                "plugins_used": [],
+                "results": {},
+                "version": null
+              },
               "severity_threshold": null
             }
           },
@@ -1597,7 +1871,7 @@
     },
     "ScannerPluginBase": {
       "additionalProperties": true,
-      "description": "Base class for all scanner plugins.",
+      "description": "Base class for all scanner plugins.\n\nPlugin implementations",
       "properties": {
         "args": {
           "$ref": "#/$defs/ToolArgs",
@@ -2081,16 +2355,20 @@
       "description": "Build-time configuration settings"
     },
     "converters": {
-      "additionalProperties": {
-        "type": "boolean"
-      },
+      "$ref": "#/$defs/ConverterConfigSegment",
       "default": {
-        "archive": true,
-        "jupyter": true
+        "archive": {
+          "enabled": true,
+          "name": "archive",
+          "options": {}
+        },
+        "jupyter": {
+          "enabled": true,
+          "name": "jupyter",
+          "options": {}
+        }
       },
-      "description": "The map of converters and a boolean value indicating whether they should be enabled or disabled",
-      "title": "Converters",
-      "type": "object"
+      "description": "Converter configurations by name."
     },
     "external_reports_to_include": {
       "default": [],
@@ -2287,7 +2565,13 @@
           "name": "detect-secrets",
           "options": {
             "baseline_file": null,
-            "scan_settings": {},
+            "scan_settings": {
+              "filters_used": [],
+              "generated_at": null,
+              "plugins_used": [],
+              "results": {},
+              "version": null
+            },
             "severity_threshold": null
           }
         },

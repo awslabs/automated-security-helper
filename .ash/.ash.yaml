@@ -69,8 +69,8 @@ scanners:
       skip_path: []
   detect-secrets:
     enabled: true
-    options:
-      baseline_file: .ash/.secrets.baseline
+    # options:
+    #   baseline_file: .ash/.secrets.baseline
   npm-audit:
     enabled: true
   grype:

@@ -1,40 +1,40 @@
-from automated_security_helper.reporters.ash_default.asff_reporter import ASFFReporter
-from automated_security_helper.reporters.ash_default.csv_reporter import CSVReporter
+from automated_security_helper.reporters.ash_default.asff_reporter import AsffReporter
+from automated_security_helper.reporters.ash_default.csv_reporter import CsvReporter
 from automated_security_helper.reporters.ash_default.cyclonedx_reporter import (
     CycloneDXReporter,
 )
-from automated_security_helper.reporters.ash_default.html_reporter import HTMLReporter
+from automated_security_helper.reporters.ash_default.html_reporter import HtmlReporter
 from automated_security_helper.reporters.ash_default.flatjson_reporter import (
-    FlatJSONReporter as JSONReporter,
+    FlatJSONReporter as FlatJsonReporter,
 )
 from automated_security_helper.reporters.ash_default.junitxml_reporter import (
-    JUnitXMLReporter,
+    JunitXmlReporter,
 )
 from automated_security_helper.reporters.ash_default.markdown_reporter import (
     MarkdownReporter,
 )
-from automated_security_helper.reporters.ash_default.ocsf_reporter import OCSFReporter
+from automated_security_helper.reporters.ash_default.ocsf_reporter import OcsfReporter
 from automated_security_helper.reporters.ash_default.report_content_emitter import (
     ReportContentEmitter,
 )
-from automated_security_helper.reporters.ash_default.sarif_reporter import SARIFReporter
-from automated_security_helper.reporters.ash_default.spdx_reporter import SPDXReporter
+from automated_security_helper.reporters.ash_default.sarif_reporter import SarifReporter
+from automated_security_helper.reporters.ash_default.spdx_reporter import SpdxReporter
 from automated_security_helper.reporters.ash_default.text_reporter import TextReporter
-from automated_security_helper.reporters.ash_default.yaml_reporter import YAMLReporter
+from automated_security_helper.reporters.ash_default.yaml_reporter import YamlReporter
 
 __all__ = [
-    "ASFFReporter",
-    "CSVReporter",
+    "AsffReporter",
+    "CsvReporter",
     "CycloneDXReporter",
-    "HTMLReporter",
+    "HtmlReporter",
     "FlatJSONReporter",
-    "JSONReporter",  # Alias for FlatJSONReporter
-    "JUnitXMLReporter",
+    "FlatJsonReporter",  # Alias for FlatJSONReporter
+    "JunitXmlReporter",
     "MarkdownReporter",
-    "OCSFReporter",
+    "OcsfReporter",
     "ReportContentEmitter",
-    "SARIFReporter",
-    "SPDXReporter",
+    "SarifReporter",
+    "SpdxReporter",
     "TextReporter",
-    "YAMLReporter",
+    "YamlReporter",
 ]

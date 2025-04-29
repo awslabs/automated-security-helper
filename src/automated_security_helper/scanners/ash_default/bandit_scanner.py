@@ -21,6 +21,7 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
@@ -87,6 +88,7 @@ class BanditScannerConfig(ScannerPluginConfigBase):
     ] = BanditScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     """Implementation of a Python security scanner using Bandit.
 

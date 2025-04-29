@@ -7,6 +7,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class OCSFReporterConfigOptions(ReporterOptionsBase):
@@ -20,7 +21,8 @@ class OCSFReporterConfig(ReporterPluginConfigBase):
     options: OCSFReporterConfigOptions = OCSFReporterConfigOptions()
 
 
-class OCSFReporter(ReporterPluginBase[OCSFReporterConfig]):
+@ash_reporter_plugin
+class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
     """Formats results as Open Cybersecurity Schema Framework (OCSF) format."""
 
     def model_post_init(self, context):

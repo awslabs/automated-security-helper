@@ -15,6 +15,7 @@ from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
 )
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
@@ -80,6 +81,7 @@ class SemgrepScannerConfig(ScannerPluginConfigBase):
     ] = SemgrepScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
     """SemgrepScanner implements code scanning using Semgrep."""
 

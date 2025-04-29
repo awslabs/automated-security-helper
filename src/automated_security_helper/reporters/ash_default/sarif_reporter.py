@@ -7,6 +7,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.clean_dict import clean_dict
 
 
@@ -21,7 +22,8 @@ class SARIFReporterConfig(ReporterPluginConfigBase):
     options: SARIFReporterConfigOptions = SARIFReporterConfigOptions()
 
 
-class SARIFReporter(ReporterPluginBase[SARIFReporterConfig]):
+@ash_reporter_plugin
+class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
     """Formats results as SARIF."""
 
     def model_post_init(self, context):

@@ -8,6 +8,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.reporters.ash_default.report_content_emitter import (
     ReportContentEmitter,
 )
@@ -36,6 +37,7 @@ class TextReporterConfig(ReporterPluginConfigBase):
     options: TextReporterConfigOptions = TextReporterConfigOptions()
 
 
+@ash_reporter_plugin
 class TextReporter(ReporterPluginBase[TextReporterConfig]):
     """Formats results as a human-readable plain text document."""
 

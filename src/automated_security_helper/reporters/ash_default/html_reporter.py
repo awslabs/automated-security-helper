@@ -9,6 +9,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class HTMLReporterConfigOptions(ReporterOptionsBase):
@@ -22,7 +23,8 @@ class HTMLReporterConfig(ReporterPluginConfigBase):
     options: HTMLReporterConfigOptions = HTMLReporterConfigOptions()
 
 
-class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
+@ash_reporter_plugin
+class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
     """Formats results as HTML."""
 
     def model_post_init(self, context):

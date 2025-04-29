@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Module containing the JupyterScanner implementation."""
+"""Module containing the JupyterConverter implementation."""
 
 from importlib.metadata import version
 from pathlib import Path
@@ -19,6 +19,7 @@ from automated_security_helper.base.options import (
     ConverterOptionsBase,
 )
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.plugins.decorators import ash_converter_plugin
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -40,10 +41,9 @@ class JupyterConverterConfig(ConverterPluginConfigBase):
     ] = JupyterConverterConfigOptions()
 
 
+@ash_converter_plugin
 class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     """Converter implementation for Jupyter notebooks security scanning."""
-
-    config: JupyterConverterConfig = JupyterConverterConfig()
 
     def model_post_init(self, context):
         self.context.work_dir = self.context.output_dir.joinpath(
@@ -52,6 +52,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         self.tool_version = version("nbconvert")
         if self.config is None:
             self.config = JupyterConverterConfig()
+        # Ensure the config name is set correctly
+        if hasattr(self.config, "name"):
+            self.config.name = "jupyter"
         return super().model_post_init(context)
 
     def validate(self):
@@ -59,45 +62,62 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # so there is nothing further to validate in terms of availability.
         return True
 
-    def convert(
-        self,
-    ) -> List[Path]:
+    def convert(self, target: Path | str = None) -> List[Path]:
+        """Convert Jupyter notebooks to Python files.
+
+        Args:
+            target: Optional target path to convert. If None, all notebooks in source_dir are converted.
+
+        Returns:
+            List[Path]: List of converted Python files
+        """
         # TODO : Convert utils/identifyipynb.sh script to python using nbconvert as lib
         ASH_LOGGER.debug(
             f"Searching for .ipynb files in search_path within the ASH scan set: {self.context.source_dir}"
         )
-        # Find all JSON/YAML files to scan from the scan set
-        ipynb_files = scan_set(
-            source=self.context.source_dir,
-            output=self.context.output_dir,
-            # filter_pattern=r"\.(ipynb)",
-        )
-        ipynb_files = [f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")]
+
+        # If target is provided, only convert that file if it's a notebook
+        if target:
+            target_path = Path(target)
+            if target_path.suffix == ".ipynb":
+                ipynb_files = [str(target_path)]
+            else:
+                return []
+        else:
+            # Find all JSON/YAML files to scan from the scan set
+            ipynb_files = scan_set(
+                source=self.context.source_dir,
+                output=self.context.output_dir,
+                # filter_pattern=r"\.(ipynb)",
+            )
+            ipynb_files = [
+                f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")
+            ]
+
         ASH_LOGGER.verbose(f"Found {len(ipynb_files)} .ipynb files in scan set.")
         py_exporter: PythonExporter = PythonExporter()
         results: List[Path] = []
+
         for ipynb_file in ipynb_files:
             ASH_LOGGER.debug(f"Converting {ipynb_file} to .py")
-            # Convert to Python
-            short_file_name = get_shortest_name(ipynb_file)
-            normalized_file_name = get_normalized_filename(short_file_name)
-            py_file = (
-                self.context.work_dir.joinpath(self.config.name)
-                .joinpath(normalized_file_name)
-                .joinpath(ipynb_file)
-                .with_suffix(".py")
+            short_ipynb_file = get_shortest_name(ipynb_file)
+            normalized_ipynb_file = get_normalized_filename(short_ipynb_file)
+            # Ensure the target path has a .py extension
+            target_path = self.context.work_dir.joinpath(
+                normalized_ipynb_file.replace(".ipynb", "") + ".py"
             )
-            py_file.parent.mkdir(exist_ok=True, parents=True)
-            (body, resources) = py_exporter.from_filename(
-                filename=ipynb_file,
-            )
-            ASH_LOGGER.debug(f"Converted file body: {body}")
-            ASH_LOGGER.debug(f"Converted file resources: {resources}")
-            with open(py_file, "w") as f:
-                f.write(body)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
             ASH_LOGGER.verbose(
-                f"Successfully converted {ipynb_file} to {py_file.as_posix()}!"
+                f"Converting {ipynb_file} to target_path: {Path(target_path).as_posix()}"
             )
-            results.append(Path(py_file))
+            try:
+                with open(ipynb_file, "r") as f:
+                    (python_code, _) = py_exporter.from_file(f)
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(target_path, "w") as py_file:
+                        py_file.write(python_code)
+                    results.append(target_path)
+            except Exception as e:
+                ASH_LOGGER.error(f"Error converting {ipynb_file}: {e}")
 
         return results

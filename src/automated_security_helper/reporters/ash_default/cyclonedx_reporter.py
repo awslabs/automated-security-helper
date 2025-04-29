@@ -6,6 +6,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class CycloneDXReporterConfigOptions(ReporterOptionsBase):
@@ -19,6 +20,7 @@ class CycloneDXReporterConfig(ReporterPluginConfigBase):
     options: CycloneDXReporterConfigOptions = CycloneDXReporterConfigOptions()
 
 
+@ash_reporter_plugin
 class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
     """Formats results as CycloneDX."""
 

@@ -8,6 +8,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class YAMLReporterConfigOptions(ReporterOptionsBase):
@@ -21,7 +22,8 @@ class YAMLReporterConfig(ReporterPluginConfigBase):
     options: YAMLReporterConfigOptions = YAMLReporterConfigOptions()
 
 
-class YAMLReporter(ReporterPluginBase[YAMLReporterConfig]):
+@ash_reporter_plugin
+class YamlReporter(ReporterPluginBase[YAMLReporterConfig]):
     """Formats results as YAML."""
 
     def model_post_init(self, context):

@@ -8,6 +8,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 import defusedxml
@@ -25,7 +26,8 @@ class JUnitXMLReporterConfig(ReporterPluginConfigBase):
     options: JUnitXMLReporterConfigOptions = JUnitXMLReporterConfigOptions()
 
 
-class JUnitXMLReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
+@ash_reporter_plugin
+class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
     """Formats results as JUnitXML."""
 
     def model_post_init(self, context):

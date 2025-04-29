@@ -11,8 +11,10 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.reporters.ash_default.report_content_emitter import (
     ReportContentEmitter,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
+@ash_reporter_plugin
 class MarkdownReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Markdown reporter."""
 

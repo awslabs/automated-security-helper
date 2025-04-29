@@ -18,6 +18,12 @@ from automated_security_helper.config.scanner_types import (
     GrypeScannerConfig,
     SyftScannerConfig,
 )
+from automated_security_helper.converters.ash_default.archive_converter import (
+    ArchiveConverterConfig,
+)
+from automated_security_helper.converters.ash_default.jupyter_converter import (
+    JupyterConverterConfig,
+)
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
     ASH_DEFAULT_SEVERITY_LEVEL,
@@ -113,6 +119,26 @@ class ScannerTypeConfig(BaseModel):
     enabled: Annotated[
         bool, Field(description="Whether this scanner type is enabled")
     ] = True
+
+
+class ConverterConfigSegment(BaseModel):
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        arbitrary_types_allowed=True,
+        use_enum_values=True,
+        extra="allow",
+    )
+
+    __pydantic_extra__: Dict[str, Any | ConverterPluginConfigBase] = {}
+
+    archive: Annotated[
+        ArchiveConverterConfig,
+        Field(description="Configure the options for the ArchiveConverter"),
+    ] = ArchiveConverterConfig()
+    jupyter: Annotated[
+        JupyterConverterConfig,
+        Field(description="Configure the options for the JupyterConverter"),
+    ] = JupyterConverterConfig()
 
 
 class ScannerConfigSegment(BaseModel):
@@ -297,14 +323,9 @@ class AshConfig(BaseModel):
     # ]
 
     converters: Annotated[
-        Dict[str, bool],
-        Field(
-            description="The map of converters and a boolean value indicating whether they should be enabled or disabled"
-        ),
-    ] = {
-        "jupyter": True,
-        "archive": True,
-    }
+        ConverterConfigSegment,
+        Field(description="Converter configurations by name."),
+    ] = ConverterConfigSegment()
 
     scanners: Annotated[
         ScannerConfigSegment,
@@ -469,114 +490,49 @@ class AshConfig(BaseModel):
             plugin_name,
             flags=re.IGNORECASE,
         ).lower()
-        # if plugin_type == "builder":
-        #     for item in self.build.custom_scanners:
-        #         if isinstance(item, dict):
-        #             item = ScannerPluginBase(**item)
-        #         if plugin_name in [
-        #             item.name,
-        #             item.__class__.__name__,
-        #         ]:
-        #             found = item
-        #             break
-        if plugin_type in ["scanner", "reporter"]:
-            item_dict = (
-                self.scanners.model_dump(by_alias=True)
-                if plugin_type == "scanner"
+        item_dict = (
+            self.scanners.model_dump(by_alias=True)
+            if plugin_type == "scanner"
+            else (
+                self.reporters.model_dump(by_alias=True)
+                if plugin_type == "reporter"
                 else (
-                    self.reporters.model_dump(by_alias=True)
-                    if plugin_type == "reporter"
+                    self.converters.model_dump(by_alias=True)
+                    if plugin_type == "converter"
                     else {}
                 )
             )
-            key_map = {}
-            for item_name, item in item_dict.items():
-                if found is not None:
-                    break
-                for possible in list(
-                    sorted(
-                        set(
-                            [
-                                item_name,
-                                re.sub(
-                                    r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
-                                ).lower(),
-                            ]
-                        )
+        )
+        key_map = {}
+        for item_name, item in item_dict.items():
+            if found is not None:
+                break
+            for possible in list(
+                sorted(
+                    set(
+                        [
+                            item_name,
+                            re.sub(
+                                r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
+                            ).lower(),
+                        ]
                     )
-                ):
-                    key_map[possible] = item_name
-            # Try direct match first
-            if plugin_name in item_dict:
-                ASH_LOGGER.debug(
-                    f"Found {plugin_type} plugin {og_plugin_name} with direct match"
                 )
-                found = item_dict[plugin_name]
-            # Then try normalized match
-            elif plugin_name in key_map:
-                ASH_LOGGER.debug(
-                    f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
-                )
-                found = item_dict[key_map[plugin_name]]
+            ):
+                key_map[possible] = item_name
+        # Try direct match first
+        if plugin_name in item_dict:
+            ASH_LOGGER.debug(
+                f"Found {plugin_type} plugin {og_plugin_name} with direct match"
+            )
+            found = item_dict[plugin_name]
+        # Then try normalized match
+        elif plugin_name in key_map:
+            ASH_LOGGER.debug(
+                f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
+            )
+            found = item_dict[key_map[plugin_name]]
 
-        if plugin_type == "converter":
-            item_dict = self.converters
-            key_map = {}
-            for item_name, item in item_dict.items():
-                if found is not None:
-                    break
-                for possible in list(
-                    sorted(
-                        set(
-                            [
-                                item_name,
-                                re.sub(
-                                    r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
-                                ).lower(),
-                            ]
-                        )
-                    )
-                ):
-                    key_map[possible] = item_name
-            if plugin_name in key_map:
-                ASH_LOGGER.debug(
-                    f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
-                )
-                found = ConverterPluginConfigBase(
-                    name=item_name, enabled=item_dict[key_map[plugin_name]]
-                )
-
-        # if plugin_type == "reporter":
-        #     item_dict = self.reporters.model_dump(by_alias=True)
-        #     key_map = {}
-        #     for item_name, item in item_dict.items():
-        #         if found is not None:
-        #             break
-        #         for possible in list(
-        #             sorted(
-        #                 set(
-        #                     [
-        #                         item_name,
-        #                         re.sub(
-        #                             r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
-        #                         ).lower(),
-        #                     ]
-        #                 )
-        #             )
-        #         ):
-        #             key_map[possible] = item_name
-        #     # Try direct match first
-        #     if plugin_name in item_dict:
-        #         ASH_LOGGER.debug(
-        #             f"Found {plugin_type} plugin {og_plugin_name} with direct match"
-        #         )
-        #         found = item_dict[plugin_name]
-        #     # Then try normalized match
-        #     elif plugin_name in key_map:
-        #         ASH_LOGGER.debug(
-        #             f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
-        #         )
-        #         found = item_dict[key_map[plugin_name]]
         if found is not None:
             ASH_LOGGER.debug(
                 f"Found config for {plugin_type} plugin {og_plugin_name}: {found}"

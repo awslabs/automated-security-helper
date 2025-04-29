@@ -7,6 +7,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class SPDXReporterConfigOptions(ReporterOptionsBase):
@@ -20,7 +21,8 @@ class SPDXReporterConfig(ReporterPluginConfigBase):
     options: SPDXReporterConfigOptions = SPDXReporterConfigOptions()
 
 
-class SPDXReporter(ReporterPluginBase[SPDXReporterConfig]):
+@ash_reporter_plugin
+class SpdxReporter(ReporterPluginBase[SPDXReporterConfig]):
     """Formats results as SPDX."""
 
     def model_post_init(self, context):

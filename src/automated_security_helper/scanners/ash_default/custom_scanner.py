@@ -15,6 +15,7 @@ from typing import Annotated, Any, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.constants import (
     ASH_DOCS_URL,
     ASH_REPO_URL,
@@ -61,6 +62,7 @@ class CustomScannerConfig(ScannerPluginConfigBase):
     ] = CustomScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
     """CustomScanner provides an interface for custom scanners using known formats."""
 

@@ -6,6 +6,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class CSVReporterConfigOptions(ReporterOptionsBase):
@@ -19,7 +20,8 @@ class CSVReporterConfig(ReporterPluginConfigBase):
     options: CSVReporterConfigOptions = CSVReporterConfigOptions()
 
 
-class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
+@ash_reporter_plugin
+class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
     """Formats results as CSV."""
 
     def model_post_init(self, context):

@@ -6,10 +6,11 @@ from typing import Any, Optional
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.plugins import ash_plugin_manager
 
 
 class EnginePhase(ABC):
-    """Base class for execution engine phases."""
+    """Base class for execution engine phases with observer pattern support."""
 
     def __init__(
         self,
@@ -20,10 +21,7 @@ class EnginePhase(ABC):
         """Initialize the engine phase.
 
         Args:
-            source_dir: Source directory to scan
-            output_dir: Output directory for scan results
-            work_dir: Working directory for temporary files
-            config: Optional AshConfig to use for configuration
+            plugin_context: Plugin context with paths and configuration
             progress_display: Progress display to use for reporting progress
             asharp_model: ASHARPModel to update with results
         """
@@ -38,9 +36,60 @@ class EnginePhase(ABC):
         """Return the name of this phase."""
         pass
 
-    @abstractmethod
+    def notify_event(self, event_type, **kwargs):
+        """Notify plugins of an event with the current context.
+
+        Args:
+            event_type: The event type to notify
+            **kwargs: Additional data to include in the notification
+
+        Returns:
+            List: Results from all event handlers
+        """
+        # Include the plugin context in all notifications
+        event_data = {
+            "phase": self.phase_name,
+            "plugin_context": self.plugin_context,
+            **kwargs,
+        }
+        return ash_plugin_manager.notify(event_type, **event_data)
+
     def execute(self, **kwargs) -> Any:
-        """Execute the phase.
+        """Execute the phase with observer pattern support.
+
+        This implementation handles the common event notifications.
+        Subclasses should override _execute_phase instead of this method.
+
+        Args:
+            **kwargs: Additional arguments for the phase
+
+        Returns:
+            Any: Phase-specific results
+        """
+        # Initialize progress
+        self.initialize_progress()
+
+        # Notify phase start
+        start_event = f"{self.phase_name.upper()}_START"
+        self.notify_event(start_event, **kwargs)
+
+        # Execute the phase-specific logic
+        results = self._execute_phase(**kwargs)
+
+        # Notify phase complete
+        complete_event = f"{self.phase_name.upper()}_COMPLETE"
+        self.notify_event(complete_event, results=results, **kwargs)
+
+        # Update progress to complete
+        self.update_progress(100, f"{self.phase_name.capitalize()} phase complete")
+
+        return results
+
+    @abstractmethod
+    def _execute_phase(self, **kwargs) -> Any:
+        """Execute the phase-specific logic.
+
+        Subclasses must implement this method instead of overriding execute().
 
         Args:
             **kwargs: Additional arguments for the phase
@@ -102,6 +151,12 @@ class EnginePhase(ABC):
                 completed=completed,
                 description=description
                 or f"{self.phase_name} phase: {completed}% complete",
+            )
+
+            # Notify progress event
+            progress_event = f"{self.phase_name.upper()}_PROGRESS"
+            self.notify_event(
+                progress_event, completed=completed, description=description
             )
 
     def add_summary(self, status: str, details: str) -> None:

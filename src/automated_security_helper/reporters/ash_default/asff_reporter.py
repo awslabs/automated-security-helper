@@ -9,6 +9,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class ASFFReporterConfigOptions(ReporterOptionsBase):
@@ -28,7 +29,8 @@ class ASFFReporterConfig(ReporterPluginConfigBase):
     options: ASFFReporterConfigOptions = ASFFReporterConfigOptions()
 
 
-class ASFFReporter(ReporterPluginBase[ASFFReporterConfig]):
+@ash_reporter_plugin
+class AsffReporter(ReporterPluginBase[ASFFReporterConfig]):
     """Formats results as Amazon Security Finding Format (ASFF)."""
 
     def model_post_init(self, context):
