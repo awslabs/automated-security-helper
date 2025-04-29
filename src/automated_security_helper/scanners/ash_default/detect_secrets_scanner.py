@@ -158,13 +158,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     for plugin_type in get_mapping_from_secret_type_to_class().values()
                 ],
             )
-            ASH_LOGGER.verbose(
-                f"Default settings identified: {
-                    self.config.options.scan_settings.model_dump(
-                        exclude_defaults=True, exclude_none=True, exclude_unset=True
-                    )
-                }"
+            settings = self.config.options.scan_settings.model_dump(
+                exclude_defaults=True, exclude_none=True, exclude_unset=True
             )
+            ASH_LOGGER.verbose(f"Default settings identified: {settings}")
 
         return super()._process_config_options()
 
