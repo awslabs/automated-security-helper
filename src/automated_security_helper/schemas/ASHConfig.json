@@ -79,6 +79,274 @@
       "title": "ArchiveConverterConfigOptions",
       "type": "object"
     },
+    "AshConfig": {
+      "additionalProperties": true,
+      "description": "Main configuration model for Automated Security Helper.",
+      "properties": {
+        "build": {
+          "$ref": "#/$defs/BuildConfig",
+          "description": "Build-time configuration settings"
+        },
+        "converters": {
+          "$ref": "#/$defs/ConverterConfigSegment",
+          "default": {
+            "archive": {
+              "enabled": true,
+              "name": "archive",
+              "options": {}
+            },
+            "jupyter": {
+              "enabled": true,
+              "name": "jupyter",
+              "options": {}
+            }
+          },
+          "description": "Converter configurations by name."
+        },
+        "external_reports_to_include": {
+          "default": [],
+          "description": "List of external reports to include in the final report. These can be SARIF, CycloneDX, or CDK synth paths that have produced NagReport CSVs or JSON files.",
+          "items": {
+            "type": "string"
+          },
+          "title": "External Reports To Include",
+          "type": "array"
+        },
+        "fail_on_findings": {
+          "default": true,
+          "description": "Whether to exit with non-zero code if findings are detected",
+          "title": "Fail On Findings",
+          "type": "boolean"
+        },
+        "global_settings": {
+          "$ref": "#/$defs/AshConfigGlobalSettingsSection",
+          "default": {
+            "ignore_paths": [],
+            "severity_threshold": "MEDIUM"
+          },
+          "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
+        },
+        "max_concurrent_scanners": {
+          "default": 4,
+          "description": "Maximum number of scanners to run concurrently",
+          "minimum": 1,
+          "title": "Max Concurrent Scanners",
+          "type": "integer"
+        },
+        "no_cleanup": {
+          "default": false,
+          "description": "Whether to keep the work directory after scanning",
+          "title": "No Cleanup",
+          "type": "boolean"
+        },
+        "project_name": {
+          "default": "ash-target",
+          "description": "Name of the project being scanned",
+          "title": "Project Name",
+          "type": "string"
+        },
+        "reporters": {
+          "$ref": "#/$defs/ReporterConfigSegment",
+          "default": {
+            "asff": {
+              "enabled": false,
+              "extension": "asff",
+              "name": "asff",
+              "options": {
+                "aws_account_id": "123456789012",
+                "aws_region": "us-east-1"
+              }
+            },
+            "csv": {
+              "enabled": true,
+              "extension": "csv",
+              "name": "csv",
+              "options": {}
+            },
+            "cyclonedx": {
+              "enabled": true,
+              "extension": "cdx.json",
+              "name": "cyclonedx",
+              "options": {}
+            },
+            "flat-json": {
+              "enabled": true,
+              "extension": "flat.json",
+              "name": "flat-json",
+              "options": {}
+            },
+            "html": {
+              "enabled": true,
+              "extension": "html",
+              "name": "html",
+              "options": {}
+            },
+            "junitxml": {
+              "enabled": true,
+              "extension": "junit.xml",
+              "name": "junitxml",
+              "options": {}
+            },
+            "markdown": {
+              "enabled": true,
+              "extension": "summary.md",
+              "name": "markdown",
+              "options": {
+                "include_detailed_findings": true,
+                "include_findings_table": false,
+                "include_summary": true,
+                "max_detailed_findings": 20,
+                "top_hotspots_limit": 10,
+                "use_collapsible_details": true
+              }
+            },
+            "ocsf": {
+              "enabled": true,
+              "extension": "ocsf.json",
+              "name": "ocsf",
+              "options": {}
+            },
+            "sarif": {
+              "enabled": true,
+              "extension": "sarif",
+              "name": "sarif",
+              "options": {}
+            },
+            "spdx": {
+              "enabled": false,
+              "extension": "spdx.json",
+              "name": "spdx",
+              "options": {}
+            },
+            "text": {
+              "enabled": true,
+              "extension": "summary.txt",
+              "name": "text",
+              "options": {
+                "include_detailed_findings": false,
+                "include_findings_table": false,
+                "include_summary": true,
+                "max_detailed_findings": 20,
+                "top_hotspots_limit": 20
+              }
+            },
+            "yaml": {
+              "enabled": false,
+              "extension": "yaml",
+              "name": "yaml",
+              "options": {}
+            }
+          },
+          "description": "Reporter configurations by name."
+        },
+        "scanners": {
+          "$ref": "#/$defs/ScannerConfigSegment",
+          "default": {
+            "bandit": {
+              "enabled": true,
+              "name": "bandit",
+              "options": {
+                "additional_formats": [],
+                "confidence_level": "all",
+                "config_file": null,
+                "excluded_paths": [],
+                "ignore_nosec": false,
+                "severity_threshold": null
+              }
+            },
+            "cdk-nag": {
+              "enabled": true,
+              "name": "cdk-nag",
+              "options": {
+                "nag_packs": {
+                  "AwsSolutionsChecks": true,
+                  "HIPAASecurityChecks": false,
+                  "NIST80053R4Checks": false,
+                  "NIST80053R5Checks": false,
+                  "PCIDSS321Checks": false
+                },
+                "severity_threshold": null
+              }
+            },
+            "cfn-nag": {
+              "enabled": true,
+              "name": "cfn-nag",
+              "options": {
+                "severity_threshold": null
+              },
+              "type": "IAC"
+            },
+            "checkov": {
+              "enabled": true,
+              "name": "checkov",
+              "options": {
+                "additional_formats": [
+                  "cyclonedx_json"
+                ],
+                "config_file": null,
+                "frameworks": [
+                  "all"
+                ],
+                "offline": false,
+                "severity_threshold": null,
+                "skip_frameworks": [],
+                "skip_path": []
+              }
+            },
+            "detect-secrets": {
+              "enabled": true,
+              "name": "detect-secrets",
+              "options": {
+                "baseline_file": null,
+                "scan_settings": {
+                  "filters_used": [],
+                  "generated_at": null,
+                  "plugins_used": [],
+                  "results": {},
+                  "version": null
+                },
+                "severity_threshold": null
+              }
+            },
+            "grype": {
+              "enabled": true,
+              "name": "grype",
+              "options": {
+                "severity_threshold": null
+              },
+              "type": "SAST"
+            },
+            "npm-audit": {
+              "enabled": true,
+              "name": "npm-audit",
+              "options": {
+                "severity_threshold": null
+              },
+              "type": "DEPENDENCY"
+            },
+            "semgrep": {
+              "enabled": true,
+              "name": "semgrep",
+              "options": {
+                "severity_threshold": null
+              },
+              "type": "SAST"
+            },
+            "syft": {
+              "enabled": true,
+              "name": "syft",
+              "options": {
+                "severity_threshold": null
+              },
+              "type": "SBOM"
+            }
+          },
+          "description": "Scanner configurations by name."
+        }
+      },
+      "title": "AshConfig",
+      "type": "object"
+    },
     "AshConfigGlobalSettingsSection": {
       "additionalProperties": false,
       "properties": {
@@ -1406,9 +1674,9 @@
       "description": "Context container for plugins to ensure consistent path information.",
       "properties": {
         "config": {
+          "$ref": "#/$defs/AshConfig",
           "default": null,
-          "description": "ASH configuration",
-          "title": "Config"
+          "description": "ASH configuration"
         },
         "output_dir": {
           "description": "Primary output directory for all ASH results",
@@ -2342,275 +2610,5 @@
       "type": "object"
     }
   },
-  "additionalProperties": true,
-  "description": "Main configuration model for Automated Security Helper.",
-  "properties": {
-    "build": {
-      "$ref": "#/$defs/BuildConfig",
-      "default": {
-        "build_mode": "OFFLINE",
-        "custom_scanners": [],
-        "tool_install_scripts": {}
-      },
-      "description": "Build-time configuration settings"
-    },
-    "converters": {
-      "$ref": "#/$defs/ConverterConfigSegment",
-      "default": {
-        "archive": {
-          "enabled": true,
-          "name": "archive",
-          "options": {}
-        },
-        "jupyter": {
-          "enabled": true,
-          "name": "jupyter",
-          "options": {}
-        }
-      },
-      "description": "Converter configurations by name."
-    },
-    "external_reports_to_include": {
-      "default": [],
-      "description": "List of external reports to include in the final report. These can be SARIF, CycloneDX, or CDK synth paths that have produced NagReport CSVs or JSON files.",
-      "items": {
-        "type": "string"
-      },
-      "title": "External Reports To Include",
-      "type": "array"
-    },
-    "fail_on_findings": {
-      "default": true,
-      "description": "Whether to exit with non-zero code if findings are detected",
-      "title": "Fail On Findings",
-      "type": "boolean"
-    },
-    "global_settings": {
-      "$ref": "#/$defs/AshConfigGlobalSettingsSection",
-      "default": {
-        "ignore_paths": [],
-        "severity_threshold": "MEDIUM"
-      },
-      "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
-    },
-    "max_concurrent_scanners": {
-      "default": 4,
-      "description": "Maximum number of scanners to run concurrently",
-      "minimum": 1,
-      "title": "Max Concurrent Scanners",
-      "type": "integer"
-    },
-    "no_cleanup": {
-      "default": false,
-      "description": "Whether to keep the work directory after scanning",
-      "title": "No Cleanup",
-      "type": "boolean"
-    },
-    "project_name": {
-      "default": "ash-target",
-      "description": "Name of the project being scanned",
-      "title": "Project Name",
-      "type": "string"
-    },
-    "reporters": {
-      "$ref": "#/$defs/ReporterConfigSegment",
-      "default": {
-        "asff": {
-          "enabled": false,
-          "extension": "asff",
-          "name": "asff",
-          "options": {
-            "aws_account_id": "123456789012",
-            "aws_region": "us-east-1"
-          }
-        },
-        "csv": {
-          "enabled": true,
-          "extension": "csv",
-          "name": "csv",
-          "options": {}
-        },
-        "cyclonedx": {
-          "enabled": true,
-          "extension": "cdx.json",
-          "name": "cyclonedx",
-          "options": {}
-        },
-        "flat-json": {
-          "enabled": true,
-          "extension": "flat.json",
-          "name": "flat-json",
-          "options": {}
-        },
-        "html": {
-          "enabled": true,
-          "extension": "html",
-          "name": "html",
-          "options": {}
-        },
-        "junitxml": {
-          "enabled": true,
-          "extension": "junit.xml",
-          "name": "junitxml",
-          "options": {}
-        },
-        "markdown": {
-          "enabled": true,
-          "extension": "summary.md",
-          "name": "markdown",
-          "options": {
-            "include_detailed_findings": true,
-            "include_findings_table": false,
-            "include_summary": true,
-            "max_detailed_findings": 20,
-            "top_hotspots_limit": 10,
-            "use_collapsible_details": true
-          }
-        },
-        "ocsf": {
-          "enabled": true,
-          "extension": "ocsf.json",
-          "name": "ocsf",
-          "options": {}
-        },
-        "sarif": {
-          "enabled": true,
-          "extension": "sarif",
-          "name": "sarif",
-          "options": {}
-        },
-        "spdx": {
-          "enabled": false,
-          "extension": "spdx.json",
-          "name": "spdx",
-          "options": {}
-        },
-        "text": {
-          "enabled": true,
-          "extension": "summary.txt",
-          "name": "text",
-          "options": {
-            "include_detailed_findings": false,
-            "include_findings_table": false,
-            "include_summary": true,
-            "max_detailed_findings": 20,
-            "top_hotspots_limit": 20
-          }
-        },
-        "yaml": {
-          "enabled": false,
-          "extension": "yaml",
-          "name": "yaml",
-          "options": {}
-        }
-      },
-      "description": "Reporter configurations by name."
-    },
-    "scanners": {
-      "$ref": "#/$defs/ScannerConfigSegment",
-      "default": {
-        "bandit": {
-          "enabled": true,
-          "name": "bandit",
-          "options": {
-            "additional_formats": [],
-            "confidence_level": "all",
-            "config_file": null,
-            "excluded_paths": [],
-            "ignore_nosec": false,
-            "severity_threshold": null
-          }
-        },
-        "cdk-nag": {
-          "enabled": true,
-          "name": "cdk-nag",
-          "options": {
-            "nag_packs": {
-              "AwsSolutionsChecks": true,
-              "HIPAASecurityChecks": false,
-              "NIST80053R4Checks": false,
-              "NIST80053R5Checks": false,
-              "PCIDSS321Checks": false
-            },
-            "severity_threshold": null
-          }
-        },
-        "cfn-nag": {
-          "enabled": true,
-          "name": "cfn-nag",
-          "options": {
-            "severity_threshold": null
-          },
-          "type": "IAC"
-        },
-        "checkov": {
-          "enabled": true,
-          "name": "checkov",
-          "options": {
-            "additional_formats": [
-              "cyclonedx_json"
-            ],
-            "config_file": null,
-            "frameworks": [
-              "all"
-            ],
-            "offline": false,
-            "severity_threshold": null,
-            "skip_frameworks": [],
-            "skip_path": []
-          }
-        },
-        "detect-secrets": {
-          "enabled": true,
-          "name": "detect-secrets",
-          "options": {
-            "baseline_file": null,
-            "scan_settings": {
-              "filters_used": [],
-              "generated_at": null,
-              "plugins_used": [],
-              "results": {},
-              "version": null
-            },
-            "severity_threshold": null
-          }
-        },
-        "grype": {
-          "enabled": true,
-          "name": "grype",
-          "options": {
-            "severity_threshold": null
-          },
-          "type": "SAST"
-        },
-        "npm-audit": {
-          "enabled": true,
-          "name": "npm-audit",
-          "options": {
-            "severity_threshold": null
-          },
-          "type": "DEPENDENCY"
-        },
-        "semgrep": {
-          "enabled": true,
-          "name": "semgrep",
-          "options": {
-            "severity_threshold": null
-          },
-          "type": "SAST"
-        },
-        "syft": {
-          "enabled": true,
-          "name": "syft",
-          "options": {
-            "severity_threshold": null
-          },
-          "type": "SBOM"
-        }
-      },
-      "description": "Scanner configurations by name."
-    }
-  },
-  "title": "AshConfig",
-  "type": "object"
+  "$ref": "#/$defs/AshConfig"
 }

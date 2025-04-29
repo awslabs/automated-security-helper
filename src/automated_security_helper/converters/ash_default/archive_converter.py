@@ -124,6 +124,13 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         ASH_LOGGER.debug(f"Found {len(archive_files)} files to convert in scan set.")
         results: List[Path] = []
 
+        # Add warning if no archive files found
+        if not archive_files:
+            ASH_LOGGER.warning(
+                f"No archive files (.zip, .tar, .gz) found in {self.context.source_dir}"
+            )
+            return results
+
         for archive_file in archive_files:
             try:
                 # Skip directories

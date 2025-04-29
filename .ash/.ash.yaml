@@ -48,6 +48,7 @@ scanners:
     options:
       confidence_level: all
       ignore_nosec: false
+      config_file: .ash/bandit.yaml
   cdk-nag:
     enabled: true
     options:

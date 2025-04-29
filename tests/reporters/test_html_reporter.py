@@ -76,7 +76,7 @@ class TestHTMLReporter:
     def test_html_reporter_with_invalid_model(self, test_plugin_context):
         """Test that the HTML reporter raises an error for invalid models."""
         reporter = HtmlReporter(context=test_plugin_context)
-        with pytest.raises(ValueError):
+        with pytest.raises(AttributeError):  # Changed from ValueError to AttributeError
             reporter.report("not a model")
 
     def test_html_reporter_with_missing_location(self, test_plugin_context):

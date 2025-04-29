@@ -354,7 +354,7 @@ class ASHScanOrchestrator(BaseModel):
             try:
                 # Execute all phases
                 asharp_model_results = self.execution_engine.execute_phases(
-                    phases=phases, config=self.config
+                    phases=phases,
                 )
 
                 ASH_LOGGER.debug("Scan execution completed successfully")

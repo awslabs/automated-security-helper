@@ -2,7 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timezone
-from typing import Dict, List, Any
+from typing import Dict, List, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from collections import Counter
 
 
@@ -13,24 +17,11 @@ class ReportContentEmitter:
     that can be used by different reporter implementations.
     """
 
-    def __init__(self, model: Any):
+    def __init__(self, model: "ASHARPModel"):
         """Initialize with an ASHARPModel."""
-        from automated_security_helper.models.asharp_model import ASHARPModel
-
-        if not isinstance(model, ASHARPModel):
-            raise ValueError("ReportContentEmitter only supports ASHARPModel")
-
-        from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
-        from automated_security_helper.config.ash_config import AshConfig
-
         self.model = model
         self.flat_vulns = model.to_flat_vulnerabilities()
-
-        # Try to get ASH config from model
-        try:
-            self.ash_conf: AshConfig = model.ash_config
-        except Exception:
-            self.ash_conf = AshConfig()
+        self.ash_conf = model.ash_config
 
         # Get global severity threshold
         self.global_threshold = ASH_DEFAULT_SEVERITY_LEVEL

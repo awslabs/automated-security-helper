@@ -47,6 +47,18 @@ def sample_ash_model():
     )
     with open(sample_aggregated_results, "r") as f:
         sample_aggregated_results = json.loads(f.read())
+
+    # Fix the converters section to use proper config objects instead of boolean values
+    if (
+        "ash_config" in sample_aggregated_results
+        and "converters" in sample_aggregated_results["ash_config"]
+    ):
+        converters = sample_aggregated_results["ash_config"]["converters"]
+        if "archive" in converters and converters["archive"] is True:
+            converters["archive"] = {"name": "archive", "enabled": True}
+        if "jupyter" in converters and converters["jupyter"] is True:
+            converters["jupyter"] = {"name": "jupyter", "enabled": True}
+
     model = ASHARPModel(**sample_aggregated_results)
     return model
 

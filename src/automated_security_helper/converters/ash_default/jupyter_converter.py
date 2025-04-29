@@ -109,6 +109,13 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         py_exporter: PythonExporter = PythonExporter()
         results: List[Path] = []
 
+        # Add warning if no Jupyter notebook files found
+        if not ipynb_files:
+            ASH_LOGGER.warning(
+                f"No Jupyter notebook (.ipynb) files found in {self.context.source_dir}"
+            )
+            return results
+
         for ipynb_file in ipynb_files:
             try:
                 ASH_LOGGER.debug(f"Converting {ipynb_file} to .py")

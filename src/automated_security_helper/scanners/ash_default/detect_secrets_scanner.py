@@ -139,7 +139,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 f"Checking for detect-secrets config @ {Path(baseline_path).absolute()}"
             )
             if Path(baseline_path).absolute().exists():
-                ASH_LOGGER.verbose(
+                ASH_LOGGER.debug(
                     f"Identified detect-secrets config @ {Path(baseline_path).absolute()}"
                 )
 
@@ -161,7 +161,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             settings = self.config.options.scan_settings.model_dump(
                 exclude_defaults=True, exclude_none=True, exclude_unset=True
             )
-            ASH_LOGGER.verbose(f"Default settings identified: {settings}")
+            ASH_LOGGER.debug(f"Default settings identified: {settings}")
 
         return super()._process_config_options()
 

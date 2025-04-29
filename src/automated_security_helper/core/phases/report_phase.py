@@ -54,89 +54,224 @@ class ReportPhase(EnginePhase):
         # Create a list of reporter classes
         reporter_classes = self.plugins
 
-        ASH_LOGGER.verbose(f"Found {len(reporter_classes)} reporter classes")
+        # Filter enabled reporters and those matching requested formats
+        enabled_reporters = []
+        enabled_reporter_names = []
+        for plugin_class in reporter_classes:
+            try:
+                plugin_name = getattr(plugin_class, "__name__", "Unknown")
+                plugin_config = (
+                    self.plugin_context.config.get_plugin_config(
+                        plugin_type="reporter",
+                        plugin_name=plugin_name.lower(),
+                    )
+                    if self.plugin_context.config is not None
+                    else None
+                )
+                # Create temporary instance to check config
+                plugin_instance = plugin_class(
+                    context=self.plugin_context,
+                    config=plugin_config,
+                )
+                # Use the configured name if available
+                display_name = plugin_name
+                if hasattr(plugin_instance, "config") and hasattr(
+                    plugin_instance.config, "name"
+                ):
+                    display_name = plugin_instance.config.name
 
-        # Create a task for report generation
+                # Check if enabled
+                if hasattr(plugin_instance, "config") and hasattr(
+                    plugin_instance.config, "enabled"
+                ):
+                    if not plugin_instance.config.enabled:
+                        ASH_LOGGER.debug(
+                            f"Reporter {display_name} is disabled, skipping"
+                        )
+                        continue
+
+                # Check if format matches requested formats
+                if (
+                    output_formats
+                    and hasattr(plugin_instance, "config")
+                    and hasattr(plugin_instance.config, "extension")
+                ):
+                    extension = plugin_instance.config.extension
+                    if extension not in output_formats:
+                        ASH_LOGGER.debug(
+                            f"Reporter {display_name} format '{extension}' not in requested formats {output_formats}, skipping"
+                        )
+                        continue
+
+                # If we got here, the reporter is enabled and matches requested formats
+                enabled_reporters.append(plugin_class)
+                enabled_reporter_names.append(display_name)
+
+            except Exception as e:
+                ASH_LOGGER.error(
+                    f"Error checking reporter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
+                )
+
+        ASH_LOGGER.verbose(
+            f"Prepared {len(enabled_reporter_names)} enabled reporters: {enabled_reporter_names}"
+        )
+
+        # Create the main report task with initial progress
         report_task = self.progress_display.add_task(
             phase=ExecutionPhase.REPORT,
-            description="Generating reports...",
+            description=f"Preparing {len(enabled_reporter_names)} reporters...",
             total=100,
         )
 
+        # Update the main task to show it's started
+        self.progress_display.update_task(
+            phase=ExecutionPhase.REPORT,
+            task_id=report_task,
+            completed=20,
+            description=f"Generating reports with {len(enabled_reporter_names)} reporters...",
+        )
+
+        # Track progress for each reporter
+        total_reporters = len(enabled_reporters)
+        completed = 0
+
         # Directly invoke each reporter plugin
         results = []
-        if reporter_classes:
-            ASH_LOGGER.debug(f"Processing {len(reporter_classes)} reporter classes")
-            for plugin_class in reporter_classes:
+        if enabled_reporters:
+            ASH_LOGGER.debug(
+                f"Processing {len(enabled_reporters)} enabled reporter classes"
+            )
+            for plugin_class in enabled_reporters:
                 try:
-                    plugin_name = plugin_class.__name__
+                    plugin_name = getattr(plugin_class, "__name__", "Unknown")
                     ASH_LOGGER.debug(f"Initializing reporter: {plugin_name}")
 
-                    # Create reporter instance with context and default config
+                    # Create a task for this reporter
+                    reporter_task = self.progress_display.add_task(
+                        phase=ExecutionPhase.REPORT,
+                        description=f"Starting reporter: {plugin_name}",
+                        total=100,
+                    )
+
+                    # Create reporter instance with context and config
                     plugin_instance = plugin_class(
                         context=self.plugin_context,
                         config=(
                             self.plugin_context.config.get_plugin_config(
                                 plugin_type="reporter",
-                                plugin_name=plugin_name,
+                                plugin_name=plugin_name.lower(),
                             )
                             if self.plugin_context.config is not None
                             else None
                         ),
                     )
 
-                    # Call report method directly
-                    ASH_LOGGER.trace(f"Calling report() on {plugin_name}")
-                    fmt = (
-                        plugin_instance.config.extension
-                        if hasattr(plugin_instance, "config")
-                        and hasattr(plugin_instance.config, "extension")
-                        else "txt"
-                    )
-                    formatted = plugin_instance.report(self.asharp_model)
-                    if formatted is None:
-                        ASH_LOGGER.error(
-                            f"Failed to format report with {plugin_name} reporter, returned empty string"
-                        )
-                        raise ValueError(
-                            f"Reporter returned empty result for {plugin_name}"
-                        )
-
-                    # Determine output filename based on reporter's extension if available
-                    output_filename = f"ash.{fmt}"
+                    # Use the configured name if available
+                    display_name = plugin_name
                     if hasattr(plugin_instance, "config") and hasattr(
-                        plugin_instance.config, "extension"
+                        plugin_instance.config, "name"
                     ):
-                        output_filename = f"ash.{plugin_instance.config.extension}"
+                        display_name = plugin_instance.config.name
 
-                    output_file = report_dir.joinpath(output_filename)
-                    ASH_LOGGER.info(f"Writing {fmt} report to {output_file}")
-                    output_file.write_text(formatted)
+                    # Update reporter task to 50%
+                    self.progress_display.update_task(
+                        phase=ExecutionPhase.REPORT,
+                        task_id=reporter_task,
+                        completed=50,
+                        description=f"Running reporter: {display_name}",
+                    )
+
+                    # Update main progress
+                    progress_percent = 20 + (completed / total_reporters * 70)
+                    self.update_progress(
+                        int(progress_percent),
+                        f"Running reporter {completed + 1}/{total_reporters}: {display_name}",
+                    )
+
+                    # Call report method directly
+                    ASH_LOGGER.debug(f"Calling report() on {display_name}")
+                    report_result = plugin_instance.report(self.asharp_model)
+
+                    if report_result:
+                        ASH_LOGGER.debug(f"Reporter {display_name} returned a report")
+
+                        # Determine output filename based on reporter's extension if available
+                        output_filename = "ash.txt"  # Default
+                        if hasattr(plugin_instance, "config") and hasattr(
+                            plugin_instance.config, "extension"
+                        ):
+                            extension = plugin_instance.config.extension
+                            output_filename = f"ash.{extension}"
+
+                        # Write the report to a file
+                        output_file = report_dir.joinpath(output_filename)
+                        ASH_LOGGER.info(
+                            f"Writing {display_name} report to {output_file}"
+                        )
+                        with open(output_file, "w") as f:
+                            f.write(report_result)
+
+                        results.append(report_result)
+
+                        # Update reporter task to 100%
+                        self.progress_display.update_task(
+                            phase=ExecutionPhase.REPORT,
+                            task_id=reporter_task,
+                            completed=100,
+                            description=f"[green]({display_name}) Generated report: {output_filename}",
+                        )
+                    else:
+                        ASH_LOGGER.debug(
+                            f"Reporter {display_name} returned None or empty report"
+                        )
+
+                        # Update reporter task to 100%
+                        self.progress_display.update_task(
+                            phase=ExecutionPhase.REPORT,
+                            task_id=reporter_task,
+                            completed=100,
+                            description=f"[yellow]({display_name}) No report generated",
+                        )
+
+                    # Increment completed count
+                    completed += 1
 
                 except Exception as e:
                     ASH_LOGGER.error(f"Error in reporter {plugin_name}: {e}")
                     ASH_LOGGER.debug(
                         f"Reporter exception traceback: {traceback.format_exc()}"
                     )
+
+                    # Update reporter task to show error
+                    self.progress_display.update_task(
+                        phase=ExecutionPhase.REPORT,
+                        task_id=reporter_task,
+                        completed=100,
+                        description=f"[red]({display_name}) Failed: {str(e)}",
+                    )
+
+                    # Increment completed count
+                    completed += 1
         else:
-            ASH_LOGGER.warning("No reporter classes found")
+            ASH_LOGGER.warning("No enabled reporters found matching requested formats")
 
         # Update progress
         self.progress_display.update_task(
             phase=ExecutionPhase.REPORT,
             task_id=report_task,
             completed=100,
-            description="Reports generated",
+            description=f"Reporters complete: {len(results)} reports generated from {len(enabled_reporters)} reporters",
         )
-
-        ASH_LOGGER.verbose(f"Generated {len(results) if results else 0} reports")
 
         # Update main progress
-        self.update_progress(100, "Report generation complete")
-
-        # Add summary row
-        self.add_summary(
-            "Complete", f"Generated {len(results) if results else 0} reports"
+        self.update_progress(
+            100,
+            f"Reporters complete: {len(results)} reports generated from {len(enabled_reporters)} reporters",
         )
+
+        # # Add summary row
+        # self.add_summary(
+        #     "Complete", f"Generated {len(results)} reports"
+        # )
 
         return None

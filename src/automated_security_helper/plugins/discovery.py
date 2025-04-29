@@ -7,7 +7,7 @@ from typing import List
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-def discover_plugins(plugin_modules: List[str] = []):
+def discover_plugins(plugin_modules: List[str] = ["ash_plugins"]):
     """Discover plugins in the given namespace"""
     discovered = {"converters": [], "scanners": [], "reporters": []}
 

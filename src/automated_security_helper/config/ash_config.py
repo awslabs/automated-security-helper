@@ -6,6 +6,7 @@ from typing import Annotated, Any, List, Dict, Literal
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import ReporterPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -29,6 +30,7 @@ from automated_security_helper.core.constants import (
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.reporters.ash_default.asff_reporter import (
     ASFFReporterConfig,
@@ -84,6 +86,7 @@ from automated_security_helper.scanners.ash_default.detect_secrets_scanner impor
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+# Define BuildConfig class
 class BuildConfig(BaseModel):
     """Configuration model for build-time settings."""
 
@@ -103,22 +106,6 @@ class BuildConfig(BaseModel):
         List[ScannerPluginBase],
         Field(description="Scanner configurations by type"),
     ] = []
-
-
-class InspectConfig(BaseModel):
-    """Configuration for the inspect phase."""
-
-    model_config = ConfigDict(extra="allow")
-    enabled: bool = False
-
-
-class ScannerTypeConfig(BaseModel):
-    """Configuration model for scanner type specific settings."""
-
-    model_config = ConfigDict(extra="allow")
-    enabled: Annotated[
-        bool, Field(description="Whether this scanner type is enabled")
-    ] = True
 
 
 class ConverterConfigSegment(BaseModel):
@@ -285,11 +272,11 @@ class AshConfig(BaseModel):
         str, Field(description="Name of the project being scanned")
     ] = "ash-target"
 
-    # Build configuration
+    # Build configuration - use a default instance instead of calling the constructor
     build: Annotated[
         BuildConfig,
         Field(description="Build-time configuration settings"),
-    ] = BuildConfig()
+    ] = Field(default_factory=BuildConfig)
 
     # output_formats: Annotated[
     #     List[
@@ -541,3 +528,11 @@ class AshConfig(BaseModel):
             )
 
         return found
+
+
+BuildConfig.model_rebuild()
+ConverterConfigSegment.model_rebuild()
+ScannerConfigSegment.model_rebuild()
+ReporterConfigSegment.model_rebuild()
+PluginContext.model_rebuild()
+ASHARPModel.model_rebuild()

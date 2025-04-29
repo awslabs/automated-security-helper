@@ -191,7 +191,6 @@ class ScanExecutionEngine:
         self._results = self._asharp_model
         self._progress = None
         self._max_workers = min(4, multiprocessing.cpu_count())
-        self._config = context.config
 
         # Register custom scanners from configuration
         self._register_custom_scanners()
@@ -208,7 +207,9 @@ class ScanExecutionEngine:
             "reporter": ash_plugin_manager.plugin_modules(IReporter),
         }
         for k, v in self.plugins.items():
-            ASH_LOGGER.verbose(f"Found {len(v)} {k} plugins")
+            ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
+
+        self.ensure_initialized(self._context.config)
 
     def _register_custom_scanners(self):
         """Register custom scanners from configuration."""
@@ -288,15 +289,17 @@ class ScanExecutionEngine:
         Args:
             config: ASH configuration object for initialization
         """
-        if not self._initialized or (self._config is None and config is not None):
+        if not self._initialized or (
+            self._context.config is None and config is not None
+        ):
             ASH_LOGGER.info("Initializing execution engine")
             if config is not None:
-                self._config = config
-            if not self._config or self._config is None:
-                self._config = AshConfig(
+                self._context.config = config
+            if not self._context.config or self._context.config is None:
+                self._context.config = AshConfig(
                     project_name="ASH Default Project Config",
                 )
-            if not isinstance(self._config, AshConfig):
+            if not isinstance(self._context.config, AshConfig):
                 raise ValueError("Configuration must be an AshConfig instance")
 
             # Mark initialization complete
@@ -305,7 +308,6 @@ class ScanExecutionEngine:
     def execute_phases(
         self,
         phases: List[ExecutionPhaseType] = ["convert", "scan", "report"],
-        config: Optional[AshConfig] = None,
     ) -> ASHARPModel:
         """Execute the specified phases in the correct order.
 
@@ -320,7 +322,6 @@ class ScanExecutionEngine:
             ASHARPModel: The results of the scan.
         """
         ASH_LOGGER.debug(f"Entering: ScanExecutionEngine.execute_phases({phases})")
-        self.ensure_initialized(config=config)
 
         # Always execute phases in the correct order, regardless of input order
         ordered_phases = []

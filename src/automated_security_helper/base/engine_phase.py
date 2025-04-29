@@ -123,7 +123,7 @@ class EnginePhase(ABC):
         """
         if self.progress_display:
             if not description:
-                description = f"Starting {self.phase_name} phase..."
+                description = f"Initializing {self.phase_name} phase..."
 
             # Convert string phase name to ExecutionPhase enum
             phase_enum = None

@@ -125,11 +125,13 @@ def test_detect_secrets_scanner_with_no_findings(
     target_dir = tmp_path / "target"
     target_dir.mkdir()
 
+    from automated_security_helper.config.ash_config import AshConfig
+
     detect_secrets_scanner.context = PluginContext(
         source_dir=target_dir,
         output_dir=tmp_path / "output",
         work_dir=tmp_path / "output" / ASH_WORK_DIR_NAME,
-        config=None,
+        config=AshConfig(),  # Use default AshConfig instead of None
     )
 
     result = detect_secrets_scanner.scan(target_dir, target_type="source")
