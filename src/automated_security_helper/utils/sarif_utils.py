@@ -10,6 +10,52 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
+    """
+    Sanitize a URI in a SARIF report.
+
+    Args:
+        uri: The URI to sanitize
+        source_dir_path: The source directory path object
+        source_dir_str: The source directory string with trailing separator
+
+    Returns:
+        The sanitized URI
+    """
+    if not uri:
+        return uri
+
+    # Remove file:// prefix if present
+    if uri.startswith("file://"):
+        uri = uri[7:]
+
+    # Remove ../../../src prefix if present
+    if uri.startswith("../../../src/"):
+        uri = uri[12:]  # Remove "../../../src/"
+    elif uri.startswith("../../../src"):
+        uri = uri[11:]  # Remove "../../../src"
+
+    # Make path relative to source directory
+    try:
+        # Try to resolve the path and make it relative
+        path_obj = Path(uri)
+        if path_obj.is_absolute():
+            try:
+                uri = str(path_obj.relative_to(source_dir_path))
+            except ValueError:
+                # If the path is not relative to source_dir, keep it as is
+                pass
+        elif uri.startswith(source_dir_str):
+            uri = uri[len(source_dir_str) :]
+    except Exception as e:
+        ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
+
+    # Replace backslashes with forward slashes for consistency
+    uri = uri.replace("\\", "/")
+
+    return uri
+
+
 def sanitize_sarif_paths(
     sarif_report: SarifReport, source_dir: str | Path
 ) -> SarifReport:
@@ -45,29 +91,7 @@ def sanitize_sarif_paths(
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
                         if uri:
-                            # Remove file:// prefix if present
-                            if uri.startswith("file://"):
-                                uri = uri[7:]
-
-                            # Make path relative to source directory
-                            try:
-                                # Try to resolve the path and make it relative
-                                path_obj = Path(uri)
-                                if path_obj.is_absolute():
-                                    try:
-                                        uri = str(path_obj.relative_to(source_dir_path))
-                                    except ValueError:
-                                        # If the path is not relative to source_dir, keep it as is
-                                        pass
-                                elif uri.startswith(source_dir_str):
-                                    uri = uri[len(source_dir_str) :]
-                            except Exception as e:
-                                ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
-
-                            # Replace backslashes with forward slashes for consistency
-                            uri = uri.replace("\\", "/")
-
-                            # Update the URI
+                            uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
                             location.physicalLocation.root.artifactLocation.uri = uri
 
             # Process related locations if present
@@ -79,55 +103,13 @@ def sanitize_sarif_paths(
                     ):
                         uri = related.physicalLocation.root.artifactLocation.uri
                         if uri:
-                            # Remove file:// prefix if present
-                            if uri.startswith("file://"):
-                                uri = uri[7:]
-
-                            # Make path relative to source directory
-                            try:
-                                # Try to resolve the path and make it relative
-                                path_obj = Path(uri)
-                                if path_obj.is_absolute():
-                                    try:
-                                        uri = str(path_obj.relative_to(source_dir_path))
-                                    except ValueError:
-                                        # If the path is not relative to source_dir, keep it as is
-                                        pass
-                                elif uri.startswith(source_dir_str):
-                                    uri = uri[len(source_dir_str) :]
-                            except Exception as e:
-                                ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
-
-                            # Replace backslashes with forward slashes for consistency
-                            uri = uri.replace("\\", "/")
-
-                            # Update the URI
+                            uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
                             related.physicalLocation.root.artifactLocation.uri = uri
 
             # Process analysis target if present
             if result.analysisTarget and result.analysisTarget.uri:
                 uri = result.analysisTarget.uri
-                if uri.startswith("file://"):
-                    uri = uri[7:]
-
-                try:
-                    # Try to resolve the path and make it relative
-                    path_obj = Path(uri)
-                    if path_obj.is_absolute():
-                        try:
-                            uri = str(path_obj.relative_to(source_dir_path))
-                        except ValueError:
-                            # If the path is not relative to source_dir, keep it as is
-                            pass
-                    elif uri.startswith(source_dir_str):
-                        uri = uri[len(source_dir_str) :]
-                except Exception as e:
-                    ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
-
-                # Replace backslashes with forward slashes for consistency
-                uri = uri.replace("\\", "/")
-
-                # Update the URI
+                uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
                 result.analysisTarget.uri = uri
 
     return sarif_report
