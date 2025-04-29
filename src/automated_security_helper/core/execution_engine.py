@@ -387,8 +387,8 @@ class ScanExecutionEngine:
                     report_phase.execute(
                         report_dir=self._context.output_dir.joinpath("reports"),
                         cli_output_formats=(
-                            self._config.output_formats
-                            if hasattr(self._config, "output_formats")
+                            self._context.config.output_formats
+                            if hasattr(self._context.config, "output_formats")
                             else None
                         ),
                     )

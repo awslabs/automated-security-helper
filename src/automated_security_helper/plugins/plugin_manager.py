@@ -217,7 +217,7 @@ class AshPluginManager(BaseModel):
 
             return ASH_SCANNERS
         elif plugin_type == IReporter or plugin_type == "reporter":
-            from automated_security_helper.reporters.ash_default import ASH_REPORTERS
+            from automated_security_helper.reporters import ASH_REPORTERS
 
             return ASH_REPORTERS
         else:
