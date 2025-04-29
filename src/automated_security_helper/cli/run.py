@@ -45,7 +45,7 @@ def run(
         typer.Option(
             help="The directory to output results to",
         ),
-    ] = Path.cwd().joinpath("ash_output").as_posix(),
+    ] = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
     config: Annotated[
         str,
         typer.Option(
@@ -53,9 +53,6 @@ def run(
             envvar="ASH_CONFIG",
         ),
     ] = None,
-    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
-    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
     offline: Annotated[
         bool,
         typer.Option(
@@ -121,6 +118,9 @@ def run(
             help="Prints version number",
         ),
     ] = False,
+    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
+    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:
@@ -154,10 +154,18 @@ def run(
 
         if config is None:
             for config_file in ASH_CONFIG_FILE_NAMES:
-                def_path = Path(source_dir).joinpath(config_file)
-                if def_path.exists():
-                    logger.info(f"Using config file found at: {def_path.as_posix()}")
-                    config = def_path.as_posix()
+                def_paths = [
+                    Path(source_dir).joinpath(config_file),
+                    Path(source_dir).joinpath(".ash", config_file),
+                ]
+                for def_path in def_paths:
+                    if def_path.exists():
+                        logger.info(
+                            f"Using config file found at: {def_path.as_posix()}"
+                        )
+                        config = def_path.as_posix()
+                        break
+                if config is not None:
                     break
         else:
             logger.info(f"Using config file specified at: {config}")

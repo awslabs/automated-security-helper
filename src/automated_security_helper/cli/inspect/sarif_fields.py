@@ -1,30 +1,8 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
-"""
-CLI subcommand for inspecting and analyzing ASH outputs and reports.
-"""
-
-import os
-import glob
-import json
-import csv
-from typing import Annotated, Dict, List, Optional
-import typer
-from rich.console import Console
-from rich.table import Table
-
-from automated_security_helper.utils.meta_analysis.generate_field_mapping_html_report import (
-    generate_html_report,
-)
 from automated_security_helper.utils.meta_analysis.analyze_sarif_file import (
     analyze_sarif_file,
 )
-from automated_security_helper.utils.meta_analysis.extract_field_paths import (
-    extract_field_paths,
-)
-from automated_security_helper.utils.meta_analysis.get_message_text import (
-    get_message_text,
+from automated_security_helper.utils.meta_analysis.generate_field_mapping_html_report import (
+    generate_html_report,
 )
 from automated_security_helper.utils.meta_analysis.get_reporter_mappings import (
     get_reporter_mappings,
@@ -32,49 +10,24 @@ from automated_security_helper.utils.meta_analysis.get_reporter_mappings import 
 from automated_security_helper.utils.meta_analysis.get_value_from_path import (
     get_value_from_path,
 )
-from automated_security_helper.utils.meta_analysis.locations_match import (
-    locations_match,
-)
 from automated_security_helper.utils.meta_analysis.validate_sarif_aggregation import (
     validate_sarif_aggregation,
 )
 
-inspect_app = typer.Typer(
-    name="inspect",
-    help="Inspect and analyze ASH outputs and reports",
-    pretty_exceptions_enable=True,
-    pretty_exceptions_short=True,
-    pretty_exceptions_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
-    in ["YES", "1", "TRUE"],
-)
+
+import typer
+from rich.console import Console
+from rich.table import Table
 
 
-# List of fields expected to change during aggregation
-EXPECTED_TRANSFORMATIONS = [
-    "ruleIndex",  # Rule array changes during aggregation
-    "tool.driver",  # Tool driver information is consolidated
-    "invocations",  # Invocation details may change
-    "properties.scanner_details",  # Scanner details may be reformatted
-    "properties.tags",  # Tags may be consolidated
-    "run.tool",  # Tool information is consolidated
-    "run.invocations",  # Invocation details may change
-    "analysisTarget",  # Analysis target may be normalized
-]
+import csv
+import glob
+import json
+import os
+from pathlib import Path
+from typing import Annotated, Optional
 
 
-@inspect_app.command(
-    name="sarif-fields",
-    help="""
-The `inspect sarif-fields` command analyzes SARIF reports to understand field usage across different scanners and ensure fields are preserved during aggregation.
-
-This command:
-1. Extracts field paths from the original SARIF reports
-2. Identifies which scanners populate which fields and their data types
-3. Compares fields between original scanner reports and the aggregated report
-4. Generates a comprehensive HTML report showing field presence and mapping information
-5. Outputs field data in both JSON and CSV formats for further analysis
-""",
-)
 def analyze_sarif_fields(
     sarif_dir: Annotated[
         str,
@@ -116,7 +69,8 @@ def analyze_sarif_fields(
 
     # Set default output directory if not provided
     if output_dir is None:
-        output_dir = os.path.join(os.getcwd(), "ash_output", "inspect")
+        output_dir = Path.cwd().joinpath(".ash", "ash_output", "inspect")
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # Find all SARIF files
     sarif_files = glob.glob(os.path.join(sarif_dir, "**/*.sarif"), recursive=True)
@@ -484,179 +438,3 @@ def analyze_sarif_fields(
                 return result["message"]["root"]["text"]
 
     return ""
-
-
-def extract_location_info(result: Dict) -> Dict:
-    """
-    Extract location information from a result.
-
-    Args:
-        result: SARIF result object
-
-    Returns:
-        Dictionary with location information
-    """
-    location = {"file_path": None, "start_line": None, "end_line": None}
-
-    # Extract from locations array
-    if result.get("locations") and len(result["locations"]) > 0:
-        loc = result["locations"][0]
-        if loc.get("physicalLocation"):
-            phys_loc = loc["physicalLocation"]
-
-            # Handle different SARIF structures
-            if phys_loc.get("artifactLocation") and phys_loc["artifactLocation"].get(
-                "uri"
-            ):
-                location["file_path"] = phys_loc["artifactLocation"]["uri"]
-            elif (
-                phys_loc.get("root")
-                and phys_loc["root"].get("artifactLocation")
-                and phys_loc["root"]["artifactLocation"].get("uri")
-            ):
-                location["file_path"] = phys_loc["root"]["artifactLocation"]["uri"]
-
-            # Extract line information
-            if phys_loc.get("region"):
-                location["start_line"] = phys_loc["region"].get("startLine")
-                location["end_line"] = phys_loc["region"].get("endLine")
-            elif phys_loc.get("root") and phys_loc["root"].get("region"):
-                location["start_line"] = phys_loc["root"]["region"].get("startLine")
-                location["end_line"] = phys_loc["root"]["region"].get("endLine")
-
-    return location
-
-
-def find_matching_result(original_result: Dict, aggregated_results: List[Dict]) -> Dict:
-    """
-    Find a matching result in the aggregated report.
-
-    Args:
-        original_result: Result from original scanner report
-        aggregated_results: List of results from aggregated report
-
-    Returns:
-        Matching result or None
-    """
-    # Extract matching criteria
-    rule_id = original_result.get("ruleId")
-
-    # Extract location info
-    location_info = extract_location_info(original_result)
-
-    # Try to find a match
-    for agg_result in aggregated_results:
-        # Match by rule ID first
-        if agg_result.get("ruleId") == rule_id:
-            # Then check location
-            agg_location = extract_location_info(agg_result)
-
-            # Compare locations, allowing for path normalization
-            if locations_match(location_info, agg_location):
-                return agg_result
-
-            # If locations don't match but messages do, consider it a match
-            if (
-                original_result.get("message")
-                and agg_result.get("message")
-                and get_message_text(original_result) == get_message_text(agg_result)
-            ):
-                return agg_result
-
-    return None
-
-
-def categorize_field_importance(path: str) -> str:
-    """
-    Categorize the importance of a field based on its path.
-
-    Args:
-        path: Field path
-
-    Returns:
-        Importance category: "critical", "important", or "informational"
-    """
-    # Critical fields that directly affect finding interpretation
-    critical_patterns = [
-        "ruleId",
-        "level",
-        "message",
-        "locations",
-        "physicalLocation",
-        "artifactLocation",
-        "region",
-        "startLine",
-        "endLine",
-    ]
-
-    # Important fields that provide context but aren't critical
-    important_patterns = [
-        "kind",
-        "rank",
-        "baselineState",
-        "codeFlows",
-        "relatedLocations",
-        "fixes",
-    ]
-
-    # Check if path contains any critical patterns
-    for pattern in critical_patterns:
-        if pattern in path:
-            return "critical"
-
-    # Check if path contains any important patterns
-    for pattern in important_patterns:
-        if pattern in path:
-            return "important"
-
-    # Default to informational
-    return "informational"
-
-
-def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> List[Dict]:
-    """
-    Compare fields between original and aggregated results.
-
-    Args:
-        original_result: Result from original scanner report
-        aggregated_result: Matching result from aggregated report
-
-    Returns:
-        List of missing fields with their importance
-    """
-    missing_fields = []
-
-    # Extract all field paths from both results
-    orig_paths = extract_field_paths(original_result)
-    agg_paths = extract_field_paths(aggregated_result)
-
-    # Find fields in original that are missing in aggregated
-    for path in orig_paths:
-        # Skip known fields that might be intentionally different
-        if path in ["properties", ".properties"]:
-            continue
-
-        # Check if this is an expected transformation
-        is_expected_transformation = False
-        for transform_path in EXPECTED_TRANSFORMATIONS:
-            if path == transform_path or path.startswith(f"{transform_path}."):
-                is_expected_transformation = True
-                break
-
-        if path not in agg_paths and not is_expected_transformation:
-            # Get the value from the original result
-            orig_value = get_value_from_path(original_result, path)
-
-            missing_fields.append(
-                {
-                    "path": path,
-                    "original_value": orig_value["value"],
-                    "importance": categorize_field_importance(path),
-                }
-            )
-
-    return missing_fields
-
-
-if __name__ == "__main__":
-    inspect_app()

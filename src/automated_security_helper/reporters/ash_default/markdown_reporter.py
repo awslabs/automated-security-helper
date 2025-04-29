@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -11,6 +14,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.reporters.ash_default.report_content_emitter import (
     ReportContentEmitter,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class MarkdownReporterConfigOptions(ReporterOptionsBase):
@@ -39,6 +43,7 @@ class MarkdownReporterConfig(ReporterPluginConfigBase):
     options: MarkdownReporterConfigOptions = MarkdownReporterConfigOptions()
 
 
+@ash_reporter_plugin
 class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
     """Formats results as a human-readable Markdown document."""
 
@@ -47,12 +52,8 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             self.config = MarkdownReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: Any) -> str:
+    def report(self, model: "ASHARPModel") -> str:
         """Format ASH model as a Markdown string."""
-        from automated_security_helper.models.asharp_model import ASHARPModel
-
-        if not isinstance(model, ASHARPModel):
-            raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
         # Use the content emitter to get report data
         emitter = ReportContentEmitter(model)

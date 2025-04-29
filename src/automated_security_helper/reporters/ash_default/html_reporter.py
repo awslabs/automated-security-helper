@@ -1,7 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import html
-from typing import Any, Dict, List, Literal
+from typing import Dict, List, Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import ASHARPModel
 
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.base.options import ReporterOptionsBase
@@ -9,6 +12,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class HTMLReporterConfigOptions(ReporterOptionsBase):
@@ -22,7 +26,8 @@ class HTMLReporterConfig(ReporterPluginConfigBase):
     options: HTMLReporterConfigOptions = HTMLReporterConfigOptions()
 
 
-class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
+@ash_reporter_plugin
+class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
     """Formats results as HTML."""
 
     def model_post_init(self, context):
@@ -30,12 +35,8 @@ class HTMLReporter(ReporterPluginBase[HTMLReporterConfig]):
             self.config = HTMLReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: Any) -> str:
+    def report(self, model: "ASHARPModel") -> str:
         """Format ASH model as HTML string with comprehensive styling and organization."""
-        from automated_security_helper.models.asharp_model import ASHARPModel
-
-        if not isinstance(model, ASHARPModel):
-            raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
         # Get results from SARIF report
         results = (

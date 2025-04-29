@@ -13,12 +13,12 @@ from automated_security_helper.scanners.ash_default.detect_secrets_scanner impor
 )
 from automated_security_helper.scanners.ash_default.grype_scanner import GrypeScanner
 
-# from automated_security_helper.scanners.ash_default.npm_audit_scanner import (
-#     NpmAuditScanner,
-# )
-# from automated_security_helper.scanners.ash_default.semgrep_scanner import (
-#     SemgrepScanner,
-# )
+from automated_security_helper.scanners.ash_default.npm_audit_scanner import (
+    NpmAuditScanner,
+)
+from automated_security_helper.scanners.ash_default.semgrep_scanner import (
+    SemgrepScanner,
+)
 from automated_security_helper.scanners.ash_default.syft_scanner import SyftScanner
 
 __all__ = [

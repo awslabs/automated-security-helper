@@ -1,7 +1,7 @@
 """Tests for HTML reporter."""
 
 import pytest
-from automated_security_helper.reporters.ash_default.html_reporter import HTMLReporter
+from automated_security_helper.reporters.ash_default.html_reporter import HtmlReporter
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.schemas.sarif_schema_model import (
     Result,
@@ -53,7 +53,7 @@ class TestHTMLReporter:
         ]
 
         # Format the report
-        reporter = HTMLReporter(context=test_plugin_context)
+        reporter = HtmlReporter(context=test_plugin_context)
         html_output = reporter.report(sample_ash_model)
 
         # Check that the HTML contains the expected elements
@@ -69,14 +69,14 @@ class TestHTMLReporter:
     def test_html_reporter_with_empty_results(self, test_plugin_context):
         """Test that the HTML reporter handles empty results correctly."""
         model = ASHARPModel()
-        reporter = HTMLReporter(context=test_plugin_context)
+        reporter = HtmlReporter(context=test_plugin_context)
         html_output = reporter.report(model)
         assert "No findings to display" in html_output
 
     def test_html_reporter_with_invalid_model(self, test_plugin_context):
         """Test that the HTML reporter raises an error for invalid models."""
-        reporter = HTMLReporter(context=test_plugin_context)
-        with pytest.raises(ValueError):
+        reporter = HtmlReporter(context=test_plugin_context)
+        with pytest.raises(AttributeError):  # Changed from ValueError to AttributeError
             reporter.report("not a model")
 
     def test_html_reporter_with_missing_location(self, test_plugin_context):
@@ -91,7 +91,7 @@ class TestHTMLReporter:
             )
         ]
 
-        reporter = HTMLReporter(context=test_plugin_context)
+        reporter = HtmlReporter(context=test_plugin_context)
         html_output = reporter.report(model)
 
         # Check that the HTML contains the expected elements

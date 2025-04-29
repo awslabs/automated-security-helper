@@ -15,6 +15,7 @@ from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
 )
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
@@ -32,9 +33,9 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     config: Annotated[
         str,
         Field(
-            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project.",
+            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to p/ci for best coverage while focusing on reducing false positives: https://semgrep.dev/p/ci",
         ),
-    ] = "auto"
+    ] = "p/ci"
 
     exclude: Annotated[
         List[str],
@@ -80,6 +81,7 @@ class SemgrepScannerConfig(ScannerPluginConfigBase):
     ] = SemgrepScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
     """SemgrepScanner implements code scanning using Semgrep."""
 

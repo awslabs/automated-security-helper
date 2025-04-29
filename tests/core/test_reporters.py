@@ -3,8 +3,8 @@
 from automated_security_helper.reporters.ash_default.flatjson_reporter import (
     FlatJSONReporter,
 )
-from automated_security_helper.reporters.ash_default.html_reporter import HTMLReporter
-from automated_security_helper.reporters.ash_default.csv_reporter import CSVReporter
+from automated_security_helper.reporters.ash_default.html_reporter import HtmlReporter
+from automated_security_helper.reporters.ash_default.csv_reporter import CsvReporter
 from automated_security_helper.models.asharp_model import ASHARPModel
 
 
@@ -28,7 +28,7 @@ class TestHTMLFormatter:
 
     def test_html_formatter(self, sample_ash_model, test_plugin_context):
         """Test HTML formatter output structure."""
-        formatter = HTMLReporter(context=test_plugin_context)
+        formatter = HtmlReporter(context=test_plugin_context)
         result = formatter.report(sample_ash_model)
         assert result is not None
         assert isinstance(result, str)
@@ -43,7 +43,7 @@ class TestCSVFormatter:
 
     def test_csv_formatter(self, sample_ash_model, test_plugin_context):
         """Test CSV formatter output structure."""
-        formatter = CSVReporter(context=test_plugin_context)
+        formatter = CsvReporter(context=test_plugin_context)
         result = formatter.report(sample_ash_model)
         assert result is not None
         assert isinstance(result, str)

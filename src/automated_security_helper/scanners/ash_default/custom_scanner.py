@@ -61,18 +61,21 @@ class CustomScannerConfig(ScannerPluginConfigBase):
     ] = CustomScannerConfigOptions()
 
 
+# Do not uncomment this decorator, this class should be extended and will
+# intentionally throw an error if registering as-is.
+# @ash_scanner_plugin
 class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
     """CustomScanner provides an interface for custom scanners using known formats."""
 
     command: str | None = None
 
     def model_post_init(self, context):
-        if self.config is None:
-            self.config = CustomScannerConfig()
         if self.command is None:
             raise ScannerError(
                 f"({self.config.name or self.__class__.__name__}) Command not provided for custom scanner! If this is a Python based scanner, set the command property to `python` in your scanner properties to resolve this error."
             )
+        if self.config is None:
+            self.config = CustomScannerConfig()
         self.args = ToolArgs()
         super().model_post_init(context)
 

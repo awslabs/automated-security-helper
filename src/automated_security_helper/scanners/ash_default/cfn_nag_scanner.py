@@ -11,6 +11,7 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBas
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
@@ -48,6 +49,7 @@ class CfnNagScannerConfig(ScannerPluginConfigBase):
     ] = CfnNagScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     """CfnNagScanner implements SECRET scanning using CFN Nag."""
 
@@ -282,7 +284,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 if __name__ == "__main__":
     scanner = CfnNagScanner(
         source_dir=Path.cwd(),
-        output_dir=Path.cwd().joinpath("ash_output"),
+        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
     )
     report = scanner.scan(target=scanner.source_dir)
 
@@ -292,6 +294,6 @@ if __name__ == "__main__":
         exclude_unset=True,
     )
     with open(
-        Path.cwd().joinpath("ash_output").joinpath("cfn_nag_results.sarif"), "w"
+        Path.cwd().joinpath(".ash", "ash_output").joinpath("cfn_nag_results.sarif"), "w"
     ) as f:
         f.write(report_json)

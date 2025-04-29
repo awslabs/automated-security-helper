@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 
+from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.progress import (
     ExecutionPhaseType,
     ExecutionStrategy,
@@ -44,7 +45,7 @@ class ASHScanOrchestrator(BaseModel):
         Path.cwd()
     )
     output_dir: Annotated[Path, Field(description="Output directory for results")] = (
-        Path.cwd().joinpath("ash_output")
+        Path.cwd().joinpath(".ash", "ash_output")
     )
     work_dir: Annotated[
         Path, Field(description="Working directory for scan operations")
@@ -105,7 +106,7 @@ class ASHScanOrchestrator(BaseModel):
         super().model_post_init(context)
         ASH_LOGGER.info("Initializing ASH Scanner")
 
-        self.config = self._load_config()
+        self.config = resolve_config(config_path=self.config_path)
 
         ASH_LOGGER.verbose("Setting up working directories")
         if self.source_dir is None:
@@ -118,9 +119,9 @@ class ASHScanOrchestrator(BaseModel):
 
         if self.output_dir is None:
             ASH_LOGGER.verbose(
-                "No explicit output directory provided, using 'ash_output' within the source directory."
+                "No explicit output directory provided, using '.ash/ash_output' within the source directory."
             )
-            self.output_dir = self.source_dir.joinpath("ash_output")
+            self.output_dir = self.source_dir.joinpath(".ash", "ash_output")
         elif not isinstance(self.output_dir, Path):
             self.output_dir = Path(self.output_dir)
 
@@ -274,10 +275,6 @@ class ASHScanOrchestrator(BaseModel):
         ASH_LOGGER.verbose(f"Executing phases: {phases}")
 
         try:
-            # Load and validate configuration
-            ASH_LOGGER.debug("Loading and validating configuration")
-            self.config = self._load_config()
-
             # Setup execution engine if not already configured
             if self.execution_engine is None:
                 ASH_LOGGER.debug("Creating execution engine")
@@ -354,7 +351,7 @@ class ASHScanOrchestrator(BaseModel):
             try:
                 # Execute all phases
                 asharp_model_results = self.execution_engine.execute_phases(
-                    phases=phases, config=self.config
+                    phases=phases,
                 )
 
                 ASH_LOGGER.debug("Scan execution completed successfully")

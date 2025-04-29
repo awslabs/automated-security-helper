@@ -13,6 +13,8 @@ test_output.json
 tests/pytest-temp/
 output/
 .*q/
+/Amazon*.md
+.envrc
 
 ### macOS ###
 # General

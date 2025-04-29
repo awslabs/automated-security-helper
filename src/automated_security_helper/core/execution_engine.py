@@ -19,15 +19,21 @@ from automated_security_helper.core.progress import (
     ExecutionStrategy,
     LiveProgressDisplay,
 )
-from automated_security_helper.core.plugin_registry import PluginRegistry, PluginType
+from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.plugins.adapters import (
+    register_converter_adapters,
+    register_scanner_adapters,
+    register_reporter_adapters,
+)
+from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.plugins.interfaces import IConverter, IReporter, IScanner
 
 # Define valid execution phases
 from automated_security_helper.config.ash_config import (
     AshConfig,
 )
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.core.scanner_factory import ScannerFactory
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -51,6 +57,7 @@ class ScanExecutionEngine:
         color_system: str = "auto",
         verbose: bool = False,
         debug: bool = False,
+        ash_plugin_modules: List[str] = [],
     ):
         """Initialize the execution engine.
 
@@ -61,6 +68,10 @@ class ScanExecutionEngine:
             asharp_model: Optional ASHARPModel to use for results
             show_progress: Whether to show progress bars
             global_ignore_paths: List of paths to ignore globally
+            color_system: Color system to use for progress display
+            verbose: Whether to show verbose output
+            debug: Whether to show debug output
+            discover_external_plugins: Whether to discover external plugins
             color_system: Color system to use for the console
             verbose: Enable verbose logging
             debug: Enable debug logging
@@ -106,6 +117,53 @@ class ScanExecutionEngine:
             "1",
             "yes",
         ]
+
+        # Discover external plugins if enabled
+        ash_plugin_manager.set_context(self._context)
+        ash_plugin_modules = (
+            getattr(self._context.config, "ash_plugin_modules", [])
+            if self._context.config
+            and hasattr(self._context.config, "ash_plugin_modules")
+            else []
+        )
+        if len(ash_plugin_modules) > 0:
+            # Import additional plugin modules from config
+            if self._context.config and hasattr(
+                self._context.config, "ash_plugin_modules"
+            ):
+                additional_modules = getattr(
+                    self._context.config, "ash_plugin_modules", []
+                )
+                if additional_modules:
+                    ASH_LOGGER.info(
+                        f"Loading additional plugin modules: {additional_modules}"
+                    )
+                    from automated_security_helper.plugins.loader import (
+                        load_additional_plugin_modules,
+                    )
+
+                    load_additional_plugin_modules(additional_modules)
+
+            # Discover plugins from specified modules
+            discovered_plugins = discover_plugins(plugin_modules=ash_plugin_modules)
+
+            # Register adapters for discovered plugins
+            if discovered_plugins.get("converters"):
+                ASH_LOGGER.debug(
+                    f"Registering {len(discovered_plugins['converters'])} discovered converter plugins"
+                )
+                register_converter_adapters(discovered_plugins["converters"])
+            if discovered_plugins.get("scanners"):
+                ASH_LOGGER.debug(
+                    f"Registering {len(discovered_plugins['scanners'])} discovered scanner plugins"
+                )
+                register_scanner_adapters(discovered_plugins["scanners"])
+            if discovered_plugins.get("reporters"):
+                ASH_LOGGER.debug(
+                    f"Registering {len(discovered_plugins['reporters'])} discovered reporter plugins"
+                )
+                register_reporter_adapters(discovered_plugins["reporters"])
+                register_reporter_adapters(discovered_plugins["reporters"])
 
         # Config can override environment
         if self._context.config:
@@ -159,70 +217,57 @@ class ScanExecutionEngine:
         self._progress = None
         self._max_workers = min(4, multiprocessing.cpu_count())
 
+        # Register custom scanners from configuration
+        self._register_custom_scanners()
+
         # Initialize scanner components
         self._scanners = {}
         self._registered_scanners = {}
         self._initialized = False
-        self._plugin_registry = PluginRegistry(
-            plugin_context=self._context,
-        )
-        self._scanner_factory = ScannerFactory(
-            plugin_context=self._context,
-            registered_scanner_plugins=self._plugin_registry.get_plugin(
-                plugin_type=PluginType.scanner
-            ),
-        )
 
-        self.ensure_initialized(config=self._context.config)
+        # Get all scanner plugins
+        self.plugins = {
+            "converter": ash_plugin_manager.plugin_modules(IConverter),
+            "scanner": ash_plugin_manager.plugin_modules(IScanner),
+            "reporter": ash_plugin_manager.plugin_modules(IReporter),
+        }
+        for k, v in self.plugins.items():
+            ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
 
-        self._registered_scanners = {}
-        self._enabled_from_config = []
-        for key, val in self._scanner_factory.available_scanners().items():
-            val_instance = val(
-                config=(
-                    self._config.get_plugin_config(
-                        plugin_type=PluginType.scanner, plugin_name=key
-                    )
-                    if self._config is not None
-                    else None
-                ),
-                context=PluginContext(
-                    source_dir=self._context.source_dir,
-                    output_dir=self._context.output_dir,
-                    work_dir=self._context.work_dir,
-                ),
-                source_dir=self._context.source_dir,
-                output_dir=self._context.output_dir,
-            )
-            ASH_LOGGER.debug(
-                f"Evaluating key {key} with val: {val_instance.model_dump_json()}"
-            )
-            self._registered_scanners[key] = val_instance
-            if (hasattr(val_instance, "enabled") and val_instance.enabled) or (
-                hasattr(val_instance, "config")
-                and hasattr(val_instance.config, "enabled")
-                and val_instance.config.enabled
-            ):
-                ASH_LOGGER.debug(
-                    f"Scanner {key} is enabled via config, adding to enabled scanner list"
+        self.ensure_initialized(self._context.config)
+
+    def _register_custom_scanners(self):
+        """Register custom scanners from configuration."""
+        if not self._context.config:
+            return
+
+        # Register custom scanners from build configuration
+        for scanner_config in self._context.config.build.custom_scanners:
+            try:
+                from automated_security_helper.scanners.ash_default.custom_scanner import (
+                    CustomScanner,
                 )
-                self._enabled_from_config.append(key)
 
-        # Get all enabled scanners from SAST and SBOM configurations using helper
-        scanner_configs = self._scanner_factory.available_scanners()
-        ASH_LOGGER.debug(f"Scanner configs: {scanner_configs}")
+                # Create and register the custom scanner
+                custom_scanner = CustomScanner(
+                    config=scanner_config, context=self._context
+                )
+
+                # Register with plugin manager
+                ash_plugin_manager.register_plugin_module(
+                    "scanner",
+                    custom_scanner.__class__,
+                    f"automated_security_helper.scanners.custom.{scanner_config.name}",
+                )
+
+                ASH_LOGGER.debug(f"Registered custom scanner: {scanner_config.name}")
+            except Exception as e:
+                ASH_LOGGER.error(f"Failed to register custom scanner: {e}")
 
     def get_scanner(
         self, scanner_name: str, check_enabled: bool = True
     ) -> ScannerPluginBase:
         """Get a scanner instance by name.
-
-        Attempts to find and instantiate a scanner in the following order:
-        1. First validates if scanner is enabled if check_enabled=True
-        2. Looks up scanner in registered scanners (including placeholders)
-        3. Tries base name without 'scanner' suffix
-        4. Attempts to get implementation from scanner factory
-        5. Auto-registers from factory if found
 
         Args:
             scanner_name: Name of the scanner to retrieve
@@ -238,44 +283,48 @@ class ScanExecutionEngine:
         lookup_name = scanner_name.lower().strip()
         if not lookup_name:
             ASH_LOGGER.warning("Scanner name cannot be empty")
+            raise ValueError("Scanner name cannot be empty")
 
-        # Ensure initialized and verify enabled status
-        self.ensure_initialized(config=self._config)
+        # Get all scanner plugins
+        scanner_plugins = self.plugins.get("scanner", [])
 
-        if check_enabled and lookup_name not in (self._enabled_scanners or set()):
-            ASH_LOGGER.warning(f"Scanner {lookup_name} is not enabled")
+        # Find the scanner by name
+        for scanner_class in scanner_plugins:
+            scanner_class_name = getattr(scanner_class, "__name__", "Unknown").lower()
+            if scanner_class_name == lookup_name:
+                # Create and return the scanner instance
+                scanner = scanner_class(
+                    context=self._context,
+                    config=(
+                        self._context.config.get_plugin_config(
+                            plugin_type="scanner", plugin_name=lookup_name
+                        )
+                        if self._context.config
+                        else None
+                    ),
+                )
+                return scanner
 
-        # Create scanner using factory
-        try:
-            scanner = self._scanner_factory.create_scanner(
-                scanner_name=lookup_name,
-                source_dir=self._context.source_dir,
-                output_dir=self._context.output_dir,
-            )
-            return scanner
-        except ValueError as e:
-            raise ValueError(f"Scanner {lookup_name} could not be created: {str(e)}")
+        # If we get here, the scanner wasn't found
+        raise ValueError(f"Scanner {lookup_name} not found")
 
     def ensure_initialized(self, config: Optional[AshConfig] = None) -> None:
         """Ensure scanner factory and scanners are properly initialized.
 
-        This method:
-        1. Registers and enables all default scanners from factory
-        2. Processes config if provided to override scanner settings
-        3. Maintains all scanners enabled by default if no explicit config
-
         Args:
             config: ASH configuration object for initialization
         """
-        if not self._initialized or (self._config is None and config is not None):
+        if not self._initialized or (
+            self._context.config is None and config is not None
+        ):
             ASH_LOGGER.info("Initializing execution engine")
             if config is not None:
-                self._config = config
-            if not self._config or self._config is None:
-                self._config = AshConfig(
+                self._context.config = config
+            if not self._context.config or self._context.config is None:
+                self._context.config = AshConfig(
                     project_name="ASH Default Project Config",
                 )
-            if not isinstance(self._config, AshConfig):
+            if not isinstance(self._context.config, AshConfig):
                 raise ValueError("Configuration must be an AshConfig instance")
 
             # Mark initialization complete
@@ -284,7 +333,6 @@ class ScanExecutionEngine:
     def execute_phases(
         self,
         phases: List[ExecutionPhaseType] = ["convert", "scan", "report"],
-        config: Optional[AshConfig] = None,
     ) -> ASHARPModel:
         """Execute the specified phases in the correct order.
 
@@ -299,7 +347,6 @@ class ScanExecutionEngine:
             ASHARPModel: The results of the scan.
         """
         ASH_LOGGER.debug(f"Entering: ScanExecutionEngine.execute_phases({phases})")
-        self.ensure_initialized(config=config)
 
         # Always execute phases in the correct order, regardless of input order
         ordered_phases = []
@@ -351,22 +398,22 @@ class ScanExecutionEngine:
                 if phase_name == "convert":
                     # Create and execute the Convert phase
                     convert_phase = ConvertPhase(
+                        plugins=ash_plugin_manager.plugin_modules(IConverter),
                         plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
-                    convert_phase.execute(plugin_registry=self._plugin_registry)
+                    convert_phase.execute()
 
                 elif phase_name == "scan":
                     # Create and execute the Scan phase
                     scan_phase = ScanPhase(
+                        plugins=ash_plugin_manager.plugin_modules(IScanner),
                         plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
                     self._results = scan_phase.execute(
-                        scanner_factory=self._scanner_factory,
-                        plugin_registry=self._plugin_registry,
                         enabled_scanners=self._init_enabled_scanners,
                         parallel=(self._strategy == ExecutionStrategy.PARALLEL),
                         max_workers=self._max_workers,
@@ -378,16 +425,16 @@ class ScanExecutionEngine:
                 elif phase_name == "report":
                     # Create and execute the Report phase
                     report_phase = ReportPhase(
+                        plugins=ash_plugin_manager.plugin_modules(IReporter),
                         plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
                     report_phase.execute(
                         report_dir=self._context.output_dir.joinpath("reports"),
-                        plugin_registry=self._plugin_registry,
                         cli_output_formats=(
-                            self._config.output_formats
-                            if hasattr(self._config, "output_formats")
+                            self._context.config.output_formats
+                            if hasattr(self._context.config, "output_formats")
                             else None
                         ),
                     )
@@ -395,6 +442,7 @@ class ScanExecutionEngine:
                 elif phase_name == "inspect":
                     # Create and execute the Inspect phase
                     inspect_phase = InspectPhase(
+                        plugins=[],  # No plugin support for the Inspect phase at this time.
                         plugin_context=self._context,
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,

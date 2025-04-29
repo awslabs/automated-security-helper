@@ -12,7 +12,7 @@ class InspectPhase(EnginePhase):
         """Return the name of this phase."""
         return "inspect"
 
-    def execute(self, **kwargs) -> None:
+    def _execute_phase(self, **kwargs) -> None:
         """Execute the Inspect phase.
 
         Args:
@@ -30,7 +30,7 @@ class InspectPhase(EnginePhase):
         ASH_LOGGER.info("Analyzing SARIF fields...")
 
         try:
-            from automated_security_helper.cli.inspect import analyze_sarif_fields
+            from automated_security_helper.cli.inspect import sarif_fields
 
             # Use the context to provide all necessary parameters
             sarif_dir = self.plugin_context.output_dir.joinpath("scanners")
@@ -47,7 +47,7 @@ class InspectPhase(EnginePhase):
             self.update_progress(30, "Analyzing SARIF fields...")
 
             # Call the analyze_sarif_fields function directly
-            analyze_sarif_fields(
+            sarif_fields(
                 sarif_dir=str(sarif_dir),
                 output_dir=str(output_dir),
                 aggregated_sarif=str(aggregated_sarif),

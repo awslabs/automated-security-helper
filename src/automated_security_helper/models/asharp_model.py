@@ -10,7 +10,7 @@ from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
-from typing import Annotated, Dict, Any, Optional, Union, List
+from typing import TYPE_CHECKING, Annotated, Dict, Any, Optional, Union, List
 from automated_security_helper.models.core import ExportFormat
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
@@ -22,7 +22,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 
-__all__ = ["ASHARPModel"]
+# Import AshConfig only for type checking to avoid circular imports
+if TYPE_CHECKING:
+    from automated_security_helper.config.ash_config import AshConfig
 
 __all__ = ["ASHARPModel"]
 
@@ -123,7 +125,7 @@ class ASHARPModel(BaseModel):
         )
     )
     ash_config: Annotated[
-        Any,
+        "AshConfig",
         Field(description="The full ASH configuration used during this scan."),
     ] = None
     sarif: Annotated[

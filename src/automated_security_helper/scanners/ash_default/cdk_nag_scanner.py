@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -82,6 +83,7 @@ class CdkNagScannerConfig(ScannerPluginConfigBase):
     ] = CdkNagScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     """CDK Nag security scanner, custom CDK-CLI-less implementation."""
 
@@ -318,7 +320,7 @@ if __name__ == "__main__":
     ASH_LOGGER.debug("Running cdk-nag via __main__")
     scanner = CdkNagScanner(
         source_dir=Path.cwd(),
-        output_dir=Path.cwd().joinpath("ash_output"),
+        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
         config=CdkNagScannerConfig(
             options=CdkNagScannerConfigOptions(
                 nag_packs=CdkNagPacks(

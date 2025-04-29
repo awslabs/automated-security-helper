@@ -1,12 +1,31 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Any, Literal
+from typing import Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.schemas.ocsf.vulnerability_finding import (
+    VulnerabilityFinding,
+    Vulnerability,
+    # Cve,
+    Metadata,
+    Product,
+    FindingInfo,
+    ActivityId,
+    SeverityId,
+)
+from automated_security_helper.utils.get_ash_version import get_ash_version
+import json
+from datetime import datetime, timezone
+import uuid
+from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class OCSFReporterConfigOptions(ReporterOptionsBase):
@@ -20,7 +39,8 @@ class OCSFReporterConfig(ReporterPluginConfigBase):
     options: OCSFReporterConfigOptions = OCSFReporterConfigOptions()
 
 
-class OCSFReporter(ReporterPluginBase[OCSFReporterConfig]):
+@ash_reporter_plugin
+class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
     """Formats results as Open Cybersecurity Schema Framework (OCSF) format."""
 
     def model_post_init(self, context):
@@ -28,28 +48,8 @@ class OCSFReporter(ReporterPluginBase[OCSFReporterConfig]):
             self.config = OCSFReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: Any) -> str:
+    def report(self, model: "ASHARPModel") -> str:
         """Format ASH model in Open Cybersecurity Schema Framework (OCSF) format."""
-        from automated_security_helper.models.asharp_model import ASHARPModel
-        from automated_security_helper.schemas.ocsf.vulnerability_finding import (
-            VulnerabilityFinding,
-            Vulnerability,
-            # Cve,
-            Metadata,
-            Product,
-            FindingInfo,
-            ActivityId,
-            SeverityId,
-        )
-        from automated_security_helper.utils.get_ash_version import get_ash_version
-        import json
-        from datetime import datetime, timezone
-        import uuid
-        from automated_security_helper.utils.log import ASH_LOGGER
-
-        if not isinstance(model, ASHARPModel):
-            raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
-
         # Get current timestamp in milliseconds since epoch
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 

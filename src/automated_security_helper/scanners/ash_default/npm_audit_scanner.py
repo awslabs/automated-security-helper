@@ -16,6 +16,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     MultiformatMessageString,
@@ -55,6 +56,7 @@ class NpmAuditScannerConfig(ScannerPluginConfigBase):
     ] = NpmAuditScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     """NpmAuditScanner implements IaC scanning using `npm/yarn/pnpm audit` based on the lock files discovered in the source directory."""
 

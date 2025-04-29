@@ -38,9 +38,9 @@ class ConverterPluginBase(BaseModel, Generic[T]):
         # Use context if provided, otherwise fall back to instance attributes
         if self.context is None:
             raise ScannerError(f"No context provided for {self.__class__.__name__}!")
-        ASH_LOGGER.debug(f"Using provided context for {self.__class__.__name__}")
+        ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
 
-        ASH_LOGGER.debug(
+        ASH_LOGGER.trace(
             f"Converter {self.config.name if self.config else self.__class__.__name__} initialized with source_dir={self.context.source_dir}, output_dir={self.context.output_dir}"
         )
         return self

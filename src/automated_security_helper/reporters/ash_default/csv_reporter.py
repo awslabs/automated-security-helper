@@ -1,11 +1,15 @@
 import csv
 from io import StringIO
-from typing import Any, Literal
+from typing import Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class CSVReporterConfigOptions(ReporterOptionsBase):
@@ -19,7 +23,8 @@ class CSVReporterConfig(ReporterPluginConfigBase):
     options: CSVReporterConfigOptions = CSVReporterConfigOptions()
 
 
-class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
+@ash_reporter_plugin
+class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
     """Formats results as CSV."""
 
     def model_post_init(self, context):
@@ -44,12 +49,8 @@ class CSVReporter(ReporterPluginBase[CSVReporterConfig]):
             "runs[0].tool.driver.name": "Scanner",
         }
 
-    def report(self, model: Any) -> str:
+    def report(self, model: "ASHARPModel") -> str:
         """Format ASH model as CSV string."""
-        from automated_security_helper.models.asharp_model import ASHARPModel
-
-        if not isinstance(model, ASHARPModel):
-            raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
         output = StringIO()
         writer = csv.writer(output)

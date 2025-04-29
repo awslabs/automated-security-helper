@@ -4,14 +4,15 @@ from importlib.metadata import version
 import json
 from pathlib import Path
 import re
-from typing import Annotated, List, Literal
+from typing import Annotated, Any, Dict, List, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
@@ -40,6 +41,34 @@ from detect_secrets.settings import transient_settings
 from detect_secrets.core.plugins.util import get_mapping_from_secret_type_to_class
 
 
+class DetectSecretsScanSettingsPluginsUsed(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    name: str | None = None
+    limit: float | None = None
+    keyword_exclude: str | None = None
+
+
+class DetectSecretsScanSettingsFiltersUsed(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    path: str | None = None
+    min_level: int | None = None
+    keyword_exclude: str | None = None
+
+
+class DetectSecretsScanSettingsResults(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    __pydantic_extra__: Dict[str, List[Any]] = {}
+
+
+class DetectSecretsScanSettings(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    version: str | None = None
+    generated_at: str | None = None
+    plugins_used: List[DetectSecretsScanSettingsPluginsUsed] = []
+    filters_used: List[DetectSecretsScanSettingsFiltersUsed] = []
+    results: DetectSecretsScanSettingsResults = DetectSecretsScanSettingsResults()
+
+
 class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
     baseline_file: Annotated[
         Path | str | None,
@@ -48,11 +77,11 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     scan_settings: Annotated[
-        dict[str, List[dict[str, str]]],
+        DetectSecretsScanSettings,
         Field(
             description="Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
         ),
-    ] = {}
+    ] = DetectSecretsScanSettings()
 
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):
@@ -64,6 +93,7 @@ class DetectSecretsScannerConfig(ScannerPluginConfigBase):
     ] = DetectSecretsScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     """DetectSecretsScanner implements SECRET scanning using detect-secrets."""
 
@@ -95,6 +125,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             item
             for item in [
                 self.config.options.baseline_file,
+                ".ash/.secrets.baseline",
                 ".secrets.baseline",
             ]
             if item is not None
@@ -107,30 +138,30 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             ASH_LOGGER.debug(
                 f"Checking for detect-secrets config @ {Path(baseline_path).absolute()}"
             )
-            if bool(self.config.options.scan_settings):
-                pass
-            elif Path(baseline_path).absolute().exists():
-                abs_baseline_path = Path(baseline_path).absolute()
-                with open(abs_baseline_path, "r") as f:
-                    self.config.options.scan_settings = json.load(f)
-                    f.close()
-                ASH_LOGGER.verbose(
-                    f"Custom settings identified: {self.config.options.scan_settings}"
+            if Path(baseline_path).absolute().exists():
+                ASH_LOGGER.debug(
+                    f"Identified detect-secrets config @ {Path(baseline_path).absolute()}"
                 )
+
+                self.config.options.baseline_file = Path(baseline_path)
                 break
 
         # If no existing baseline is identified then use all detect-secrets plugins
         # This is the same as using the default_settings function provided by detect-secrets
-        if not bool(self.config.options.scan_settings):
-            self.config.options.scan_settings = {
-                "plugins_used": [
-                    {"name": plugin_type.__name__}
+        if (
+            self.config.options.scan_settings.version is None
+            and len(self.config.options.scan_settings.plugins_used) == 0
+        ):
+            self.config.options.scan_settings = DetectSecretsScanSettings(
+                plugins_used=[
+                    DetectSecretsScanSettingsPluginsUsed(name=plugin_type.__name__)
                     for plugin_type in get_mapping_from_secret_type_to_class().values()
                 ],
-            }
-            ASH_LOGGER.debug(
-                f"Default settings identified: {self.config.options.scan_settings}"
             )
+            settings = self.config.options.scan_settings.model_dump(
+                exclude_defaults=True, exclude_none=True, exclude_unset=True
+            )
+            ASH_LOGGER.debug(f"Default settings identified: {settings}")
 
         return super()._process_config_options()
 
@@ -169,6 +200,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             results_file.parent.mkdir(exist_ok=True, parents=True)
             self._resolve_arguments(target=target, results_file=target_results_dir)
 
+            if self.config.options.baseline_file is not None:
+                with open(self.config.options.baseline_file, "r") as f:
+                    self._secrets_collection = SecretsCollection.load_from_baseline(
+                        baseline=json.load(f),
+                    )
+                    f.close()
+
+            self._secrets_collection.root = Path(target).absolute()
             # Find all files to scan from the scan set
             scannable = scan_set(
                 source=target,
@@ -178,7 +217,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             ASH_LOGGER.debug(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets"
             )
-            with transient_settings(self.config.options.scan_settings) as settings:
+            with transient_settings(
+                self.config.options.scan_settings.model_dump(
+                    exclude_defaults=True, exclude_none=True, exclude_unset=True
+                )
+            ) as settings:
                 ASH_LOGGER.debug(f"Settings: {settings}")
                 self._secrets_collection.scan_files(*scannable)
 
@@ -288,6 +331,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 if __name__ == "__main__":
     scanner = DetectSecretsScanner(
         source_dir=Path.cwd(),
-        output_dir=Path.cwd().joinpath("ash_output"),
+        output_dir=Path.cwd().joinpath(".ash", "ash_output"),
     )
     scanner.scan(target=Path.cwd())

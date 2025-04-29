@@ -2,12 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from typing import Any, Literal
+from typing import Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class FlatJSONReporterConfigOptions(ReporterOptionsBase):
@@ -21,6 +25,7 @@ class FlatJSONReporterConfig(ReporterPluginConfigBase):
     options: FlatJSONReporterConfigOptions = FlatJSONReporterConfigOptions()
 
 
+@ash_reporter_plugin
 class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
     """Formats results as a flattened JSON array of findings."""
 
@@ -48,12 +53,8 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
             "runs[0].results[0].properties.tags": "tags",
         }
 
-    def report(self, model: Any) -> str:
+    def report(self, model: "ASHARPModel") -> str:
         """Format ASH model as JSON string."""
-        from automated_security_helper.models.asharp_model import ASHARPModel
-
-        if not isinstance(model, ASHARPModel):
-            raise ValueError(f"{self.__class__.__name__} only supports ASHARPModel")
 
         flat_vulns = model.to_flat_vulnerabilities()
         return json.dumps(

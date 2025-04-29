@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../src/automated_security_helper/schemas/ASHConfig.json
+project_name: ash_plugins_example
+ash_plugin_modules:
+  - my_ash_plugins
+converters:
+  my-example-converter:
+    enabled: true
+scanners:
+  my-example-scanner:
+    enabled: true
+reporters:
+  my-example-reporter:
+    enabled: true
+    extension: example-report.md
+    options:
+      # Custom option
+      format-version: v3

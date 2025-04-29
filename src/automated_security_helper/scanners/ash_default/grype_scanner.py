@@ -17,6 +17,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -54,6 +55,7 @@ class GrypeScannerConfig(ScannerPluginConfigBase):
     ] = GrypeScannerConfigOptions()
 
 
+@ash_scanner_plugin
 class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     """GrypeScanner implements IaC scanning using Grype."""
 
@@ -92,7 +94,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             for item in [
                 self.config.options.config_file,
                 ".grype.yaml",
+                ".ash/.grype.yaml",
                 ".grype.yml",
+                ".ash/.grype.yml",
             ]
             if item is not None
         ]

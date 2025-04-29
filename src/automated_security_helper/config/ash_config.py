@@ -6,6 +6,7 @@ from typing import Annotated, Any, List, Dict, Literal
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import ReporterPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -18,11 +19,18 @@ from automated_security_helper.config.scanner_types import (
     GrypeScannerConfig,
     SyftScannerConfig,
 )
+from automated_security_helper.converters.ash_default.archive_converter import (
+    ArchiveConverterConfig,
+)
+from automated_security_helper.converters.ash_default.jupyter_converter import (
+    JupyterConverterConfig,
+)
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.reporters.ash_default.asff_reporter import (
     ASFFReporterConfig,
@@ -78,6 +86,7 @@ from automated_security_helper.scanners.ash_default.detect_secrets_scanner impor
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+# Define BuildConfig class
 class BuildConfig(BaseModel):
     """Configuration model for build-time settings."""
 
@@ -99,20 +108,24 @@ class BuildConfig(BaseModel):
     ] = []
 
 
-class InspectConfig(BaseModel):
-    """Configuration for the inspect phase."""
+class ConverterConfigSegment(BaseModel):
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        arbitrary_types_allowed=True,
+        use_enum_values=True,
+        extra="allow",
+    )
 
-    model_config = ConfigDict(extra="allow")
-    enabled: bool = False
+    __pydantic_extra__: Dict[str, Any | ConverterPluginConfigBase] = {}
 
-
-class ScannerTypeConfig(BaseModel):
-    """Configuration model for scanner type specific settings."""
-
-    model_config = ConfigDict(extra="allow")
-    enabled: Annotated[
-        bool, Field(description="Whether this scanner type is enabled")
-    ] = True
+    archive: Annotated[
+        ArchiveConverterConfig,
+        Field(description="Configure the options for the ArchiveConverter"),
+    ] = ArchiveConverterConfig()
+    jupyter: Annotated[
+        JupyterConverterConfig,
+        Field(description="Configure the options for the JupyterConverter"),
+    ] = JupyterConverterConfig()
 
 
 class ScannerConfigSegment(BaseModel):
@@ -259,11 +272,11 @@ class AshConfig(BaseModel):
         str, Field(description="Name of the project being scanned")
     ] = "ash-target"
 
-    # Build configuration
+    # Build configuration - use a default instance instead of calling the constructor
     build: Annotated[
         BuildConfig,
         Field(description="Build-time configuration settings"),
-    ] = BuildConfig()
+    ] = Field(default_factory=BuildConfig)
 
     # output_formats: Annotated[
     #     List[
@@ -297,14 +310,9 @@ class AshConfig(BaseModel):
     # ]
 
     converters: Annotated[
-        Dict[str, bool],
-        Field(
-            description="The map of converters and a boolean value indicating whether they should be enabled or disabled"
-        ),
-    ] = {
-        "jupyter": True,
-        "archive": True,
-    }
+        ConverterConfigSegment,
+        Field(description="Converter configurations by name."),
+    ] = ConverterConfigSegment()
 
     scanners: Annotated[
         ScannerConfigSegment,
@@ -339,10 +347,12 @@ class AshConfig(BaseModel):
         ),
     ] = []
 
-    output_dir: Annotated[
-        str,
-        Field(description="Directory to store scan outputs"),
-    ] = "ash_output"
+    ash_plugin_modules: Annotated[
+        List[str],
+        Field(
+            description="List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.",
+        ),
+    ] = []
 
     max_concurrent_scanners: Annotated[
         int, Field(description="Maximum number of scanners to run concurrently", ge=1)
@@ -374,12 +384,18 @@ class AshConfig(BaseModel):
                     "No configuration file provided, checking for default paths"
                 )
                 for item in ASH_CONFIG_FILE_NAMES:
-                    config_path = source_dir.joinpath(item)
-                    if config_path.exists():
-                        config_path = config_path
-                        ASH_LOGGER.verbose(
-                            f"Found configuration file at: {config_path.as_posix()}"
-                        )
+                    possible_config_paths = [
+                        source_dir.joinpath(item),
+                        source_dir.joinpath(".ash", item),
+                    ]
+                    for possible_config_path in possible_config_paths:
+                        if possible_config_path.exists():
+                            config_path = possible_config_path
+                            ASH_LOGGER.verbose(
+                                f"Found configuration file at: {possible_config_path.as_posix()}"
+                            )
+                            break
+                    if config_path:
                         break
                 ASH_LOGGER.verbose(
                     "Configuration file not found or provided, using default config"
@@ -389,7 +405,9 @@ class AshConfig(BaseModel):
             # case self.config_path is resolved from a default location.
             # Do not use `else:` here!
             if config_path:
-                ASH_LOGGER.debug(f"Loading configuration from {config_path.as_posix()}")
+                ASH_LOGGER.verbose(
+                    f"Loading configuration from {config_path.as_posix()}"
+                )
                 try:
                     with open(config_path, "r") as f:
                         if str(config_path).endswith(".json"):
@@ -400,7 +418,7 @@ class AshConfig(BaseModel):
                     if not isinstance(config_data, dict):
                         raise ValueError("Configuration must be a dictionary")
 
-                    ASH_LOGGER.debug("Transforming file config")
+                    ASH_LOGGER.verbose("Validating file config")
                     config = cls.model_validate(config_data)
                     ASH_LOGGER.debug(f"Loaded config from file: {config}")
                 except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
@@ -468,117 +486,60 @@ class AshConfig(BaseModel):
             plugin_name,
             flags=re.IGNORECASE,
         ).lower()
-        # if plugin_type == "builder":
-        #     for item in self.build.custom_scanners:
-        #         if isinstance(item, dict):
-        #             item = ScannerPluginBase(**item)
-        #         if plugin_name in [
-        #             item.name,
-        #             item.__class__.__name__,
-        #         ]:
-        #             found = item
-        #             break
-        if plugin_type in ["scanner", "reporter"]:
-            item_dict = (
-                self.scanners.model_dump(by_alias=True)
-                if plugin_type == "scanner"
+        item_dict = (
+            self.scanners.model_dump(by_alias=True)
+            if plugin_type == "scanner"
+            else (
+                self.reporters.model_dump(by_alias=True)
+                if plugin_type == "reporter"
                 else (
-                    self.reporters.model_dump(by_alias=True)
-                    if plugin_type == "reporter"
+                    self.converters.model_dump(by_alias=True)
+                    if plugin_type == "converter"
                     else {}
                 )
             )
-            key_map = {}
-            for item_name, item in item_dict.items():
-                if found is not None:
-                    break
-                for possible in list(
-                    sorted(
-                        set(
-                            [
-                                item_name,
-                                re.sub(
-                                    r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
-                                ).lower(),
-                            ]
-                        )
+        )
+        key_map = {}
+        for item_name, item in item_dict.items():
+            if found is not None:
+                break
+            for possible in list(
+                sorted(
+                    set(
+                        [
+                            item_name,
+                            re.sub(
+                                r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
+                            ).lower(),
+                        ]
                     )
-                ):
-                    key_map[possible] = item_name
-            # Try direct match first
-            if plugin_name in item_dict:
-                ASH_LOGGER.debug(
-                    f"Found {plugin_type} plugin {og_plugin_name} with direct match"
                 )
-                found = item_dict[plugin_name]
-            # Then try normalized match
-            elif plugin_name in key_map:
-                ASH_LOGGER.debug(
-                    f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
-                )
-                found = item_dict[key_map[plugin_name]]
+            ):
+                key_map[possible] = item_name
+        # Try direct match first
+        if plugin_name in item_dict:
+            ASH_LOGGER.debug(
+                f"Found {plugin_type} plugin {og_plugin_name} with direct match"
+            )
+            found = item_dict[plugin_name]
+        # Then try normalized match
+        elif plugin_name in key_map:
+            ASH_LOGGER.debug(
+                f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
+            )
+            found = item_dict[key_map[plugin_name]]
 
-        if plugin_type == "converter":
-            item_dict = self.converters
-            key_map = {}
-            for item_name, item in item_dict.items():
-                if found is not None:
-                    break
-                for possible in list(
-                    sorted(
-                        set(
-                            [
-                                item_name,
-                                re.sub(
-                                    r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
-                                ).lower(),
-                            ]
-                        )
-                    )
-                ):
-                    key_map[possible] = item_name
-            if plugin_name in key_map:
-                ASH_LOGGER.debug(
-                    f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
-                )
-                found = ConverterPluginConfigBase(
-                    name=item_name, enabled=item_dict[key_map[plugin_name]]
-                )
-
-        # if plugin_type == "reporter":
-        #     item_dict = self.reporters.model_dump(by_alias=True)
-        #     key_map = {}
-        #     for item_name, item in item_dict.items():
-        #         if found is not None:
-        #             break
-        #         for possible in list(
-        #             sorted(
-        #                 set(
-        #                     [
-        #                         item_name,
-        #                         re.sub(
-        #                             r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
-        #                         ).lower(),
-        #                     ]
-        #                 )
-        #             )
-        #         ):
-        #             key_map[possible] = item_name
-        #     # Try direct match first
-        #     if plugin_name in item_dict:
-        #         ASH_LOGGER.debug(
-        #             f"Found {plugin_type} plugin {og_plugin_name} with direct match"
-        #         )
-        #         found = item_dict[plugin_name]
-        #     # Then try normalized match
-        #     elif plugin_name in key_map:
-        #         ASH_LOGGER.debug(
-        #             f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
-        #         )
-        #         found = item_dict[key_map[plugin_name]]
         if found is not None:
             ASH_LOGGER.debug(
                 f"Found config for {plugin_type} plugin {og_plugin_name}: {found}"
             )
 
         return found
+
+
+BuildConfig.model_rebuild()
+ConverterConfigSegment.model_rebuild()
+ScannerConfigSegment.model_rebuild()
+ReporterConfigSegment.model_rebuild()
+PluginContext.model_rebuild()
+ASHARPModel.model_rebuild()
