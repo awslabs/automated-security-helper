@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Annotated, TYPE_CHECKING
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.plugins.plugin_manager import AshPluginManager
 
 # Import AshConfig only for type checking to avoid circular imports
 if TYPE_CHECKING:
@@ -40,3 +41,6 @@ class PluginContext(BaseModel):
         if self.work_dir is None:
             self.work_dir = self.output_dir.joinpath(ASH_WORK_DIR_NAME)
         return super().model_post_init(context)
+
+
+AshPluginManager.model_rebuild()

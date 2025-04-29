@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "ash_plugins_example"
+name = "my-ash-plugins"
 version = "0.1.0"
 description = "Example external plugin package for ASH"
 authors = ["Amazon Web Services <aws-security-helper@amazon.com>"]
@@ -17,12 +17,8 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.10"
-automated-security-helper = "*"
-
-[tool.poetry.dev-dependencies]
-pytest = "^7.0.0"
-black = "^23.0.0"
-isort = "^5.10.0"
+automated-security-helper = {path = "../../", develop = true}
+# automated-security-helper = "*"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

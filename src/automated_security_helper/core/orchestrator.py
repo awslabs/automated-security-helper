@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 
+from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.progress import (
     ExecutionPhaseType,
     ExecutionStrategy,
@@ -105,7 +106,7 @@ class ASHScanOrchestrator(BaseModel):
         super().model_post_init(context)
         ASH_LOGGER.info("Initializing ASH Scanner")
 
-        self.config = self._load_config()
+        self.config = resolve_config(config_path=self.config_path)
 
         ASH_LOGGER.verbose("Setting up working directories")
         if self.source_dir is None:
@@ -274,10 +275,6 @@ class ASHScanOrchestrator(BaseModel):
         ASH_LOGGER.verbose(f"Executing phases: {phases}")
 
         try:
-            # Load and validate configuration
-            ASH_LOGGER.debug("Loading and validating configuration")
-            self.config = self._load_config()
-
             # Setup execution engine if not already configured
             if self.execution_engine is None:
                 ASH_LOGGER.debug("Creating execution engine")

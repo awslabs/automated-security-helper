@@ -97,7 +97,8 @@ class EnginePhase(ABC):
         self.notify_event(complete_event, results=results, **kwargs)
 
         # Update progress to complete
-        self.update_progress(100, f"{self.phase_name.capitalize()} phase complete")
+        # Don't update the progress here, let the phase implementation handle it
+        # self.update_progress(100, f"{self.phase_name.capitalize()} phase complete")
 
         return results
 
@@ -125,21 +126,23 @@ class EnginePhase(ABC):
             if not description:
                 description = f"Initializing {self.phase_name} phase..."
 
-            # Convert string phase name to ExecutionPhase enum
-            phase_enum = None
-            if self.phase_name == "convert":
-                phase_enum = ExecutionPhase.CONVERT
-            elif self.phase_name == "scan":
-                phase_enum = ExecutionPhase.SCAN
-            elif self.phase_name == "report":
-                phase_enum = ExecutionPhase.REPORT
-            else:
-                # Default to CONVERT if unknown
-                phase_enum = ExecutionPhase.CONVERT
+            # # Convert string phase name to ExecutionPhase enum
+            # phase_enum = None
+            # if self.phase_name == "convert":
+            #     phase_enum = ExecutionPhase.CONVERT
+            # elif self.phase_name == "scan":
+            #     phase_enum = ExecutionPhase.SCAN
+            # elif self.phase_name == "report":
+            #     phase_enum = ExecutionPhase.REPORT
+            # else:
+            #     # Default to CONVERT if unknown
+            #     phase_enum = ExecutionPhase.CONVERT
 
-            self.phase_task = self.progress_display.add_task(
-                phase=phase_enum, description=description, total=100
-            )
+            # Don't create a task here - let the phase implementation create its own task
+            # with proper initial progress
+            # self.phase_task = self.progress_display.add_task(
+            #     phase=phase_enum, description=description, total=100
+            # )
 
     def update_progress(self, completed: int, description: str = None) -> None:
         """Update progress for this phase.

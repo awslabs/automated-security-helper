@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-from typing import Dict, Annotated, List, Literal
+from typing import TYPE_CHECKING, Any, Dict, Annotated, List, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
-from automated_security_helper import __version__
 from automated_security_helper.utils.log import ASH_LOGGER
+
+if TYPE_CHECKING:
+    from automated_security_helper.base.plugin_context import PluginContext
 
 
 class AshPluginRegistration(BaseModel):
@@ -56,38 +58,17 @@ class AshPluginLibrary(BaseModel):
 
 
 class AshPluginManager(BaseModel):
-    plugin_library: Annotated[AshPluginLibrary, Field()] = AshPluginLibrary(
-        converters={
-            "ash-default": AshPluginRegistration(
-                name="ash-default",
-                plugin_module_path="automated_security_helper.converters.ash_default",
-                description="The default set of converters for ASH",
-                version=__version__,
-                author="Nate Ferrell<nateferl@amazon.com>",
-                enabled=True,
-            )
-        },
-        scanners={
-            "ash-default": AshPluginRegistration(
-                name="ash-default",
-                plugin_module_path="automated_security_helper.scanners.ash_default",
-                description="The default set of scanners for ASH",
-                version=__version__,
-                author="Nate Ferrell<nateferl@amazon.com>",
-                enabled=True,
-            )
-        },
-        reporters={
-            "ash-default": AshPluginRegistration(
-                name="ash-default",
-                plugin_module_path="automated_security_helper.reporters.ash_default",
-                description="The default set of reporters for ASH",
-                version=__version__,
-                author="Nate Ferrell<nateferl@amazon.com>",
-                enabled=True,
-            )
-        },
-    )
+    plugin_library: Annotated[AshPluginLibrary, Field()] = AshPluginLibrary()
+    context: Any = None
+
+    def set_context(self, context: "PluginContext"):
+        """Set the plugin context for this plugin manager.
+
+        Args:
+            context: The PluginContext to use for plugin discovery and operations
+        """
+        self.context = context
+        ASH_LOGGER.debug(f"Plugin manager context set: {context}")
 
     def subscribe(self, event_type, callback):
         """Subscribe a callback to a specific event type"""
@@ -213,26 +194,88 @@ class AshPluginManager(BaseModel):
         Returns:
             List of plugin class implementations (not registration objects)
         """
+        import importlib
         from automated_security_helper.plugins.interfaces import (
             IConverter,
             IReporter,
             IScanner,
         )
 
-        # For internal plugins, we can directly access the module lists
+        plugins = []
+
+        # Get all registered plugins (internal and external)
         if plugin_type == IConverter or plugin_type == "converter":
-            from automated_security_helper.converters import ASH_CONVERTERS
+            # Add registered converters
+            for name, registration in self.plugin_library.converters.items():
+                if registration.enabled:
+                    try:
+                        module = importlib.import_module(
+                            registration.plugin_module_path
+                        )
+                        # Find the plugin class in the module
+                        for attr_name in dir(module):
+                            attr = getattr(module, attr_name)
+                            if (
+                                isinstance(attr, type)
+                                and hasattr(attr, "ash_plugin_type")
+                                and attr.ash_plugin_type == "converter"
+                            ):
+                                if attr not in plugins:  # Avoid duplicates
+                                    plugins.append(attr)
+                    except ImportError as e:
+                        ASH_LOGGER.warning(
+                            f"Failed to import plugin module {registration.plugin_module_path}: {e}"
+                        )
 
-            return ASH_CONVERTERS
         elif plugin_type == IScanner or plugin_type == "scanner":
-            from automated_security_helper.scanners import ASH_SCANNERS
+            # Add registered scanners
+            for name, registration in self.plugin_library.scanners.items():
+                if registration.enabled:
+                    try:
+                        module = importlib.import_module(
+                            registration.plugin_module_path
+                        )
+                        # Find the plugin class in the module
+                        for attr_name in dir(module):
+                            attr = getattr(module, attr_name)
+                            if (
+                                isinstance(attr, type)
+                                and hasattr(attr, "ash_plugin_type")
+                                and attr.ash_plugin_type == "scanner"
+                            ):
+                                if attr not in plugins:  # Avoid duplicates
+                                    plugins.append(attr)
+                    except ImportError as e:
+                        ASH_LOGGER.warning(
+                            f"Failed to import plugin module {registration.plugin_module_path}: {e}"
+                        )
 
-            return ASH_SCANNERS
         elif plugin_type == IReporter or plugin_type == "reporter":
-            from automated_security_helper.reporters import ASH_REPORTERS
-
-            return ASH_REPORTERS
+            # Add registered reporters
+            for name, registration in self.plugin_library.reporters.items():
+                if registration.enabled:
+                    try:
+                        module = importlib.import_module(
+                            registration.plugin_module_path
+                        )
+                        # Find the plugin class in the module
+                        for attr_name in dir(module):
+                            attr = getattr(module, attr_name)
+                            if (
+                                isinstance(attr, type)
+                                and hasattr(attr, "ash_plugin_type")
+                                and attr.ash_plugin_type == "reporter"
+                            ):
+                                if attr not in plugins:  # Avoid duplicates
+                                    plugins.append(attr)
+                    except ImportError as e:
+                        ASH_LOGGER.warning(
+                            f"Failed to import plugin module {registration.plugin_module_path}: {e}"
+                        )
         else:
             # If we get here, we don't know what to do with this plugin type
             ASH_LOGGER.warning(f"Unknown plugin type: {plugin_type}")
             return []
+
+        # Apply filter callback
+        return self.filter_plugin_modules(plugins, filter_callback, *args, **kwargs)

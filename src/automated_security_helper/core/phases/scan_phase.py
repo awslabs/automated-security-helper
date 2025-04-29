@@ -210,7 +210,7 @@ class ScanPhase(EnginePhase):
                 phase=ExecutionPhase.SCAN,
                 task_id=scan_task,
                 completed=100,
-                description="Scan phase complete",
+                description=f"Scanners complete: {len(self._completed_scanners)} scanners executed",
             )
 
             # Add summary row

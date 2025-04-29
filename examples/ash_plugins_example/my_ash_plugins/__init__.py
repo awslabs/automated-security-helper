@@ -6,9 +6,9 @@
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.plugins.decorators import event_subscriber
 
-from .converter import ExampleConverter
-from .scanner import ExampleScanner
-from .reporter import ExampleReporter
+from my_ash_plugins.converter import ExampleConverter
+from my_ash_plugins.scanner import ExampleScanner
+from my_ash_plugins.reporter import ExampleReporter
 
 # Make plugins discoverable
 ASH_CONVERTERS = [ExampleConverter]

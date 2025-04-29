@@ -53,9 +53,6 @@ def run(
             envvar="ASH_CONFIG",
         ),
     ] = None,
-    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
-    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
     offline: Annotated[
         bool,
         typer.Option(
@@ -121,6 +118,9 @@ def run(
             help="Prints version number",
         ),
     ] = False,
+    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
+    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:

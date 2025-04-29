@@ -33,9 +33,9 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     config: Annotated[
         str,
         Field(
-            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project.",
+            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to p/ci for best coverage while focusing on reducing false positives: https://semgrep.dev/p/ci",
         ),
-    ] = "auto"
+    ] = "p/ci"
 
     exclude: Annotated[
         List[str],

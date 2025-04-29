@@ -255,6 +255,12 @@ class ReportPhase(EnginePhase):
         else:
             ASH_LOGGER.warning("No enabled reporters found matching requested formats")
 
+        # Update main progress
+        self.update_progress(
+            100,
+            f"Reporters complete: {len(results)} reports generated from {len(enabled_reporters)} reporters",
+        )
+
         # Update progress
         self.progress_display.update_task(
             phase=ExecutionPhase.REPORT,
@@ -263,15 +269,7 @@ class ReportPhase(EnginePhase):
             description=f"Reporters complete: {len(results)} reports generated from {len(enabled_reporters)} reporters",
         )
 
-        # Update main progress
-        self.update_progress(
-            100,
-            f"Reporters complete: {len(results)} reports generated from {len(enabled_reporters)} reporters",
-        )
-
-        # # Add summary row
-        # self.add_summary(
-        #     "Complete", f"Generated {len(results)} reports"
-        # )
+        # Add summary row
+        self.add_summary("Complete", f"Generated {len(results)} reports")
 
         return None

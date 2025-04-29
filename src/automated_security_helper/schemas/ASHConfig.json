@@ -83,6 +83,15 @@
       "additionalProperties": true,
       "description": "Main configuration model for Automated Security Helper.",
       "properties": {
+        "ash_plugin_modules": {
+          "default": [],
+          "description": "List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ash Plugin Modules",
+          "type": "array"
+        },
         "build": {
           "$ref": "#/$defs/BuildConfig",
           "description": "Build-time configuration settings"

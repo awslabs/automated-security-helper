@@ -4,25 +4,47 @@
 """Example reporter plugin for ASH."""
 
 from pathlib import Path
+from typing import Annotated, Literal
 
+from pydantic import Field
+
+from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+class ExampleReporterConfigOptions(ReporterOptionsBase):
+    pass
+
+
 class ExampleReporterConfig(ReporterPluginConfigBase):
     """Configuration for the example reporter."""
 
-    pass
+    name: Literal["my-example-reporter"] = "my-example-reporter"
+    enabled: bool = True
+    options: Annotated[
+        ExampleReporterConfigOptions,
+        Field(description="Configure my-example-reporter"),
+    ] = ExampleReporterConfigOptions()
 
 
 @ash_reporter_plugin
 class ExampleReporter(ReporterPluginBase[ExampleReporterConfig]):
     """Example reporter plugin that demonstrates the decorator pattern."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = ExampleReporterConfig()
+        self.context.work_dir = self.context.output_dir.joinpath(
+            ASH_WORK_DIR_NAME
+        ).joinpath(self.config.name)
+        return super().model_post_init(context)
 
     def report(self, model: ASHARPModel) -> str:
         """Generate a report from scan results.

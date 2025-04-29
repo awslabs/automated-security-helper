@@ -17,7 +17,6 @@ from automated_security_helper.reporters.ash_default.report_content_emitter impo
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
-@ash_reporter_plugin
 class MarkdownReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Markdown reporter."""
 
@@ -44,6 +43,7 @@ class MarkdownReporterConfig(ReporterPluginConfigBase):
     options: MarkdownReporterConfigOptions = MarkdownReporterConfigOptions()
 
 
+@ash_reporter_plugin
 class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
     """Formats results as a human-readable Markdown document."""
 

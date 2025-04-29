@@ -347,6 +347,13 @@ class AshConfig(BaseModel):
         ),
     ] = []
 
+    ash_plugin_modules: Annotated[
+        List[str],
+        Field(
+            description="List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.",
+        ),
+    ] = []
+
     max_concurrent_scanners: Annotated[
         int, Field(description="Maximum number of scanners to run concurrently", ge=1)
     ] = 4

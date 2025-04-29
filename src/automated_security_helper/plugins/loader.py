@@ -3,6 +3,7 @@
 import importlib
 from typing import Dict, List, Any
 
+from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -22,57 +23,24 @@ def load_internal_plugins():
             module = importlib.import_module(module_name)
             ASH_LOGGER.debug(f"Loaded internal plugin module: {module_name}")
 
-            # Track loaded plugins
+            # Track loaded plugins - these should already be auto-registered via decorators
             if hasattr(module, "ASH_CONVERTERS"):
                 ASH_LOGGER.debug(
                     f"Found {len(module.ASH_CONVERTERS)} converters in {module_name}"
                 )
                 loaded_plugins["converters"].extend(module.ASH_CONVERTERS)
-                # Register each converter with the plugin manager
-                from automated_security_helper.plugins.decorators import (
-                    ash_converter_plugin,
-                )
-
-                for converter_class in module.ASH_CONVERTERS:
-                    # Apply decorator if not already applied
-                    if not hasattr(converter_class, "ash_plugin_type"):
-                        ASH_LOGGER.debug(
-                            f"Applying ash_converter_plugin decorator to {converter_class.__name__}"
-                        )
-                        converter_class = ash_converter_plugin(converter_class)
 
             if hasattr(module, "ASH_SCANNERS"):
                 ASH_LOGGER.debug(
                     f"Found {len(module.ASH_SCANNERS)} scanners in {module_name}"
                 )
                 loaded_plugins["scanners"].extend(module.ASH_SCANNERS)
-                # Register each scanner with the plugin manager
-                from automated_security_helper.plugins.decorators import (
-                    ash_scanner_plugin,
-                )
-
-                for scanner_class in module.ASH_SCANNERS:
-                    # Apply decorator if not already applied
-                    if not hasattr(scanner_class, "ash_plugin_type"):
-                        ASH_LOGGER.debug(
-                            f"Applying ash_scanner_plugin decorator to {scanner_class.__name__}"
-                        )
-                        scanner_class = ash_scanner_plugin(scanner_class)
 
             if hasattr(module, "ASH_REPORTERS"):
-                loaded_plugins["reporters"].extend(module.ASH_REPORTERS)
-                # Register each reporter with the plugin manager
-                from automated_security_helper.plugins.decorators import (
-                    ash_reporter_plugin,
+                ASH_LOGGER.debug(
+                    f"Found {len(module.ASH_REPORTERS)} reporters in {module_name}"
                 )
-
-                for reporter_class in module.ASH_REPORTERS:
-                    # Apply decorator if not already applied
-                    if not hasattr(reporter_class, "ash_plugin_type"):
-                        ASH_LOGGER.debug(
-                            f"Applying ash_reporter_plugin decorator to {reporter_class.__name__}"
-                        )
-                        reporter_class = ash_reporter_plugin(reporter_class)
+                loaded_plugins["reporters"].extend(module.ASH_REPORTERS)
 
         except ImportError as e:
             ASH_LOGGER.warning(f"Failed to import internal module {module_name}: {e}")
@@ -80,17 +48,52 @@ def load_internal_plugins():
     return loaded_plugins
 
 
-def load_plugins() -> Dict[str, List[Any]]:
+def load_additional_plugin_modules(plugin_modules: List[str] = None):
+    """Load additional plugin modules specified in configuration.
+
+    Args:
+        plugin_modules: List of module paths to import
+    """
+    if not plugin_modules:
+        return
+
+    for module_path in plugin_modules:
+        try:
+            ASH_LOGGER.info(f"Importing additional plugin module: {module_path}")
+            importlib.import_module(module_path)
+        except ImportError as e:
+            ASH_LOGGER.warning(f"Failed to import plugin module {module_path}: {e}")
+
+
+def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
     """Load all ASH plugins, both internal and external.
+
+    Args:
+        plugin_context: Optional plugin context containing configuration
 
     Returns:
         Dict[str, List[Any]]: Dictionary containing lists of loaded plugins by type
     """
+    # Extract additional plugin modules from context if available
+    additional_plugin_modules = []
+    if plugin_context and plugin_context.config:
+        additional_plugin_modules = getattr(
+            plugin_context.config, "ash_plugin_modules", []
+        )
+
+    # Set the context on the plugin manager if provided
+    if plugin_context:
+        ash_plugin_manager.set_context(plugin_context)
+
+    # Load any additional plugin modules specified in configuration
+    if additional_plugin_modules:
+        load_additional_plugin_modules(additional_plugin_modules)
+
     # Load internal plugins
     internal_plugins = load_internal_plugins()
 
     # Load external plugins
-    external_plugins = discover_plugins()
+    external_plugins = discover_plugins(plugin_modules=additional_plugin_modules)
 
     # Combine internal and external plugins
     all_plugins = {
