@@ -149,14 +149,14 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             target_results_dir = self.results_dir.joinpath(target_type)
 
             # Find all files to scan from the scan set
-            scannable = scan_set(
-                source=target,
-                output=(
-                    self.context.output_dir
-                    if target == self.context.source_dir
-                    else self.context.work_dir
-                ),
-                # filter_pattern=r"\.(yaml|yml|json)$",
+            scannable = (
+                [item for item in self.context.work_dir.glob("**/*.*")]
+                if target_type == "converted"
+                else scan_set(
+                    source=self.context.source_dir,
+                    output=self.context.output_dir,
+                    # filter_pattern=r"\.(yaml|yml|json)$",
+                )
             )
             ASH_LOGGER.debug(
                 f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"

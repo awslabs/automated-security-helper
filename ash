@@ -16,6 +16,7 @@ OUTPUT_FORMAT="text"
 DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS:-}"
 DOCKER_RUN_EXTRA_ARGS=""
 ASH_ARGS=""
+COLOR_OUTPUT="true"
 NO_BUILD="NO"
 NO_RUN="NO"
 DEBUG="NO"
@@ -88,10 +89,9 @@ while (("$#")); do
       source "${ASH_ROOT_DIR}/ash-multi" --version
       exit 0
       ;;
-    --finch|-f)
-      # Show colored deprecation warning from entrypoint script and exit 1
-      source "${ASH_ROOT_DIR}/ash-multi" --finch
-      exit 1
+    --no-color | -c)
+      COLOR_OUTPUT="false"
+      ASH_ARGS="${ASH_ARGS} --no-color"
       ;;
     *)
       ASH_ARGS="${ASH_ARGS} $1"
@@ -182,6 +182,11 @@ else
         fi
         # set mount option for output dir
         MOUNT_OUTPUT_DIR="--mount type=bind,source=${OUTPUT_DIR},destination=/out"
+      fi
+      # Capture terminal size if tput is available so the container experience can be improved
+      command -v tput && DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -e COLUMNS=\"`tput cols`\" -e LINES=\"`tput lines`\""
+      if [[ "${COLOR_OUTPUT}" = "true" ]]; then
+        DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
       fi
       echo "MOUNT_SOURCE_DIR resolved: ${MOUNT_SOURCE_DIR}"
       echo "MOUNT_OUTPUT_DIR resolved: ${MOUNT_OUTPUT_DIR}"

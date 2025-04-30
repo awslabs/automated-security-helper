@@ -2,12 +2,59 @@
 
 import os
 from pathlib import Path
+from typing import List
 from automated_security_helper.schemas.sarif_schema_model import (
+    Kind,
+    Level,
     SarifReport,
     ToolComponent,
     PropertyBag,
 )
+from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.schemas.sarif_schema_model import (
+    Suppression,
+    Kind1,
+)
+
+
+def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
+    """
+    Sanitize a URI in a SARIF report.
+
+    Args:
+        uri: The URI to sanitize
+        source_dir_path: The source directory path object
+        source_dir_str: The source directory string with trailing separator
+
+    Returns:
+        The sanitized URI
+    """
+    if not uri:
+        return uri
+
+    # Remove file:// prefix if present
+    if uri.startswith("file://"):
+        uri = uri[7:]
+
+    # Make path relative to source directory
+    try:
+        # Try to resolve the path and make it relative
+        path_obj = Path(uri)
+        if path_obj.is_absolute():
+            try:
+                uri = str(path_obj.relative_to(source_dir_path))
+            except ValueError:
+                # If the path is not relative to source_dir, keep it as is
+                pass
+        elif uri.startswith(source_dir_str):
+            uri = uri[len(source_dir_str) :]
+    except Exception as e:
+        ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
+
+    # Replace backslashes with forward slashes for consistency
+    uri = uri.replace("\\", "/")
+    return uri
 
 
 def sanitize_sarif_paths(
@@ -45,29 +92,7 @@ def sanitize_sarif_paths(
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
                         if uri:
-                            # Remove file:// prefix if present
-                            if uri.startswith("file://"):
-                                uri = uri[7:]
-
-                            # Make path relative to source directory
-                            try:
-                                # Try to resolve the path and make it relative
-                                path_obj = Path(uri)
-                                if path_obj.is_absolute():
-                                    try:
-                                        uri = str(path_obj.relative_to(source_dir_path))
-                                    except ValueError:
-                                        # If the path is not relative to source_dir, keep it as is
-                                        pass
-                                elif uri.startswith(source_dir_str):
-                                    uri = uri[len(source_dir_str) :]
-                            except Exception as e:
-                                ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
-
-                            # Replace backslashes with forward slashes for consistency
-                            uri = uri.replace("\\", "/")
-
-                            # Update the URI
+                            uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
                             location.physicalLocation.root.artifactLocation.uri = uri
 
             # Process related locations if present
@@ -79,55 +104,13 @@ def sanitize_sarif_paths(
                     ):
                         uri = related.physicalLocation.root.artifactLocation.uri
                         if uri:
-                            # Remove file:// prefix if present
-                            if uri.startswith("file://"):
-                                uri = uri[7:]
-
-                            # Make path relative to source directory
-                            try:
-                                # Try to resolve the path and make it relative
-                                path_obj = Path(uri)
-                                if path_obj.is_absolute():
-                                    try:
-                                        uri = str(path_obj.relative_to(source_dir_path))
-                                    except ValueError:
-                                        # If the path is not relative to source_dir, keep it as is
-                                        pass
-                                elif uri.startswith(source_dir_str):
-                                    uri = uri[len(source_dir_str) :]
-                            except Exception as e:
-                                ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
-
-                            # Replace backslashes with forward slashes for consistency
-                            uri = uri.replace("\\", "/")
-
-                            # Update the URI
+                            uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
                             related.physicalLocation.root.artifactLocation.uri = uri
 
             # Process analysis target if present
             if result.analysisTarget and result.analysisTarget.uri:
                 uri = result.analysisTarget.uri
-                if uri.startswith("file://"):
-                    uri = uri[7:]
-
-                try:
-                    # Try to resolve the path and make it relative
-                    path_obj = Path(uri)
-                    if path_obj.is_absolute():
-                        try:
-                            uri = str(path_obj.relative_to(source_dir_path))
-                        except ValueError:
-                            # If the path is not relative to source_dir, keep it as is
-                            pass
-                    elif uri.startswith(source_dir_str):
-                        uri = uri[len(source_dir_str) :]
-                except Exception as e:
-                    ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
-
-                # Replace backslashes with forward slashes for consistency
-                uri = uri.replace("\\", "/")
-
-                # Update the URI
+                uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
                 result.analysisTarget.uri = uri
 
     return sarif_report
@@ -215,4 +198,106 @@ def attach_scanner_details(
                 # Add scanner details object to result properties
                 setattr(result.properties, "scanner_details", scanner_details)
 
+    return sarif_report
+
+
+def _path_matches_pattern(path: str, pattern: str) -> bool:
+    """
+    Check if a path matches a pattern.
+
+    Args:
+        path: The path to check
+        pattern: The pattern to match against
+
+    Returns:
+        True if the path matches the pattern, False otherwise
+    """
+    import fnmatch
+
+    # Normalize paths for comparison
+    path = path.replace("\\", "/")
+    pattern = pattern.replace("\\", "/") + "/**/*.*"
+
+    # Check for exact match
+    if path == pattern:
+        return True
+    elif path in pattern:
+        return True
+
+    # Check for directory match (e.g., "dir/" should match "dir/file.txt")
+    if pattern.endswith("/") and path.startswith(pattern):
+        return True
+
+    # Use fnmatch for glob-style pattern matching
+    return fnmatch.fnmatch(path, pattern)
+
+
+def apply_suppressions_to_sarif(
+    sarif_report: SarifReport, ignore_paths: List[IgnorePathWithReason] = []
+) -> SarifReport:
+    """
+    Apply suppressions to a SARIF report based on global ignore paths.
+
+    Args:
+        sarif_report: The SARIF report to modify
+        ignore_paths: List of paths to ignore with reasons
+
+    Returns:
+        The modified SARIF report with suppressions applied
+    """
+    if (
+        not sarif_report
+        or not sarif_report.runs
+        or not ignore_paths
+        or len(ignore_paths) == 0
+    ):
+        return sarif_report
+
+    for run in sarif_report.runs:
+        if not run.results:
+            continue
+
+        updated_results = []
+        for result in run.results:
+            # Check if result location matches any ignore path
+            if result.locations:
+                for location in result.locations:
+                    if (
+                        location.physicalLocation
+                        and location.physicalLocation.root.artifactLocation
+                    ):
+                        uri = location.physicalLocation.root.artifactLocation.uri
+                        if uri:
+                            for ignore_path in ignore_paths:
+                                # Check if the URI matches the ignore path pattern
+                                if _path_matches_pattern(uri, ignore_path.path):
+                                    # Initialize suppressions list if it doesn't exist
+                                    if not result.suppressions:
+                                        result.suppressions = []
+
+                                    # Add suppression
+                                    ASH_LOGGER.verbose(
+                                        f"Suppressing rule '{result.ruleId}' on location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: {ignore_path.reason}"
+                                    )
+                                    suppression = Suppression(
+                                        kind=Kind1.external,
+                                        justification=f"(ASH) Suppressing finding on uri '{uri}' based on path match against pattern '{ignore_path.path}' with global reason: {ignore_path.reason}",
+                                    )
+                                    if len(result.suppressions) == 0:
+                                        result.suppressions.append(suppression)
+                                    else:
+                                        ASH_LOGGER.trace(
+                                            f"Multiple suppressions found for rule '{result.ruleId}' on location '{uri}'. Only the first suppression will be applied."
+                                        )
+                                    result.level = Level.none
+                                    result.kind = Kind.informational
+                                    break  # No need to check other ignore paths
+                                # else:
+                                #     ASH_LOGGER.verbose(
+                                #         f"Rule '{result.ruleId}' on location '{uri}' does not match global ignore path '{ignore_path.path}'"
+                                #     )
+
+            # Add the result to the updated results list
+            updated_results.append(result)
+        sarif_report.runs[0].results = updated_results
     return sarif_report

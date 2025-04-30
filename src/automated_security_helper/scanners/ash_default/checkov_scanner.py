@@ -255,7 +255,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             results_file.parent.mkdir(exist_ok=True, parents=True)
 
             # Extend the skip-paths args with the global exclusion list
-            self.config.options.skip_path.extend(global_ignore_paths)
+            # self.config.options.skip_path.extend(global_ignore_paths)
             final_args = self._resolve_arguments(
                 target=target,
                 # We want to use the parent here, not the results_file, as Checkov is expecting the output

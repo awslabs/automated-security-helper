@@ -19,6 +19,7 @@ permissions:
   statuses: write
 env:
   PYTHON_VERSION: "3.12"
+  COLUMNS: 160
 jobs:
   build:
     # strategy:

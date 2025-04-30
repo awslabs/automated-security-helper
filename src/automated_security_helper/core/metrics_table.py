@@ -28,7 +28,7 @@ def generate_metrics_table(
         Table: Rich table with scanner metrics
     """
     # Create a table
-    table = Table(title="ASH Scan Results Summary", expand=True, min_width=120)
+    table = Table(title="ASH Scan Results Summary", expand=True)
 
     # Add columns
     table.add_column("Scanner", style="cyan")
@@ -260,7 +260,9 @@ def display_metrics_table(
     """
     try:
         # Create a console with color settings that respect the --no-color flag
-        console = Console(color_system="auto" if use_color else None)
+        console = Console(
+            color_system="auto" if use_color else None, force_terminal=use_color
+        )
 
         # Generate the metrics table
         table = generate_metrics_table(completed_scanners, asharp_model, scan_results)
@@ -272,7 +274,9 @@ def display_metrics_table(
             "- Result: ✅ Passed = No findings at or above threshold, ❌ Failed = Findings at or above threshold\n"
             "- Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
         )
-        help_panel = Panel(help_text, title="Results Guide", border_style="blue")
+        help_panel = Panel(
+            help_text, title="Results Guide", border_style="blue", expand=True
+        )
 
         # Print everything with some spacing
         console.print(help_panel)

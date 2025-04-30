@@ -181,7 +181,7 @@ class ConvertPhase(EnginePhase):
                 # Call convert method directly - converters should handle finding their own targets
                 ASH_LOGGER.debug(f"Calling convert() on {display_name}")
                 # Pass the source directory as the target
-                convert_result = plugin_instance.convert(self.plugin_context.source_dir)
+                convert_result = plugin_instance.convert()
 
                 if convert_result:
                     if isinstance(convert_result, list):

@@ -31,6 +31,8 @@ class ConverterPluginBase(BaseModel, Generic[T]):
 
     config: T | ConverterPluginConfigBase | None = None
     context: PluginContext | None = None
+    results_dir: Path | None = None
+    tool_version: str | None = None
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
@@ -44,6 +46,14 @@ class ConverterPluginBase(BaseModel, Generic[T]):
             f"Converter {self.config.name if self.config else self.__class__.__name__} initialized with source_dir={self.context.source_dir}, output_dir={self.context.output_dir}"
         )
         return self
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = ConverterPluginConfigBase()
+        self.results_dir = self.context.work_dir.joinpath(
+            self.config.name or self.__class__.__name__
+        )
+        return super().model_post_init(context)
 
     def configure(
         self,

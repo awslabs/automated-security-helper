@@ -11,7 +11,6 @@ import zipfile
 from pydantic import Field
 
 from automated_security_helper.core.constants import (
-    ASH_WORK_DIR_NAME,
     KNOWN_SCANNABLE_EXTENSIONS,
 )
 from automated_security_helper.base.converter_plugin import (
@@ -46,11 +45,6 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     """Converter implementation for Archive file extraction."""
 
     def model_post_init(self, context):
-        self.context.work_dir = self.context.output_dir.joinpath(
-            ASH_WORK_DIR_NAME
-        ).joinpath("archive")
-        if self.config is None:
-            self.config = ArchiveConverterConfig()
         return super().model_post_init(context)
 
     def validate(self):
@@ -78,7 +72,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 filtered_members.append(member)
         return filtered_members
 
-    def convert(self, target: Path | str = None) -> List[Path]:
+    def convert(self) -> List[Path]:
         """Convert archive files by extracting their contents.
 
         Args:
@@ -92,34 +86,16 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             f"Searching for archive files in search_path within the ASH scan set: {self.context.source_dir}"
         )
 
-        # If target is provided and it's a directory, find archives within it
-        if target and Path(target).is_dir():
-            ASH_LOGGER.debug(f"Target is a directory: {target}")
-            # Find all archive files to scan from the scan set
-            archive_files = scan_set(
-                source=self.context.source_dir,
-                output=self.context.output_dir,
-            )
-            archive_files = [
-                f.strip()
-                for f in archive_files
-                if f.strip().split(".")[-1] in ["zip", "tar", "gz"]
-            ]
-        # If target is provided and it's a file, only convert that file if it's an archive
-        elif target and Path(target).is_file():
-            ASH_LOGGER.debug(f"Target is a file: {target}")
-            archive_files = [str(target)]
-        else:
-            # Find all archive files to scan from the scan set
-            archive_files = scan_set(
-                source=self.context.source_dir,
-                output=self.context.output_dir,
-            )
-            archive_files = [
-                f.strip()
-                for f in archive_files
-                if f.strip().split(".")[-1] in ["zip", "tar", "gz"]
-            ]
+        # Find all archive files to scan from the scan set
+        archive_files = scan_set(
+            source=self.context.source_dir,
+            output=self.context.output_dir,
+        )
+        archive_files = [
+            f.strip()
+            for f in archive_files
+            if f.strip().split(".")[-1] in ["zip", "tar", "gz"]
+        ]
 
         ASH_LOGGER.debug(f"Found {len(archive_files)} files to convert in scan set.")
         results: List[Path] = []
@@ -131,6 +107,8 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             )
             return results
 
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+
         for archive_file in archive_files:
             try:
                 # Skip directories
@@ -140,9 +118,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
                 short_archive_file = get_shortest_name(archive_file)
                 normalized_archive_file = get_normalized_filename(short_archive_file)
-                target_path = self.context.work_dir.joinpath(self.config.name).joinpath(
-                    normalized_archive_file
-                )
+                target_path = self.results_dir.joinpath(normalized_archive_file)
                 ASH_LOGGER.verbose(
                     f"Extracting {archive_file} contents to target_path: {Path(target_path).as_posix()}"
                 )

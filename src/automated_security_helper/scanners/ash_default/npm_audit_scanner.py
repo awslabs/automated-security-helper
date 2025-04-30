@@ -266,14 +266,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             results_file = target_results_dir.joinpath("results.json")
             results_file.parent.mkdir(exist_ok=True, parents=True)
 
-            # Find all JSON/YAML files to scan from the scan set
-            scannable = scan_set(
-                source=self.context.work_dir
+            # Find all files to scan from the scan set
+            scannable = (
+                [item for item in self.context.work_dir.glob("**/*.*")]
                 if target_type == "converted"
-                else self.context.source_dir,
-                output=self.context.work_dir
-                if target_type == "converted"
-                else self.context.output_dir,
+                else scan_set(
+                    source=self.context.source_dir,
+                    output=self.context.output_dir,
+                    # filter_pattern=r"\.(yaml|yml|json)$",
+                )
             )
             scannable = [
                 f.strip()
