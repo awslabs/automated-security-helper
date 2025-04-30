@@ -284,12 +284,11 @@ def apply_suppressions_to_sarif(
                                         kind=Kind1.external,
                                         justification=f"(ASH) Suppressing finding on uri '{uri}' based on path match against pattern '{ignore_path.path}' with global reason: {ignore_path.reason}",
                                         state=State.accepted,
-                                        guid=f"ash.global_settings.ignore_path.{ignore_path.path}.{result.ruleId}",
                                     )
                                     if len(result.suppressions) == 0:
                                         result.suppressions.append(suppression)
                                     else:
-                                        ASH_LOGGER.warning(
+                                        ASH_LOGGER.trace(
                                             f"Multiple suppressions found for rule '{result.ruleId}' on location '{uri}'. Only the first suppression will be applied."
                                         )
                                     result.level = Level.none
