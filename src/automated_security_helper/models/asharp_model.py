@@ -21,6 +21,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
 # Import AshConfig only for type checking to avoid circular imports
 if TYPE_CHECKING:
@@ -455,7 +456,10 @@ class ASHARPModel(BaseModel):
             report: The report to add. Can be a SarifReport, CycloneDXReport, or a JSON string.
         """
         if isinstance(report, SarifReport):
-            self.sarif.merge_sarif_report(report)
+            sanitized_sarif = apply_suppressions_to_sarif(
+                report, self.ash_config.global_settings.ignore_paths or []
+            )
+            self.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(report, CycloneDXReport):
             self.sbom = report
         elif isinstance(report, str):

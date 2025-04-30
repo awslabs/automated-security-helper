@@ -279,13 +279,13 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             results_file.parent.mkdir(exist_ok=True, parents=True)
 
             # Add global ignore paths as exclude patterns
-            for ignore_path in global_ignore_paths:
-                self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--exclude",
-                        value=ignore_path.path,
-                    )
-                )
+            # for ignore_path in global_ignore_paths:
+            #     self.args.extra_args.append(
+            #         ToolExtraArg(
+            #             key="--exclude",
+            #             value=ignore_path.path,
+            #         )
+            #     )
 
             final_args = self._resolve_arguments(
                 target=target,

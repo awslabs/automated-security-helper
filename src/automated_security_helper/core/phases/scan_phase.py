@@ -13,7 +13,10 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sarif_utils import sanitize_sarif_paths
+from automated_security_helper.utils.sarif_utils import (
+    sanitize_sarif_paths,
+    apply_suppressions_to_sarif,
+)
 
 
 """Implementation of the Scan phase."""
@@ -362,6 +365,20 @@ class ScanPhase(EnginePhase):
                     )
 
                     if isinstance(raw_results, SarifReport):
+                        # Sanitize paths in SARIF report to be relative to source directory
+                        raw_results = sanitize_sarif_paths(
+                            raw_results, self.plugin_context.source_dir
+                        )
+
+                        # Apply suppressions based on global ignore paths
+                        ASH_LOGGER.trace(
+                            f"Ignoring paths: {self.plugin_context.config.global_settings.ignore_paths}"
+                        )
+                        raw_results = apply_suppressions_to_sarif(
+                            raw_results,
+                            self.plugin_context.config.global_settings.ignore_paths
+                            or [],
+                        )
                         severity_counts, finding_count = (
                             self._extract_metrics_from_sarif(raw_results)
                         )
@@ -663,6 +680,16 @@ class ScanPhase(EnginePhase):
             sanitized_sarif = sanitize_sarif_paths(
                 results.raw_results, self.plugin_context.source_dir
             )
+
+            # Apply suppressions based on global ignore paths
+            ASH_LOGGER.trace(
+                f"Ignoring paths: {self.plugin_context.config.global_settings.ignore_paths}"
+            )
+            sanitized_sarif = apply_suppressions_to_sarif(
+                sanitized_sarif,
+                self.plugin_context.config.global_settings.ignore_paths or [],
+            )
+
             # Attach scanner details to the SARIF report
             scanner_version = None
 
