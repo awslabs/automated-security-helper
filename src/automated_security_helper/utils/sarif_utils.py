@@ -282,7 +282,7 @@ def apply_suppressions_to_sarif(
                                     )
                                     suppression = Suppression(
                                         kind=Kind1.external,
-                                        justification=ignore_path.reason,
+                                        justification=f"(ASH) Suppressing finding on uri '{uri}' based on path match against pattern '{ignore_path.path}' with global reason: {ignore_path.reason}",
                                         state=State.accepted,
                                         guid=f"ash.global_settings.ignore_path.{ignore_path.path}.{result.ruleId}",
                                     )
