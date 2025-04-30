@@ -15,7 +15,6 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.schemas.sarif_schema_model import (
     Suppression,
     Kind1,
-    State,
 )
 
 
@@ -283,7 +282,6 @@ def apply_suppressions_to_sarif(
                                     suppression = Suppression(
                                         kind=Kind1.external,
                                         justification=f"(ASH) Suppressing finding on uri '{uri}' based on path match against pattern '{ignore_path.path}' with global reason: {ignore_path.reason}",
-                                        state=State.accepted,
                                     )
                                     if len(result.suppressions) == 0:
                                         result.suppressions.append(suppression)
