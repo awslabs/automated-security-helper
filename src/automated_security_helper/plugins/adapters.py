@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from pathlib import Path
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -27,11 +28,12 @@ def register_converter_adapters(converter_plugins):
             )
             if plugin.validate():
                 plugin.context = plugin_context
+                plugin.context.source_dir = Path(target)
                 try:
                     ASH_LOGGER.debug(
                         f"Calling convert() on {plugin.__class__.__name__}"
                     )
-                    converted = plugin.convert(target)
+                    converted = plugin.convert()
                     if converted:
                         ASH_LOGGER.debug(
                             f"Converter {plugin.__class__.__name__} returned {len(converted)} converted files"

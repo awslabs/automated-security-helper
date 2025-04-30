@@ -136,18 +136,15 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         except ScannerError as exc:
             raise exc
 
-        # Find all JSON/YAML files to scan from the scan set
-        scannable = scan_set(
-            source=(
-                self.context.work_dir
-                if target_type == "converted"
-                else self.context.source_dir
-            ),
-            output=(
-                self.context.work_dir
-                if target_type == "converted"
-                else self.context.output_dir
-            ),
+        # Find all files to scan from the scan set
+        scannable = (
+            [item for item in self.context.work_dir.glob("**/*.*")]
+            if target_type == "converted"
+            else scan_set(
+                source=self.context.source_dir,
+                output=self.context.output_dir,
+                # filter_pattern=r"\.(yaml|yml|json)$",
+            )
         )
         ASH_LOGGER.debug(
             f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"

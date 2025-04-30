@@ -52,6 +52,8 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
 
     # Replace backslashes with forward slashes for consistency
     uri = uri.replace("\\", "/")
+    if uri.startswith("/"):
+        uri = uri[1:]  # Remove leading slash if present
 
     return uri
 

@@ -102,9 +102,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             self.config = DetectSecretsScannerConfig()
         self.command = "detect-secrets"
         self.tool_version = version("detect-secrets")
-        super().model_post_init(context)
-
         self._secrets_collection = SecretsCollection()
+        super().model_post_init(context)
 
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -195,27 +194,37 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ASH_LOGGER.debug(f"config: {config}")
 
         try:
+            self._secrets_collection = SecretsCollection()
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
             self._resolve_arguments(target=target, results_file=target_results_dir)
 
-            if self.config.options.baseline_file is not None:
+            if (
+                target_type == "source"
+                and self.config.options.baseline_file is not None
+            ):
                 with open(self.config.options.baseline_file, "r") as f:
                     self._secrets_collection = SecretsCollection.load_from_baseline(
                         baseline=json.load(f),
                     )
                     f.close()
 
-            self._secrets_collection.root = Path(target).absolute()
+                self._secrets_collection.root = Path(target).absolute()
             # Find all files to scan from the scan set
-            scannable = scan_set(
-                source=target,
-                output=self.context.output_dir,  # Always use the configured output_dir
-                # filter_pattern=r"\.(yaml|yml|json)$",
+            scannable = (
+                [item for item in self.context.work_dir.glob("**/*.*")]
+                if target_type == "converted"
+                else scan_set(
+                    source=self.context.source_dir,
+                    output=self.context.output_dir,
+                    # filter_pattern=r"\.(yaml|yml|json)$",
+                )
             )
-            ASH_LOGGER.debug(
-                f"Found {len(scannable)} files in scan set to scan with detect-secrets"
+            self._scanner_log(
+                f"Found {len(scannable)} files in scan set to scan with detect-secrets",
+                level=15,
+                target_type=target_type,
             )
             with transient_settings(
                 self.config.options.scan_settings.model_dump(

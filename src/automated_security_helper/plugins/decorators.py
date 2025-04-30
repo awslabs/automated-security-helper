@@ -17,6 +17,7 @@ def ash_plugin(
 
     Args:
         cls: The class to decorate
+        plugin_type: Type of plugin ("converter", "scanner", or "reporter")
         auto_register: Whether to automatically register the plugin with the plugin manager
 
     Returns:
@@ -28,9 +29,17 @@ def ash_plugin(
         if auto_register:
             # Get the module path of the class
             module_path = cls.__module__
-            ASH_LOGGER.info(
-                f"Auto-registering {plugin_type} plugin {cls.__name__} from {module_path}"
-            )
+            log_level = "debug" if plugin_type == "reporter" else "info"
+
+            if log_level == "info":
+                ASH_LOGGER.info(
+                    f"Auto-registering {plugin_type} plugin {cls.__name__} from {module_path}"
+                )
+            else:
+                ASH_LOGGER.debug(
+                    f"Auto-registering {plugin_type} plugin {cls.__name__} from {module_path}"
+                )
+
             plug_mod_ver = None
             try:
                 if "." in module_path:
@@ -53,12 +62,13 @@ def ash_plugin(
             )
         return cls
 
-    # Handle both @ash_converter_plugin and @ash_converter_plugin(auto_register=True)
+    # Handle both @ash_plugin and @ash_plugin(plugin_type="converter", auto_register=True)
     if cls is None:
         return wrap
     return wrap(cls)
 
 
+# Legacy decorators that use the general ash_plugin decorator
 def ash_converter_plugin(cls=None, *, auto_register=True):
     """Decorator to register a converter plugin with ASH
 
@@ -69,29 +79,11 @@ def ash_converter_plugin(cls=None, *, auto_register=True):
     Returns:
         The decorated class
     """
-
-    def wrap(cls):
-        cls.ash_plugin_type = "converter"
-        if auto_register:
-            # Get the module path of the class
-            module_path = cls.__module__
-            ASH_LOGGER.info(
-                f"Auto-registering converter plugin {cls.__name__} from {module_path}"
-            )
-
-            ash_plugin_manager.register_plugin_module(
-                plugin_type="converter",
-                plugin_module_class=cls,
-                plugin_module_path=module_path,
-                plugin_module_version=getattr(cls, "__version__", None),
-                plugin_module_enabled=True,
-            )
-        return cls
-
-    # Handle both @ash_converter_plugin and @ash_converter_plugin(auto_register=True)
     if cls is None:
-        return wrap
-    return wrap(cls)
+        return lambda c: ash_plugin(
+            c, plugin_type="converter", auto_register=auto_register
+        )
+    return ash_plugin(cls, plugin_type="converter", auto_register=auto_register)
 
 
 def ash_scanner_plugin(cls=None, *, auto_register=True):
@@ -104,29 +96,11 @@ def ash_scanner_plugin(cls=None, *, auto_register=True):
     Returns:
         The decorated class
     """
-
-    def wrap(cls):
-        cls.ash_plugin_type = "scanner"
-        if auto_register:
-            # Get the module path of the class
-            module_path = cls.__module__
-            ASH_LOGGER.info(
-                f"Auto-registering scanner plugin {cls.__name__} from {module_path}"
-            )
-
-            ash_plugin_manager.register_plugin_module(
-                plugin_type="scanner",
-                plugin_module_class=cls,
-                plugin_module_path=module_path,
-                plugin_module_version=getattr(cls, "__version__", None),
-                plugin_module_enabled=True,
-            )
-        return cls
-
-    # Handle both @ash_scanner_plugin and @ash_scanner_plugin(auto_register=True)
     if cls is None:
-        return wrap
-    return wrap(cls)
+        return lambda c: ash_plugin(
+            c, plugin_type="scanner", auto_register=auto_register
+        )
+    return ash_plugin(cls, plugin_type="scanner", auto_register=auto_register)
 
 
 def ash_reporter_plugin(cls=None, *, auto_register=True):
@@ -139,29 +113,11 @@ def ash_reporter_plugin(cls=None, *, auto_register=True):
     Returns:
         The decorated class
     """
-
-    def wrap(cls):
-        cls.ash_plugin_type = "reporter"
-        if auto_register:
-            # Get the module path of the class
-            module_path = cls.__module__
-            ASH_LOGGER.debug(
-                f"Auto-registering reporter plugin {cls.__name__} from {module_path}"
-            )
-
-            ash_plugin_manager.register_plugin_module(
-                plugin_type="reporter",
-                plugin_module_class=cls,
-                plugin_module_path=module_path,
-                plugin_module_version=getattr(cls, "__version__", None),
-                plugin_module_enabled=True,
-            )
-        return cls
-
-    # Handle both @ash_reporter_plugin and @ash_reporter_plugin(auto_register=True)
     if cls is None:
-        return wrap
-    return wrap(cls)
+        return lambda c: ash_plugin(
+            c, plugin_type="reporter", auto_register=auto_register
+        )
+    return ash_plugin(cls, plugin_type="reporter", auto_register=auto_register)
 
 
 def event_subscriber(event_type):

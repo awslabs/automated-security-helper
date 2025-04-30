@@ -42,7 +42,7 @@ class TestConverterPlugin:
         def validate(self) -> bool:
             return True
 
-        def convert(self, target: Path | str) -> list[Path]:
+        def convert(self) -> list[Path]:
             return [Path("test.txt")]
 
     def test_setup_paths_default(self, test_plugin_context):
@@ -103,7 +103,7 @@ class TestConverterPlugin:
     def test_convert_implementation(self, test_plugin_context):
         """Test convert method implementation."""
         converter = self.DummyConverter(context=test_plugin_context)
-        result = converter.convert("test.txt")
+        result = converter.convert()
         assert isinstance(result, list)
         assert all(isinstance(p, Path) for p in result)
 
