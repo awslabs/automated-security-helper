@@ -4,10 +4,10 @@ import json
 import logging
 import os
 from pathlib import Path
-import shutil
 from typing import Annotated, List, Literal
+from typing_extensions import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
@@ -29,6 +29,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.download_utils import (
+    create_url_download_command,
+    get_opengrep_url,
+)
 
 
 class OpengrepScannerConfigOptions(ScannerOptionsBase):
@@ -74,6 +78,27 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = False
 
+    patterns: Annotated[
+        List[str],
+        Field(
+            description="Patterns to search for with OpenGrep.",
+        ),
+    ] = []
+
+    version: Annotated[
+        str,
+        Field(
+            description="Version of OpenGrep to use.",
+        ),
+    ] = "v1.1.5"
+
+    linux_type: Annotated[
+        str,
+        Field(
+            description="Type of Linux build to use (manylinux or musllinux).",
+        ),
+    ] = "manylinux"
+
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["opengrep"] = "opengrep"
@@ -102,6 +127,79 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         )
         super().model_post_init(context)
 
+    @model_validator(mode="after")
+    def setup_opengrep_commands(self) -> Self:
+        """Set up custom installation commands for opengrep."""
+        # Get version and linux_type from config
+        version = self.config.options.version
+        linux_type = self.config.options.linux_type
+
+        # Linux
+        if "linux" not in self.custom_install_commands:
+            self.custom_install_commands["linux"] = {}
+
+        self.custom_install_commands["linux"]["amd64"] = [
+            create_url_download_command(
+                url=get_opengrep_url(
+                    "linux", "amd64", version=version, linux_type=linux_type
+                ),
+                destination="/usr/local/bin",
+                rename_to="opengrep",
+            )
+        ]
+
+        self.custom_install_commands["linux"]["arm64"] = [
+            create_url_download_command(
+                url=get_opengrep_url(
+                    "linux", "arm64", version=version, linux_type=linux_type
+                ),
+                destination="/usr/local/bin",
+                rename_to="opengrep",
+            )
+        ]
+
+        # macOS
+        if "darwin" not in self.custom_install_commands:
+            self.custom_install_commands["darwin"] = {}
+
+        self.custom_install_commands["darwin"]["amd64"] = [
+            create_url_download_command(
+                url=get_opengrep_url("darwin", "amd64", version=version),
+                destination="/usr/local/bin",
+                rename_to="opengrep",
+            )
+        ]
+
+        self.custom_install_commands["darwin"]["arm64"] = [
+            create_url_download_command(
+                url=get_opengrep_url("darwin", "arm64", version=version),
+                destination="/usr/local/bin",
+                rename_to="opengrep",
+            )
+        ]
+
+        # Windows
+        if "windows" not in self.custom_install_commands:
+            self.custom_install_commands["windows"] = {}
+
+        self.custom_install_commands["windows"]["amd64"] = [
+            create_url_download_command(
+                url=get_opengrep_url("windows", "amd64", version=version),
+                destination="C:\\Windows\\System32",
+                rename_to="opengrep.exe",
+            )
+        ]
+
+        self.custom_install_commands["windows"]["arm64"] = [
+            create_url_download_command(
+                url=get_opengrep_url("windows", "arm64", version=version),
+                destination="C:\\Windows\\System32",
+                rename_to="opengrep.exe",
+            )
+        ]
+
+        return self
+
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.
 
@@ -111,7 +209,28 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        return shutil.which(self.command) is not None
+        # Check if opengrep is installed
+        try:
+            result = self._run_subprocess(
+                [self.command, "--version"],
+                stdout_preference="return",
+                stderr_preference="return",
+            )
+            if result.get("returncode", 1) != 0:
+                self._scanner_log(
+                    f"OpenGrep is not installed or not working properly: {result.get('stderr', '')}",
+                    level=logging.ERROR,
+                )
+                return False
+
+            self.tool_version = result.get("stdout", "").strip()
+            self._scanner_log(
+                f"OpenGrep version: {self.tool_version}", level=logging.INFO
+            )
+            return True
+        except Exception as e:
+            self._scanner_log(f"Error validating OpenGrep: {e}", level=logging.ERROR)
+            return False
 
     def _process_config_options(self):
         ash_stargrep_rules = [
@@ -196,22 +315,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 )
             )
 
-        # Add legacy flag for compatibility
-        # self.args.extra_args.append(
-        #     ToolExtraArg(
-        #         key="--legacy",
-        #         value="",
-        #     )
-        # )
-
-        # # Add error flag to return non-zero exit code on findings
-        # self.args.extra_args.append(
-        #     ToolExtraArg(
-        #         key="--error",
-        #         value="",
-        #     )
-        # )
-
         # Add exclude patterns
         for exclude_pattern in self.config.options.exclude:
             self.args.extra_args.append(
@@ -246,6 +349,20 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 value="",
             )
         )
+
+        # Add patterns if using direct pattern search mode
+        if self.config.options.patterns:
+            # Switch to pattern search mode
+            self.args.extra_args = [ToolExtraArg(key="--json", value="")]
+
+            # Add patterns
+            for pattern in self.config.options.patterns:
+                self.args.extra_args.append(
+                    ToolExtraArg(
+                        key="--pattern",
+                        value=pattern,
+                    )
+                )
 
         return super()._process_config_options()
 
@@ -295,24 +412,17 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         try:
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
-            results_file.parent.mkdir(exist_ok=True, parents=True)
+            target_results_dir.mkdir(exist_ok=True, parents=True)
 
-            # Add global ignore paths as exclude patterns
-            # for ignore_path in global_ignore_paths:
-            #     self.args.extra_args.append(
-            #         ToolExtraArg(
-            #             key="--exclude",
-            #             value=ignore_path.path,
-            #         )
-            #     )
+            # If using pattern search mode, use a different results file
+            if self.config.options.patterns:
+                results_file = target_results_dir.joinpath("opengrep_results.json")
 
             final_args = self._resolve_arguments(
                 target=target,
                 results_file=results_file,
             )
 
-            # Opengrep expects the target directory at the end of the command
-            # final_args.append(str(target))
             self._scanner_log(
                 f"Running command: {' '.join(final_args)}",
                 target_type=target_type,
@@ -356,48 +466,82 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 target_type=target_type,
             )
 
-            opengrep_results = {}
-            if Path(results_file).exists():
-                with open(results_file, "r") as f:
-                    opengrep_results = json.load(f)
-                try:
-                    sarif_report: SarifReport = SarifReport.model_validate(
-                        opengrep_results
-                    )
-                    sarif_report.runs[0].invocations = [
-                        Invocation(
-                            commandLine=" ".join(final_args),
-                            arguments=final_args[1:],
-                            startTimeUtc=self.start_time,
-                            endTimeUtc=self.end_time,
-                            executionSuccessful=True,
-                            exitCode=self.exit_code,
-                            exitCodeDescription="\n".join(self.errors),
-                            workingDirectory=ArtifactLocation(
-                                uri=get_shortest_name(input=target),
-                            ),
-                            properties=PropertyBag(
-                                tool=sarif_report.runs[0].tool,
-                            ),
+            # Handle different result formats based on mode
+            if self.config.options.patterns:
+                # Pattern search mode - parse JSON results
+                if results_file.exists():
+                    try:
+                        with open(results_file, "r") as f:
+                            results_data = json.load(f)
+
+                        # Convert OpenGrep results to findings format
+                        findings = []
+                        for match in results_data.get("matches", []):
+                            findings.append(
+                                {
+                                    "file": match.get("file", ""),
+                                    "line": match.get("line", 0),
+                                    "column": match.get("column", 0),
+                                    "message": f"Found pattern: {match.get('pattern', '')}",
+                                    "severity": "MEDIUM",  # Default severity
+                                    "code": match.get("content", ""),
+                                }
+                            )
+                        return {"findings": findings}
+                    except Exception as e:
+                        self._scanner_log(
+                            f"Error parsing OpenGrep results: {e}", level=logging.ERROR
                         )
-                    ]
-                    return sarif_report
-                except Exception as e:
+                        return {"findings": []}
+                else:
                     self._scanner_log(
-                        f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
+                        f"No results file found at {results_file}",
+                        level=logging.WARNING,
+                    )
+                    return {"findings": []}
+            else:
+                # SARIF mode - parse SARIF results
+                if Path(results_file).exists():
+                    with open(results_file, "r") as f:
+                        opengrep_results = json.load(f)
+                    try:
+                        sarif_report: SarifReport = SarifReport.model_validate(
+                            opengrep_results
+                        )
+                        sarif_report.runs[0].invocations = [
+                            Invocation(
+                                commandLine=" ".join(final_args),
+                                arguments=final_args[1:],
+                                startTimeUtc=self.start_time,
+                                endTimeUtc=self.end_time,
+                                executionSuccessful=True,
+                                exitCode=self.exit_code,
+                                exitCodeDescription="\n".join(self.errors),
+                                workingDirectory=ArtifactLocation(
+                                    uri=get_shortest_name(input=target),
+                                ),
+                                properties=PropertyBag(
+                                    tool=sarif_report.runs[0].tool,
+                                ),
+                            )
+                        ]
+                        return sarif_report
+                    except Exception as e:
+                        self._scanner_log(
+                            f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
+                            target_type=target_type,
+                            level=logging.ERROR,
+                            append_to_stream="stderr",
+                        )
+                        return
+                else:
+                    self._scanner_log(
+                        f"No results file found at {results_file}",
                         target_type=target_type,
-                        level=logging.ERROR,
+                        level=logging.WARNING,
                         append_to_stream="stderr",
                     )
                     return
-            else:
-                self._scanner_log(
-                    f"No results file found at {results_file}",
-                    target_type=target_type,
-                    level=logging.WARNING,
-                    append_to_stream="stderr",
-                )
-                return
 
         except Exception as e:
             # Check if there are useful error details

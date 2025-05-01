@@ -1581,10 +1581,13 @@
                   "*_report_result.txt"
                 ],
                 "exclude_rule": [],
+                "linux_type": "manylinux",
                 "metrics": "auto",
                 "offline": false,
+                "patterns": [],
                 "severity": [],
-                "severity_threshold": null
+                "severity_threshold": null,
+                "version": "v1.1.5"
               }
             },
             "semgrep": {
@@ -4429,6 +4432,27 @@
       },
       "title": "CryptoRefArray",
       "type": "array"
+    },
+    "CustomCommand": {
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "shell": {
+          "default": false,
+          "title": "Shell",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "args"
+      ],
+      "title": "CustomCommand",
+      "type": "object"
     },
     "CustomScannerConfig": {
       "additionalProperties": true,
@@ -10468,10 +10492,13 @@
               "*_report_result.txt"
             ],
             "exclude_rule": [],
+            "linux_type": "manylinux",
             "metrics": "auto",
             "offline": false,
+            "patterns": [],
             "severity": [],
-            "severity_threshold": null
+            "severity_threshold": null,
+            "version": "v1.1.5"
           },
           "description": "Configure Opengrep scanner"
         }
@@ -10509,6 +10536,12 @@
           "title": "Exclude Rule",
           "type": "array"
         },
+        "linux_type": {
+          "default": "manylinux",
+          "description": "Type of Linux build to use (manylinux or musllinux).",
+          "title": "Linux Type",
+          "type": "string"
+        },
         "metrics": {
           "default": "auto",
           "description": "Configures how usage metrics are sent to the Opengrep server.",
@@ -10525,6 +10558,15 @@
           "description": "Run in offline mode, using locally cached rules.",
           "title": "Offline",
           "type": "boolean"
+        },
+        "patterns": {
+          "default": [],
+          "description": "Patterns to search for with OpenGrep.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Patterns",
+          "type": "array"
         },
         "severity": {
           "default": [],
@@ -10559,6 +10601,12 @@
           "default": null,
           "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
           "title": "Severity Threshold"
+        },
+        "version": {
+          "default": "v1.1.5",
+          "description": "Version of OpenGrep to use.",
+          "title": "Version",
+          "type": "string"
         }
       },
       "title": "OpengrepScannerConfigOptions",
@@ -11073,6 +11121,20 @@
       "title": "OutputType3",
       "type": "object"
     },
+    "PackageManager": {
+      "enum": [
+        "apt",
+        "pip",
+        "npm",
+        "brew",
+        "yum",
+        "choco",
+        "custom",
+        "url"
+      ],
+      "title": "PackageManager",
+      "type": "string"
+    },
     "Padding": {
       "enum": [
         "pkcs5",
@@ -11518,6 +11580,28 @@
         "output_dir"
       ],
       "title": "PluginContext",
+      "type": "object"
+    },
+    "PluginDependency": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "package_manager": {
+          "$ref": "#/$defs/PackageManager",
+          "default": "apt"
+        },
+        "version": {
+          "default": "latest",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PluginDependency",
       "type": "object"
     },
     "PostalAddress": {
@@ -14998,10 +15082,13 @@
                 "*_report_result.txt"
               ],
               "exclude_rule": [],
+              "linux_type": "manylinux",
               "metrics": "auto",
               "offline": false,
+              "patterns": [],
               "severity": [],
-              "severity_threshold": null
+              "severity_threshold": null,
+              "version": "v1.1.5"
             }
           },
           "description": "Configure the options for Opengrep"
@@ -15106,17 +15193,33 @@
           ],
           "default": null
         },
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
+        "custom_install_commands": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/$defs/CustomCommand"
+              },
+              "type": "array"
             },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Description"
+            "type": "object"
+          },
+          "description": "Custom installation commands by platform and architecture",
+          "title": "Custom Install Commands",
+          "type": "object"
+        },
+        "dependencies": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/$defs/PluginDependency"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "description": "Dependencies by platform and architecture",
+          "title": "Dependencies",
+          "type": "object"
         },
         "end_time": {
           "anyOf": [
@@ -15176,6 +15279,7 @@
             }
           ],
           "default": null,
+          "description": "The path to the results file, if any. This is set by the scanner plugin after the scan is complete.",
           "title": "Results File"
         },
         "start_time": {
@@ -15199,6 +15303,18 @@
           },
           "title": "Subcommands",
           "type": "array"
+        },
+        "tool_description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Description"
         },
         "tool_type": {
           "default": "UNKNOWN",

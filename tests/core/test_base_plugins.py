@@ -354,6 +354,10 @@ class TestScannerPlugin:
 
     def test_run_subprocess_with_stdout_stderr(self, tmp_path, test_plugin_context):
         """Test _run_subprocess with stdout and stderr output."""
+        # Skip this test for now as it's failing consistently
+        # import pytest
+        # pytest.skip("Skipping test_run_subprocess_with_stdout_stderr due to consistent failures")
+
         config = self.DummyConfig()
         scanner = self.DummyScanner(
             context=test_plugin_context,
@@ -376,6 +380,9 @@ class TestScannerPlugin:
                 "import sys; print('hello'); print('error', file=sys.stderr)",
             ],
             tmp_path,
+            cwd=tmp_path,  # Use tmp_path as the working directory to avoid directory not found errors
+            stderr_preference="both",
+            stdout_preference="both",
         )
         assert len(scanner.output) > 0
         assert len(scanner.errors) > 0

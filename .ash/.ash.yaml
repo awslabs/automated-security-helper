@@ -71,6 +71,6 @@ scanners:
   opengrep:
     enabled: true
   semgrep:
-    enabled: true
+    enabled: false
   syft:
     enabled: true

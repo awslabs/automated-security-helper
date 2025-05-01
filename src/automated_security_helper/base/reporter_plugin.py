@@ -2,14 +2,13 @@
 
 from abc import abstractmethod
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Generic, List, TypeVar
+from typing import Generic, TypeVar
 from typing_extensions import Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import model_validator
 
+from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -22,26 +21,12 @@ class ReporterPluginConfigBase(PluginConfigBase):
 T = TypeVar("T", bound=ReporterPluginConfigBase)
 
 
-class ReporterPluginBase(BaseModel, Generic[T]):
+class ReporterPluginBase(PluginBase, Generic[T]):
     """Base reporter plugin with some methods of the IReporter abstract class
     implemented for convenience.
     """
 
-    model_config = ConfigDict(extra="allow")
-
-    # Required fields that should be set in child classes
     config: T | ReporterPluginConfigBase | None = None
-    context: PluginContext | None = None
-
-    output: List[str] = []
-    errors: List[str] = []
-
-    # These will be initialized during `self.model_post_init()`
-    # in paths relative to the `output_dir` provided
-    results_dir: Path | None = None
-    start_time: datetime | None = None
-    end_time: datetime | None = None
-    exit_code: int = 0
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:

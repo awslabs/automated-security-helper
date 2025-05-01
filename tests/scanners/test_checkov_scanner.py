@@ -130,8 +130,6 @@ def test_checkov_scanner_scan(test_checkov_scanner, test_data_dir):
     """Test CheckovScanner scan method."""
     # Use a test CloudFormation template
     test_template = test_data_dir.joinpath("scanners/cdk/insecure-s3-template.yaml")
-    if not test_template.exists():
-        pytest.skip("Test template not found")
 
     # Mock the scan to avoid actual execution
     import unittest.mock

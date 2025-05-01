@@ -40,11 +40,9 @@
 #   pre-commit run --hook-stage manual ash
 #
 -   id: ash
-    name: use ASH for checking
-    description: Runs various code scanners in separate Docker containers
-    entry: ash
+    name: Use ASH for SAST/SCA scanning
+    description: Runs various code scanners from Python directly
+    entry: ashv3
     verbose: true
-    stages: [commit, merge-commit, push, manual]
-    language: script
+    language: python
     pass_filenames: false
-    types_or: [yaml, json, shell, bash, python]

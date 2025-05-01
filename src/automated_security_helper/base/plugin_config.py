@@ -1,9 +1,5 @@
 from automated_security_helper.base.options import ScannerOptionsBase
-
-
 from pydantic import BaseModel, ConfigDict, Field
-
-
 from typing import Annotated
 
 

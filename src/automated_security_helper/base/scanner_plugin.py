@@ -1,17 +1,15 @@
 from datetime import datetime, timezone
 import logging
+from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
-import shutil
-import subprocess  # nosec B404 - We are using `subprocess` explicitly to call CLI security scanning tools.
 from abc import abstractmethod
 from pathlib import Path
 
@@ -23,20 +21,16 @@ class ScannerPluginConfigBase(PluginConfigBase):
 T = TypeVar("T", bound=ScannerPluginConfigBase)
 
 
-class ScannerPluginBase(BaseModel, Generic[T]):
+class ScannerPluginBase(PluginBase, Generic[T]):
     """Base class for all scanner plugins.
 
     Plugin implementations
     """
 
-    model_config = ConfigDict(extra="allow")
-
     config: T | ScannerPluginConfigBase | None = None
-    context: PluginContext | None = None
 
     tool_type: str = "UNKNOWN"
-    tool_version: str | None = None
-    description: str | None = None
+
     command: Annotated[
         str,
         Field(
@@ -56,16 +50,12 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         ),
     ] = ToolArgs()
 
-    output: List[str] = []
-    errors: List[str] = []
-
-    # These will be initialized during `self.model_post_init()`
-    # in paths relative to the `output_dir` provided
-    results_dir: Path | None = None
-    results_file: Path | None = None
-    start_time: datetime | None = None
-    end_time: datetime | None = None
-    exit_code: int = 0
+    results_file: Annotated[
+        Path | None,
+        Field(
+            description="The path to the results file, if any. This is set by the scanner plugin after the scan is complete."
+        ),
+    ] = None
 
     def model_post_init(self, context):
         if self.config is None:
@@ -265,64 +255,49 @@ class ScannerPluginBase(BaseModel, Generic[T]):
         results_dir: str | Path = None,
         stdout_preference: Literal["return", "write", "both", "none"] = "write",
         stderr_preference: Literal["return", "write", "both", "none"] = "write",
+        cwd: Path | str = None,
     ) -> Dict[str, str]:
         """Run a subprocess with the given command.
 
         Args:
             command: Command to run
+            results_dir: Directory to write output files to
+            stdout_preference: How to handle stdout
+            stderr_preference: How to handle stderr
+            cwd: Working directory for the command (defaults to context.source_dir)
 
-        Raises:
-            ScannerError: If process errors
+        Returns:
+            Dictionary with stdout and stderr if requested
         """
-        try:
-            binary_full_path = shutil.which(command[0])
-            if binary_full_path is not None:
-                command = [binary_full_path, *command[1:]]
-        except Exception as e:
-            ASH_LOGGER.debug(e)
+        from automated_security_helper.utils.subprocess_utils import (
+            run_command_with_output_handling,
+        )
 
-        ASH_LOGGER.verbose(f"({self.config.name}) Running: {command}")
         try:
-            result = subprocess.run(  # nosec B603 - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
-                command,
-                capture_output=True,
-                text=True,
+            # Use provided cwd or fall back to context.source_dir
+            working_dir = cwd if cwd is not None else Path(self.context.source_dir)
+
+            # Run the command using the centralized utility
+            response = run_command_with_output_handling(
+                command=command,
+                results_dir=results_dir,
+                stdout_preference=stdout_preference,
+                stderr_preference=stderr_preference,
+                cwd=working_dir,
                 shell=False,
-                check=False,
-                cwd=Path(self.context.source_dir).as_posix(),
-                # env=os.environ.copy(),
+                class_name=self.__class__.__name__,
             )
-            # Default to 1 if it doesn't exist, something went wrong during execution
-            self.exit_code = result.returncode or 1
 
-            # Process stdout
-            if result.stdout:
-                self.output.extend(result.stdout.splitlines())
-                if results_dir is not None and stdout_preference in ["write", "both"]:
-                    with open(
-                        Path(results_dir).joinpath(
-                            f"{self.__class__.__name__}.stdout.log"
-                        ),
-                        "w",
-                    ) as stdout_file:
-                        stdout_file.write(result.stdout)
-            # Process stderr
-            if result.stderr:
-                self.errors.extend(result.stderr.splitlines())
-                if results_dir is not None and stderr_preference in ["write", "both"]:
-                    with open(
-                        Path(results_dir).joinpath(
-                            f"{self.__class__.__name__}.stderr.log"
-                        ),
-                        "w",
-                    ) as stderr_file:
-                        stderr_file.write(result.stderr)
+            # Process stdout and stderr for the scanner plugin
+            if "stdout" in response and response["stdout"]:
+                self.output.extend(response["stdout"].splitlines())
 
-            response = {}
-            if stdout_preference in ["return", "both"]:
-                response["stdout"] = result.stdout
-            if stderr_preference in ["return", "both"]:
-                response["stderr"] = result.stderr
+            if "stderr" in response and response["stderr"]:
+                self.errors.extend(response["stderr"].splitlines())
+
+            # Set exit code (default to 1 if not available)
+            self.exit_code = response.get("returncode", 1)
+
             return response
 
         except Exception as e:
@@ -330,6 +305,7 @@ class ScannerPluginBase(BaseModel, Generic[T]):
             # show full stack trace in warning
             ASH_LOGGER.trace(f"({self.config.name}) Error running {command}: {e}")
             self.exit_code = 1
+            return {"error": str(e)}
 
     ### Methods that require implementation by plugins.
     @abstractmethod
