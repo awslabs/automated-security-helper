@@ -1,4 +1,4 @@
-"""Module containing the Semgrep security scanner implementation."""
+"""Module containing the Opengrep security scanner implementation."""
 
 import json
 import logging
@@ -31,11 +31,11 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class SemgrepScannerConfigOptions(ScannerOptionsBase):
+class OpengrepScannerConfigOptions(ScannerOptionsBase):
     config: Annotated[
         str,
         Field(
-            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
         ),
     ] = "auto"
 
@@ -63,7 +63,7 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     metrics: Annotated[
         Literal["auto", "on", "off"],
         Field(
-            description="Configures how usage metrics are sent to the Semgrep server.",
+            description="Configures how usage metrics are sent to the Opengrep server.",
         ),
     ] = "auto"
 
@@ -75,22 +75,22 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     ] = False
 
 
-class SemgrepScannerConfig(ScannerPluginConfigBase):
-    name: Literal["semgrep"] = "semgrep"
-    enabled: bool = False  # Prefer Opengrep by default, but allow users to enable Semgrep if preferred.
+class OpengrepScannerConfig(ScannerPluginConfigBase):
+    name: Literal["opengrep"] = "opengrep"
+    enabled: bool = True
     options: Annotated[
-        SemgrepScannerConfigOptions, Field(description="Configure Semgrep scanner")
-    ] = SemgrepScannerConfigOptions()
+        OpengrepScannerConfigOptions, Field(description="Configure Opengrep scanner")
+    ] = OpengrepScannerConfigOptions()
 
 
 @ash_scanner_plugin
-class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
-    """SemgrepScanner implements code scanning using Semgrep."""
+class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
+    """OpengrepScanner implements code scanning using Opengrep."""
 
     def model_post_init(self, context):
         if self.config is None:
-            self.config = SemgrepScannerConfig()
-        self.command = "semgrep"
+            self.config = OpengrepScannerConfig()
+        self.command = "opengrep"
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,
@@ -138,28 +138,30 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     value="off",
                 )
             )
-
-            # Check if SEMGREP_RULES_CACHE_DIR is set in environment
-            semgrep_rules_cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
-            if semgrep_rules_cache_dir:
-                semgrep_rules = [
+            # Check if OPENGREP_RULES_CACHE_DIR is set in environment
+            opengrep_rules_cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
+            if opengrep_rules_cache_dir:
+                opengrep_rules = [
                     item
-                    for item in Path(semgrep_rules_cache_dir).glob("**/*")
+                    for item in [
+                        *Path(opengrep_rules_cache_dir).glob("**/*"),
+                        *Path(opengrep_rules_cache_dir).glob("*"),
+                    ]
                     if (item.name.endswith(".yaml") or item.name.endswith(".yml"))
                 ]
-                if semgrep_rules:
+                if opengrep_rules:
                     self.args.extra_args.extend(
                         [
                             ToolExtraArg(
                                 key="--config",
                                 value=item.as_posix(),
                             )
-                            for item in semgrep_rules
+                            for item in opengrep_rules
                         ]
                     )
                 else:
                     self._scanner_log(
-                        "No Semgrep rules found in cache directory, falling back to p/ci",
+                        "No Opengrep rules found in cache directory, falling back to p/ci",
                         level=logging.WARNING,
                     )
                     self.args.extra_args.append(
@@ -170,7 +172,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     )
             else:
                 self._scanner_log(
-                    "SEMGREP_RULES_CACHE_DIR not set but offline mode enabled, falling back to p/ci",
+                    "OPENGREP_RULES_CACHE_DIR not set but offline mode enabled, falling back to p/ci",
                     level=logging.WARNING,
                 )
                 self.args.extra_args.append(
@@ -193,6 +195,22 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     value=self.config.options.metrics,
                 )
             )
+
+        # Add legacy flag for compatibility
+        # self.args.extra_args.append(
+        #     ToolExtraArg(
+        #         key="--legacy",
+        #         value="",
+        #     )
+        # )
+
+        # # Add error flag to return non-zero exit code on findings
+        # self.args.extra_args.append(
+        #     ToolExtraArg(
+        #         key="--error",
+        #         value="",
+        #     )
+        # )
 
         # Add exclude patterns
         for exclude_pattern in self.config.options.exclude:
@@ -236,9 +254,9 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
-        config: SemgrepScannerConfig | None = None,
+        config: OpengrepScannerConfig | None = None,
     ) -> SarifReport:
-        """Execute Semgrep scan and return results.
+        """Execute Opengrep scan and return results.
 
         Args:
             target: Path to scan
@@ -293,7 +311,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 results_file=results_file,
             )
 
-            # Semgrep expects the target directory at the end of the command
+            # Opengrep expects the target directory at the end of the command
             # final_args.append(str(target))
             self._scanner_log(
                 f"Running command: {' '.join(final_args)}",
@@ -303,8 +321,10 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
 
             # Set environment variables for offline mode if needed
             env_vars = {}
-            if self.config.options.offline and "SEMGREP_RULES_CACHE_DIR" in os.environ:
-                env_vars["SEMGREP_RULES"] = f"{os.environ['SEMGREP_RULES_CACHE_DIR']}/*"
+            if self.config.options.offline and "OPENGREP_RULES_CACHE_DIR" in os.environ:
+                env_vars["OPENGREP_RULES"] = (
+                    f"{os.environ['OPENGREP_RULES_CACHE_DIR']}/*"
+                )
 
             # Run the subprocess with the environment variables
             if env_vars:
@@ -336,13 +356,13 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 target_type=target_type,
             )
 
-            semgrep_results = {}
+            opengrep_results = {}
             if Path(results_file).exists():
                 with open(results_file, "r") as f:
-                    semgrep_results = json.load(f)
+                    opengrep_results = json.load(f)
                 try:
                     sarif_report: SarifReport = SarifReport.model_validate(
-                        semgrep_results
+                        opengrep_results
                     )
                     sarif_report.runs[0].invocations = [
                         Invocation(
@@ -381,4 +401,4 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
 
         except Exception as e:
             # Check if there are useful error details
-            raise ScannerError(f"Semgrep scan failed: {str(e)}")
+            raise ScannerError(f"Opengrep scan failed: {str(e)}")

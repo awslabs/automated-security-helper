@@ -1,0 +1,12 @@
+rules:
+  - id: hardcoded-sqlplus-credentials
+    pattern-regex: sqlplus .*-s \w+\/\w+
+    message: "Hardcoded credentials detected in sqlplus command"
+    languages: [none]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      references:
+        - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/

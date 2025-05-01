@@ -9,6 +9,7 @@ import yaml
 import typer
 
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -34,12 +35,12 @@ class IndentableYamlDumper(yaml.Dumper):
 
 @config_app.command()
 def init(
-    filename: Annotated[
+    config_path: Annotated[
         str,
         typer.Argument(
             help=f"The name of the config file to initialize. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
         ),
-    ] = ".ash.yaml",
+    ] = ".ash/.ash.yaml",
     force: Annotated[
         bool,
         typer.Option(
@@ -47,16 +48,16 @@ def init(
         ),
     ] = False,
 ):
-    config_path = Path(filename)
-    if config_path.absolute().exists() and not force:
+    config_path_path = Path(config_path)
+    if config_path_path.absolute().exists() and not force:
         typer.secho(
-            f"Config file already exists at {config_path.absolute()}. Include --force to overwrite.",
+            f"Config file already exists at {config_path_path.absolute()}. Include --force to overwrite.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
-    typer.secho(f"Saving ASH config to path: {config_path.absolute()}")
+    typer.secho(f"Saving ASH config to path: {config_path_path.absolute()}")
     config = AshConfig(
-        project_name=config_path.absolute().parent.name,
+        project_name=config_path_path.absolute().parent.name,
     )
     config_strings = [
         "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/src/automated_security_helper/schemas/AshConfig.json",
@@ -66,22 +67,22 @@ def init(
             indent=2,
         ),
     ]
-    config_path.write_text("\n".join(config_strings))
+    config_path_path.write_text("\n".join(config_strings))
 
 
 @config_app.command()
 def get(
-    filename: Annotated[
+    config_path: Annotated[
         str,
         typer.Argument(
-            help=f"The name of the config file to create. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
+            help=f"The name of the config file to get. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
         ),
-    ] = ".ash.yaml",
+    ] = None,
 ):
-    if not Path(filename).exists():
-        typer.secho(f"Config file does not exist at {filename}", fg=typer.colors.RED)
+    if config_path is not None and not Path(config_path).exists():
+        typer.secho(f"Config file does not exist at {config_path}", fg=typer.colors.RED)
         raise typer.Exit(1)
-    config = AshConfig.from_file(Path(filename))
+    config = resolve_config(config_path)
     typer.secho(
         yaml.dump(
             config.model_dump(
@@ -98,21 +99,21 @@ def get(
 
 @config_app.command()
 def validate(
-    filename: Annotated[
+    config_path: Annotated[
         str,
         typer.Argument(
             help=f"The name of the config file to create. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
         ),
-    ] = ".ash.yaml",
+    ] = None,
 ):
-    if not Path(filename).exists():
-        typer.secho(f"Config file does not exist at {filename}", fg=typer.colors.RED)
+    if config_path is not None and not Path(config_path).exists():
+        typer.secho(f"Config file does not exist at {config_path}", fg=typer.colors.RED)
         raise typer.Exit(1)
     try:
-        config = AshConfig.from_file(Path(filename))
+        config = resolve_config(config_path)
         if config.project_name:
             typer.secho(
-                f"Config file '{Path(filename).absolute().as_posix()}' is valid",
+                f"Config file '{Path(config_path).absolute().as_posix()}' is valid",
                 fg=typer.colors.GREEN,
             )
             return True
@@ -122,7 +123,7 @@ def validate(
         )
     except Exception as e:
         typer.secho(
-            f"Config file '{Path(filename).absolute().as_posix()}' is not valid: {e}",
+            f"Config file '{Path(config_path).absolute().as_posix()}' is not valid: {e}",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)

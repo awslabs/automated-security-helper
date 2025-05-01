@@ -155,7 +155,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
             final_args = self._resolve_arguments(
-                target=target,
+                # Grype expects directory scans to have the target begin with `dir:`
+                target=f"dir:{target.as_posix()}",
                 results_file=results_file,
             )
             self._run_subprocess(
