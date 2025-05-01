@@ -20,7 +20,7 @@ def get_reporter_mappings() -> Dict[str, Dict[str, str]]:
             CsvReporter,
             CycloneDXReporter,
             HtmlReporter,
-            FlatJSONReporter,
+            FlatJsonReporter,
             JunitXmlReporter,
             MarkdownReporter,
             OcsfReporter,
@@ -100,18 +100,18 @@ def get_reporter_mappings() -> Dict[str, Dict[str, str]]:
 
         # Try to get mappings from reporter instances if they have a sarif_field_mappings attribute
         reporters = [
-            AsffReporter(),
-            CsvReporter(),
-            CycloneDXReporter(),
-            HtmlReporter(),
-            FlatJSONReporter(),
-            JunitXmlReporter(),
-            MarkdownReporter(),
-            OcsfReporter(),
-            SarifReporter(),
-            SpdxReporter(),
-            TextReporter(),
-            YamlReporter(),
+            AsffReporter,
+            CsvReporter,
+            CycloneDXReporter,
+            HtmlReporter,
+            FlatJsonReporter,
+            JunitXmlReporter,
+            MarkdownReporter,
+            OcsfReporter,
+            SarifReporter,
+            SpdxReporter,
+            TextReporter,
+            YamlReporter,
         ]
 
         for reporter in reporters:

@@ -34,7 +34,8 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
             self.config = FlatJSONReporterConfig()
         return super().model_post_init(context)
 
-    def sarif_field_mappings(self) -> dict[str, str] | None:
+    @staticmethod
+    def sarif_field_mappings() -> dict[str, str] | None:
         """
         Get mappings from SARIF fields to flat JSON fields.
 

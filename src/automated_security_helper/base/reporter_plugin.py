@@ -66,7 +66,8 @@ class ReporterPluginBase(BaseModel, Generic[T]):
     def _post_report(self) -> None:
         self.end_time = datetime.now(timezone.utc)
 
-    def sarif_field_mappings(self) -> dict[str, str] | None:
+    @staticmethod
+    def sarif_field_mappings() -> dict[str, str] | None:
         """
         Get mappings from SARIF fields to this reporter's output format.
 

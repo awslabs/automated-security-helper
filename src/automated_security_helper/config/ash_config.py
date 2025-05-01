@@ -83,6 +83,9 @@ from automated_security_helper.scanners.ash_default.custom_scanner import (
 from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
     DetectSecretsScannerConfig,
 )
+from automated_security_helper.scanners.ash_default.opengrep_scanner import (
+    OpengrepScannerConfig,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -166,6 +169,9 @@ class ScannerConfigSegment(BaseModel):
         NpmAuditScannerConfig,
         Field(description="Configure the options for NpmAudit", alias="npm-audit"),
     ] = NpmAuditScannerConfig()
+    opengrep: Annotated[
+        OpengrepScannerConfig, Field(description="Configure the options for Opengrep")
+    ] = OpengrepScannerConfig()
     semgrep: Annotated[
         SemgrepScannerConfig, Field(description="Configure the options for Semgrep")
     ] = SemgrepScannerConfig()

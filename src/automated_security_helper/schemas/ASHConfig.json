@@ -333,6 +333,22 @@
               },
               "type": "DEPENDENCY"
             },
+            "opengrep": {
+              "enabled": true,
+              "name": "opengrep",
+              "options": {
+                "config": "auto",
+                "exclude": [
+                  "*-converted.py",
+                  "*_report_result.txt"
+                ],
+                "exclude_rule": [],
+                "metrics": "auto",
+                "offline": false,
+                "severity": [],
+                "severity_threshold": null
+              }
+            },
             "semgrep": {
               "enabled": true,
               "name": "semgrep",
@@ -1678,6 +1694,125 @@
       "title": "OCSFReporterConfigOptions",
       "type": "object"
     },
+    "OpengrepScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "opengrep",
+          "default": "opengrep",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/OpengrepScannerConfigOptions",
+          "default": {
+            "config": "auto",
+            "exclude": [
+              "*-converted.py",
+              "*_report_result.txt"
+            ],
+            "exclude_rule": [],
+            "metrics": "auto",
+            "offline": false,
+            "severity": [],
+            "severity_threshold": null
+          },
+          "description": "Configure Opengrep scanner"
+        }
+      },
+      "title": "OpengrepScannerConfig",
+      "type": "object"
+    },
+    "OpengrepScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config": {
+          "default": "auto",
+          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+          "title": "Config",
+          "type": "string"
+        },
+        "exclude": {
+          "default": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "description": "Skip any file or directory whose path matches the pattern.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude",
+          "type": "array"
+        },
+        "exclude_rule": {
+          "default": [],
+          "description": "Skip any rule with the given id.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Rule",
+          "type": "array"
+        },
+        "metrics": {
+          "default": "auto",
+          "description": "Configures how usage metrics are sent to the Opengrep server.",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "title": "Metrics",
+          "type": "string"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, using locally cached rules.",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "severity": {
+          "default": [],
+          "description": "Report findings only from rules matching the supplied severity level.",
+          "items": {
+            "enum": [
+              "INFO",
+              "WARNING",
+              "ERROR"
+            ],
+            "type": "string"
+          },
+          "title": "Severity",
+          "type": "array"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "OpengrepScannerConfigOptions",
+      "type": "object"
+    },
     "PluginContext": {
       "additionalProperties": true,
       "description": "Context container for plugins to ensure consistent path information.",
@@ -2089,6 +2224,26 @@
             "type": "DEPENDENCY"
           },
           "description": "Configure the options for NpmAudit"
+        },
+        "opengrep": {
+          "$ref": "#/$defs/OpengrepScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "opengrep",
+            "options": {
+              "config": "auto",
+              "exclude": [
+                "*-converted.py",
+                "*_report_result.txt"
+              ],
+              "exclude_rule": [],
+              "metrics": "auto",
+              "offline": false,
+              "severity": [],
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for Opengrep"
         },
         "semgrep": {
           "$ref": "#/$defs/SemgrepScannerConfig",

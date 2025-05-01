@@ -15,6 +15,7 @@ output/
 .*q/
 /Amazon*.md
 .envrc
+utils/try*.sh
 
 ### macOS ###
 # General
