@@ -46,22 +46,15 @@
   verbose: true
   language: python
   pass_filenames: false
-  stages:
-    - pre-commit
-    - manual
   args:
     - --simple
-    - --python-based-scanners-only
+    - --python-based-plugins-only
 - id: ash-full-scan
   name: Use ASH for SAST/IaC/Secrets scanning
-  description: Runs full ASH scan with container build and all scanners
+  description: Runs full ASH scan with container build and all scanners (takes several minutes)
   entry: ash
   verbose: true
   language: script
   pass_filenames: false
-  stages:
-    - pre-commit
-    - manual
   args:
     - --simple
-    - --python-based-scanners-only

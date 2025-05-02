@@ -19,7 +19,7 @@ class ReportPhase(EnginePhase):
         self,
         report_dir: Path,
         cli_output_formats=None,
-        python_based_scanners_only: bool = False,
+        python_based_plugins_only: bool = False,
         **kwargs,
     ) -> None:
         """Execute the Report phase.
@@ -91,10 +91,10 @@ class ReportPhase(EnginePhase):
                         )
                         continue
 
-                # Check if python_based_scanners_only is set and if the reporter is Python-only
-                if python_based_scanners_only and not plugin_instance.is_python_only():
+                # Check if python_based_plugins_only is set and if the reporter is Python-only
+                if python_based_plugins_only and not plugin_instance.is_python_only():
                     ASH_LOGGER.debug(
-                        f"Reporter {display_name} is not Python-only, skipping due to python_based_scanners_only flag"
+                        f"Reporter {display_name} is not Python-only, skipping due to python_based_plugins_only flag"
                     )
                     continue
 

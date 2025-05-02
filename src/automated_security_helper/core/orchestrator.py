@@ -108,7 +108,7 @@ class ASHScanOrchestrator(BaseModel):
         Field(description="Path to existing ash_aggregated_results.json file"),
     ] = None
 
-    python_based_scanners_only: Annotated[
+    python_based_plugins_only: Annotated[
         bool,
         Field(
             False,
@@ -172,7 +172,7 @@ class ASHScanOrchestrator(BaseModel):
             color_system=self.color_system,
             verbose=self.verbose,
             debug=self.debug,
-            python_based_scanners_only=self.python_based_scanners_only,  # Pass the python_based_scanners_only flag to the execution engine
+            python_based_plugins_only=self.python_based_plugins_only,  # Pass the python_based_plugins_only flag to the execution engine
             **exec_engine_params,
         )
 
