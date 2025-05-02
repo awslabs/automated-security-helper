@@ -94,7 +94,7 @@ function Invoke-ASH {
         $AshImageName = $(if ($null -ne $env:ASH_IMAGE_NAME) {
             $env:ASH_IMAGE_NAME
         } else {
-            "automated-security-helper:non-root"
+            "automated-security-helper"
         }),
         [parameter()]
         [switch]

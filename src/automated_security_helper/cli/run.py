@@ -305,28 +305,38 @@ def run(
         # Get the count of actionable findings from summary_stats
         actionable_findings = results.metadata.summary_stats.get("actionable", 0)
         # Add helpful guidance about where to find reports
-        out_dir_alias = os.environ.get("ASH_ACTUAL_OUTPUT_DIR", str(output_dir))
+        relative_out_dir = (
+            Path(output_dir).relative_to(source_dir)
+            if Path(output_dir).is_relative_to(source_dir)
+            else output_dir
+        )
+        out_dir_alias = os.environ.get(
+            "ASH_ACTUAL_OUTPUT_DIR",
+            relative_out_dir.as_posix(),
+        )
         if not quiet:
-            print("\n[yellow]=== Scan Complete: Next Steps ===[/yellow]")
-            print(f"- View detailed findings in: {out_dir_alias}/reports/")
-            print(f"- HTML report available at: {out_dir_alias}/reports/ash.html")
+            print("\n[cyan]=== Scan Complete: Next Steps ===[/cyan]")
+            print(f"View detailed findings in: {out_dir_alias}/reports/...")
+            print(f"  - HTML report available at: {out_dir_alias}/reports/ash.html")
             print(
-                f"- Markdown summary report available at: {out_dir_alias}/reports/ash.summary.md"
+                f"  - Markdown summary report available at: {out_dir_alias}/reports/ash.summary.md"
             )
             print(
-                f"- Text summary report available at: {out_dir_alias}/reports/ash.summary.txt"
+                f"  - Text summary report available at: {out_dir_alias}/reports/ash.summary.txt"
             )
             print(
-                f"- Full SARIF report available at: {out_dir_alias}/reports/ash.sarif"
+                f"  - Full SARIF report available at: {out_dir_alias}/reports/ash.sarif"
             )
             print(
-                f"- Full JUnitXML report available at: {out_dir_alias}/reports/ash.junit.xml"
+                f"  - Full JUnitXML report available at: {out_dir_alias}/reports/ash.junit.xml"
             )
-            print(f"- Full ASH aggregated results JSON available at: {out_dir_alias}")
+            print(
+                f"  - Full ASH aggregated results JSON available at: {out_dir_alias}/{output_file.relative_to(output_dir).as_posix()}"
+            )
 
         # If there are actionable findings, provide guidance
         if actionable_findings > 0:
-            print("\n[yellow]=== Actionable findings detected! ===[/yellow]")
+            print("\n[magenta]=== Actionable findings detected! ===[/magenta]")
             print("To investigate...")
             print("  1. Open the HTML report for a user-friendly view")
             print("  2. Use `ash inspect findings` for an interactive exploration")

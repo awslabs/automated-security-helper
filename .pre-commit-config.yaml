@@ -40,7 +40,7 @@ repos:
   #         - --simple
   #         - --python-only
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: 7e66807edbaaeee2cf6cf4937c0e9b4fa170cd8a
+    rev: 1dfb14c680df836ac705a3014b03b0e47a248cfa
     hooks:
       - id: ash-simple-scan
         name: Use ASH for SAST/IaC/Secrets scanning
