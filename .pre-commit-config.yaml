@@ -18,7 +18,7 @@ repos:
           - "--indent=2"
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: v0.11.2
+    rev: v0.11.8
     hooks:
       # Run the linter.
       - id: ruff
@@ -39,7 +39,9 @@ repos:
   #       args:
   #         - --simple
   #         - --python-only
-  - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3/feat/image-build-cleanup
-    hooks:
-      - id: ash
+  # - repo: https://github.com/awslabs/automated-security-helper
+  #   rev: v3/feat/image-build-cleanup
+  #   hooks:
+  #     - id: ash-simple-scan
+  #       name: Use ASH for SAST/SCA scanning
+  #       description: Runs various code scanners from Python directly

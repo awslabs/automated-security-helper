@@ -39,7 +39,7 @@
 # against the code repository using this command:
 #   pre-commit run --hook-stage manual ash
 #
-- id: ash
+- id: ash-simple-scan
   name: Use ASH for SAST/SCA scanning
   description: Runs various code scanners from Python directly
   entry: ashv3
@@ -47,7 +47,7 @@
   language: python
   pass_filenames: false
   stages:
-    - pre-push
+    - pre-commit
     - manual
   args:
     - --simple
