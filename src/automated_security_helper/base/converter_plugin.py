@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Generic, List, TypeVar
 from typing_extensions import Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import model_validator
 
+from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -20,19 +20,12 @@ class ConverterPluginConfigBase(PluginConfigBase):
 T = TypeVar("T", bound=ConverterPluginConfigBase)
 
 
-class ConverterPluginBase(BaseModel, Generic[T]):
+class ConverterPluginBase(PluginBase, Generic[T]):
     """Base converter plugin with some methods of the IConverter abstract class
     implemented for convenience.
     """
 
-    model_config = ConfigDict(
-        extra="allow", arbitrary_types_allowed=True, use_enum_values=True
-    )
-
     config: T | ConverterPluginConfigBase | None = None
-    context: PluginContext | None = None
-    results_dir: Path | None = None
-    tool_version: str | None = None
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:

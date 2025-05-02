@@ -43,8 +43,8 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
             Dict[str, str]: Dictionary mapping SARIF field paths to flat JSON fields
         """
         return {
-            "runs[0].results[0].ruleId": "rule_id",
-            "runs[0].results[0].message.text": "description",
+            "runs[].results[].ruleId": "rule_id",
+            "runs[]results[0].message.text": "description",
             "runs[0].results[0].level": "severity",
             "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "file_path",
             "runs[0].results[0].locations[0].physicalLocation.region.startLine": "line_start",

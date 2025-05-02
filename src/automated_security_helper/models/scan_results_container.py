@@ -52,7 +52,10 @@ class ScanResultsContainer(BaseModel):
             "info": 0,
         }
     )
-    status: str = "passed"  # Can be "passed", "failed", "warning"
+    scanner_severity_threshold: (
+        Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None
+    ) = None
+    status: Literal["passed", "failed", "warning"] = "passed"
 
     def add_metadata(self, key: str, value: Any) -> None:
         """Add metadata to the container.

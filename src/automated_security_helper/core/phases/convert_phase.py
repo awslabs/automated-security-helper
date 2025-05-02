@@ -16,7 +16,7 @@ class ConvertPhase(EnginePhase):
         """Return the name of this phase."""
         return "convert"
 
-    def _execute_phase(self, **kwargs) -> List[Path]:
+    def _execute_phase(self, python_only: bool = False, **kwargs) -> List[Path]:
         """Execute the Convert phase with observer pattern.
 
         Args:
@@ -62,6 +62,13 @@ class ConvertPhase(EnginePhase):
                             f"Converter {plugin_name} is disabled, skipping"
                         )
                         continue
+
+                # Check if python_only is set and if the converter is Python-only
+                if python_only and not plugin_instance.is_python_only():
+                    ASH_LOGGER.debug(
+                        f"Converter {plugin_name} is not Python-only, skipping due to python_only flag"
+                    )
+                    continue
 
                 # Check if the converter validates
                 if not plugin_instance.validate():

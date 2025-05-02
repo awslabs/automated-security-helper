@@ -92,6 +92,23 @@ def generate_html_report(
     html.append(
         "    .jq-query code { background-color: #f5f5f5; padding: 2px 4px; border-radius: 3px; }"
     )
+    # Add styles for dropdown
+    html.append(
+        "    .dropdown { position: relative; display: inline-block; margin-left: 10px; }"
+    )
+    html.append(
+        "    .dropbtn { background-color: #f1f1f1; color: #333; padding: 5px; font-size: 12px; border: none; cursor: pointer; border-radius: 3px; }"
+    )
+    html.append(
+        "    .dropdown-content { display: none; position: absolute; background-color: #f9f9f9; min-width: 300px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 1; padding: 10px; }"
+    )
+    html.append("    .dropdown:hover .dropdown-content { display: block; }")
+    html.append(
+        "    .dropdown-content code { display: block; padding: 5px; background-color: #f5f5f5; margin-bottom: 5px; white-space: pre-wrap; word-break: break-all; }"
+    )
+    html.append(
+        "    .copy-btn { background-color: #4CAF50; color: white; border: none; padding: 5px 10px; text-align: center; text-decoration: none; display: inline-block; font-size: 12px; margin: 4px 2px; cursor: pointer; border-radius: 3px; }"
+    )
     html.append("  </style>")
     html.append("</head>")
     html.append("<body>")
@@ -249,7 +266,13 @@ def generate_html_report(
     html.append("        <th class='sortable'>Supporting Scanners</th>")
     html.append("        <th class='sortable'>Field Type</th>")
     html.append("        <th class='sortable'>Aggregated Results Includes?</th>")
-    html.append("        <th class='sortable'>Reporter Mappings</th>")
+
+    # Add a column for each reporter type
+    reporter_mappings = get_reporter_mappings()
+    reporter_types = sorted(reporter_mappings.keys())
+    for reporter_type in reporter_types:
+        html.append(f"        <th class='sortable'>{reporter_type}</th>")
+
     html.append("      </tr>")
     html.append("      <tr class='filter-row'>")
     html.append("        <td><input type='text' placeholder='Filter by field...'></td>")
@@ -260,7 +283,13 @@ def generate_html_report(
     html.append(
         "        <td><input type='text' placeholder='Filter by presence...'></td>"
     )
-    html.append("        <td></td>")
+
+    # Add filter inputs for each reporter type
+    for _ in reporter_types:
+        html.append(
+            "        <td><input type='text' placeholder='Filter by mapping...'></td>"
+        )
+
     html.append("      </tr>")
     html.append("      </thead>")
     html.append("      <tbody>")
@@ -359,43 +388,49 @@ def generate_html_report(
 
         jq_command = f"jq '{jq_query}' {example_file}"
 
+        # Create a unique ID for this field's JQ query
+        field_id = f"jq-{abs(hash(path)) % 10000000}"
+
         # Add row to table
         html.append("      <tr>")
-        html.append(
-            f"        <td class='field-path'>{path}<div class='jq-query'><code>{jq_command}</code></div></td>"
-        )
+        html.append(f"""
+        <td class='field-path'>
+            {path}
+            <div class='dropdown'>
+                <button class='dropbtn'>JQ</button>
+                <div class='dropdown-content'>
+                    <code id='{field_id}'>{jq_command}</code>
+                    <button id='btn-{field_id}' class='copy-btn' onclick="copyToClipboard('{field_id}')">Copy</button>
+                </div>
+            </div>
+        </td>
+        """)
         html.append(f"        <td>{scanners_list}</td>")
         html.append(f"        <td>{field_type}</td>")
 
         # In Aggregate column with proper styling
         in_agg_class = "present" if info.get("in_aggregate", False) else "missing"
         in_agg_text = "Yes" if info.get("in_aggregate", False) else "No"
+
+        # If the field is intentionally excluded, indicate that
+        if info.get("intentionally_excluded", False):
+            in_agg_text += " (Intentionally Excluded)"
+            in_agg_class = "informational"  # Use a different style for intentionally excluded fields
+
         html.append(f"        <td class='{in_agg_class}'>{in_agg_text}</td>")
 
-        # Reporter Mappings column
-        mappings_html = ""
+        # Add a cell for each reporter type
+        for reporter_type in reporter_types:
+            mapped_field = ""
+            # Check if this field is mapped in this reporter
+            if (
+                reporter_type in reporter_mappings
+                and path in reporter_mappings[reporter_type]
+            ):
+                mapped_field = reporter_mappings[reporter_type][path]
 
-        # First, check for explicit reporter mappings in the field info
-        if info.get("reporter_mappings"):
-            for reporter, target_path in info["reporter_mappings"].items():
-                mappings_html += (
-                    f"<div class='reporter-mapping'>{reporter}: {target_path}</div>"
-                )
-
-        # Then check the global reporter mappings
-        else:
-            for reporter, mappings in reporter_mappings.items():
-                if path in mappings:
-                    mappings_html += f"<div class='reporter-mapping'>{reporter}: {mappings[path]}</div>"
-
-        # Add flat report presence indicators if available
-        if info.get("in_flat"):
-            for report_type, present in info["in_flat"].items():
-                presence_class = "present" if present else "missing"
-                presence_text = "✓" if present else "✗"
-                mappings_html += f"<div class='{presence_class}'>In {report_type}: {presence_text}</div>"
-
-        html.append(f"        <td>{mappings_html}</td>")
+            # Apply the field-path class to the mapped field cells for consistent styling
+            html.append(f"        <td class='field-path'>{mapped_field}</td>")
         html.append("      </tr>")
 
     html.append("      </tbody>")
@@ -457,6 +492,25 @@ def generate_html_report(
     html.append("          }")
     html.append("        }")
     html.append("      }")
+    html.append("    }")
+
+    # Add copy to clipboard functionality
+    html.append("    function copyToClipboard(elementId) {")
+    html.append("      const element = document.getElementById(elementId);")
+    html.append("      const text = element.textContent;")
+    html.append("      ")
+    html.append("      navigator.clipboard.writeText(text).then(function() {")
+    html.append("        // Success feedback")
+    html.append("        const button = document.getElementById('btn-' + elementId);")
+    html.append("        const originalText = button.textContent;")
+    html.append("        button.textContent = 'Copied!';")
+    html.append("        setTimeout(function() {")
+    html.append("          button.textContent = originalText;")
+    html.append("        }, 1000);")
+    html.append("      }, function() {")
+    html.append("        // Error feedback")
+    html.append("        alert('Failed to copy text');")
+    html.append("      });")
     html.append("    }")
 
     # Add sorting functionality

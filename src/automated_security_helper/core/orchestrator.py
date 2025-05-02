@@ -70,6 +70,13 @@ class ASHScanOrchestrator(BaseModel):
         bool,
         Field(True, description="Enable graphical progress visibility in the console."),
     ]
+    simple_mode: Annotated[
+        bool,
+        Field(
+            False,
+            description="Enable simplified output mode for pre-commit hooks and CI.",
+        ),
+    ]
     offline: Annotated[bool, Field(False, description="Run in offline mode")]
     no_run: Annotated[bool, Field(False, description="Only build container image")]
     build_target: Annotated[
@@ -100,6 +107,14 @@ class ASHScanOrchestrator(BaseModel):
         Optional[Path],
         Field(description="Path to existing ash_aggregated_results.json file"),
     ] = None
+
+    python_only: Annotated[
+        bool,
+        Field(
+            False,
+            description="Exclude execution of any plugins or tools that have dependencies external to Python",
+        ),
+    ] = False
 
     def model_post_init(self, context):
         """Post initialization configuration."""
@@ -157,6 +172,7 @@ class ASHScanOrchestrator(BaseModel):
             color_system=self.color_system,
             verbose=self.verbose,
             debug=self.debug,
+            python_only=self.python_only,  # Pass the python_only flag to the execution engine
             **exec_engine_params,
         )
 

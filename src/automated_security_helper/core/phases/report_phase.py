@@ -19,6 +19,7 @@ class ReportPhase(EnginePhase):
         self,
         report_dir: Path,
         cli_output_formats=None,
+        python_only: bool = False,
         **kwargs,
     ) -> None:
         """Execute the Report phase.
@@ -89,6 +90,13 @@ class ReportPhase(EnginePhase):
                             f"Reporter {display_name} is disabled, skipping"
                         )
                         continue
+
+                # Check if python_only is set and if the reporter is Python-only
+                if python_only and not plugin_instance.is_python_only():
+                    ASH_LOGGER.debug(
+                        f"Reporter {display_name} is not Python-only, skipping due to python_only flag"
+                    )
+                    continue
 
                 # Check if format matches requested formats
                 if (

@@ -285,7 +285,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             ]
         )
         with open(outdir.joinpath("ash-cdk-nag.sarif"), "w") as fp:
-            report_str = report.model_dump_json()
+            report_str = report.model_dump_json(
+                exclude_none=True,
+                exclude_unset=True,
+            )
             fp.write(report_str)
 
         return report

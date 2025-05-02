@@ -57,6 +57,8 @@ class ScanExecutionEngine:
         color_system: str = "auto",
         verbose: bool = False,
         debug: bool = False,
+        python_only: bool = False,
+        simple_mode: bool = False,
         ash_plugin_modules: List[str] = [],
     ):
         """Initialize the execution engine.
@@ -105,6 +107,8 @@ class ScanExecutionEngine:
         self._enabled_scanners = []
         self._global_ignore_paths = global_ignore_paths
         self._queue = multiprocessing.Queue()
+        self._python_only = python_only  # Store the python_only flag
+        self._simple_mode = simple_mode  # Store the simple_mode flag
 
         # Get debug and verbose flags from environment or config
         debug_flag = debug or os.environ.get("ASH_DEBUG", "").lower() in [
@@ -215,7 +219,7 @@ class ScanExecutionEngine:
         self._completed_scanners = []
         self._results = self._asharp_model
         self._progress = None
-        self._max_workers = min(4, multiprocessing.cpu_count())
+        self._max_workers = multiprocessing.cpu_count()
 
         # Register custom scanners from configuration
         self._register_custom_scanners()
@@ -403,7 +407,7 @@ class ScanExecutionEngine:
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
-                    convert_phase.execute()
+                    convert_phase.execute(python_only=self._python_only)
 
                 elif phase_name == "scan":
                     # Create and execute the Scan phase
@@ -413,11 +417,19 @@ class ScanExecutionEngine:
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
+
+                    # If python_only is True, log that we're filtering non-Python scanners
+                    if self._python_only:
+                        ASH_LOGGER.info(
+                            "Python-only mode enabled: Filtering out non-Python scanners"
+                        )
+
                     self._results = scan_phase.execute(
                         enabled_scanners=self._init_enabled_scanners,
                         parallel=(self._strategy == ExecutionStrategy.PARALLEL),
                         max_workers=self._max_workers,
                         global_ignore_paths=self._global_ignore_paths,
+                        python_only=self._python_only,  # Pass the python_only flag to the scan phase
                     )
                     # Store the completed scanners for metrics display
                     self._completed_scanners = scan_phase._completed_scanners
@@ -437,6 +449,7 @@ class ScanExecutionEngine:
                             if hasattr(self._context.config, "output_formats")
                             else None
                         ),
+                        python_only=self._python_only,
                     )
 
                 elif phase_name == "inspect":
@@ -447,7 +460,7 @@ class ScanExecutionEngine:
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
-                    inspect_phase.execute()
+                    inspect_phase.execute(python_only=self._python_only)
 
             # Return the results
             return self._results
@@ -461,7 +474,9 @@ class ScanExecutionEngine:
                 self.progress_display.stop()
 
             # Display the final metrics table
-            ASH_LOGGER.info("===== ASH Security Scan Complete =====")
+            if not self._simple_mode:
+                ASH_LOGGER.info("===== ASH Security Scan Complete =====")
+
             if self._completed_scanners:
                 # Get color setting from progress display
                 use_color = True
@@ -470,15 +485,10 @@ class ScanExecutionEngine:
                 ):
                     use_color = self.progress_display.console.color_system is not None
 
+                # Always display the metrics table, even in simple mode
                 display_metrics_table(
                     completed_scanners=self._completed_scanners,
                     asharp_model=self._asharp_model,
                     scan_results=self._scan_results,
                     use_color=use_color,
                 )
-
-        return ASHARPModel(description="No results generated")
-
-    def set_max_workers(self, workers: int) -> None:
-        """Set maximum number of worker threads for parallel execution."""
-        self._max_workers = workers

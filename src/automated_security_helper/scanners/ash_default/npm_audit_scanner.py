@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 from typing import Annotated, Dict, List, Literal, Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs
@@ -72,6 +72,27 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             extra_args=[],
         )
         super().model_post_init(context)
+
+    @model_validator(mode="after")
+    def setup_custom_install_commands(self) -> "NpmAuditScanner":
+        """Set up custom installation commands for opengrep."""
+        # Get version and linux_type from config
+        # Linux
+        if "linux" not in self.custom_install_commands:
+            self.custom_install_commands["linux"] = {}
+        self.custom_install_commands["linux"]["amd64"] = []
+        self.custom_install_commands["linux"]["arm64"] = []
+        # macOS
+        if "darwin" not in self.custom_install_commands:
+            self.custom_install_commands["darwin"] = {}
+        self.custom_install_commands["darwin"]["amd64"] = []
+        self.custom_install_commands["darwin"]["arm64"] = []
+        # Windows
+        if "windows" not in self.custom_install_commands:
+            self.custom_install_commands["windows"] = {}
+        self.custom_install_commands["windows"]["amd64"] = []
+
+        return self
 
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -416,7 +437,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # Save SARIF report
                 sarif_file = target_results_dir.joinpath("results_sarif.sarif")
                 with open(sarif_file, "w") as f:
-                    f.write(sarif_report.model_dump_json(indent=2))
+                    f.write(
+                        sarif_report.model_dump_json(
+                            exclude_none=True,
+                            exclude_unset=True,
+                        )
+                    )
 
                 return sarif_report
             else:

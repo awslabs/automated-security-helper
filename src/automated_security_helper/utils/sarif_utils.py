@@ -277,7 +277,7 @@ def apply_suppressions_to_sarif(
 
                                     # Add suppression
                                     ASH_LOGGER.verbose(
-                                        f"Suppressing rule '{result.ruleId}' on location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: {ignore_path.reason}"
+                                        f"Suppressing rule '{result.ruleId}' on location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
                                     )
                                     suppression = Suppression(
                                         kind=Kind1.external,

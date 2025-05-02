@@ -39,12 +39,29 @@
 # against the code repository using this command:
 #   pre-commit run --hook-stage manual ash
 #
--   id: ash
-    name: use ASH for checking
-    description: Runs various code scanners in separate Docker containers
-    entry: ash
-    verbose: true
-    stages: [commit, merge-commit, push, manual]
-    language: script
-    pass_filenames: false
-    types_or: [yaml, json, shell, bash, python]
+- id: ash-simple-scan
+  name: Use ASH for SAST/IaC/Secrets scanning
+  description: Runs various code scanners from Python directly
+  entry: ashv3
+  verbose: true
+  language: python
+  pass_filenames: false
+  stages:
+    - pre-commit
+    - manual
+  args:
+    - --simple
+    - --python-only
+- id: ash-full-scan
+  name: Use ASH for SAST/IaC/Secrets scanning
+  description: Runs full ASH scan with container build and all scanners
+  entry: ash
+  verbose: true
+  language: script
+  pass_filenames: false
+  stages:
+    - pre-commit
+    - manual
+  args:
+    - --simple
+    - --python-only

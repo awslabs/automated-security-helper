@@ -33,69 +33,69 @@ def get_reporter_mappings() -> Dict[str, Dict[str, str]]:
         # Define mappings for each reporter
         # OCSF mappings
         mappings["ocsf"] = {
-            "runs[0].tool.driver.rules[0].id": "vulnerabilities[0].cve.uid",
-            "runs[0].results[0].message.text": "vulnerabilities[0].desc",
-            "runs[0].results[0].ruleId": "vulnerabilities[0].title",
-            "runs[0].results[0].level": "severity",
-            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "affected_code[0].file.path",
-            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "affected_code[0].start_line",
-            "runs[0].results[0].locations[0].physicalLocation.region.endLine": "affected_code[0].end_line",
+            "runs[].tool.driver.rules[].id": "vulnerabilities[].cve.uid",
+            "runs[].results[].message.text": "vulnerabilities[].desc",
+            "runs[].results[].ruleId": "vulnerabilities[].title",
+            "runs[].results[].level": "severity",
+            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "affected_code[].file.path",
+            "runs[].results[].locations[].physicalLocation.region.startLine": "affected_code[].start_line",
+            "runs[].results[].locations[].physicalLocation.region.endLine": "affected_code[].end_line",
         }
 
         # ASFF mappings
         mappings["asff"] = {
-            "runs[0].results[0].ruleId": "Findings[0].Types[0]",
-            "runs[0].results[0].message.text": "Findings[0].Description",
-            "runs[0].results[0].level": "Findings[0].Severity.Label",
-            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "Findings[0].Resources[0].Details.AwsEc2Instance.Path",
-            "runs[0].tool.driver.name": "Findings[0].ProductFields.aws/securityhub/ProductName",
+            "runs[].results[].ruleId": "Findings[].Types[]",
+            "runs[].results[].message.text": "Findings[].Description",
+            "runs[].results[].level": "Findings[].Severity.Label",
+            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "Findings[].Resources[].Details.AwsEc2Instance.Path",
+            "runs[].tool.driver.name": "Findings[].ProductFields.aws/securityhub/ProductName",
         }
 
         # CSV mappings
         mappings["csv"] = {
-            "runs[0].results[0].ruleId": "Rule ID",
-            "runs[0].results[0].message.text": "Description",
-            "runs[0].results[0].level": "Severity",
-            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "File Path",
-            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "Line Start",
-            "runs[0].tool.driver.name": "Scanner",
+            "runs[].results[].ruleId": "Rule ID",
+            "runs[].results[].message.text": "Description",
+            "runs[].results[].level": "Severity",
+            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "File Path",
+            "runs[].results[].locations[].physicalLocation.region.startLine": "Line Start",
+            "runs[].tool.driver.name": "Scanner",
         }
 
         # Flat JSON mappings
         mappings["flat-json"] = {
-            "runs[0].results[0].ruleId": "rule_id",
-            "runs[0].results[0].message.text": "description",
-            "runs[0].results[0].level": "severity",
-            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "file_path",
-            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "line_start",
-            "runs[0].results[0].locations[0].physicalLocation.region.endLine": "line_end",
-            "runs[0].tool.driver.name": "scanner",
+            "runs[].results[].ruleId": "rule_id",
+            "runs[].results[].message.text": "description",
+            "runs[].results[].level": "severity",
+            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "file_path",
+            "runs[].results[].locations[].physicalLocation.region.startLine": "line_start",
+            "runs[].results[].locations[].physicalLocation.region.endLine": "line_end",
+            "runs[].tool.driver.name": "scanner",
         }
 
         # JUnit XML mappings
         mappings["junitxml"] = {
-            "runs[0].results[0].ruleId": "testcase.classname",
-            "runs[0].results[0].message.text": "testcase.name",
-            "runs[0].results[0].level": "testcase.result.type",
-            "runs[0].tool.driver.name": "testsuite.name",
+            "runs[].results[].ruleId": "testcase.classname",
+            "runs[].results[].message.text": "testcase.name",
+            "runs[].results[].level": "testcase.result.type",
+            "runs[].tool.driver.name": "testsuite.name",
         }
 
         # Markdown mappings
         mappings["markdown"] = {
-            "runs[0].results[0].ruleId": "Finding.title",
-            "runs[0].results[0].message.text": "Finding.description",
-            "runs[0].results[0].level": "Finding.severity",
-            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "Finding.location",
-            "runs[0].tool.driver.name": "Finding.scanner",
+            "runs[].results[].ruleId": "Finding.title",
+            "runs[].results[].message.text": "Finding.description",
+            "runs[].results[].level": "Finding.severity",
+            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "Finding.location",
+            "runs[].tool.driver.name": "Finding.scanner",
         }
 
         # HTML mappings
         mappings["html"] = {
-            "runs[0].results[0].ruleId": "table.row.rule",
-            "runs[0].results[0].message.text": "table.row.message",
-            "runs[0].results[0].level": "table.row.severity",
-            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "table.row.location",
-            "runs[0].tool.driver.name": "table.section.scanner",
+            "runs[].results[].ruleId": "table.row.rule",
+            "runs[].results[].message.text": "table.row.message",
+            "runs[].results[].level": "table.row.severity",
+            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "table.row.location",
+            "runs[].tool.driver.name": "table.section.scanner",
         }
 
         # Try to get mappings from reporter instances if they have a sarif_field_mappings attribute

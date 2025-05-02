@@ -345,8 +345,10 @@
                 "exclude_rule": [],
                 "metrics": "auto",
                 "offline": false,
+                "patterns": [],
                 "severity": [],
-                "severity_threshold": null
+                "severity_threshold": null,
+                "version": "v1.1.5"
               }
             },
             "semgrep": {
@@ -1015,6 +1017,27 @@
         }
       },
       "title": "ConverterPluginConfigBase",
+      "type": "object"
+    },
+    "CustomCommand": {
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "shell": {
+          "default": false,
+          "title": "Shell",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "args"
+      ],
+      "title": "CustomCommand",
       "type": "object"
     },
     "CustomScannerConfig": {
@@ -1719,8 +1742,10 @@
             "exclude_rule": [],
             "metrics": "auto",
             "offline": false,
+            "patterns": [],
             "severity": [],
-            "severity_threshold": null
+            "severity_threshold": null,
+            "version": "v1.1.5"
           },
           "description": "Configure Opengrep scanner"
         }
@@ -1775,6 +1800,15 @@
           "title": "Offline",
           "type": "boolean"
         },
+        "patterns": {
+          "default": [],
+          "description": "Patterns to search for with OpenGrep.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Patterns",
+          "type": "array"
+        },
         "severity": {
           "default": [],
           "description": "Report findings only from rules matching the supplied severity level.",
@@ -1808,10 +1842,30 @@
           "default": null,
           "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
           "title": "Severity Threshold"
+        },
+        "version": {
+          "default": "v1.1.5",
+          "description": "Version of OpenGrep to use.",
+          "title": "Version",
+          "type": "string"
         }
       },
       "title": "OpengrepScannerConfigOptions",
       "type": "object"
+    },
+    "PackageManager": {
+      "enum": [
+        "apt",
+        "pip",
+        "npm",
+        "brew",
+        "yum",
+        "choco",
+        "custom",
+        "url"
+      ],
+      "title": "PackageManager",
+      "type": "string"
     },
     "PluginContext": {
       "additionalProperties": true,
@@ -1847,6 +1901,28 @@
         "output_dir"
       ],
       "title": "PluginContext",
+      "type": "object"
+    },
+    "PluginDependency": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "package_manager": {
+          "$ref": "#/$defs/PackageManager",
+          "default": "apt"
+        },
+        "version": {
+          "default": "latest",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PluginDependency",
       "type": "object"
     },
     "ReporterConfigSegment": {
@@ -2239,8 +2315,10 @@
               "exclude_rule": [],
               "metrics": "auto",
               "offline": false,
+              "patterns": [],
               "severity": [],
-              "severity_threshold": null
+              "severity_threshold": null,
+              "version": "v1.1.5"
             }
           },
           "description": "Configure the options for Opengrep"
@@ -2345,17 +2423,35 @@
           ],
           "default": null
         },
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
+        "custom_install_commands": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/$defs/CustomCommand"
+              },
+              "type": "array"
             },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Description"
+            "type": "object"
+          },
+          "default": {},
+          "description": "Custom installation commands by platform and architecture",
+          "title": "Custom Install Commands",
+          "type": "object"
+        },
+        "dependencies": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/$defs/PluginDependency"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Dependencies by platform and architecture",
+          "title": "Dependencies",
+          "type": "object"
         },
         "end_time": {
           "anyOf": [
@@ -2415,6 +2511,7 @@
             }
           ],
           "default": null,
+          "description": "The path to the results file, if any. This is set by the scanner plugin after the scan is complete.",
           "title": "Results File"
         },
         "start_time": {
@@ -2438,6 +2535,18 @@
           },
           "title": "Subcommands",
           "type": "array"
+        },
+        "tool_description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Description"
         },
         "tool_type": {
           "default": "UNKNOWN",

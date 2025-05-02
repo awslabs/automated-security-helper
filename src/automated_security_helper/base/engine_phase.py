@@ -65,13 +65,14 @@ class EnginePhase(ABC):
         )
         return ash_plugin_manager.notify(event_type, **event_data)
 
-    def execute(self, **kwargs) -> Any:
+    def execute(self, python_only: bool = False, **kwargs) -> Any:
         """Execute the phase with observer pattern support.
 
         This implementation handles the common event notifications.
         Subclasses should override _execute_phase instead of this method.
 
         Args:
+            python_only: If True, only execute plugins that are Python-only
             **kwargs: Additional arguments for the phase
 
         Returns:
@@ -89,7 +90,7 @@ class EnginePhase(ABC):
         ASH_LOGGER.debug(
             f"EnginePhase.execute: Executing phase-specific logic for {self.phase_name}"
         )
-        results = self._execute_phase(**kwargs)
+        results = self._execute_phase(python_only=python_only, **kwargs)
 
         # Notify phase complete
         complete_event = f"{self.phase_name.upper()}_COMPLETE"
@@ -103,12 +104,13 @@ class EnginePhase(ABC):
         return results
 
     @abstractmethod
-    def _execute_phase(self, **kwargs) -> Any:
+    def _execute_phase(self, python_only: bool = False, **kwargs) -> Any:
         """Execute the phase-specific logic.
 
         Subclasses must implement this method instead of overriding execute().
 
         Args:
+            python_only: If True, only execute plugins that are Python-only
             **kwargs: Additional arguments for the phase
 
         Returns:

@@ -6,6 +6,7 @@ from typing import Dict, List, Any
 from pathlib import Path
 
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.core.progress import ExecutionPhase
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
@@ -36,6 +37,7 @@ class ScanPhase(EnginePhase):
         parallel: bool = True,
         max_workers: int = 4,
         global_ignore_paths: List[IgnorePathWithReason] = None,
+        python_only: bool = False,
         **kwargs,
     ) -> ASHARPModel:
         """Execute the Scan phase.
@@ -106,14 +108,27 @@ class ScanPhase(EnginePhase):
                         ):
                             display_name = plugin_instance.config.name
 
-                        # Check if scanner is enabled
-                        if (
-                            hasattr(plugin_instance.config, "enabled")
-                            and bool(plugin_instance.config.enabled)
-                            and (
-                                not enabled_scanners
-                                or display_name.lower().strip() in enabled_scanners
+                        # Check if scanner is enabled and if python_only is set, check if it's a Python-only scanner
+                        is_enabled = hasattr(
+                            plugin_instance.config, "enabled"
+                        ) and bool(plugin_instance.config.enabled)
+                        is_in_enabled_scanners = (
+                            not enabled_scanners
+                            or display_name.lower().strip() in enabled_scanners
+                        )
+
+                        # Add debug logging for python_only check
+                        is_python_only_scanner = True  # Default to True to allow all scanners if not checking
+                        if python_only:
+                            is_python_only_scanner = plugin_instance.is_python_only()
+                            ASH_LOGGER.info(
+                                f"Scanner {display_name}: Python-only check result: {is_python_only_scanner}"
                             )
+
+                        if (
+                            is_enabled
+                            and is_in_enabled_scanners
+                            and (not python_only or is_python_only_scanner)
                         ):
                             # Add a single task per scanner that will handle both source and converted directories
                             self._queue.put(
@@ -305,6 +320,7 @@ class ScanPhase(EnginePhase):
                     scanner_name=scanner_config.name,
                     target=scan_target,
                     target_type=target_type,
+                    scanner_severity_threshold=scanner_config.options.severity_threshold,
                 )
 
                 # Execute scan for this target
@@ -665,9 +681,64 @@ class ScanPhase(EnginePhase):
         if scanner_name not in self.asharp_model.additional_reports:
             self.asharp_model.additional_reports[scanner_name] = {}
 
+        # Determine which is set first:
+        # 1. results.scanner_severity_threshold
+        # 2. self.asharp_model.ash_config.global_settings.severity_threshold
+        # 3. ASH_DEFAULT_SEVERITY_LEVEL
+        evaluation_threshold = (
+            results.scanner_severity_threshold
+            if results.scanner_severity_threshold is not None
+            else (
+                self.asharp_model.ash_config.global_settings.severity_threshold
+                if self.asharp_model.ash_config.global_settings.severity_threshold
+                is not None
+                else ASH_DEFAULT_SEVERITY_LEVEL
+            )
+        )
+
+        for sev in [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info",
+        ]:
+            self.asharp_model.metadata.summary_stats[sev] += results.severity_counts[
+                sev
+            ]
+            self.asharp_model.metadata.summary_stats["total"] += (
+                results.severity_counts[sev]
+            )
+
+        actionable = 0
+        if evaluation_threshold == "ALL":
+            actionable = results.severity_counts["total"]
+        elif evaluation_threshold == "LOW":
+            actionable = (
+                results.severity_counts["critical"]
+                + results.severity_counts["high"]
+                + results.severity_counts["medium"]
+                + results.severity_counts["low"]
+            )
+        elif evaluation_threshold == "MEDIUM":
+            actionable = (
+                results.severity_counts["critical"]
+                + results.severity_counts["high"]
+                + results.severity_counts["medium"]
+            )
+        elif evaluation_threshold == "HIGH":
+            actionable = (
+                results.severity_counts["critical"] + results.severity_counts["high"]
+            )
+        elif evaluation_threshold == "CRITICAL":
+            actionable = results.severity_counts["critical"]
+
+        self.asharp_model.metadata.summary_stats["actionable"] += actionable
+
         # Store metrics in the additional_reports
         self.asharp_model.additional_reports[scanner_name][results.target_type] = {
             "severity_counts": results.severity_counts,
+            "actionable_finding_count": actionable,
             "finding_count": results.finding_count,
             "exit_code": results.exit_code,
             "status": results.status,

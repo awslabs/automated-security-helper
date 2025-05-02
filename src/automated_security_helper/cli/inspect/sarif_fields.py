@@ -1,31 +1,126 @@
-from automated_security_helper.utils.meta_analysis.analyze_sarif_file import (
-    analyze_sarif_file,
-)
-from automated_security_helper.utils.meta_analysis.generate_field_mapping_html_report import (
-    generate_html_report,
-)
-from automated_security_helper.utils.meta_analysis.get_reporter_mappings import (
-    get_reporter_mappings,
-)
-from automated_security_helper.utils.meta_analysis.get_value_from_path import (
-    get_value_from_path,
-)
-from automated_security_helper.utils.meta_analysis.validate_sarif_aggregation import (
-    validate_sarif_aggregation,
-)
-
-
 import typer
 from rich.console import Console
 from rich.table import Table
-
 
 import csv
 import glob
 import json
 import os
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Dict, Any
+
+from automated_security_helper.utils.meta_analysis.generate_field_mapping_html_report import (
+    generate_html_report,
+)
+from automated_security_helper.utils.meta_analysis.should_include_field import (
+    should_include_field,
+)
+
+
+def flatten_sarif_results(
+    sarif_data: Dict[str, Any],
+) -> tuple[Dict[str, bool], Dict[str, bool]]:
+    """
+    Recursively flatten the SARIF results structure to get all unique field paths.
+    Focus only on fields under runs[].results[].
+    Skip expansion of fields under properties.
+    Use [] notation for arrays instead of specific indices.
+
+    Args:
+        sarif_data: The SARIF data to flatten
+
+    Returns:
+        Tuple of (included_fields, excluded_fields) dictionaries
+    """
+    included_fields = {}
+    excluded_fields = {}
+
+    # Check if the SARIF data has runs
+    if not sarif_data.get("runs"):
+        return included_fields, excluded_fields
+
+    # Process each run
+    for run in sarif_data["runs"]:
+        # Focus only on results
+        if not run.get("results"):
+            continue
+
+        # Process each result
+        for result in run["results"]:
+            # Recursively flatten the result object
+            _flatten_object(
+                result, "runs[].results[]", included_fields, excluded_fields
+            )
+
+    return included_fields, excluded_fields
+
+
+def _flatten_object(
+    obj: Any,
+    prefix: str,
+    result: Dict[str, bool],
+    excluded_result: Dict[str, bool] = None,
+) -> None:
+    """
+    Recursively flatten an object into a dictionary with path keys.
+    Skip expansion of fields under properties.
+    Use [] notation for arrays instead of specific indices.
+    Track excluded fields separately if excluded_result is provided.
+
+    Args:
+        obj: The object to flatten
+        prefix: The current path prefix
+        result: The result dictionary to update with included fields
+        excluded_result: Optional dictionary to update with excluded fields
+    """
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            new_prefix = f"{prefix}.{key}" if prefix else key
+
+            # Check if this field should be included
+            if not should_include_field(new_prefix):
+                # If we're tracking excluded fields, add it to that dictionary
+                if excluded_result is not None:
+                    excluded_result[new_prefix] = True
+                continue
+
+            # Skip expansion of fields under properties
+            if key == "properties":
+                result[new_prefix] = True
+                continue
+
+            if isinstance(value, (dict, list)):
+                _flatten_object(value, new_prefix, result, excluded_result)
+            else:
+                result[new_prefix] = True
+    elif isinstance(obj, list):
+        # For lists, use [] notation instead of specific indices
+        if obj and len(obj) > 0:
+            # Process the first item as representative
+            new_prefix = f"{prefix}[]" if not prefix.endswith("[]") else prefix
+            _flatten_object(obj[0], new_prefix, result, excluded_result)
+
+
+def get_scanner_name_from_path(file_path: str) -> str:
+    """
+    Extract scanner name from file path.
+
+    Args:
+        file_path: Path to the SARIF file
+
+    Returns:
+        str: The scanner name
+    """
+    path_parts = Path(file_path).parts
+
+    # Check if the file is in the scanners directory
+    if "scanners" in path_parts:
+        scanners_index = path_parts.index("scanners")
+        if len(path_parts) > scanners_index + 1:
+            return path_parts[scanners_index + 1]
+
+    # If not in scanners directory, use the filename without extension
+    return Path(file_path).stem
 
 
 def analyze_sarif_fields(
@@ -34,7 +129,7 @@ def analyze_sarif_fields(
         typer.Option(
             help="Directory containing SARIF files to analyze",
         ),
-    ],
+    ] = None,
     output_dir: Annotated[
         str,
         typer.Option(
@@ -58,383 +153,308 @@ def analyze_sarif_fields(
     Analyze SARIF fields across different scanners to understand their schema.
 
     This command:
-    1. Extracts field paths from SARIF reports across different scanners
-    2. Identifies field types and groups them by scanner
-    3. Outputs results in both JSON and CSV formats
-    4. Validates that fields from original scanner reports are preserved in the aggregated report
-    5. Generates a comprehensive HTML report with field analysis and validation results
-    6. Analyzes how SARIF fields map to different flat report formats
+    1. Finds all SARIF files in the specified directories
+    2. Extracts field paths from SARIF reports across different scanners
+    3. Creates a mapping of fields to scanners that use them
+    4. Outputs results in both JSON and CSV formats
+    5. Generates a comprehensive HTML report with field analysis
     """
     console = Console()
 
-    # Set default output directory if not provided
+    # Set default directories if not provided
+    if sarif_dir is None:
+        sarif_dir = Path.cwd().joinpath(".ash", "ash_output")
+
     if output_dir is None:
         output_dir = Path.cwd().joinpath(".ash", "ash_output", "inspect")
+
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    # Find all SARIF files
-    sarif_files = glob.glob(os.path.join(sarif_dir, "**/*.sarif"), recursive=True)
+    # Initialize the results dictionary
+    # Key: flattened field name, Value: dict of scanner names with True values
+    results_dict: Dict[str, Dict[str, bool]] = {}
+    excluded_dict: Dict[str, Dict[str, bool]] = {}  # For tracking excluded fields
 
-    if not sarif_files:
+    # Define the search patterns in the specified order
+    search_patterns = [
+        os.path.join(sarif_dir, "reports", "*.sarif"),
+        os.path.join(sarif_dir, "scanners", "**", "*.sarif"),
+    ]
+
+    # Find all SARIF files in the specified patterns
+    all_sarif_files = []
+    for pattern in search_patterns:
+        all_sarif_files.extend(glob.glob(pattern, recursive=True))
+
+    if not all_sarif_files:
         console.print(f"[bold red]No SARIF files found in {sarif_dir}[/bold red]")
         raise typer.Exit(code=1)
 
-    console.print(f"Found [bold green]{len(sarif_files)}[/bold green] SARIF files")
+    console.print(f"Found [bold green]{len(all_sarif_files)}[/bold green] SARIF files")
 
-    # Initialize field dictionary
-    field_dict = {}
-    scanner_reports = {}
+    # Process files in the specified order
+    sarif_files = []
 
-    # First, analyze the aggregated SARIF file if provided
-    if aggregated_sarif and os.path.exists(aggregated_sarif):
-        console.print(
-            f"Analyzing aggregated SARIF report: [cyan]{aggregated_sarif}[/cyan]"
-        )
+    # First, process files in reports directory
+    reports_files = [f for f in all_sarif_files if "reports" in Path(f).parts]
+    sarif_files.extend(reports_files)
 
-        # Load aggregated report
-        with open(aggregated_sarif, "r") as f:
-            aggregated_report = json.load(f)
-            scanner_reports["ash-aggregated"] = aggregated_report
+    # Then, process files in scanners directory
+    scanners_files = [f for f in all_sarif_files if "scanners" in Path(f).parts]
+    sarif_files.extend(scanners_files)
 
-        # Extract fields from aggregated report
-        agg_fields, _ = analyze_sarif_file(
-            aggregated_sarif, scanner_name="ash-aggregated"
-        )
-
-        # Initialize field dictionary with aggregated fields
-        for path, info in agg_fields.items():
-            field_dict[path] = {
-                "type": info["type"],
-                "scanners": {"ash-aggregated"},
-                "in_aggregate": True,
-            }
-
-    # Then analyze each scanner file
-    with console.status("[bold green]Analyzing scanner SARIF files..."):
+    # Process each SARIF file
+    with console.status("[bold green]Analyzing SARIF files..."):
         for file_path in sarif_files:
-            # Skip the aggregated file if we already processed it
-            if aggregated_sarif and file_path == aggregated_sarif:
-                continue
-
             console.print(f"Analyzing [cyan]{file_path}[/cyan]")
 
-            # Extract scanner name from file path
-            # Expected pattern: ${OUTPUT_DIR}/${SCANNER_NAME}/${SCAN_TARGET_TYPE}/**/*.sarif
-            path_parts = file_path.split(os.sep)
-            scanners_index = path_parts.index("scanners")
-            scanner_name = path_parts[scanners_index + 1]
-            # scan_target = path_parts[scanners_index + 2]
+            # Get scanner name from file path
+            scanner_name = get_scanner_name_from_path(file_path)
 
-            # Format scanner identifier
-            scanner_id = scanner_name
+            try:
+                # Load the SARIF file
+                with open(file_path, "r") as f:
+                    sarif_data = json.load(f)
 
-            # Extract fields from scanner file
-            field_paths, detected_scanner = analyze_sarif_file(
-                file_path, scanner_name=scanner_id
-            )
+                # Flatten the SARIF results - now returns both included and excluded fields
+                included_fields, excluded_fields = flatten_sarif_results(sarif_data)
 
-            # If we detected a scanner name from the file content, use it instead
-            if detected_scanner != "unknown" and detected_scanner != scanner_id:
-                scanner_id = detected_scanner
+                # Update the results dictionary with included fields
+                for field_name in included_fields:
+                    if field_name not in results_dict:
+                        results_dict[field_name] = {}
 
-            # Store original report for validation
-            with open(file_path, "r") as f:
-                scanner_reports[scanner_id] = json.load(f)
+                    # Add the scanner to the field's scanners list if not already present
+                    if scanner_name not in results_dict[field_name]:
+                        results_dict[field_name][scanner_name] = True
 
-            # Update field dictionary with scanner fields
-            for path, info in field_paths.items():
-                if path in field_dict:
-                    # Update existing field entry
-                    field_dict[path]["type"].update(info["type"])
-                    field_dict[path]["scanners"].add(scanner_id)
-                else:
-                    # Add new field entry
-                    field_dict[path] = {
-                        "type": info["type"],
-                        "scanners": {scanner_id},
-                        "in_aggregate": False,  # Not in aggregate by default
-                    }
+                # Update the excluded fields dictionary
+                for field_name in excluded_fields:
+                    if field_name not in excluded_dict:
+                        excluded_dict[field_name] = {}
 
-    # Convert field_dict to the format expected by downstream functions
-    merged_paths = {}
-    for path, info in field_dict.items():
-        merged_paths[path] = {"type": info["type"], "scanners": info["scanners"]}
+                    # Add the scanner to the excluded field's scanners list
+                    if scanner_name not in excluded_dict[field_name]:
+                        excluded_dict[field_name][scanner_name] = True
 
-    # Convert sets to lists for JSON serialization
-    result = {}
-    for path, info in merged_paths.items():
-        result[path] = {
-            "type": list(info["type"]),
-            "scanners": list(info["scanners"]),
-            "in_aggregate": field_dict.get(path, {}).get("in_aggregate", False),
-        }
+            except Exception as e:
+                console.print(
+                    f"[bold red]Error processing {file_path}: {str(e)}[/bold red]"
+                )
 
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Write JSON output
+    # Write JSON output for included fields
     json_path = os.path.join(output_dir, "sarif_fields.json")
     with open(json_path, "w") as f:
-        json.dump(result, f, indent=2)
+        json.dump(results_dict, f, indent=2)
+    console.print(f"Wrote included fields JSON to [cyan]{json_path}[/cyan]")
 
-    console.print(f"Wrote JSON output to [cyan]{json_path}[/cyan]")
+    # Write JSON output for excluded fields
+    excluded_json_path = os.path.join(output_dir, "sarif_excluded_fields.json")
+    with open(excluded_json_path, "w") as f:
+        json.dump(excluded_dict, f, indent=2)
+    console.print(f"Wrote excluded fields JSON to [cyan]{excluded_json_path}[/cyan]")
 
-    # Write CSV output
+    # Write CSV output for included fields
     csv_path = os.path.join(output_dir, "sarif_fields.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["field", "scanners", "type", "in_aggregate"])
+        writer.writerow(["field", "scanners"])
 
-        for path, info in sorted(result.items()):
-            writer.writerow(
-                [
-                    path,
-                    ", ".join(sorted(info["scanners"])),
-                    ", ".join(sorted(info["type"])),
-                    "Yes" if info.get("in_aggregate", False) else "No",
-                ]
-            )
+        for field_name, scanners in sorted(results_dict.items()):
+            writer.writerow([field_name, ", ".join(sorted(scanners.keys()))])
+    console.print(f"Wrote included fields CSV to [cyan]{csv_path}[/cyan]")
 
-    console.print(f"Wrote CSV output to [cyan]{csv_path}[/cyan]")
+    # Write CSV output for excluded fields
+    excluded_csv_path = os.path.join(output_dir, "sarif_excluded_fields.csv")
+    with open(excluded_csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["field", "scanners", "reason"])
 
-    # Validate aggregated report if provided
-    if aggregated_sarif and os.path.exists(aggregated_sarif):
+        for field_name, scanners in sorted(excluded_dict.items()):
+            reason = "Intentionally excluded during aggregation"
+            writer.writerow([field_name, ", ".join(sorted(scanners.keys())), reason])
+    console.print(f"Wrote excluded fields CSV to [cyan]{excluded_csv_path}[/cyan]")
+
+    # Generate HTML report
+    # Convert results_dict to the format expected by generate_html_report
+    field_presence = {}
+    for field_name, scanners in results_dict.items():
+        field_presence[field_name] = {
+            "type": ["unknown"],  # We don't have type information
+            "scanners": list(scanners.keys()),
+            "in_aggregate": "ash-aggregated" in scanners or "ash" in scanners,
+            "intentionally_excluded": False,
+        }
+
+    # Add excluded fields to field_presence with a flag indicating they're intentionally excluded
+    for field_name, scanners in excluded_dict.items():
+        field_presence[field_name] = {
+            "type": ["unknown"],
+            "scanners": list(scanners.keys()),
+            "in_aggregate": "ash-aggregated" in scanners or "ash" in scanners,
+            "intentionally_excluded": True,
+        }
+
+    # Create validation results structure for HTML report
+    validation_results = {
+        "summary": {
+            "total_findings": len(field_presence),
+            "matched_findings": sum(
+                1 for info in field_presence.values() if info["in_aggregate"]
+            ),
+            "critical_missing_fields": 0,
+            "important_missing_fields": 0,
+            "informational_missing_fields": 0,
+        },
+        "match_statistics": {},
+        "missing_fields": {},
+    }
+
+    # Generate scanner statistics
+    all_scanners = set()
+    for scanners in results_dict.values():
+        all_scanners.update(scanners.keys())
+    for scanners in excluded_dict.values():
+        all_scanners.update(scanners.keys())
+
+    for scanner in all_scanners:
+        # Count fields for this scanner
+        scanner_fields = [
+            field for field, scanners in results_dict.items() if scanner in scanners
+        ]
+        total_fields = len(scanner_fields)
+
+        # Count fields that are also in the aggregate
+        matched_fields = sum(
+            1 for field in scanner_fields if field_presence[field]["in_aggregate"]
+        )
+
+        # Calculate match rate
+        match_rate = matched_fields / total_fields if total_fields > 0 else 0
+
+        # Add to validation results
+        validation_results["match_statistics"][scanner] = {
+            "total_results": total_fields,
+            "matched_results": matched_fields,
+            "field_preservation_rate": match_rate,
+            "critical_fields_missing": 0,
+            "important_fields_missing": 0,
+            "informational_fields_missing": 0,
+        }
+
+        # Add missing fields structure
+        validation_results["missing_fields"][scanner] = {
+            "critical": [],
+            "important": [],
+            "informational": [],
+        }
+
+    # Generate HTML report
+    html_report_path = os.path.join(output_dir, "sarif_validation_report.html")
+    generate_html_report(validation_results, html_report_path, field_presence)
+    console.print(f"Wrote HTML report to [cyan]{html_report_path}[/cyan]")
+
+    # Create a summary table
+    table = Table(title="SARIF Field Analysis Summary")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Total unique fields (included)", str(len(results_dict)))
+    table.add_row("Total unique fields (excluded)", str(len(excluded_dict)))
+    table.add_row("Total unique scanners", str(len(all_scanners)))
+
+    # Find fields used by all scanners
+    fields_in_all_scanners = [
+        field
+        for field, scanners in results_dict.items()
+        if len(scanners) == len(all_scanners)
+    ]
+    table.add_row("Fields used by all scanners", str(len(fields_in_all_scanners)))
+
+    # Find fields used by only one scanner
+    fields_in_one_scanner = [
+        field for field, scanners in results_dict.items() if len(scanners) == 1
+    ]
+    table.add_row("Fields used by only one scanner", str(len(fields_in_one_scanner)))
+
+    console.print(table)
+
+    # Create a per-scanner statistics table
+    scanner_table = Table(title="Per-Scanner SARIF Field Statistics")
+    scanner_table.add_column("Scanner", style="cyan")
+    scanner_table.add_column("Total Fields", style="green")
+    scanner_table.add_column("Unique Fields", style="yellow")
+    scanner_table.add_column("Missing (Unexpected)", style="red")
+    scanner_table.add_column("Missing (Intentional)", style="blue")
+    scanner_table.add_column("% in Aggregate", style="magenta")
+
+    # Calculate statistics for each scanner
+    aggregate_scanners = ["ash", "ash-aggregated"]
+    has_unexpected_missing_fields = False
+
+    for scanner in sorted(all_scanners):
+        # Skip aggregate scanners in the per-scanner table
+        if scanner in aggregate_scanners:
+            continue
+
+        # Count fields for this scanner
+        scanner_fields = [
+            field for field, scanners in results_dict.items() if scanner in scanners
+        ]
+        total_fields = len(scanner_fields)
+
+        # Count excluded fields for this scanner
+        excluded_scanner_fields = [
+            field for field, scanners in excluded_dict.items() if scanner in scanners
+        ]
+        excluded_count = len(excluded_scanner_fields)
+
+        # Count unique fields (fields that only this scanner has)
+        unique_fields = [
+            field
+            for field in scanner_fields
+            if sum(1 for s in results_dict[field].keys() if s != scanner) == 0
+        ]
+        unique_count = len(unique_fields)
+
+        # Count fields missing from the aggregate report (excluding intentionally excluded fields)
+        missing_from_aggregate = [
+            field
+            for field in scanner_fields
+            if not any(agg in results_dict.get(field, {}) for agg in aggregate_scanners)
+            and field
+            not in excluded_dict  # This ensures we don't count intentionally excluded fields
+        ]
+        missing_count = len(missing_from_aggregate)
+
+        # Track if there are any unexpected missing fields
+        if missing_count > 0:
+            has_unexpected_missing_fields = True
+
+        # Calculate percentage in aggregate
+        in_aggregate_count = total_fields - missing_count - excluded_count
+        in_aggregate_pct = (
+            (in_aggregate_count / total_fields * 100) if total_fields > 0 else 0
+        )
+
+        # Add row to table
+        scanner_table.add_row(
+            scanner,
+            str(total_fields),
+            str(unique_count),
+            str(missing_count),
+            str(excluded_count),
+            f"{in_aggregate_pct:.1f}%",
+        )
+
+    # Print the scanner statistics table
+    console.print(scanner_table)
+
+    # Exit with non-zero code if there are unexpected missing fields
+    if has_unexpected_missing_fields:
         console.print(
-            f"Validating aggregated SARIF report: [cyan]{aggregated_sarif}[/cyan]"
+            "[bold red]WARNING: Some fields are unexpectedly missing from the aggregate report[/bold red]"
         )
+        raise typer.Exit(code=1)
 
-        # Load aggregated report
-        with open(aggregated_sarif, "r") as f:
-            aggregated_report = json.load(f)
-
-        # Load flat reports if provided
-        flat_reports = {}
-        if flat_reports_dir and os.path.exists(flat_reports_dir):
-            console.print(f"Loading flat reports from: [cyan]{flat_reports_dir}[/cyan]")
-
-            # Look for CSV files
-            csv_files = glob.glob(os.path.join(flat_reports_dir, "*.csv"))
-            for csv_file in csv_files:
-                report_name = os.path.basename(csv_file).replace(".csv", "")
-                with open(csv_file, "r") as f:
-                    flat_reports[report_name] = f.read()
-                console.print(f"  - Loaded CSV report: [cyan]{report_name}[/cyan]")
-
-            # Look for JSON files
-            json_files = glob.glob(os.path.join(flat_reports_dir, "*.json"))
-            for json_file in json_files:
-                # Skip SARIF files
-                if json_file.endswith(".sarif"):
-                    continue
-
-                report_name = os.path.basename(json_file).replace(".json", "")
-                try:
-                    with open(json_file, "r") as f:
-                        flat_reports[report_name] = json.load(f)
-                    console.print(f"  - Loaded JSON report: [cyan]{report_name}[/cyan]")
-                except json.JSONDecodeError:
-                    console.print(
-                        f"  - [yellow]Failed to parse JSON file: {json_file}[/yellow]"
-                    )
-
-        # Validate
-        validation_results = validate_sarif_aggregation(
-            scanner_reports, aggregated_report
-        )
-
-        # Use our field dictionary for field presence
-        field_presence = {}
-        for path, info in field_dict.items():
-            field_presence[path] = {
-                "type": list(info["type"]),
-                "scanners": list(info["scanners"]),
-                "in_aggregate": info.get("in_aggregate", False),
-                "in_flat": {},
-                "reporter_mappings": {},
-            }
-
-        # Check field presence in flat reports
-        if flat_reports:
-            for path in field_presence:
-                if aggregated_report:
-                    # Use get_value_from_path to check if field exists in aggregate
-                    result = get_value_from_path(aggregated_report, path)
-                    field_presence[path]["in_aggregate"] = result[
-                        "exists"
-                    ]  # Field exists even if value is None
-                field_presence[path]["in_flat"] = {}
-                for report_type, report_data in flat_reports.items():
-                    field_presence[path]["in_flat"][report_type] = False
-
-                    # Get the mapping for this report type if available
-                    reporter_mappings = get_reporter_mappings()
-                    if (
-                        report_type in reporter_mappings
-                        and path in reporter_mappings[report_type]
-                    ):
-                        mapped_field = reporter_mappings[report_type][path]
-
-                        # Check if the mapped field exists in the flat report
-                        if isinstance(report_data, dict):
-                            # For nested fields in JSON-like formats
-                            field_parts = mapped_field.split(".")
-                            current = report_data
-                            field_exists = True
-
-                            for part in field_parts:
-                                if part in current:
-                                    current = current[part]
-                                else:
-                                    field_exists = False
-                                    break
-
-                            field_presence[path]["in_flat"][report_type] = field_exists
-                        elif isinstance(report_data, str):
-                            # For text-based formats, check if the field name appears in the content
-                            field_presence[path]["in_flat"][report_type] = (
-                                mapped_field in report_data
-                            )
-                    else:
-                        # Fallback to checking if the last part of the path exists in the report
-                        field_name = path.split(".")[-1]
-                        if isinstance(report_data, dict) and field_name in report_data:
-                            field_presence[path]["in_flat"][report_type] = True
-                        elif isinstance(report_data, str) and field_name in report_data:
-                            field_presence[path]["in_flat"][report_type] = True
-
-        # Write validation results
-        validation_path = os.path.join(output_dir, "sarif_validation.json")
-        with open(validation_path, "w") as f:
-            json.dump(validation_results, f, indent=2)
-
-        # Write validation summary CSV
-        validation_csv_path = os.path.join(output_dir, "sarif_validation.csv")
-        with open(validation_csv_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                [
-                    "scanner",
-                    "total_results",
-                    "matched_results",
-                    "preservation_rate",
-                    "critical_missing",
-                    "important_missing",
-                    "informational_missing",
-                    "example_critical_fields",
-                    "example_important_fields",
-                ]
-            )
-
-            for scanner, stats in validation_results["match_statistics"].items():
-                # Get example missing fields
-                critical_fields = validation_results["missing_fields"][scanner][
-                    "critical"
-                ]
-                important_fields = validation_results["missing_fields"][scanner][
-                    "important"
-                ]
-
-                # Get field paths for examples
-                critical_examples = ", ".join(
-                    [f.get("path", "unknown") for f in critical_fields[:3]]
-                )
-                important_examples = ", ".join(
-                    [f.get("path", "unknown") for f in important_fields[:3]]
-                )
-
-                writer.writerow(
-                    [
-                        scanner,
-                        stats["total_results"],
-                        stats["matched_results"],
-                        f"{stats['field_preservation_rate']:.2f}",
-                        stats.get("critical_fields_missing", 0),
-                        stats.get("important_fields_missing", 0),
-                        stats.get("informational_fields_missing", 0),
-                        critical_examples,
-                        important_examples,
-                    ]
-                )
-
-        # Generate a comprehensive HTML report with field analysis and validation results
-        html_report_path = os.path.join(output_dir, "sarif_validation_report.html")
-        generate_html_report(validation_results, html_report_path, field_presence)
-
-        console.print("Wrote validation results to:")
-        console.print(f"  - [cyan]{validation_path}[/cyan]")
-        console.print(f"  - [cyan]{validation_csv_path}[/cyan]")
-        console.print(f"  - [cyan]{html_report_path}[/cyan]")
-
-        # Print summary
-        console.print("\n[bold]Validation Summary:[/bold]")
-
-        # Create a summary table
-        table = Table(title="SARIF Field Analysis Summary")
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="green")
-        table.add_column("Percentage", style="yellow")
-
-        matched_pct = (
-            validation_results["summary"]["matched_findings"]
-            / validation_results["summary"]["total_findings"]
-            * 100
-        )
-
-        table.add_row(
-            "Total findings", str(validation_results["summary"]["total_findings"]), ""
-        )
-        table.add_row(
-            "Matched findings",
-            str(validation_results["summary"]["matched_findings"]),
-            f"{matched_pct:.2f}%",
-        )
-        table.add_row(
-            "Critical missing fields",
-            str(validation_results["summary"]["critical_missing_fields"]),
-            "",
-        )
-        table.add_row(
-            "Important missing fields",
-            str(validation_results["summary"]["important_missing_fields"]),
-            "",
-        )
-        table.add_row(
-            "Informational missing fields",
-            str(validation_results["summary"]["informational_missing_fields"]),
-            "",
-        )
-
-        console.print(table)
-
-        # Scanner-specific results table
-        scanner_table = Table(title="Scanner-Specific SARIF Emission Results")
-        scanner_table.add_column("Scanner", style="cyan")
-        scanner_table.add_column("Matched/Total", style="green")
-        scanner_table.add_column("Match Rate", style="yellow")
-        scanner_table.add_column("Critical Missing", style="red")
-        scanner_table.add_column("Important Missing", style="magenta")
-
-        for scanner, stats in validation_results["match_statistics"].items():
-            match_rate = stats["field_preservation_rate"] * 100
-            scanner_table.add_row(
-                scanner,
-                f"{stats['matched_results']}/{stats['total_results']}",
-                f"{match_rate:.2f}%",
-                str(stats.get("critical_fields_missing", 0)),
-                str(stats.get("important_fields_missing", 0)),
-            )
-
-        console.print(scanner_table)
-
-    if result.get("message"):
-        if isinstance(result["message"], str):
-            return result["message"]
-        elif isinstance(result["message"], dict):
-            if result["message"].get("text"):
-                return result["message"]["text"]
-            elif result["message"].get("root") and result["message"]["root"].get(
-                "text"
-            ):
-                return result["message"]["root"]["text"]
-
-    return ""
+    return results_dict

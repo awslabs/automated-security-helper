@@ -9,6 +9,7 @@ import typer
 import json
 import sys
 from pathlib import Path
+from rich import print
 
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
@@ -118,9 +119,28 @@ def run(
             help="Prints version number",
         ),
     ] = False,
+    python_only: Annotated[
+        bool,
+        typer.Option(
+            help="Exclude execution of any plugins or tools that have depencies external to Python."
+        ),
+    ] = False,
+    quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,
+    simple: Annotated[
+        bool,
+        typer.Option(
+            help="Enable simplified logging. Good for use when you just want brief status and summary of a scan, e.g. during a pre-commit hook."
+        ),
+    ] = False,
     verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+    fail_on_findings: Annotated[
+        bool | None,
+        typer.Option(
+            help="Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value."
+        ),
+    ] = None,
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:
@@ -139,18 +159,38 @@ def run(
     from automated_security_helper.utils.log import get_logger
 
     try:
+        # Handle quiet mode - if quiet is True, set logging level to ERROR
+        # For simple mode, also use ERROR level to show only important messages
+        log_level = (
+            logging.ERROR
+            if quiet or simple  # Set to ERROR for both quiet and simple modes
+            else logging.DEBUG
+            if debug
+            else 15
+            if verbose
+            else logging.INFO
+        )
+
+        # Handle simple mode - this will be used to configure the logger for simplified output
+        simple_logging = simple
+
         logger = get_logger(
-            level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
+            level=log_level,
             output_dir=Path(output_dir),
             show_progress=progress
+            and not quiet  # Don't show progress in quiet mode
+            and not simple  # Don't show progress in simple mode
             and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
             not in ["YES", "1", "TRUE"],
             use_color=color,
+            simple_format=simple_logging,  # Pass the simple flag to the logger
         )
         # Create orchestrator instance
         source_dir = Path(source_dir)
         output_dir = Path(output_dir)
-        logger.debug(f"Scanners specified: {scanners}")
+
+        if not quiet and not simple:
+            logger.debug(f"Scanners specified: {scanners}")
 
         if config is None:
             for config_file in ASH_CONFIG_FILE_NAMES:
@@ -186,6 +226,8 @@ def run(
             no_cleanup=not cleanup,
             output_formats=output_formats,
             show_progress=progress
+            and not quiet  # Don't show progress in quiet mode
+            and not simple  # Don't show progress in simple mode
             and (
                 os.environ.get("ASH_IN_CONTAINER", "NO").upper()
                 not in [
@@ -196,6 +238,7 @@ def run(
                 or os.environ.get("CI", None)
                 is not None  # Neither is running in a CI pipeline
             ),
+            simple_mode=simple,  # Pass the simple mode flag to the orchestrator
             color_system="auto" if color else None,
             offline=(
                 offline
@@ -203,6 +246,7 @@ def run(
                 else os.environ.get("ASH_OFFLINE", "NO").upper() in ["YES", "1", "TRUE"]
             ),
             existing_results_path=Path(existing_results) if existing_results else None,
+            python_only=python_only,  # Pass the python_only flag to the orchestrator
         )
 
         # Determine which phases to run. Process them in required order to build the
@@ -227,20 +271,104 @@ def run(
         if not phases_to_run:
             phases_to_run = ["convert", "scan", "report"]
 
-        logger.debug(f"Running phases: {phases_to_run}")
+        if not quiet and not simple:
+            logger.debug(f"Running phases: {phases_to_run}")
 
         # Execute scan with specified phases
         results = orchestrator.execute_scan(phases=phases_to_run)
+
+        # For simple mode, print a minimal completion message
+        if simple and not quiet:
+            typer.echo("\nASH scan completed.")
+
         if isinstance(results, ASHARPModel):
             content = results.model_dump_json(indent=2, by_alias=True)
         else:
             content = json.dumps(results, indent=2, default=str)
 
         # Write results to output file
-        output_file = output_dir.joinpath("ash_aggregated_results.json")
+        output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
         with open(output_file, "w") as f:
             f.write(content)
 
+        # Check if we should fail on findings
+        final_fail_on_findings = (
+            fail_on_findings
+            if fail_on_findings is not None
+            else (
+                orchestrator.config.fail_on_findings
+                if orchestrator.config.fail_on_findings is not None
+                else True
+            )
+        )
+
+        # Get the count of actionable findings from summary_stats
+        actionable_findings = results.metadata.summary_stats.get("actionable", 0)
+        # Add helpful guidance about where to find reports
+        relative_out_dir = (
+            Path(output_dir).relative_to(source_dir)
+            if Path(output_dir).is_relative_to(source_dir)
+            else output_dir
+        )
+        out_dir_alias = os.environ.get(
+            "ASH_ACTUAL_OUTPUT_DIR",
+            relative_out_dir.as_posix(),
+        )
+        if not quiet:
+            print("\n[cyan]=== Scan Complete: Next Steps ===[/cyan]")
+            print(f"View detailed findings in: {out_dir_alias}/reports/...")
+            print(f"  - HTML report available at: {out_dir_alias}/reports/ash.html")
+            print(
+                f"  - Markdown summary report available at: {out_dir_alias}/reports/ash.summary.md"
+            )
+            print(
+                f"  - Text summary report available at: {out_dir_alias}/reports/ash.summary.txt"
+            )
+            print(
+                f"  - Full SARIF report available at: {out_dir_alias}/reports/ash.sarif"
+            )
+            print(
+                f"  - Full JUnitXML report available at: {out_dir_alias}/reports/ash.junit.xml"
+            )
+            print(
+                f"  - Full ASH aggregated results JSON available at: {out_dir_alias}/{output_file.relative_to(output_dir).as_posix()}"
+            )
+
+        # If there are actionable findings, provide guidance
+        if actionable_findings > 0:
+            print("\n[magenta]=== Actionable findings detected! ===[/magenta]")
+            print("To investigate...")
+            print("  1. Open the HTML report for a user-friendly view")
+            print("  2. Use `ash inspect findings` for an interactive exploration")
+            print(
+                f"  3. Review scanner-specific reports and outputs in the {out_dir_alias}/scanners directory"
+            )
+
+        # Exit with non-zero code if configured to fail on findings and there are actionable findings
+        if final_fail_on_findings and actionable_findings > 0:
+            # Document exit codes
+            print(
+                "\n[yellow]=== ASH Exit Codes ===[/yellow]",
+            )
+            print(
+                "  0: Success - No actionable findings or not configured to fail on findings",
+            )
+            print(
+                "  1: Error during execution",
+            )
+            print(
+                f"  2: Actionable findings detected when configured with fail_on_findings: {final_fail_on_findings} (default: True)",
+            )
+            print(
+                f"[bold red]ERROR (2) Exiting due to {actionable_findings} actionable findings found in ASH scan[/bold red]",
+            )
+            raise sys.exit(
+                2
+            ) from None  # Using exit code 2 specifically for actionable findings
+
     except Exception as e:
         logger.exception(e)
-        sys.exit(1)
+        print(
+            f"[bold red]ERROR (1) Exiting due to exception during ASH scan: {e}[/bold red]",
+        )
+        raise sys.exit(1) from None

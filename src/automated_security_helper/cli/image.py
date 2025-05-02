@@ -3,10 +3,9 @@
 
 import os
 import re
-import shutil
 import logging
-import subprocess
 import shlex
+from subprocess import CalledProcessError, CompletedProcess
 import time
 from datetime import datetime
 from enum import Enum
@@ -22,13 +21,15 @@ from rich import box
 import threading
 import io
 
-image_app = typer.Typer(
-    name="image",
-    help="Build and run ASH container image",
-    pretty_exceptions_enable=True,
-    pretty_exceptions_short=True,
-    pretty_exceptions_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
-    in ["YES", "1", "TRUE"],
+# Import subprocess utilities
+from automated_security_helper.utils.log import get_logger
+from automated_security_helper.utils.subprocess_utils import (
+    create_process_with_pipes,
+    create_completed_process,
+    raise_called_process_error,
+    get_host_uid,
+    get_host_gid,
+    find_executable,
 )
 
 
@@ -50,105 +51,85 @@ def validate_path(path: str) -> Path:
         path: The path string to validate
 
     Returns:
-        Path: A validated Path object
+        Path: The validated Path object
 
     Raises:
-        typer.BadParameter: If the path is not valid
+        ValueError: If the path is not safe
     """
-    try:
-        # Convert to absolute path and resolve any symlinks
-        resolved_path = Path(path).resolve()
-        return resolved_path
-    except (ValueError, TypeError) as e:
-        raise typer.BadParameter(f"Invalid path: {path}. Error: {str(e)}")
+    # Convert to absolute path
+    abs_path = Path(path).resolve()
 
+    # Check if the path exists
+    if not abs_path.exists():
+        raise ValueError(f"Path does not exist: {abs_path}")
 
-def safe_split_args(args_str: str) -> List[str]:
-    """
-    Safely split a string into command arguments.
-
-    Args:
-        args_str: String containing command arguments
-
-    Returns:
-        List[str]: List of split arguments
-    """
-    if not args_str:
-        return []
-    return shlex.split(args_str)
+    return abs_path
 
 
 class CommandOutputStreamer:
     """
-    Stream and capture command output in real-time using Rich.
-
-    This class provides a rich UI for displaying command output in real-time,
-    with progress tracking, elapsed time, and customizable display options.
+    A class to stream command output to a Rich panel with live updates.
     """
 
     def __init__(
         self,
-        console: Console,
-        debug: bool = False,
-        border_style: str = "green",
-        box_style: box = box.ROUNDED,
-        refresh_rate: int = 10,
+        console: Console = None,
         output_title: str = "Command Output",
+        border_style: str = "blue",
+        box_style=box.ROUNDED,
+        max_output_lines: int = 20,
+        refresh_rate: int = 10,
+        debug: bool = False,
     ):
         """
-        Initialize the CommandOutputStreamer.
+        Initialize the command output streamer.
 
         Args:
-            console: Rich console instance for output
-            debug: Whether to show debug information
-            border_style: Style for the output panel border
-            box_style: Box style for the output panel
-            refresh_rate: UI refresh rate per second
+            console: Rich console to use
             output_title: Title for the output panel
+            border_style: Style for the panel border
+            box_style: Box style for the panel
+            max_output_lines: Maximum number of output lines to display
+            refresh_rate: Refresh rate for the live display
+            debug: Whether to print debug information
         """
-        self.console = console
-        self.debug = debug
+        self.console = console or Console(
+            color_system="auto",
+        )
+        self.output_title = output_title
         self.border_style = border_style
         self.box_style = box_style
+        self.max_output_lines = max_output_lines
         self.refresh_rate = refresh_rate
-        self.output_title = output_title
+        self.debug = debug
 
-        # Thread synchronization
-        self._lock = threading.Lock()
+        # Initialize output buffers
+        self.stdout_buffer = io.StringIO()
+        self.stderr_buffer = io.StringIO()
 
-        # Initialize buffers and UI components
-        self._update_terminal_dimensions()
-        self._reset_buffers()
-        self._setup_layout()
+        # Initialize output lines
+        self.output_lines = []
 
-        # Track command execution
-        self.start_time = None
+        # Initialize output panel
+        self.output_panel = Panel(
+            "",
+            title=output_title,
+            border_style=border_style,
+            box=box_style,
+            expand=True,
+        )
 
-    def _update_terminal_dimensions(self):
-        """Update terminal dimensions and adjust layout accordingly."""
-        self.width, self.height = shutil.get_terminal_size()
-        self.max_output_lines = max(10, self.height - 10)
-
-    def _setup_layout(self):
-        """Set up the Rich layout components."""
-        self.layout = Layout()
+        # Initialize progress
         self.progress = Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]{task.description}"),
             BarColumn(),
             TextColumn("[bold]{task.fields[status]}"),
-            TextColumn("[dim]{task.fields[elapsed]}"),
         )
         self.task_id = None
-        self.output_lines = []
-        self.output_panel = Panel(
-            "",
-            title=self.output_title,
-            border_style=self.border_style,
-            box=self.box_style,
-        )
 
-        # Set up the layout
+        # Initialize layout
+        self.layout = Layout()
         self.layout.split(
             Layout(name="progress", size=3),
             Layout(name="output", ratio=1),
@@ -156,47 +137,77 @@ class CommandOutputStreamer:
         self.layout["progress"].update(self.progress)
         self.layout["output"].update(self.output_panel)
 
+        # Thread lock for synchronization
+        self._lock = threading.Lock()
+
     def _reset_buffers(self):
-        """Reset the stdout and stderr buffers."""
-        with self._lock:
-            self.stdout_buffer = io.StringIO()
-            self.stderr_buffer = io.StringIO()
+        """Reset the output buffers."""
+        self.stdout_buffer = io.StringIO()
+        self.stderr_buffer = io.StringIO()
+        self.start_time = datetime.now()
 
     def start_task(self, description: str) -> TaskID:
         """
-        Start a new progress task with elapsed time tracking.
+        Start a new progress task.
 
         Args:
             description: Description of the task
 
         Returns:
-            TaskID: ID of the created task
+            TaskID: The ID of the created task
         """
-        self.task_id = self.progress.add_task(
-            description, total=None, status="Starting...", elapsed="0s"
-        )
-        self.start_time = time.time()
-        return self.task_id
+        with self._lock:
+            if self.task_id is not None:
+                self.progress.remove_task(self.task_id)
+            self.task_id = self.progress.add_task(
+                description, total=None, status="Starting..."
+            )
+            return self.task_id
 
-    def update_task(self, status: str):
+    def update_task(self, status: str) -> None:
         """
-        Update the task status with elapsed time.
-
-        Args:
-            status: New status message
-        """
-        if self.task_id is not None and self.start_time is not None:
-            elapsed = time.time() - self.start_time
-            elapsed_str = f"{int(elapsed)}s"
-            with self._lock:
-                self.progress.update(self.task_id, status=status, elapsed=elapsed_str)
-
-    def add_output_line(self, line: str, filter_pattern: str = None):
-        """
-        Add a line to the output panel, optionally filtering by pattern.
+        Update the progress task status.
 
         Args:
-            line: The line to add
+            status: New status text
+        """
+        with self._lock:
+            if self.task_id is not None:
+                self.progress.update(self.task_id, status=status)
+
+    def complete_task(self, status: str = "Done") -> None:
+        """
+        Mark the progress task as complete.
+
+        Args:
+            status: Final status text
+        """
+        with self._lock:
+            if self.task_id is not None:
+                self.progress.update(self.task_id, status=status, completed=100)
+
+    def fail_task(self, status: str = "Failed") -> None:
+        """
+        Mark the progress task as failed.
+
+        Args:
+            status: Final status text
+        """
+        with self._lock:
+            if self.task_id is not None:
+                self.progress.update(self.task_id, status=status, completed=0)
+
+    def _update_terminal_dimensions(self) -> None:
+        """Update the terminal dimensions for the layout."""
+        # This is a no-op for now, but could be used to handle terminal resizing
+        pass
+
+    def add_output_line(self, line: str, filter_pattern: str = None) -> None:
+        """
+        Add a line to the output panel.
+
+        Args:
+            line: Line to add
             filter_pattern: Optional regex pattern to filter lines
         """
         if not line.strip():  # Skip empty lines
@@ -228,9 +239,9 @@ class CommandOutputStreamer:
             self.output_lines = []
             self.start_time = None
 
-    def run_command(
+    def run_cmd(
         self, cmd_list: List[str], check: bool = True, filter_pattern: str = None
-    ) -> subprocess.CompletedProcess:
+    ) -> CompletedProcess:
         """
         Run a command with live output streaming.
 
@@ -261,13 +272,10 @@ class CommandOutputStreamer:
         self.start_task(f"Running {cmd_list[0]}")
 
         try:
-            # Create process
-            process = subprocess.Popen(
-                cmd_list,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+            # Create process using subprocess_utils
+            process = create_process_with_pipes(
+                args=cmd_list,
                 text=True,
-                bufsize=1,  # Line buffered
             )
 
             # Create a live display
@@ -336,7 +344,7 @@ class CommandOutputStreamer:
             stderr = self.stderr_buffer.getvalue()
 
             # Create a CompletedProcess object
-            result = subprocess.CompletedProcess(
+            result = create_completed_process(
                 args=cmd_list,
                 returncode=process.returncode if process.returncode is not None else -1,
                 stdout=stdout,
@@ -345,48 +353,108 @@ class CommandOutputStreamer:
 
             # Check return code if requested
             if check and result.returncode != 0:
-                raise subprocess.CalledProcessError(
-                    result.returncode, cmd_list, output=stdout, stderr=stderr
+                raise_called_process_error(
+                    returncode=result.returncode,
+                    cmd=cmd_list,
+                    output=stdout,
+                    stderr=stderr,
                 )
 
             return result
 
         except Exception as e:
-            if not isinstance(e, subprocess.CalledProcessError):
+            if not isinstance(e, CalledProcessError):
                 self.console.print(
                     f"Error executing command: {str(e)}", style="bold red"
                 )
             raise
         finally:
             # Ensure we clean up resources even if there's an exception
-            self.cleanup()
+            pass
 
 
-@image_app.callback(invoke_without_command=True)
-def image(
+def image_build(
     ctx: typer.Context,
     source_dir: Annotated[
         Optional[str],
         typer.Option(
+            "--source-dir",
+            "-s",
             help="Path to the directory containing the code/files you wish to scan",
         ),
     ] = None,
     output_dir: Annotated[
         Optional[str],
         typer.Option(
+            "--output-dir",
+            "-o",
             help="Path to the directory that will contain the report of the scans",
         ),
     ] = None,
-    format: Annotated[
-        OutputFormat,
+    build: Annotated[
+        bool,
         typer.Option(
-            help="Output format of the aggregated_results file segments",
-            case_sensitive=False,
+            "--build/--no-build",
+            "-b/-B",
+            help="Whether to build the ASH container image",
         ),
-    ] = OutputFormat.TEXT,
+    ] = True,
+    run: Annotated[
+        bool,
+        typer.Option(
+            "--run/--no-run",
+            "-r/-R",
+            help="Whether to run the ASH container image",
+        ),
+    ] = True,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force rebuild of the ASH container image",
+        ),
+    ] = False,
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet",
+            "-q",
+            help="Don't print verbose text about the build process",
+        ),
+    ] = False,
+    oci_runner: Annotated[
+        Optional[str],
+        typer.Option(
+            "--oci-runner",
+            "--oci",
+            "--runner",
+            "-r",
+            help="Use the specified OCI runner instead of docker to run the containerized tools",
+            envvar="OCI_RUNNER",
+        ),
+    ] = None,
+    # preserve_report: Annotated[
+    #     bool,
+    #     typer.Option(
+    #         "--preserve-report",
+    #         "-p",
+    #         help="Add timestamp to the final report file to avoid overwriting it after multiple executions",
+    #     ),
+    # ] = False,
+    # extension: Annotated[
+    #     Optional[str],
+    #     typer.Option(
+    #         "--ext",
+    #         "--extension",
+    #         "-e",
+    #         help="Force a file extension to scan. Defaults to identify files automatically",
+    #     ),
+    # ] = None,
     build_target: Annotated[
         BuildTarget,
         typer.Option(
+            "--build-target",
             help="Specify the target stage of the ASH image to build",
             case_sensitive=False,
         ),
@@ -394,210 +462,91 @@ def image(
     offline: Annotated[
         bool,
         typer.Option(
+            "--offline",
             help="Build ASH for offline execution",
         ),
     ] = False,
     offline_semgrep_rulesets: Annotated[
         str,
         typer.Option(
+            "--offline-semgrep-rulesets",
             help="Specify Semgrep rulesets for use in ASH offline mode",
         ),
     ] = "p/ci",
-    force: Annotated[
-        bool,
-        typer.Option(
-            help="Force rebuild the entire framework to obtain latest changes",
-        ),
-    ] = False,
-    build: Annotated[
-        bool,
-        typer.Option(
-            help="Skip rebuild of the ASH container image, run a scan only",
-        ),
-    ] = True,
-    run: Annotated[
-        bool,
-        typer.Option(
-            help="Skip running a scan with ASH, build a new ASH container image only",
-        ),
-    ] = True,
-    cleanup: Annotated[
-        bool,
-        typer.Option(
-            help="Don't cleanup the work directory where temp reports are stored",
-        ),
-    ] = False,
-    ext: Annotated[
-        Optional[str],
-        typer.Option(
-            "--ext",
-            "-extension",
-            help="Force a file extension to scan",
-        ),
-    ] = None,
-    color: Annotated[
-        bool,
-        typer.Option(
-            help="Enable/disable colorized output",
-        ),
-    ] = True,
-    single_process: Annotated[
-        bool,
-        typer.Option(
-            "-s",
-            "--single-process",
-            help="Run ash scanners serially rather than as separate, parallel sub-processes",
-        ),
-    ] = False,
-    oci_runner: Annotated[
-        Optional[str],
-        typer.Option(
-            "-o",
-            "--oci-runner",
-            help="Use the specified OCI runner instead of docker to run the containerized tools",
-            envvar="ASH_OCI_RUNNER",
-        ),
-    ] = None,
     container_uid: Annotated[
         Optional[str],
         typer.Option(
-            "-u",
             "--container-uid",
-            help="Specify the UID to use in the container",
+            "-u",
+            help="UID to use for the container user",
         ),
     ] = None,
     container_gid: Annotated[
         Optional[str],
         typer.Option(
             "--container-gid",
-            help="Specify the GID to use in the container",
+            "-g",
+            help="GID to use for the container user",
         ),
     ] = None,
-    preserve_report: Annotated[
-        bool,
-        typer.Option(
-            "-p",
-            "--preserve-report",
-            help="Add timestamp to the final report file to avoid overwriting it",
-        ),
-    ] = False,
-    debug: Annotated[
-        bool,
-        typer.Option(
-            "-d",
-            "--debug",
-            help="Print ASH debug log information where applicable",
-        ),
-    ] = False,
-    quiet: Annotated[
-        bool,
-        typer.Option(
-            "-q",
-            "--quiet",
-            help="Don't print verbose text about the build process",
-        ),
-    ] = False,
-    version: Annotated[
-        bool,
-        typer.Option(
-            "-v",
-            "--version",
-            help="Prints version number",
-        ),
-    ] = False,
+    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
+    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ):
     """
-    Build and run ASH container for security scanning.
+    Build and run the ASH container image.
     """
-    if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "image"]:
-        return
+    # Configure logging
+    logging.basicConfig(
+        level=logging.DEBUG if debug else logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    logger = get_logger(level=logging.DEBUG if debug else logging.INFO)
 
-    if version:
-        from automated_security_helper import __version__
-
-        typer.echo(f"awslabs/automated-security-helper v{__version__}")
-        raise typer.Exit()
-
-    # Set up logging based on verbosity flags
-    log_level = logging.INFO
-    if debug:
-        log_level = logging.DEBUG
-    elif quiet:
-        log_level = logging.WARNING
-
-    logging.basicConfig(level=log_level)
-    logger = logging.getLogger("ash.image")
-
-    # Create Rich console
-    cur_term_width, cur_term_height = shutil.get_terminal_size()
-    term_width = int(os.environ.get("TERM_WIDTH", cur_term_width))
-    term_height = int(os.environ.get("TERM_HEIGHT", cur_term_height))
-    console = Console(color_system="auto")
+    # Create console
+    console = Console(color_system="auto" if color else None)
 
     # Create command output streamer
     cmd_streamer = CommandOutputStreamer(
-        console,
+        console=console,
+        output_title="ASH Build Output",
         debug=debug,
-        border_style="green" if color else "none",
-        refresh_rate=10 if color else 5,
     )
 
-    # Set default source directory if not provided
-    if source_dir is None:
-        source_dir = os.getcwd()
-
-    # Validate and convert paths
-    try:
-        source_path = validate_path(source_dir)
-        if not source_path.exists():
-            typer.secho(
-                f"Source directory does not exist: {source_dir}", fg=typer.colors.RED
-            )
-            raise typer.Exit(1)
-        if not source_path.is_dir():
-            typer.secho(
-                f"Source path is not a directory: {source_dir}", fg=typer.colors.RED
-            )
-            raise typer.Exit(1)
-        source_dir = source_path.as_posix()
-    except typer.BadParameter as e:
-        typer.secho(str(e), fg=typer.colors.RED)
-        raise typer.Exit(1)
-
-    # Create and validate output directory if specified
-    output_dir_specified = output_dir is not None
-    if output_dir_specified:
+    # Validate source directory
+    if source_dir:
         try:
-            output_path = validate_path(output_dir)
-            # Create the directory if it doesn't exist
-            output_path.mkdir(parents=True, exist_ok=True)
-            if not output_path.is_dir():
-                typer.secho(
-                    f"Output path is not a directory: {output_dir}", fg=typer.colors.RED
-                )
-                raise typer.Exit(1)
-            output_dir = output_path.as_posix()
-        except typer.BadParameter as e:
+            source_dir = validate_path(source_dir)
+        except ValueError as e:
             typer.secho(str(e), fg=typer.colors.RED)
             raise typer.Exit(1)
 
-    # Set image name from environment or use default
-    ash_image_name = os.environ.get(
-        "ASH_IMAGE_NAME", f"automated-security-helper:{build_target.value}"
-    )
+    # Set default source directory if not provided
+    if not source_dir:
+        source_dir = Path.cwd()
+        logger.info(f"Using current directory as source: {source_dir}")
+
+    # Validate output directory
+    if output_dir:
+        try:
+            # Create output directory if it doesn't exist
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir = output_dir.resolve()
+        except Exception as e:
+            typer.secho(f"Error creating output directory: {e}", fg=typer.colors.RED)
+            raise typer.Exit(1)
+    else:
+        # Default to ash_output in the source directory
+        output_dir = source_dir / "ash_output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using default output directory: {output_dir}")
 
     # Get host UID and GID using safe subprocess calls
     try:
-        host_uid_result = subprocess.run(
-            ["id", "-u"], capture_output=True, text=True, check=True
-        )
-        host_uid = host_uid_result.stdout.strip()
-
-        host_gid_result = subprocess.run(
-            ["id", "-g"], capture_output=True, text=True, check=True
-        )
-        host_gid = host_gid_result.stdout.strip()
-    except subprocess.CalledProcessError as e:
+        host_uid = get_host_uid()
+        host_gid = get_host_gid()
+    except Exception as e:
         typer.secho(f"Error getting user ID information: {e}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
@@ -616,56 +565,20 @@ def image(
     else:
         container_gid = host_gid
 
-    # Prepare docker extra args - use safe splitting
-    docker_extra_args = safe_split_args(os.environ.get("DOCKER_EXTRA_ARGS", ""))
-    docker_run_extra_args = []
-
-    # Add force rebuild flag if specified
-    if force:
-        docker_extra_args.append("--no-cache")
-
-    # Add quiet flag if specified
-    if quiet:
-        docker_extra_args.append("-q")
-
-    # Add offline mode flag if specified
-    if offline:
-        docker_run_extra_args.append("--network=none")
-
-    # Prepare ASH args
-    ash_args = []
-
-    if quiet:
-        ash_args.append("--quiet")
-
-    if ext:
-        ash_args.append("--ext")
-        ash_args.append(ext)
-
-    if not color:
-        ash_args.append("--no-color")
-
-    if single_process:
-        ash_args.append("--single-process")
-
-    if preserve_report:
-        ash_args.append("--preserve-report")
-
-    if cleanup:
-        ash_args.append("--cleanup")
-
     # Resolve OCI runner
-    resolved_oci_runner = oci_runner
-    if not resolved_oci_runner:
-        for runner in ["docker", "finch", "nerdctl", "podman"]:
-            try:
-                exists = shutil.which(runner)
-                if not exists:
-                    continue
-                resolved_oci_runner = exists
-                break
-            except subprocess.CalledProcessError:
+    resolved_oci_runner = None
+    runners = [oci_runner] if oci_runner else ["docker", "finch", "nerdctl", "podman"]
+
+    for runner in runners:
+        try:
+            exists = find_executable(runner)
+            if not exists:
                 continue
+            resolved_oci_runner = exists
+            break
+        except Exception:
+            logger.verbose(f"Unable to find {runner} -- continuing")
+            continue
 
     if not resolved_oci_runner:
         typer.secho("Unable to resolve an OCI runner -- exiting", fg=typer.colors.RED)
@@ -681,25 +594,28 @@ def image(
         typer.secho(f"Dockerfile not found at {dockerfile_path}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
-    # Build the image if the --no-build flag is not set
+    # Set image name from environment or use default
+    ash_image_name = os.environ.get(
+        "ASH_IMAGE_NAME", f"automated-security-helper:{build_target.value}"
+    )
+
+    # Build the image if the --build flag is set
     if build:
         typer.echo(
             f"Building image {ash_image_name} -- this may take a few minutes during the first build..."
         )
 
+        # Prepare build command
         build_cmd = [
             resolved_oci_runner,
             "build",
         ]
 
-        # Add UID/GID build args if specified
-        if container_uid:
-            build_cmd.extend(["--build-arg", f"UID={container_uid}"])
+        # Add UID/GID build args
+        build_cmd.extend(["--build-arg", f"UID={container_uid}"])
+        build_cmd.extend(["--build-arg", f"GID={container_gid}"])
 
-        if container_gid:
-            build_cmd.extend(["--build-arg", f"GID={container_gid}"])
-
-        # Add remaining build arguments
+        # Add other build args
         build_cmd.extend(
             [
                 "--tag",
@@ -717,25 +633,34 @@ def image(
             ]
         )
 
-        # Add any extra docker args
+        # Add extra build args
+        docker_extra_args = []
+        if force:
+            docker_extra_args.append("--no-cache")
+        if quiet:
+            docker_extra_args.append("-q")
+
+        # Add any extra args
         build_cmd.extend(docker_extra_args)
 
         # Add the build context
         build_cmd.append(ash_root_dir.as_posix())
 
         try:
-            build_result = cmd_streamer.run_command(build_cmd)
+            build_result = cmd_streamer.run_cmd(build_cmd)
             if debug:
                 logger.debug(f"Build stdout: {build_result.stdout}")
                 logger.debug(f"Build stderr: {build_result.stderr}")
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             typer.secho(f"Error building ASH image: {e}", fg=typer.colors.RED)
             if debug:
-                logger.debug(f"Build stdout: {e.stdout}")
-                logger.debug(f"Build stderr: {e.stderr}")
+                if hasattr(e, "stdout"):
+                    logger.debug(f"Build stdout: {e.stdout}")
+                if hasattr(e, "stderr"):
+                    logger.debug(f"Build stderr: {e.stderr}")
             raise typer.Exit(1)
 
-    # Run the image if the --no-run flag is not set
+    # Run the image if the --run flag is set
     if run:
         run_cmd = [
             resolved_oci_runner,
@@ -744,64 +669,86 @@ def image(
         ]
 
         # Add environment variables
-        run_cmd.extend(["-e", f"ACTUAL_SOURCE_DIR={source_dir}"])
-        run_cmd.extend(["-e", f"ASH_DEBUG={'YES' if debug else 'NO'}"])
-        run_cmd.extend(["-e", f"ASH_OUTPUT_FORMAT={format.value}"])
-        term_width, term_height = shutil.get_terminal_size()
-        # Add to environment variables passed to container
-        run_cmd.extend(["-e", f"TERM_WIDTH={term_width}"])
-        run_cmd.extend(["-e", f"TERM_HEIGHT={term_height}"])
+        run_cmd.extend(
+            [
+                "-e",
+                f"ASH_ACTUAL_SOURCE_DIR={source_dir}",
+                "-e",
+                f"ASH_ACTUAL_OUTPUT_DIR={output_dir}",
+                "-e",
+                f"ASH_DEBUG={'YES' if debug else 'NO'}",
+            ]
+        )
 
-        # Add source directory mount
-        mount_source_option = f"type=bind,source={source_dir},destination=/src"
+        # Add mount for source directory
+        mount_source_dir = f"type=bind,source={source_dir},destination=/src"
 
-        # Only make source dir readonly if output dir is not a subdirectory of source
-        if output_dir_specified and not output_dir.startswith(source_dir):
-            mount_source_option += ",readonly"
+        # Only make source dir readonly if output dir is not a subdirectory
+        if output_dir and not str(output_dir).startswith(str(source_dir)):
+            mount_source_dir += ",readonly"
 
-        run_cmd.extend(["--mount", mount_source_option])
+        run_cmd.extend(["--mount", mount_source_dir])
 
-        # Add output directory mount if specified
-        if output_dir_specified:
-            run_cmd.extend(
-                ["--mount", f"type=bind,source={output_dir},destination=/out"]
-            )
+        # Add mount for output directory
+        run_cmd.extend(["--mount", f"type=bind,source={output_dir},destination=/out"])
 
-        # Add extra docker run args
-        run_cmd.extend(docker_run_extra_args)
+        # Add offline mode flag
+        if offline:
+            run_cmd.append("--network=none")
+
+        # Add terminal size environment variables
+        try:
+            import shutil
+
+            columns, lines = shutil.get_terminal_size()
+            run_cmd.extend(["-e", f"COLUMNS={columns}", "-e", f"LINES={lines}"])
+        except Exception as e:
+            logger.trace(f"Unable to determine terminal size via shutil: {e}")
+
+        # Add color support
+        if color:
+            run_cmd.append("-t")
 
         # Add image name
         run_cmd.append(ash_image_name)
 
-        # Add ASH command and args
+        # Add ASH command
         run_cmd.append("ashv3")
-        run_cmd.extend(["--source-dir", "/src"])
 
-        # Add output dir option if specified
-        if output_dir_specified:
-            run_cmd.extend(["--output-dir", "/out"])
+        # Add ASH arguments
+        run_cmd.extend(["--source-dir", "/src", "--output-dir", "/out"])
 
-        # Add any additional ASH args
+        # Add additional ASH arguments, starting with ctx.args in case any extra args
+        # were passed in at CLI runtime
+        ash_args = ctx.args or []
+        if quiet:
+            ash_args.append("--quiet")
+        if not color:
+            ash_args.append("--no-color")
+        if debug:
+            ash_args.append("--debug")
+        if verbose:
+            ash_args.append("--verbose")
+
+        # Add any additional ASH arguments
         run_cmd.extend(ash_args)
 
         typer.echo("Running ASH scan using built image...")
-
         try:
-            run_result = cmd_streamer.run_command(run_cmd, check=False)
+            run_result = cmd_streamer.run_cmd(run_cmd)
             if debug:
                 logger.debug(f"Run stdout: {run_result.stdout}")
                 logger.debug(f"Run stderr: {run_result.stderr}")
 
-            if run_result.returncode != 0:
-                typer.secho(
-                    f"ASH scan completed with non-zero exit code: {run_result.returncode}",
-                    fg=typer.colors.YELLOW,
-                )
-                raise typer.Exit(run_result.returncode)
+            # Return the exit code from the run command
+            return run_result.returncode
         except Exception as e:
             typer.secho(f"Error running ASH scan: {e}", fg=typer.colors.RED)
+            if debug:
+                if hasattr(e, "stdout"):
+                    logger.debug(f"Run stdout: {e.stdout}")
+                if hasattr(e, "stderr"):
+                    logger.debug(f"Run stderr: {e.stderr}")
             raise typer.Exit(1)
 
-
-if __name__ == "__main__":
-    image_app()
+    return 0

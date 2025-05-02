@@ -23,7 +23,6 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
-# Import AshConfig only for type checking to avoid circular imports
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -64,7 +63,15 @@ class ReportMetadata(BaseModel):
     summary_stats: Annotated[
         Dict[str, int],
         Field(description="Summary statistics (e.g., count by severity)"),
-    ] = {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    ] = {
+        "total": 0,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 0,
+        "actionable": 0,
+    }
 
     @field_validator("project_name")
     @classmethod
@@ -94,12 +101,6 @@ class ReportMetadata(BaseModel):
             self.report_id = (
                 f"ASH-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
             )
-
-
-# from automated_security_helper.models.aggregation import (
-#     FindingAggregator,
-#     TrendAnalyzer,
-# )
 
 
 class ASHARPModel(BaseModel):
@@ -144,42 +145,7 @@ class ASHARPModel(BaseModel):
                         downloadUri=ASH_REPO_URL,
                         informationUri=ASH_DOCS_URL,
                     ),
-                    extensions=[
-                        # Tool(
-                        #     driver=ToolComponent(
-                        #         name="Bandit",
-                        #         organization="PyCQA",
-                        #         version=version("bandit"),
-                        #         language="Python",
-                        #         rules=[
-                        #             ReportingDescriptor(
-                        #                 id="B101",
-                        #                 shortDescription="Assert used",
-                        #                 fullDescription="Use of assert detected. The enclosed code will be removed when compiling to optimized byte code.",
-                        #                 properties=PropertyBag(
-                        #                     tags=["security", "bandit", "B101"]
-                        #                 ),
-                        #             ),
-                        #             ReportingDescriptor(
-                        #                 id="B103",
-                        #                 shortDescription="Assert always true",
-                        #                 fullDescription="Assert always true",
-                        #                 properties=PropertyBag(
-                        #                     tags=["security", "bandit", "B103"]
-                        #                 ),
-                        #             ),
-                        #         ],
-                        #     ),
-                        # ),
-                        # Tool(
-                        #     driver=ToolComponent(
-                        #         name="Checkov",
-                        #         organization="Bridgecrew",
-                        #         version=version("checkov"),
-                        #         language="all",
-                        #     ),
-                        # ),
-                    ],
+                    extensions=[],
                 ),
                 results=[],
                 invocations=[],
@@ -210,10 +176,6 @@ class ASHARPModel(BaseModel):
 
     def model_post_init(self, context):
         """Initialize aggregator and trend analyzer with current findings."""
-        # self._aggregator = FindingAggregator()
-        # self._trend_analyzer = TrendAnalyzer()
-        # for finding in self.findings:
-        #     self._aggregator.add_finding(finding)
         return super().model_post_init(context)
 
     def to_flat_vulnerabilities(self) -> List[FlatVulnerability]:
@@ -457,11 +419,11 @@ class ASHARPModel(BaseModel):
         """
         if isinstance(report, SarifReport):
             sanitized_sarif = apply_suppressions_to_sarif(
-                report, self.ash_config.global_settings.ignore_paths or []
+                report, self.ash_config.global_ignore_paths or []
             )
             self.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(report, CycloneDXReport):
-            self.sbom = report
+            self.cyclonedx = report
         elif isinstance(report, str):
             self.additional_reports[reporter] = report
         else:
@@ -480,42 +442,8 @@ class ASHARPModel(BaseModel):
                 by_alias=True,
                 exclude_unset=True,
                 exclude_none=True,
-                # exclude_defaults=True,
-                # round_trip=True,
             )
         )
-
-        # # # Save model.sbom as ash.cdx.json (JSON formatted CycloneDX report)
-        # json_path = output_dir.joinpath("ash.cdx.json")
-        # json_path.write_text(
-        #     self.cyclonedx.model_dump_json(
-        #         by_alias=True,
-        #         exclude_unset=True,
-        #         exclude_none=True,
-        #         # exclude_defaults=True,
-        #         # round_trip=True,
-        #     )
-        # )
-
-        # ash_config: AshConfig = self.ash_config
-
-        # for fmt in ash_config.output_formats:
-        #     outfile = self.report(
-        #         output_format=fmt,
-        #         output_dir=report_dir,
-        #     )
-        #     if outfile is None:
-        #         ASH_LOGGER.warning(f"Failed to generate output for format {fmt}")
-        #     elif isinstance(outfile, Path) and not outfile.exists():
-        #         ASH_LOGGER.warning(
-        #             f"Output file {outfile} does not exist for format {fmt}"
-        #         )
-        #     elif isinstance(outfile, Path) and outfile.exists():
-        #         ASH_LOGGER.verbose(f"Generated output for format {fmt} at {outfile}")
-        #     else:
-        #         ASH_LOGGER.verbose(
-        #             f"Unexpected response when formatting {fmt}: {outfile}"
-        #         )
 
     @classmethod
     def load_model(cls, json_path: Path) -> Optional["ASHARPModel"]:
@@ -527,57 +455,6 @@ class ASHARPModel(BaseModel):
             json_data = json.load(f)
 
         return cls.from_json(json_data)
-
-    # def report(self, output_format: str, output_dir: Path | None = None) -> Path:
-    #     """Format ASH model using specified reporter."""
-    #     from automated_security_helper.reporters.ash_default import (
-    #         ASFFReporter,
-    #         CSVReporter,
-    #         CycloneDXReporter,
-    #         HTMLReporter,
-    #         JSONReporter,
-    #         JUnitXMLReporter,
-    #         SARIFReporter,
-    #         SPDXReporter,
-    #         TextReporter,
-    #         YAMLReporter,
-    #     )
-
-    #     reporters = {
-    #         "asff": {"reporter": ASFFReporter(), "ext": "asff"},
-    #         "csv": {"reporter": CSVReporter(), "ext": "csv"},
-    #         "cyclonedx": {"reporter": CycloneDXReporter(), "ext": "cdx.json"},
-    #         "html": {"reporter": HTMLReporter(), "ext": "html"},
-    #         "json": {"reporter": JSONReporter(), "ext": "json"},
-    #         "junitxml": {"reporter": JUnitXMLReporter(), "ext": "junit.xml"},
-    #         "sarif": {"reporter": SARIFReporter(), "ext": "sarif"},
-    #         "spdx": {"reporter": SPDXReporter(), "ext": "spdx.json"},
-    #         "text": {"reporter": TextReporter(), "ext": "txt"},
-    #         "yaml": {"reporter": YAMLReporter(), "ext": "yaml"},
-    #     }
-    #     try:
-    #         if output_format not in reporters:
-    #             raise ValueError(f"Unsupported output format: {output_format}")
-
-    #         formatted = reporters[output_format]["reporter"].report(self)
-    #         if formatted is None:
-    #             ASH_LOGGER.error(
-    #                 f"Failed to format report with {output_format} reporter, returned empty string"
-    #             )
-    #         if output_dir is None:
-    #             return formatted
-    #         else:
-    #             output_dir = Path(output_dir)
-    #             output_dir.mkdir(parents=True, exist_ok=True)
-    #             output_filename = f"ash.{reporters[output_format]['ext']}"
-    #             output_file = output_dir.joinpath(output_filename)
-    #             ASH_LOGGER.info(f"Writing {output_format} report to {output_file}")
-    #             output_file.write_text(formatted)
-    #             return output_file
-    #     except Exception as e:
-    #         ASH_LOGGER.error(
-    #             f"Failed to format report with {output_format} reporter: {e}"
-    #         )
 
 
 if __name__ == "__main__":
