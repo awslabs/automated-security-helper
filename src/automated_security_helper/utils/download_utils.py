@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, Optional
 import urllib.request
 
+
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import run_command
@@ -33,6 +34,9 @@ def download_file(url: str, destination: Path, rename_to: Optional[str] = None) 
         rename_to = url.split("/")[-1]
 
     # Download to a temporary file first
+    if not url.startswith("https://"):
+        raise ValueError(f"Invalid URL: {url}")
+
     with tempfile.NamedTemporaryFile(delete=False) as temp_file:
         ASH_LOGGER.info(f"Downloading {url} to {temp_file.name}")
         with urllib.request.urlopen(url) as response:
