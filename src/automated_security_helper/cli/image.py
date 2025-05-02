@@ -22,6 +22,7 @@ import threading
 import io
 
 # Import subprocess utilities
+from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.subprocess_utils import (
     create_process_with_pipes,
     create_completed_process,
@@ -500,7 +501,7 @@ def image_build(
         level=logging.DEBUG if debug else logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
-    logger = logging.getLogger("ash.image")
+    logger = get_logger(level=logging.DEBUG if debug else logging.INFO)
 
     # Create console
     console = Console(color_system="auto" if color else None)
@@ -576,6 +577,7 @@ def image_build(
             resolved_oci_runner = exists
             break
         except Exception:
+            logger.verbose(f"Unable to find {runner} -- continuing")
             continue
 
     if not resolved_oci_runner:
@@ -700,8 +702,8 @@ def image_build(
 
             columns, lines = shutil.get_terminal_size()
             run_cmd.extend(["-e", f"COLUMNS={columns}", "-e", f"LINES={lines}"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.trace(f"Unable to determine terminal size via shutil: {e}")
 
         # Add color support
         if color:

@@ -679,6 +679,20 @@ class ScanPhase(EnginePhase):
         if scanner_name not in self.asharp_model.additional_reports:
             self.asharp_model.additional_reports[scanner_name] = {}
 
+        for sev in [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info",
+        ]:
+            self.asharp_model.metadata.summary_stats[sev] += results.severity_counts[
+                sev
+            ]
+            self.asharp_model.metadata.summary_stats["total"] += (
+                results.severity_counts[sev]
+            )
+
         # Store metrics in the additional_reports
         self.asharp_model.additional_reports[scanner_name][results.target_type] = {
             "severity_counts": results.severity_counts,

@@ -9,18 +9,6 @@ repos:
         language: system
         verbose: true
         pass_filenames: false
-      - id: ash
-        name: Use ASH for SAST/SCA scanning
-        description: Runs various code scanners from Python directly
-        entry: .venv/bin/ashv3
-        verbose: true
-        language: python
-        pass_filenames: false
-        args:
-          - --simple
-          # - --no-progress
-          - --output-dir=.ash/ash_output
-          - --python-only
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -37,21 +25,21 @@ repos:
         args: [--fix]
       # Run the formatter.
       - id: ruff-format
+  - repo: local
+    hooks:
+      - id: ash
+        name: Use ASH for SAST/SCA scanning
+        description: Runs various code scanners from Python directly
+        entry: .venv/bin/ashv3
+        verbose: true
+        language: python
+        pass_filenames: false
+        stages:
+          - pre-push
+        args:
+          - --simple
+          - --python-only
   # - repo: https://github.com/awslabs/automated-security-helper
-  #   rev: beta
+  #   rev: v3/feat/image-build-cleanup
   #   hooks:
-  #     # Run the linter.
   #     - id: ash
-  #       args:
-  #         - --source-dir="."
-  #         - --output-dir=".ash/ash_output"
-  #         - --scanners bandit
-  #         - --scanners cdk-nag
-  #         - --scanners cfn-nag
-  #         - --scanners checkov
-  #         - --scanners detect-secrets
-  #         - --scanners grype
-  #         - --scanners npm-audit
-  #         # - --scanners opengrep
-  #         # - --scanners semgrep
-  #         # - --scanners syft

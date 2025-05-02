@@ -12727,6 +12727,7 @@
             "type": "integer"
           },
           "default": {
+            "actionable": 0,
             "critical": 0,
             "high": 0,
             "info": 0,

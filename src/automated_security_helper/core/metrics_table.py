@@ -7,6 +7,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
 
+from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
@@ -47,13 +48,12 @@ def generate_metrics_table(
 
     # Get global severity threshold from config
     global_threshold = ASH_DEFAULT_SEVERITY_LEVEL
-    from automated_security_helper.config.ash_config import AshConfig
 
     try:
-        ash_conf: AshConfig = asharp_model.ash_config
+        ash_conf = asharp_model.ash_config
     except Exception as e:
         ASH_LOGGER.error(f"Error loading config, using default: {e}")
-        ash_conf = AshConfig()
+        ash_conf = get_default_config()
 
     # Check for global_settings.severity_threshold first (new structure)
     if (

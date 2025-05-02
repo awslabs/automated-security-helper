@@ -39,10 +39,15 @@
 # against the code repository using this command:
 #   pre-commit run --hook-stage manual ash
 #
--   id: ash
-    name: Use ASH for SAST/SCA scanning
-    description: Runs various code scanners from Python directly
-    entry: ashv3
-    verbose: true
-    language: python
-    pass_filenames: false
+- id: ash
+  name: Use ASH for SAST/SCA scanning
+  description: Runs various code scanners from Python directly
+  entry: ashv3
+  verbose: true
+  language: python
+  pass_filenames: false
+  stages:
+    - pre-push
+  args:
+    - --simple
+    - --python-only

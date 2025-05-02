@@ -63,7 +63,15 @@ class ReportMetadata(BaseModel):
     summary_stats: Annotated[
         Dict[str, int],
         Field(description="Summary statistics (e.g., count by severity)"),
-    ] = {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    ] = {
+        "total": 0,
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "info": 0,
+        "actionable": 0,
+    }
 
     @field_validator("project_name")
     @classmethod

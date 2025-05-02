@@ -219,7 +219,7 @@ class ScanExecutionEngine:
         self._completed_scanners = []
         self._results = self._asharp_model
         self._progress = None
-        self._max_workers = min(4, multiprocessing.cpu_count())
+        self._max_workers = multiprocessing.cpu_count()
 
         # Register custom scanners from configuration
         self._register_custom_scanners()
@@ -492,9 +492,3 @@ class ScanExecutionEngine:
                     scan_results=self._scan_results,
                     use_color=use_color,
                 )
-
-        return ASHARPModel(description="No results generated")
-
-    def set_max_workers(self, workers: int) -> None:
-        """Set maximum number of worker threads for parallel execution."""
-        self._max_workers = workers

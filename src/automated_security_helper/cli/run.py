@@ -284,6 +284,37 @@ def run(
         with open(output_file, "w") as f:
             f.write(content)
 
+        # Check if we should fail on findings
+        fail_on_findings = False
+        if orchestrator.config and hasattr(orchestrator.config, "global_settings"):
+            if hasattr(orchestrator.config.global_settings, "fail_on_findings"):
+                fail_on_findings = orchestrator.config.global_settings.fail_on_findings
+
+        # Get the count of actionable findings from summary_stats
+        actionable_findings = 0
+        if (
+            isinstance(results, ASHARPModel)
+            and hasattr(results, "metadata")
+            and hasattr(results.metadata, "summary_stats")
+        ):
+            actionable_findings = results.metadata.summary_stats.get("actionable", 0)
+
+        # Exit with non-zero code if configured to fail on findings and there are actionable findings
+        if fail_on_findings and actionable_findings > 0:
+            logger.warning(
+                f"Exiting with non-zero code due to {actionable_findings} actionable findings"
+            )
+            # Document exit codes
+            logger.info("ASH Exit Codes:")
+            logger.info(
+                "  0: Success - No actionable findings or not configured to fail on findings"
+            )
+            logger.info("  1: Error during execution")
+            logger.info(
+                "  2: Actionable findings detected when configured to fail on findings"
+            )
+            sys.exit(2)  # Using exit code 2 specifically for actionable findings
+
     except Exception as e:
         logger.exception(e)
         sys.exit(1)

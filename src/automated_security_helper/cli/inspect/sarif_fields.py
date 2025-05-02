@@ -314,6 +314,8 @@ def analyze_sarif_fields(
     all_scanners = set()
     for scanners in results_dict.values():
         all_scanners.update(scanners.keys())
+    for scanners in excluded_dict.values():
+        all_scanners.update(scanners.keys())
 
     for scanner in all_scanners:
         # Count fields for this scanner
@@ -382,12 +384,13 @@ def analyze_sarif_fields(
     scanner_table.add_column("Scanner", style="cyan")
     scanner_table.add_column("Total Fields", style="green")
     scanner_table.add_column("Unique Fields", style="yellow")
-    scanner_table.add_column("Missing from Aggregate", style="red")
-    scanner_table.add_column("Intentionally Excluded", style="blue")
+    scanner_table.add_column("Missing (Unexpected)", style="red")
+    scanner_table.add_column("Missing (Intentional)", style="blue")
     scanner_table.add_column("% in Aggregate", style="magenta")
 
     # Calculate statistics for each scanner
     aggregate_scanners = ["ash", "ash-aggregated"]
+    has_unexpected_missing_fields = False
 
     for scanner in sorted(all_scanners):
         # Skip aggregate scanners in the per-scanner table
@@ -414,16 +417,22 @@ def analyze_sarif_fields(
         ]
         unique_count = len(unique_fields)
 
-        # Count fields missing from the aggregate report
+        # Count fields missing from the aggregate report (excluding intentionally excluded fields)
         missing_from_aggregate = [
             field
             for field in scanner_fields
             if not any(agg in results_dict.get(field, {}) for agg in aggregate_scanners)
+            and field
+            not in excluded_dict  # This ensures we don't count intentionally excluded fields
         ]
         missing_count = len(missing_from_aggregate)
 
+        # Track if there are any unexpected missing fields
+        if missing_count > 0:
+            has_unexpected_missing_fields = True
+
         # Calculate percentage in aggregate
-        in_aggregate_count = total_fields - missing_count
+        in_aggregate_count = total_fields - missing_count - excluded_count
         in_aggregate_pct = (
             (in_aggregate_count / total_fields * 100) if total_fields > 0 else 0
         )
@@ -440,5 +449,12 @@ def analyze_sarif_fields(
 
     # Print the scanner statistics table
     console.print(scanner_table)
+
+    # Exit with non-zero code if there are unexpected missing fields
+    if has_unexpected_missing_fields:
+        console.print(
+            "[bold red]WARNING: Some fields are unexpectedly missing from the aggregate report[/bold red]"
+        )
+        raise typer.Exit(code=1)
 
     return results_dict
