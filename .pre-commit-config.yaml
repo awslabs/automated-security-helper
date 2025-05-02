@@ -39,22 +39,27 @@ repos:
   #       args:
   #         - --simple
   #         - --python-only
-  # - repo: https://github.com/awslabs/automated-security-helper
-  #   rev: 18b4896d8558b9bf13796c80a16a9fca9630eb07
-  #   hooks:
-  #     - id: ash-simple-scan
-  #       args:
-  #         ## DEFAULT / MINIMUM ARGS FOR BEST PRE-COMMIT EXPERIENCE
-  #         # Only run python-based plugins with ASH for speed during pre-commit
-  #         # hooks
-  #         - --python-based-plugins-only
-  #         # Show simplified log output from ASH optimized for pre-commit
-  #         - --simple
+  - repo: https://github.com/awslabs/automated-security-helper
+    #
+    rev: 6ee53829528dcdc76f546a4d0933c7f0ff026742
+    hooks:
+      - id: ash-simple-scan
+        args:
+          ## DEFAULT / MINIMUM ARGS FOR BEST PRE-COMMIT EXPERIENCE
+          # Only run python-based plugins with ASH for speed
+          # during pre-commit hook invocation
+          - --python-only
+          # Show simplified log output from ASH optimized for pre-commit
+          - --simple
 
-  #         ## EXTRA ARGS (these are specific to this repo's usage of the hook)
-  #         # Default behavior is to fail if any actionable findings are found
-  #         - --no-fail-on-findings
-  #         # If you have a custom ASH config, you can provide it here
-  #         - --config=.ash/.ash.yaml
-  #         # Default output-dir is `.ash/ash_output`, customize if preferred
-  #         - --output-dir=.ash/ash_output_precommit
+          ## EXTRA ARGS (these are specific to this repo's usage of the hook)
+          # Default behavior is to fail if any actionable findings are found.
+          # We are working through resolution right now while still needing
+          # to run this hook, so we are disabling the '--fail-on-findings' default
+          # behavior temporarily to allow the hook to not be blocking while
+          # still providing necessary visibility into findings state.
+          - --no-fail-on-findings
+          # Default output-dir is `.ash/ash_output`, customize if preferred.
+          # This is to allow the pre-commit runs of ASH to not collide with the
+          # manual runs so results are retained independently.
+          - --output-dir=.ash/ash_output_precommit

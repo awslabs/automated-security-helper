@@ -318,22 +318,16 @@ def run(
         )
         if not quiet:
             print("\n[cyan]=== Scan Complete: Next Steps ===[/cyan]")
-            print(f"View detailed findings in: {out_dir_alias}/reports/...")
-            print(f"  - HTML report available at: {out_dir_alias}/reports/ash.html")
+            print("View detailed findings...")
+            print(f"  - HTML report of findings: '{out_dir_alias}/reports/ash.html'")
+            print(f"  - Markdown summary: '{out_dir_alias}/reports/ash.summary.md'")
             print(
-                f"  - Markdown summary report available at: {out_dir_alias}/reports/ash.summary.md"
+                f"  - Text summary summary: '{out_dir_alias}/reports/ash.summary.txt'"
             )
+            print(f"  - Full SARIF report: '{out_dir_alias}/reports/ash.sarif'")
+            print(f"  - Full JUnitXML report: '{out_dir_alias}/reports/ash.junit.xml'")
             print(
-                f"  - Text summary report available at: {out_dir_alias}/reports/ash.summary.txt"
-            )
-            print(
-                f"  - Full SARIF report available at: {out_dir_alias}/reports/ash.sarif"
-            )
-            print(
-                f"  - Full JUnitXML report available at: {out_dir_alias}/reports/ash.junit.xml"
-            )
-            print(
-                f"  - Full ASH aggregated results JSON available at: {out_dir_alias}/{output_file.relative_to(output_dir).as_posix()}"
+                f"  - ASH aggregated results JSON available at: '{out_dir_alias}/{output_file.relative_to(output_dir).as_posix()}'"
             )
 
         # If there are actionable findings, provide guidance
@@ -343,7 +337,7 @@ def run(
             print("  1. Open the HTML report for a user-friendly view")
             print("  2. Use `ash inspect findings` for an interactive exploration")
             print(
-                f"  3. Review scanner-specific reports and outputs in the {out_dir_alias}/scanners directory"
+                f"  3. Review scanner-specific reports and outputs in the '{out_dir_alias}/scanners' directory"
             )
 
         # Exit with non-zero code if configured to fail on findings and there are actionable findings

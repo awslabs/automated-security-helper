@@ -8,7 +8,7 @@ export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 
 # Set local variables
 SOURCE_DIR=""
-OUTPUT_DIR=""
+OUTPUT_DIR=".ash/ash_output"
 OUTPUT_DIR_SPECIFIED="NO"
 CONTAINER_UID_SPECIFIED="NO"
 CONTAINER_GID_SPEICIFED="NO"
@@ -108,10 +108,8 @@ fi
 
 # Resolve the absolute paths
 SOURCE_DIR="$(cd "$SOURCE_DIR"; pwd)"
-if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]]; then
-  mkdir -p "${OUTPUT_DIR}"
-  OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
-fi
+mkdir -p "${OUTPUT_DIR}"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
 
 #
 # Gather the UID and GID of the caller
@@ -169,42 +167,38 @@ else
     # Run the image if the --no-run flag is not set
     RC=0
     if [ "${NO_RUN}" = "NO" ]; then
-      MOUNT_SOURCE_DIR="--mount type=bind,source=${SOURCE_DIR},destination=/src"
-      MOUNT_OUTPUT_DIR=""
-      OUTPUT_DIR_OPTION="--output-dir /out"
-      if [[ ${OUTPUT_DIR_SPECIFIED} = "YES" ]]; then
-        # Only make source dir readonly if output dir is not a subdirectory of source
-        # dir, otherwise writing to the output dir will fail due to attempting to write
-        # to a readonly fs.
-        if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]] && [[ "${OUTPUT_DIR}" != "${SOURCE_DIR}"* ]]; then
-          # add readonly source mount when --output-dir is outside source dir
-          MOUNT_SOURCE_DIR="${MOUNT_SOURCE_DIR},readonly"
-        fi
-        # set mount option for output dir
-        MOUNT_OUTPUT_DIR="--mount type=bind,source=${OUTPUT_DIR},destination=/out"
+
+
+      # Only make source dir readonly if output dir is not a subdirectory of source
+      # dir, otherwise writing to the output dir will fail due to attempting to write
+      # to a readonly fs.
+      SOURCE_READONLY=""
+      if [[ "${OUTPUT_DIR}" != "${SOURCE_DIR}"* ]]; then
+        # add readonly source mount when --output-dir is outside source dir
+        SOURCE_READONLY=",readonly"
       fi
       # Capture terminal size if tput is available so the container experience can be improved
-      command -v tput && DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -e COLUMNS=\"`tput cols`\" -e LINES=\"`tput lines`\""
+      if command -v tput >/dev/null 2>&1; then
+        DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -e COLUMNS=$(tput cols) -e LINES=$(tput lines)"
+      fi
       if [[ "${COLOR_OUTPUT}" = "true" ]]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
       fi
-      echo "MOUNT_SOURCE_DIR resolved: ${MOUNT_SOURCE_DIR}"
-      echo "MOUNT_OUTPUT_DIR resolved: ${MOUNT_OUTPUT_DIR}"
-      echo "OUTPUT_DIR_OPTION resolved: ${OUTPUT_DIR_OPTION}"
       echo "Running ASH scan using built image..."
-      eval ${RESOLVED_OCI_RUNNER} run \
+      ${RESOLVED_OCI_RUNNER} run \
           --rm \
-          -e ASH_ACTUAL_SOURCE_DIR="${SOURCE_DIR}" \
-          -e ASH_ACTUAL_OUTPUT_DIR="${OUTPUT_DIR}" \
-          -e ASH_DEBUG=${DEBUG} \
-          -e ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT} \
-          ${MOUNT_SOURCE_DIR} \
+          -e "ASH_ACTUAL_SOURCE_DIR=${SOURCE_DIR}" \
+          -e "ASH_ACTUAL_OUTPUT_DIR=${OUTPUT_DIR}" \
+          -e "ASH_DEBUG=${DEBUG}" \
+          -e "ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT}" \
+          --mount source="${SOURCE_DIR}",type=bind,destination=/src${SOURCE_READONLY} \
+          --mount source="${OUTPUT_DIR}",type=bind,destination=/out \
           ${MOUNT_OUTPUT_DIR} \
           ${DOCKER_RUN_EXTRA_ARGS} \
           ${ASH_IMAGE_NAME} \
             ashv3 \
-              --source-dir /src  \
-              ${OUTPUT_DIR_OPTION}  \
+              --source-dir /src \
+              --output-dir /out \
               $ASH_ARGS
       RC=$?
     fi
