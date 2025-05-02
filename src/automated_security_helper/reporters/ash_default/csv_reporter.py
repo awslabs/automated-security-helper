@@ -41,13 +41,13 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
             Dict[str, str]: Dictionary mapping SARIF field paths to CSV column headers
         """
         return {
-            "runs[0].results[0].ruleId": "Rule ID",
-            "runs[0].results[0].message.text": "Description",
-            "runs[0].results[0].level": "Severity",
-            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "File Path",
-            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "Line Start",
-            "runs[0].results[0].locations[0].physicalLocation.region.endLine": "Line End",
-            "runs[0].tool.driver.name": "Scanner",
+            "runs[].results[].ruleId": "Rule ID",
+            "runs[].results[].message.text": "Description",
+            "runs[].results[].level": "Severity",
+            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "File Path",
+            "runs[].results[]locations[].physicalLocation.region.startLine": "Line Start",
+            "runs[].results[]locations[].physicalLocation.region.endLine": "Line End",
+            "runs[].tool.driver.name": "Scanner",
         }
 
     def report(self, model: "ASHARPModel") -> str:

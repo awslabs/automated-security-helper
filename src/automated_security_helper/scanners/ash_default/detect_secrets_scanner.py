@@ -323,7 +323,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 ]
             )
             with open(results_file, "w") as fp:
-                report_str = sarif_report.model_dump_json()
+                report_str = sarif_report.model_dump_json(
+                    exclude_none=True,
+                    exclude_unset=True,
+                )
                 fp.write(report_str)
 
             # Set exit code to 0 when no findings are found

@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 from typing import Annotated, List, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs
@@ -75,6 +75,27 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             ],
         )
         super().model_post_init(context)
+
+    @model_validator(mode="after")
+    def setup_custom_install_commands(self) -> "GrypeScanner":
+        """Set up custom installation commands for opengrep."""
+        # Get version and linux_type from config
+        # Linux
+        if "linux" not in self.custom_install_commands:
+            self.custom_install_commands["linux"] = {}
+        self.custom_install_commands["linux"]["amd64"] = []
+        self.custom_install_commands["linux"]["arm64"] = []
+        # macOS
+        if "darwin" not in self.custom_install_commands:
+            self.custom_install_commands["darwin"] = {}
+        self.custom_install_commands["darwin"]["amd64"] = []
+        self.custom_install_commands["darwin"]["arm64"] = []
+        # Windows
+        if "windows" not in self.custom_install_commands:
+            self.custom_install_commands["windows"] = {}
+        self.custom_install_commands["windows"]["amd64"] = []
+
+        return self
 
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.

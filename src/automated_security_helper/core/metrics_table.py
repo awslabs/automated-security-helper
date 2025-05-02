@@ -1,5 +1,6 @@
 """Module for generating metrics tables for ASH scan results."""
 
+import shutil
 from typing import Dict, List, Any
 from rich.console import Console
 from rich.table import Table
@@ -16,6 +17,7 @@ def generate_metrics_table(
     completed_scanners: List[ScannerPluginBase],
     asharp_model: ASHARPModel,
     scan_results: Dict[str, Any] = None,
+    console: Console = None,
 ) -> Table:
     """Generate a Rich table with metrics for each scanner.
 
@@ -37,7 +39,9 @@ def generate_metrics_table(
     table.add_column("Medium", style="yellow")
     table.add_column("Low", style="green")
     table.add_column("Info", style="blue")
-    table.add_column("Total", style="bold white")
+    table.add_column(
+        "Actionable", style="bold"
+    )  # Remove white style to allow per-cell coloring
     table.add_column("Result", style="bold")
     table.add_column("Threshold")
 
@@ -90,7 +94,6 @@ def generate_metrics_table(
         low = 0
         info = 0
         exit_code = 0
-        status = "✅ Passed"
 
         # Get scanner-specific configuration
         ASH_LOGGER.debug(f"Looking up config for scanner: {scanner_name}")
@@ -177,9 +180,6 @@ def generate_metrics_table(
                     if "exit_code" in results:
                         exit_code = max(exit_code, results["exit_code"])
 
-        # Calculate total findings
-        total = critical + high + medium + low + info
-
         # Use scanner-specific threshold for evaluation if available, otherwise use global
         evaluation_threshold = (
             scanner_threshold if scanner_threshold is not None else global_threshold
@@ -187,46 +187,79 @@ def generate_metrics_table(
         ASH_LOGGER.debug(
             f"Scanner {scanner_name} using evaluation threshold: {evaluation_threshold} (scanner_threshold={scanner_threshold}, global_threshold={global_threshold})"
         )
+        # Calculate total findings
+        total = critical + high + medium + low + info
+
+        # Calculate actionable findings based on threshold
+        actionable = 0
+        if evaluation_threshold == "ALL":
+            actionable = total
+        elif evaluation_threshold == "LOW":
+            actionable = critical + high + medium + low
+        elif evaluation_threshold == "MEDIUM":
+            actionable = critical + high + medium
+        elif evaluation_threshold == "HIGH":
+            actionable = critical + high
+        elif evaluation_threshold == "CRITICAL":
+            actionable = critical
 
         # Determine status based on the appropriate severity threshold
-        if evaluation_threshold == "ALL":
-            if total > 0:
-                status = "❌ Failed"
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} failed with ALL threshold: {total} findings"
-                )
-        elif evaluation_threshold == "LOW":
-            if critical > 0 or high > 0 or medium > 0 or low > 0:
-                status = "❌ Failed"
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} failed with LOW threshold: {critical} critical, {high} high, {medium} medium, {low} low"
-                )
-        elif evaluation_threshold == "MEDIUM":
-            if critical > 0 or high > 0 or medium > 0:
-                status = "❌ Failed"
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} failed with MEDIUM threshold: {critical} critical, {high} high, {medium} medium"
-                )
-        elif evaluation_threshold == "HIGH":
-            if critical > 0 or high > 0:
-                status = "❌ Failed"
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} failed with HIGH threshold: {critical} critical, {high} high"
-                )
-        elif evaluation_threshold == "CRITICAL":
-            if critical > 0:
-                status = "❌ Failed"
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} failed with CRITICAL threshold: {critical} critical"
-                )
+        status = "✅ Passed"
+        if actionable > 0:
+            status = "❌ Failed"
+            ASH_LOGGER.debug(
+                f"Scanner {scanner_name} failed with {evaluation_threshold} threshold: {actionable} actionable findings"
+            )
 
         ASH_LOGGER.debug(f"Scanner {scanner_name} final status: {status}")
 
-        # Format the threshold for display
-        # Show whether the threshold is inherited from global or scanner-specific
-        threshold_text = Text(
-            f"{evaluation_threshold} ({scanner_threshold_def})", style="cyan"
-        )
+        # Format the threshold for display based on terminal width
+        # Get terminal width
+        if console:
+            terminal_width = console.width if hasattr(console, "width") else 100
+        else:
+            terminal_width = 100
+
+        if terminal_width < 100:
+            # Use shortened format for small terminals
+            threshold_display = (
+                "MED"
+                if evaluation_threshold == "MEDIUM"
+                else evaluation_threshold[:4].upper()
+            )  # First 4 chars of severity level
+            threshold_location = scanner_threshold_def[
+                0
+            ].lower()  # First char of location (g, c, s)
+            threshold_text = Text(
+                f"{threshold_display} ({threshold_location})", style="cyan"
+            )
+        else:
+            # Full format for larger terminals
+            threshold_text = Text(
+                f"{evaluation_threshold} ({scanner_threshold_def})", style="cyan"
+            )
+
+        # Format the result status based on terminal width
+        if console:
+            terminal_width = console.width if hasattr(console, "width") else 100
+        else:
+            terminal_width = shutil.get_terminal_size().columns
+
+        if terminal_width < 100:
+            # Use text-only format with color for small terminals
+            if status == "✅ Passed":
+                status_text = Text("Passed", style="green bold")
+            else:
+                status_text = Text("Failed", style="red bold")
+        else:
+            # Use emoji format for larger terminals
+            status_text = status
+
+        # Format the actionable count with color based on value
+        if actionable > 0:
+            actionable_text = Text(str(actionable), style="red bold")
+        else:
+            actionable_text = Text(str(actionable), style="green bold")
 
         # Add row to table
         table.add_row(
@@ -236,8 +269,8 @@ def generate_metrics_table(
             str(medium),
             str(low),
             str(info),
-            str(total),
-            status,
+            actionable_text,
+            status_text,
             threshold_text,
         )
 
@@ -265,13 +298,16 @@ def display_metrics_table(
         )
 
         # Generate the metrics table
-        table = generate_metrics_table(completed_scanners, asharp_model, scan_results)
+        table = generate_metrics_table(
+            completed_scanners, asharp_model, scan_results, console
+        )
 
         # Create a help panel with instructions
         help_text = (
             "How to read this table:\n"
             "- Threshold: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
             "- Result: ✅ Passed = No findings at or above threshold, ❌ Failed = Findings at or above threshold\n"
+            "- Actionable: Number of findings at or above the threshold severity level\n"
             "- Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
         )
         help_panel = Panel(

@@ -5,7 +5,6 @@ import logging
 import os
 from pathlib import Path
 from typing import Annotated, List, Literal
-from typing_extensions import Self
 
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -92,13 +91,6 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = "v1.1.5"
 
-    linux_type: Annotated[
-        str,
-        Field(
-            description="Type of Linux build to use (manylinux or musllinux).",
-        ),
-    ] = "manylinux"
-
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["opengrep"] = "opengrep"
@@ -128,11 +120,12 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         super().model_post_init(context)
 
     @model_validator(mode="after")
-    def setup_opengrep_commands(self) -> Self:
+    def setup_custom_install_commands(self) -> "OpengrepScanner":
         """Set up custom installation commands for opengrep."""
         # Get version and linux_type from config
         version = self.config.options.version
-        linux_type = self.config.options.linux_type
+        # TODO - Check if linux and determine whether manylinux or musllinux is needed
+        linux_type = "manylinux"
 
         # Linux
         if "linux" not in self.custom_install_commands:
@@ -143,7 +136,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 url=get_opengrep_url(
                     "linux", "amd64", version=version, linux_type=linux_type
                 ),
-                destination="/usr/local/bin",
                 rename_to="opengrep",
             )
         ]
@@ -153,7 +145,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 url=get_opengrep_url(
                     "linux", "arm64", version=version, linux_type=linux_type
                 ),
-                destination="/usr/local/bin",
                 rename_to="opengrep",
             )
         ]
@@ -165,7 +156,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         self.custom_install_commands["darwin"]["amd64"] = [
             create_url_download_command(
                 url=get_opengrep_url("darwin", "amd64", version=version),
-                destination="/usr/local/bin",
                 rename_to="opengrep",
             )
         ]
@@ -173,7 +163,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         self.custom_install_commands["darwin"]["arm64"] = [
             create_url_download_command(
                 url=get_opengrep_url("darwin", "arm64", version=version),
-                destination="/usr/local/bin",
                 rename_to="opengrep",
             )
         ]
@@ -185,15 +174,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         self.custom_install_commands["windows"]["amd64"] = [
             create_url_download_command(
                 url=get_opengrep_url("windows", "amd64", version=version),
-                destination="C:\\Windows\\System32",
-                rename_to="opengrep.exe",
-            )
-        ]
-
-        self.custom_install_commands["windows"]["arm64"] = [
-            create_url_download_command(
-                url=get_opengrep_url("windows", "arm64", version=version),
-                destination="C:\\Windows\\System32",
                 rename_to="opengrep.exe",
             )
         ]

@@ -4,7 +4,7 @@ from datetime import datetime
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List
+from typing import Annotated, Dict, List
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -53,15 +53,58 @@ class PluginBase(BaseModel):
     exit_code: int = 0
 
     # Installation-related properties
-    dependencies: Dict[str, Dict[str, List[PluginDependency]]] = Field(
-        default_factory=dict,
-        description="Dependencies by platform and architecture",
-    )
+    dependencies: Annotated[
+        Dict[str, Dict[str, List[PluginDependency]]],
+        Field(
+            description="Dependencies by platform and architecture",
+        ),
+    ] = {}
 
-    custom_install_commands: Dict[str, Dict[str, List[CustomCommand]]] = Field(
-        default_factory=dict,
-        description="Custom installation commands by platform and architecture",
-    )
+    custom_install_commands: Annotated[
+        Dict[str, Dict[str, List[CustomCommand]]],
+        Field(
+            description="Custom installation commands by platform and architecture",
+        ),
+    ] = {}
+
+    def is_python_only(self) -> bool:
+        """
+        Determine if this plugin only depends on Python and has no external dependencies.
+
+        A plugin is considered Python-only if:
+        1. It has no dependencies defined in self.dependencies, or
+        2. It only has pip dependencies (Python packages)
+        3. It has no custom installation commands
+
+        Returns:
+            bool: True if the plugin only depends on Python, False otherwise
+        """
+        # Check if there are any custom installation commands
+        if len(self.custom_install_commands) > 0:
+            ASH_LOGGER.debug(
+                f"Plugin {self.__class__.__name__} has custom install commands, this is not Python-only"
+            )
+            return False
+
+        # Check if there are any dependencies
+        if len(self.dependencies) == 0:
+            ASH_LOGGER.debug(
+                f"Plugin {self.__class__.__name__} has no dependencies and no custom install commands, this is Python-only"
+            )
+            return True
+
+        # Check if all dependencies are Python packages (pip)
+        for platform in self.dependencies:
+            for arch in self.dependencies[platform]:
+                for dep in self.dependencies[platform][arch]:
+                    if dep.package_manager != PackageManager.PIP:
+                        ASH_LOGGER.debug(
+                            f"Plugin {self.__class__.__name__} has non-Python dependencies with {dep.package_manager}, this is not Python-only"
+                        )
+                        return False
+
+        # If we got here, all dependencies are Python packages
+        return True
 
     @model_validator(mode="after")
     def setup_paths(self) -> "PluginBase":

@@ -426,7 +426,9 @@ def image_build(
         Optional[str],
         typer.Option(
             "--oci-runner",
-            "-o",
+            "--oci",
+            "--runner",
+            "-r",
             help="Use the specified OCI runner instead of docker to run the containerized tools",
             envvar="OCI_RUNNER",
         ),
@@ -677,16 +679,16 @@ def image_build(
         )
 
         # Add mount for source directory
-        mount_source_dir = f"--mount type=bind,source={source_dir},destination=/src"
+        mount_source_dir = f"type=bind,source={source_dir},destination=/src"
 
         # Only make source dir readonly if output dir is not a subdirectory
         if output_dir and not str(output_dir).startswith(str(source_dir)):
             mount_source_dir += ",readonly"
 
-        run_cmd.append(mount_source_dir)
+        run_cmd.extend(["--mount", mount_source_dir])
 
         # Add mount for output directory
-        run_cmd.append(f"--mount type=bind,source={output_dir},destination=/out")
+        run_cmd.extend(["--mount", f"type=bind,source={output_dir},destination=/out"])
 
         # Add offline mode flag
         if offline:
@@ -723,6 +725,8 @@ def image_build(
             ash_args.append("--no-color")
         if debug:
             ash_args.append("--debug")
+        if verbose:
+            ash_args.append("--verbose")
 
         # Add any additional ASH arguments
         run_cmd.extend(ash_args)

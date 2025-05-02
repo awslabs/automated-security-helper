@@ -118,6 +118,19 @@ def run(
             help="Prints version number",
         ),
     ] = False,
+    python_only: Annotated[
+        bool,
+        typer.Option(
+            help="Exclude execution of any plugins or tools that have depencies external to Python."
+        ),
+    ] = False,
+    quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,
+    simple: Annotated[
+        bool,
+        typer.Option(
+            help="Enable simplified logging. Good for use when you just want brief status and summary of a scan, e.g. during a pre-commit hook."
+        ),
+    ] = False,
     verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
@@ -139,18 +152,38 @@ def run(
     from automated_security_helper.utils.log import get_logger
 
     try:
+        # Handle quiet mode - if quiet is True, set logging level to ERROR
+        # For simple mode, also use ERROR level to show only important messages
+        log_level = (
+            logging.ERROR
+            if quiet or simple  # Set to ERROR for both quiet and simple modes
+            else logging.DEBUG
+            if debug
+            else 15
+            if verbose
+            else logging.INFO
+        )
+
+        # Handle simple mode - this will be used to configure the logger for simplified output
+        simple_logging = simple
+
         logger = get_logger(
-            level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
+            level=log_level,
             output_dir=Path(output_dir),
             show_progress=progress
+            and not quiet  # Don't show progress in quiet mode
+            and not simple  # Don't show progress in simple mode
             and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
             not in ["YES", "1", "TRUE"],
             use_color=color,
+            simple_format=simple_logging,  # Pass the simple flag to the logger
         )
         # Create orchestrator instance
         source_dir = Path(source_dir)
         output_dir = Path(output_dir)
-        logger.debug(f"Scanners specified: {scanners}")
+
+        if not quiet and not simple:
+            logger.debug(f"Scanners specified: {scanners}")
 
         if config is None:
             for config_file in ASH_CONFIG_FILE_NAMES:
@@ -186,6 +219,8 @@ def run(
             no_cleanup=not cleanup,
             output_formats=output_formats,
             show_progress=progress
+            and not quiet  # Don't show progress in quiet mode
+            and not simple  # Don't show progress in simple mode
             and (
                 os.environ.get("ASH_IN_CONTAINER", "NO").upper()
                 not in [
@@ -196,6 +231,7 @@ def run(
                 or os.environ.get("CI", None)
                 is not None  # Neither is running in a CI pipeline
             ),
+            simple_mode=simple,  # Pass the simple mode flag to the orchestrator
             color_system="auto" if color else None,
             offline=(
                 offline
@@ -203,6 +239,7 @@ def run(
                 else os.environ.get("ASH_OFFLINE", "NO").upper() in ["YES", "1", "TRUE"]
             ),
             existing_results_path=Path(existing_results) if existing_results else None,
+            python_only=python_only,  # Pass the python_only flag to the orchestrator
         )
 
         # Determine which phases to run. Process them in required order to build the
@@ -227,10 +264,16 @@ def run(
         if not phases_to_run:
             phases_to_run = ["convert", "scan", "report"]
 
-        logger.debug(f"Running phases: {phases_to_run}")
+        if not quiet and not simple:
+            logger.debug(f"Running phases: {phases_to_run}")
 
         # Execute scan with specified phases
         results = orchestrator.execute_scan(phases=phases_to_run)
+
+        # For simple mode, print a minimal completion message
+        if simple and not quiet:
+            typer.echo("\nASH scan completed.")
+
         if isinstance(results, ASHARPModel):
             content = results.model_dump_json(indent=2, by_alias=True)
         else:

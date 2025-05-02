@@ -343,7 +343,6 @@
                   "*_report_result.txt"
                 ],
                 "exclude_rule": [],
-                "linux_type": "manylinux",
                 "metrics": "auto",
                 "offline": false,
                 "patterns": [],
@@ -1741,7 +1740,6 @@
               "*_report_result.txt"
             ],
             "exclude_rule": [],
-            "linux_type": "manylinux",
             "metrics": "auto",
             "offline": false,
             "patterns": [],
@@ -1784,12 +1782,6 @@
           },
           "title": "Exclude Rule",
           "type": "array"
-        },
-        "linux_type": {
-          "default": "manylinux",
-          "description": "Type of Linux build to use (manylinux or musllinux).",
-          "title": "Linux Type",
-          "type": "string"
         },
         "metrics": {
           "default": "auto",
@@ -2321,7 +2313,6 @@
                 "*_report_result.txt"
               ],
               "exclude_rule": [],
-              "linux_type": "manylinux",
               "metrics": "auto",
               "offline": false,
               "patterns": [],
@@ -2442,6 +2433,7 @@
             },
             "type": "object"
           },
+          "default": {},
           "description": "Custom installation commands by platform and architecture",
           "title": "Custom Install Commands",
           "type": "object"
@@ -2456,6 +2448,7 @@
             },
             "type": "object"
           },
+          "default": {},
           "description": "Dependencies by platform and architecture",
           "title": "Dependencies",
           "type": "object"

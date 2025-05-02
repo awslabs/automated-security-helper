@@ -251,6 +251,7 @@ def get_logger(
     log_format: Literal["JSONL", "TABULAR", "BOTH"] = "TABULAR",
     show_progress: bool = True,
     use_color: bool = True,
+    simple_format: bool = False,
 ) -> ASHLogger:
     # VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
     # DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
@@ -309,24 +310,27 @@ def get_logger(
     )
     if SHOW_DEBUG_INFO:
         handler = RichHandler(
-            show_level=True,
-            enable_link_path=True,
-            rich_tracebacks=True,
-            show_path=os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+            show_level=not simple_format,
+            enable_link_path=not simple_format,
+            rich_tracebacks=not simple_format,
+            show_path=not simple_format
+            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
             not in ["YES", "1", "TRUE"],
-            tracebacks_show_locals=True,
+            tracebacks_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
+            in ["YES", "1", "TRUE"],
             markup=True,
             **level_param,
             **custom_console_params,
         )
     else:
         handler = RichHandler(
-            show_level=True,
+            show_level=not simple_format,
             enable_link_path=False,
             show_path=False,
-            tracebacks_show_locals=False,
+            tracebacks_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
+            in ["YES", "1", "TRUE"],
             show_time=False,
-            rich_tracebacks=True,
+            rich_tracebacks=not simple_format,
             markup=True,
             **level_param,
             **custom_console_params,

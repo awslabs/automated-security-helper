@@ -7,9 +7,20 @@ repos:
         name: Generate ASH JSON schemas
         entry: poetry run schemagen
         language: system
+        verbose: true
         pass_filenames: false
-      # - id: ash
-      #   pass_filenames: false
+      - id: ash
+        name: Use ASH for SAST/SCA scanning
+        description: Runs various code scanners from Python directly
+        entry: .venv/bin/ashv3
+        verbose: true
+        language: python
+        pass_filenames: false
+        args:
+          - --simple
+          # - --no-progress
+          - --output-dir=.ash/ash_output
+          - --python-only
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -26,3 +37,21 @@ repos:
         args: [--fix]
       # Run the formatter.
       - id: ruff-format
+  # - repo: https://github.com/awslabs/automated-security-helper
+  #   rev: beta
+  #   hooks:
+  #     # Run the linter.
+  #     - id: ash
+  #       args:
+  #         - --source-dir="."
+  #         - --output-dir=".ash/ash_output"
+  #         - --scanners bandit
+  #         - --scanners cdk-nag
+  #         - --scanners cfn-nag
+  #         - --scanners checkov
+  #         - --scanners detect-secrets
+  #         - --scanners grype
+  #         - --scanners npm-audit
+  #         # - --scanners opengrep
+  #         # - --scanners semgrep
+  #         # - --scanners syft

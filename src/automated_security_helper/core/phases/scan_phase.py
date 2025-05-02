@@ -36,6 +36,7 @@ class ScanPhase(EnginePhase):
         parallel: bool = True,
         max_workers: int = 4,
         global_ignore_paths: List[IgnorePathWithReason] = None,
+        python_only: bool = False,
         **kwargs,
     ) -> ASHARPModel:
         """Execute the Scan phase.
@@ -106,14 +107,27 @@ class ScanPhase(EnginePhase):
                         ):
                             display_name = plugin_instance.config.name
 
-                        # Check if scanner is enabled
-                        if (
-                            hasattr(plugin_instance.config, "enabled")
-                            and bool(plugin_instance.config.enabled)
-                            and (
-                                not enabled_scanners
-                                or display_name.lower().strip() in enabled_scanners
+                        # Check if scanner is enabled and if python_only is set, check if it's a Python-only scanner
+                        is_enabled = hasattr(
+                            plugin_instance.config, "enabled"
+                        ) and bool(plugin_instance.config.enabled)
+                        is_in_enabled_scanners = (
+                            not enabled_scanners
+                            or display_name.lower().strip() in enabled_scanners
+                        )
+
+                        # Add debug logging for python_only check
+                        is_python_only_scanner = True  # Default to True to allow all scanners if not checking
+                        if python_only:
+                            is_python_only_scanner = plugin_instance.is_python_only()
+                            ASH_LOGGER.info(
+                                f"Scanner {display_name}: Python-only check result: {is_python_only_scanner}"
                             )
+
+                        if (
+                            is_enabled
+                            and is_in_enabled_scanners
+                            and (not python_only or is_python_only_scanner)
                         ):
                             # Add a single task per scanner that will handle both source and converted directories
                             self._queue.put(

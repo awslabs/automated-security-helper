@@ -5,9 +5,10 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 import urllib.request
 
+from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import run_command
 from automated_security_helper.base.plugin_base import CustomCommand
@@ -97,7 +98,9 @@ def install_binary_from_url(
 
 
 def create_url_download_command(
-    url: str, destination: str = "/usr/local/bin", rename_to: Optional[str] = None
+    url: str,
+    destination: str = ASH_BIN_PATH,
+    rename_to: str | None = None,
 ) -> CustomCommand:
     """Create a CustomCommand to download and install a binary from a URL.
 
@@ -109,6 +112,9 @@ def create_url_download_command(
     Returns:
         CustomCommand object
     """
+    if not Path(destination).exists():
+        ASH_LOGGER.verbose(f"Creating ASH bin path directory @ {destination}")
+        Path(destination).mkdir(parents=True, exist_ok=True)
     return CustomCommand(
         args=[
             sys.executable,
@@ -121,7 +127,10 @@ def create_url_download_command(
 
 
 def get_opengrep_url(
-    platform: str, arch: str, version: str = "v1.1.5", linux_type: str = "manylinux"
+    platform: Literal["linux", "darwin", "windows"],
+    arch: Literal["amd64", "arm64"],
+    version: str = "v1.1.5",
+    linux_type: Literal["musllinux", "manylinux"] = "manylinux",
 ) -> str:
     """Get the URL for the opengrep binary based on platform and architecture.
 

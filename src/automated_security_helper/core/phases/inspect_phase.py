@@ -12,7 +12,7 @@ class InspectPhase(EnginePhase):
         """Return the name of this phase."""
         return "inspect"
 
-    def _execute_phase(self, **kwargs) -> None:
+    def _execute_phase(self, python_only: bool = False, **kwargs) -> None:
         """Execute the Inspect phase.
 
         Args:
@@ -35,12 +35,12 @@ class InspectPhase(EnginePhase):
             )
 
             # Use the context to provide all necessary parameters
-            sarif_dir = self.plugin_context.output_dir.joinpath("scanners")
+            # sarif_dir = self.plugin_context.output_dir.joinpath("scanners")
             output_dir = self.plugin_context.output_dir.joinpath("analysis")
-            aggregated_sarif = self.plugin_context.output_dir.joinpath(
-                "reports"
-            ).joinpath("ash.sarif")
-            flat_reports_dir = self.plugin_context.output_dir.joinpath("reports")
+            # aggregated_sarif = self.plugin_context.output_dir.joinpath(
+            #     "reports"
+            # ).joinpath("ash.sarif")
+            # flat_reports_dir = self.plugin_context.output_dir.joinpath("reports")
 
             # Create the output directory if it doesn't exist
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -50,10 +50,7 @@ class InspectPhase(EnginePhase):
 
             # Call the analyze_sarif_fields function directly
             analyze_sarif_fields(
-                sarif_dir=str(sarif_dir),
                 output_dir=str(output_dir),
-                aggregated_sarif=str(aggregated_sarif),
-                flat_reports_dir=str(flat_reports_dir),
             )
 
             # Update progress

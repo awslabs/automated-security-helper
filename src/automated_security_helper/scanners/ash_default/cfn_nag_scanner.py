@@ -2,10 +2,9 @@
 
 import logging
 from pathlib import Path
-import shutil
 from typing import Annotated, List, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
@@ -32,8 +31,6 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
-
-from detect_secrets import SecretsCollection
 
 
 class CfnNagScannerConfigOptions(ScannerOptionsBase):
@@ -85,21 +82,29 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             scan_path_arg="--input-path",
             extra_args=extra_args,
         )
-        tool_version = self._run_subprocess(
-            command=[self.command, "--version"],
-            results_dir=self.context.output_dir,
-            stdout_preference="return",
-            stderr_preference="return",
-        )
-        if isinstance(tool_version, dict):
-            self.tool_version = tool_version.get("stdout", None)
-        else:
-            self.tool_version = None
 
         super().model_post_init(context)
-        super().model_post_init(context)
 
-        self._secrets_collection = SecretsCollection()
+    @model_validator(mode="after")
+    def setup_custom_install_commands(self) -> "CfnNagScanner":
+        """Set up custom installation commands for opengrep."""
+        # Get version and linux_type from config
+        # Linux
+        if "linux" not in self.custom_install_commands:
+            self.custom_install_commands["linux"] = {}
+        self.custom_install_commands["linux"]["amd64"] = []
+        self.custom_install_commands["linux"]["arm64"] = []
+        # macOS
+        if "darwin" not in self.custom_install_commands:
+            self.custom_install_commands["darwin"] = {}
+        self.custom_install_commands["darwin"]["amd64"] = []
+        self.custom_install_commands["darwin"]["arm64"] = []
+        # Windows
+        if "windows" not in self.custom_install_commands:
+            self.custom_install_commands["windows"] = {}
+        self.custom_install_commands["windows"]["amd64"] = []
+
+        return self
 
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -110,7 +115,24 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        return shutil.which(self.command) is not None
+        try:
+            tool_version = self._run_subprocess(
+                command=[self.command, "--version"],
+                results_dir=self.context.output_dir,
+                stdout_preference="return",
+                stderr_preference="return",
+            )
+            if isinstance(tool_version, dict):
+                self.tool_version = tool_version.get("stdout", "").strip()
+            else:
+                self.tool_version = None
+
+            return self.tool_version is not None
+        except Exception as e:
+            self._scanner_log(
+                f"Error validating {self.config.name} scanner: {e}", level=logging.ERROR
+            )
+            return False
 
     def _process_config_options(self):
         # Add any additional config option parsing here, if necessary
@@ -271,7 +293,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             )
             sarif_report.runs[0].invocations = [sarif_invocation]
             with open(sarif_output_file, "w") as fp:
-                report_str = sarif_report.model_dump_json()
+                report_str = sarif_report.model_dump_json(
+                    exclude_none=True,
+                    exclude_unset=True,
+                )
                 fp.write(report_str)
 
             return sarif_report
