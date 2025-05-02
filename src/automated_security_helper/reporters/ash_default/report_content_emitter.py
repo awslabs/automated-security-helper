@@ -205,20 +205,38 @@ class ReportContentEmitter:
                     "passed": passed,
                     "threshold": evaluation_threshold,
                     "threshold_source": scanner_threshold_def,
+                    "actionable": self.calculate_actionable_count(
+                        critical, high, medium, low, info, evaluation_threshold
+                    ),
                 }
             )
 
         return results
+
+    def calculate_actionable_count(self, critical, high, medium, low, info, threshold):
+        """Calculate the number of actionable findings based on the threshold."""
+        if threshold == "ALL":
+            return critical + high + medium + low + info
+        elif threshold == "LOW":
+            return critical + high + medium + low
+        elif threshold == "MEDIUM":
+            return critical + high + medium
+        elif threshold == "HIGH":
+            return critical + high
+        elif threshold == "CRITICAL":
+            return critical
+        return 0
 
     def get_top_hotspots(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get top hotspots (files with most findings)."""
         if not self.flat_vulns:
             return []
 
-        # Count findings by file location
+        # Count findings by file location, but only include actionable findings
         location_counts = Counter()
         for vuln in self.flat_vulns:
-            if vuln.file_path:
+            # Check if the finding is actionable based on severity threshold
+            if vuln.file_path and self.is_finding_actionable(vuln):
                 location_counts[vuln.file_path] += 1
 
         # Get top hotspots
@@ -227,6 +245,63 @@ class ReportContentEmitter:
         return [
             {"location": location, "count": count} for location, count in top_hotspots
         ]
+
+    def is_finding_actionable(self, vuln) -> bool:
+        """Determine if a finding is actionable based on severity threshold."""
+        # Get scanner-specific threshold if available
+        scanner_name = vuln.scanner or "Unknown"
+        scanner_config_entry = self.ash_conf.get_plugin_config(
+            plugin_type="scanner",
+            plugin_name=scanner_name,
+        )
+
+        # Initialize scanner_threshold to None
+        scanner_threshold = None
+
+        # Check for scanner-specific configuration overrides
+        if (
+            scanner_config_entry
+            and isinstance(scanner_config_entry, dict)
+            and "options" in scanner_config_entry
+        ):
+            options = scanner_config_entry["options"]
+            if (
+                "severity_threshold" in options
+                and options["severity_threshold"] is not None
+            ):
+                scanner_threshold = options["severity_threshold"]
+        elif scanner_config_entry and hasattr(scanner_config_entry, "options"):
+            if hasattr(scanner_config_entry.options, "severity_threshold"):
+                scanner_threshold_from_config = (
+                    scanner_config_entry.options.severity_threshold
+                )
+                if scanner_threshold_from_config is not None:
+                    scanner_threshold = scanner_threshold_from_config
+
+        # Use scanner-specific threshold for evaluation if available, otherwise use global
+        evaluation_threshold = (
+            scanner_threshold
+            if scanner_threshold is not None
+            else self.global_threshold
+        )
+
+        # Get the severity of the finding
+        severity = vuln.severity or "UNKNOWN"
+
+        # Determine if the finding is actionable based on the threshold
+        if evaluation_threshold == "ALL":
+            return True
+        elif evaluation_threshold == "LOW":
+            return severity in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+        elif evaluation_threshold == "MEDIUM":
+            return severity in ["CRITICAL", "HIGH", "MEDIUM"]
+        elif evaluation_threshold == "HIGH":
+            return severity in ["CRITICAL", "HIGH"]
+        elif evaluation_threshold == "CRITICAL":
+            return severity == "CRITICAL"
+
+        # Default case
+        return False
 
     def get_findings_overview(self) -> List[Dict[str, Any]]:
         """Get overview of all findings."""

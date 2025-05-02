@@ -51,7 +51,7 @@
     - manual
   args:
     - --simple
-    - --python-only
+    - --python-based-scanners-only
 - id: ash-full-scan
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs full ASH scan with container build and all scanners
@@ -64,4 +64,4 @@
     - manual
   args:
     - --simple
-    - --python-only
+    - --python-based-scanners-only

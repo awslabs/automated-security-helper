@@ -57,7 +57,7 @@ class ScanExecutionEngine:
         color_system: str = "auto",
         verbose: bool = False,
         debug: bool = False,
-        python_only: bool = False,
+        python_based_scanners_only: bool = False,
         simple_mode: bool = False,
         ash_plugin_modules: List[str] = [],
     ):
@@ -107,7 +107,9 @@ class ScanExecutionEngine:
         self._enabled_scanners = []
         self._global_ignore_paths = global_ignore_paths
         self._queue = multiprocessing.Queue()
-        self._python_only = python_only  # Store the python_only flag
+        self._python_only = (
+            python_based_scanners_only  # Store the python_based_scanners_only flag
+        )
         self._simple_mode = simple_mode  # Store the simple_mode flag
 
         # Get debug and verbose flags from environment or config
@@ -407,7 +409,7 @@ class ScanExecutionEngine:
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
-                    convert_phase.execute(python_only=self._python_only)
+                    convert_phase.execute(python_based_scanners_only=self._python_only)
 
                 elif phase_name == "scan":
                     # Create and execute the Scan phase
@@ -418,7 +420,7 @@ class ScanExecutionEngine:
                         asharp_model=self._asharp_model,
                     )
 
-                    # If python_only is True, log that we're filtering non-Python scanners
+                    # If python_based_scanners_only is True, log that we're filtering non-Python scanners
                     if self._python_only:
                         ASH_LOGGER.info(
                             "Python-only mode enabled: Filtering out non-Python scanners"
@@ -429,7 +431,7 @@ class ScanExecutionEngine:
                         parallel=(self._strategy == ExecutionStrategy.PARALLEL),
                         max_workers=self._max_workers,
                         global_ignore_paths=self._global_ignore_paths,
-                        python_only=self._python_only,  # Pass the python_only flag to the scan phase
+                        python_based_scanners_onlyd_scanners_onlyd_scanners_onlyd_python_based_scanners_onlyly=self._python_only,  # Pass the python_based_scanners_only flag to the scan phase
                     )
                     # Store the completed scanners for metrics display
                     self._completed_scanners = scan_phase._completed_scanners
@@ -449,7 +451,7 @@ class ScanExecutionEngine:
                             if hasattr(self._context.config, "output_formats")
                             else None
                         ),
-                        python_only=self._python_only,
+                        python_based_scanners_only=self._python_only,
                     )
 
                 elif phase_name == "inspect":
@@ -460,7 +462,7 @@ class ScanExecutionEngine:
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
-                    inspect_phase.execute(python_only=self._python_only)
+                    inspect_phase.execute(python_based_scanners_only=self._python_only)
 
             # Return the results
             return self._results
