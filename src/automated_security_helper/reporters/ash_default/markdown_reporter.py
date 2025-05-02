@@ -121,7 +121,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             )
 
             md_parts.append(
-                "| Scanner | Critical | High | Medium | Low | Info | Total | Result | Threshold |"
+                "| Scanner | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |"
             )
             md_parts.append(
                 "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"
@@ -132,9 +132,10 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             for result in scanner_results:
                 status = "✅ Passed" if result["passed"] else "❌ Failed"
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
+
                 md_parts.append(
                     f"| {result['scanner_name']} | {result['critical']} | {result['high']} | "
-                    f"{result['medium']} | {result['low']} | {result['info']} | {result['total']} | "
+                    f"{result['medium']} | {result['low']} | {result['info']} | {result['actionable']} | "
                     f"{status} | {threshold_text} |"
                 )
 

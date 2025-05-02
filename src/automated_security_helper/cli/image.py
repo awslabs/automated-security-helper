@@ -6,6 +6,7 @@ import re
 import logging
 import shlex
 from subprocess import CalledProcessError, CompletedProcess
+import sys
 import time
 from datetime import datetime
 from enum import Enum
@@ -75,9 +76,9 @@ class CommandOutputStreamer:
         self,
         console: Console = None,
         output_title: str = "Command Output",
-        border_style: str = "blue",
-        box_style=box.ROUNDED,
-        max_output_lines: int = 20,
+        border_style: str = "green",
+        box_style=box.MINIMAL,
+        max_output_lines: int = 30,
         refresh_rate: int = 10,
         debug: bool = False,
     ):
@@ -736,19 +737,11 @@ def image_build(
         typer.echo("Running ASH scan using built image...")
         try:
             run_result = cmd_streamer.run_cmd(run_cmd)
-            if debug:
-                logger.debug(f"Run stdout: {run_result.stdout}")
-                logger.debug(f"Run stderr: {run_result.stderr}")
-
             # Return the exit code from the run command
-            return run_result.returncode
-        except Exception as e:
-            typer.secho(f"Error running ASH scan: {e}", fg=typer.colors.RED)
-            if debug:
-                if hasattr(e, "stdout"):
-                    logger.debug(f"Run stdout: {e.stdout}")
-                if hasattr(e, "stderr"):
-                    logger.debug(f"Run stderr: {e.stderr}")
-            raise typer.Exit(1)
+            if run_result.returncode != 0:
+                raise sys.exit(run_result.returncode) from None
+            return sys.exit(run_result.returncode)
+        except CalledProcessError as e:
+            raise sys.exit(e.returncode) from None
 
-    return 0
+    return sys.exit(0)

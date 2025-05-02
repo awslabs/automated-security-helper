@@ -128,16 +128,17 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
             # Create header row with proper spacing
             text_parts.append(
-                f"{'Scanner':<20} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Total':>8} {'Result':<8} {'Threshold':<15}"
+                f"{'Scanner':<20} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Actionable':>10} {'Result':<8} {'Threshold':<15}"
             )
             text_parts.append(
-                f"{'-' * 20} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 15}"
+                f"{'-' * 20} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 8} {'-' * 15}"
             )
 
             # Add scanner result rows
             for result in scanner_results:
                 status = "PASS" if result["passed"] else "FAIL"
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
+
                 text_parts.append(
                     f"{result['scanner_name']:<20} "
                     f"{result['critical']:>8} "
@@ -145,7 +146,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                     f"{result['medium']:>8} "
                     f"{result['low']:>8} "
                     f"{result['info']:>8} "
-                    f"{result['total']:>8} "
+                    f"{result['actionable']:>10} "
                     f"{status:<8} "
                     f"{threshold_text:<15}"
                 )
