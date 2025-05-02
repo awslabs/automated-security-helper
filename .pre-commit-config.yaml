@@ -25,21 +25,21 @@ repos:
         args: [--fix]
       # Run the formatter.
       - id: ruff-format
-  - repo: local
-    hooks:
-      - id: ash
-        name: Use ASH for SAST/SCA scanning
-        description: Runs various code scanners from Python directly
-        entry: .venv/bin/ashv3
-        verbose: true
-        language: python
-        pass_filenames: false
-        stages:
-          - pre-push
-        args:
-          - --simple
-          - --python-only
-  # - repo: https://github.com/awslabs/automated-security-helper
-  #   rev: v3/feat/image-build-cleanup
+  # - repo: local
   #   hooks:
   #     - id: ash
+  #       name: Use ASH for SAST/SCA scanning
+  #       description: Runs various code scanners from Python directly
+  #       entry: .venv/bin/ashv3
+  #       verbose: true
+  #       language: python
+  #       pass_filenames: false
+  #       stages:
+  #         - pre-push
+  #       args:
+  #         - --simple
+  #         - --python-only
+  - repo: https://github.com/awslabs/automated-security-helper
+    rev: v3/feat/image-build-cleanup
+    hooks:
+      - id: ash

@@ -48,6 +48,7 @@
   pass_filenames: false
   stages:
     - pre-push
+    - manual
   args:
     - --simple
     - --python-only
