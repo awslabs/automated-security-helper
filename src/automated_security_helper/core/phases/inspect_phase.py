@@ -12,7 +12,9 @@ class InspectPhase(EnginePhase):
         """Return the name of this phase."""
         return "inspect"
 
-    def _execute_phase(self, python_only: bool = False, **kwargs) -> None:
+    def _execute_phase(
+        self, python_based_scanners_only: bool = False, **kwargs
+    ) -> None:
         """Execute the Inspect phase.
 
         Args:

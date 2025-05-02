@@ -119,10 +119,11 @@ def run(
             help="Prints version number",
         ),
     ] = False,
-    python_only: Annotated[
+    python_based_scanners_only: Annotated[
         bool,
         typer.Option(
-            help="Exclude execution of any plugins or tools that have depencies external to Python."
+            "--python-only",
+            help="Exclude execution of any plugins or tools that have depencies external to Python.",
         ),
     ] = False,
     quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,
@@ -246,7 +247,7 @@ def run(
                 else os.environ.get("ASH_OFFLINE", "NO").upper() in ["YES", "1", "TRUE"]
             ),
             existing_results_path=Path(existing_results) if existing_results else None,
-            python_only=python_only,  # Pass the python_only flag to the orchestrator
+            python_based_scanners_only=python_based_scanners_only,  # Pass the python_based_scanners_only flag to the orchestrator
         )
 
         # Determine which phases to run. Process them in required order to build the
