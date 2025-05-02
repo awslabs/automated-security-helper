@@ -39,9 +39,9 @@ repos:
   #       args:
   #         - --simple
   #         - --python-only
-  # - repo: https://github.com/awslabs/automated-security-helper
-  #   rev: v3/feat/image-build-cleanup
-  #   hooks:
-  #     - id: ash-simple-scan
-  #       name: Use ASH for SAST/SCA scanning
-  #       description: Runs various code scanners from Python directly
+  - repo: https://github.com/awslabs/automated-security-helper
+    rev: 3ed67f2b7aa17ea4e58598d51de2674b84c682dc
+    hooks:
+      - id: ash-simple-scan
+        name: Use ASH for SAST/IaC/Secrets scanning
+        description: Runs various code scanners from Python directly

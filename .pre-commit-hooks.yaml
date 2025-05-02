@@ -40,11 +40,24 @@
 #   pre-commit run --hook-stage manual ash
 #
 - id: ash-simple-scan
-  name: Use ASH for SAST/SCA scanning
+  name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs various code scanners from Python directly
   entry: ashv3
   verbose: true
   language: python
+  pass_filenames: false
+  stages:
+    - pre-commit
+    - manual
+  args:
+    - --simple
+    - --python-only
+- id: ash-full-scan
+  name: Use ASH for SAST/IaC/Secrets scanning
+  description: Runs full ASH scan with container build and all scanners
+  entry: ash
+  verbose: true
+  language: script
   pass_filenames: false
   stages:
     - pre-commit

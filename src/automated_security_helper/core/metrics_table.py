@@ -80,8 +80,16 @@ def generate_metrics_table(
             f"No global severity threshold found in config, using default: {ASH_DEFAULT_SEVERITY_LEVEL}"
         )
 
+    # Sort the completed_scanners by name for better readability
+    sorted_scanners = sorted(
+        completed_scanners,
+        key=lambda scanner: scanner.config.name
+        if hasattr(scanner.config, "name") and scanner.config.name
+        else scanner.__class__.__name__,
+    )
+
     # Process each scanner's results
-    for scanner in completed_scanners:
+    for scanner in sorted_scanners:
         scanner_name = (
             scanner.config.name
             if hasattr(scanner.config, "name") and scanner.config.name

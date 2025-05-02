@@ -672,9 +672,9 @@ def image_build(
         run_cmd.extend(
             [
                 "-e",
-                f"ACTUAL_SOURCE_DIR={source_dir}",
+                f"ASH_ACTUAL_SOURCE_DIR={source_dir}",
                 "-e",
-                f"ACTUAL_OUTPUT_DIR={output_dir}",
+                f"ASH_ACTUAL_OUTPUT_DIR={output_dir}",
                 "-e",
                 f"ASH_DEBUG={'YES' if debug else 'NO'}",
             ]

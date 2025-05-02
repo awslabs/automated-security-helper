@@ -9,6 +9,7 @@ import typer
 import json
 import sys
 from pathlib import Path
+from rich import print
 
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
@@ -134,6 +135,12 @@ def run(
     verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+    fail_on_findings: Annotated[
+        bool | None,
+        typer.Option(
+            help="Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value."
+        ),
+    ] = None,
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:
@@ -280,41 +287,78 @@ def run(
             content = json.dumps(results, indent=2, default=str)
 
         # Write results to output file
-        output_file = output_dir.joinpath("ash_aggregated_results.json")
+        output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
         with open(output_file, "w") as f:
             f.write(content)
 
         # Check if we should fail on findings
-        fail_on_findings = False
-        if orchestrator.config and hasattr(orchestrator.config, "global_settings"):
-            if hasattr(orchestrator.config.global_settings, "fail_on_findings"):
-                fail_on_findings = orchestrator.config.global_settings.fail_on_findings
+        final_fail_on_findings = (
+            fail_on_findings
+            if fail_on_findings is not None
+            else (
+                orchestrator.config.fail_on_findings
+                if orchestrator.config.fail_on_findings is not None
+                else True
+            )
+        )
 
         # Get the count of actionable findings from summary_stats
-        actionable_findings = 0
-        if (
-            isinstance(results, ASHARPModel)
-            and hasattr(results, "metadata")
-            and hasattr(results.metadata, "summary_stats")
-        ):
-            actionable_findings = results.metadata.summary_stats.get("actionable", 0)
+        actionable_findings = results.metadata.summary_stats.get("actionable", 0)
+        # Add helpful guidance about where to find reports
+        out_dir_alias = os.environ.get("ASH_ACTUAL_OUTPUT_DIR", str(output_dir))
+        if not quiet:
+            print("\n[yellow]=== Scan Complete: Next Steps ===[/yellow]")
+            print(f"- View detailed findings in: {out_dir_alias}/reports/")
+            print(f"- HTML report available at: {out_dir_alias}/reports/ash.html")
+            print(
+                f"- Markdown summary report available at: {out_dir_alias}/reports/ash.summary.md"
+            )
+            print(
+                f"- Text summary report available at: {out_dir_alias}/reports/ash.summary.txt"
+            )
+            print(
+                f"- Full SARIF report available at: {out_dir_alias}/reports/ash.sarif"
+            )
+            print(
+                f"- Full JUnitXML report available at: {out_dir_alias}/reports/ash.junit.xml"
+            )
+            print(f"- Full ASH aggregated results JSON available at: {out_dir_alias}")
+
+        # If there are actionable findings, provide guidance
+        if actionable_findings > 0:
+            print("\n[yellow]=== Actionable findings detected! ===[/yellow]")
+            print("To investigate...")
+            print("  1. Open the HTML report for a user-friendly view")
+            print("  2. Use `ash inspect findings` for an interactive exploration")
+            print(
+                f"  3. Review scanner-specific reports and outputs in the {out_dir_alias}/scanners directory"
+            )
 
         # Exit with non-zero code if configured to fail on findings and there are actionable findings
-        if fail_on_findings and actionable_findings > 0:
-            logger.warning(
-                f"Exiting with non-zero code due to {actionable_findings} actionable findings"
-            )
+        if final_fail_on_findings and actionable_findings > 0:
             # Document exit codes
-            logger.info("ASH Exit Codes:")
-            logger.info(
-                "  0: Success - No actionable findings or not configured to fail on findings"
+            print(
+                "\n[yellow]=== ASH Exit Codes ===[/yellow]",
             )
-            logger.info("  1: Error during execution")
-            logger.info(
-                "  2: Actionable findings detected when configured to fail on findings"
+            print(
+                "  0: Success - No actionable findings or not configured to fail on findings",
             )
-            sys.exit(2)  # Using exit code 2 specifically for actionable findings
+            print(
+                "  1: Error during execution",
+            )
+            print(
+                f"  2: Actionable findings detected when configured with fail_on_findings: {final_fail_on_findings} (default: True)",
+            )
+            print(
+                f"[bold red]ERROR (2) Exiting due to {actionable_findings} actionable findings found in ASH scan[/bold red]",
+            )
+            raise sys.exit(
+                2
+            ) from None  # Using exit code 2 specifically for actionable findings
 
     except Exception as e:
         logger.exception(e)
-        sys.exit(1)
+        print(
+            f"[bold red]ERROR (1) Exiting due to exception during ASH scan: {e}[/bold red]",
+        )
+        raise sys.exit(1) from None
