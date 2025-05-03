@@ -37,8 +37,8 @@ include = [
     { path = "poetry.lock", format = ["sdist", "wheel"] },
 ]
 
-[tool.poetry.build]
-script = "ci/generate_commit_pointer.py"
+# [tool.poetry.build]
+# script = "ci/generate_commit_pointer.py"
 
 [tool.poetry.scripts]
 asharp = 'asharp.asharp:main'
