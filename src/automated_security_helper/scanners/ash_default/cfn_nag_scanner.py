@@ -170,8 +170,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         try:
             target_results_dir = self.results_dir.joinpath(target_type)
 
-            # Find all files to scan from the scan set
-            scannable = (
+            orig_scannable = (
                 [item for item in self.context.work_dir.glob("**/*.*")]
                 if target_type == "converted"
                 else scan_set(
@@ -181,17 +180,18 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 )
             )
             ASH_LOGGER.debug(
-                f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"
+                f"Found {len(orig_scannable)} files in scan set. Checking for possible CloudFormation templates"
             )
-            scannable = [
-                f.strip()
-                for f in scannable
+
+            scannable = []
+            for f in orig_scannable:
+                pf = Path(f)
                 if (
-                    f.strip().endswith(".json")
-                    or f.strip().endswith(".yaml")
-                    or f.strip().endswith(".yml")
-                )
-            ]
+                    pf.name.endswith(".json")
+                    or pf.name.endswith(".yaml")
+                    or pf.name.endswith(".yml")
+                ):
+                    scannable.append(pf.as_posix())
             joined_files = "\n- ".join(scannable)
             ASH_LOGGER.debug(
                 f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}"
@@ -222,7 +222,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             sarif_output_file.parent.mkdir(exist_ok=True, parents=True)
             for cfn_file in scannable:
                 try:
-                    cfn_model = get_model_from_template(template_path=cfn_file)
+                    cfn_model = get_model_from_template(template_path=Path(cfn_file))
                 except Exception as e:
                     ASH_LOGGER.debug(
                         f"Not a CloudFormation file: {cfn_file}. Exception: {e}"

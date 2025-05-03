@@ -137,7 +137,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             raise exc
 
         # Find all files to scan from the scan set
-        scannable = (
+        orig_scannable = (
             [item for item in self.context.work_dir.glob("**/*.*")]
             if target_type == "converted"
             else scan_set(
@@ -147,17 +147,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             )
         )
         ASH_LOGGER.debug(
-            f"Found {len(scannable)} files in scan set. Checking for possible CloudFormation templates"
+            f"Found {len(orig_scannable)} files in scan set. Checking for possible CloudFormation templates"
         )
-        scannable = [
-            f.strip()
-            for f in scannable
+
+        scannable = []
+        for f in orig_scannable:
+            pf = Path(f)
             if (
-                f.strip().endswith(".json")
-                or f.strip().endswith(".yaml")
-                or f.strip().endswith(".yml")
-            )
-        ]
+                pf.name.endswith(".json")
+                or pf.name.endswith(".yaml")
+                or pf.name.endswith(".yml")
+            ):
+                scannable.append(pf.as_posix())
         joined_files = "\n- ".join(scannable)
         ASH_LOGGER.debug(f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}")
 
@@ -187,7 +188,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     nag_packs = nag_packs.model_dump(by_alias=True)
 
                 nag_result_dict = run_cdk_nag_against_cfn_template(
-                    template_path=cfn_file,
+                    template_path=Path(cfn_file),
                     nag_packs=[
                         item
                         for item, value in nag_packs.items()

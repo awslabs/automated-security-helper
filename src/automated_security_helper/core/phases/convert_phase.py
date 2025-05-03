@@ -17,7 +17,7 @@ class ConvertPhase(EnginePhase):
         return "convert"
 
     def _execute_phase(
-        self, python_based_scanners_only: bool = False, **kwargs
+        self, python_based_plugins_only: bool = False, **kwargs
     ) -> List[Path]:
         """Execute the Convert phase with observer pattern.
 
@@ -65,10 +65,10 @@ class ConvertPhase(EnginePhase):
                         )
                         continue
 
-                # Check if python_based_scanners_only is set and if the converter is Python-only
-                if python_based_scanners_only and not plugin_instance.is_python_only():
+                # Check if python_based_plugins_only is set and if the converter is Python-only
+                if python_based_plugins_only and not plugin_instance.is_python_only():
                     ASH_LOGGER.debug(
-                        f"Converter {plugin_name} is not Python-only, skipping due to python_based_scanners_only flag"
+                        f"Converter {plugin_name} is not Python-only, skipping due to python_based_plugins_only flag"
                     )
                     continue
 

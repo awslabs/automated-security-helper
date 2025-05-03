@@ -65,14 +65,14 @@ class EnginePhase(ABC):
         )
         return ash_plugin_manager.notify(event_type, **event_data)
 
-    def execute(self, python_based_scanners_only: bool = False, **kwargs) -> Any:
+    def execute(self, python_based_plugins_only: bool = False, **kwargs) -> Any:
         """Execute the phase with observer pattern support.
 
         This implementation handles the common event notifications.
         Subclasses should override _execute_phase instead of this method.
 
         Args:
-            python_based_scanners_only: If True, only execute plugins that are Python-only
+            python_based_plugins_only: If True, only execute plugins that are Python-only
             **kwargs: Additional arguments for the phase
 
         Returns:
@@ -91,7 +91,7 @@ class EnginePhase(ABC):
             f"EnginePhase.execute: Executing phase-specific logic for {self.phase_name}"
         )
         results = self._execute_phase(
-            python_based_scanners_only=python_based_scanners_only, **kwargs
+            python_based_plugins_only=python_based_plugins_only, **kwargs
         )
 
         # Notify phase complete
@@ -106,13 +106,13 @@ class EnginePhase(ABC):
         return results
 
     @abstractmethod
-    def _execute_phase(self, python_based_scanners_only: bool = False, **kwargs) -> Any:
+    def _execute_phase(self, python_based_plugins_only: bool = False, **kwargs) -> Any:
         """Execute the phase-specific logic.
 
         Subclasses must implement this method instead of overriding execute().
 
         Args:
-            python_based_scanners_only: If True, only execute plugins that are Python-only
+            python_based_plugins_only: If True, only execute plugins that are Python-only
             **kwargs: Additional arguments for the phase
 
         Returns:
