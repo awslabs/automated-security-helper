@@ -115,7 +115,7 @@ class TestConverterPlugin:
 
         with pytest.raises(
             TypeError,
-            match="Can't instantiate abstract class AbstractConverter without an implementation for abstract method",
+            match="Can't instantiate abstract class AbstractConverter",
         ):
             AbstractConverter()
 
