@@ -9,14 +9,6 @@ on:
     branches:
       - "*"
   workflow_dispatch: {}
-permissions:
-  actions: read
-  checks: write
-  contents: write
-  id-token: write
-  security-events: write
-  pull-requests: write
-  statuses: write
 env:
   PYTHON_VERSION: "3.12"
   COLUMNS: 160
@@ -36,7 +28,7 @@ jobs:
     permissions:
       actions: read
       checks: write
-      contents: write
+      contents: read
       id-token: write
       security-events: write
       pull-requests: write
@@ -120,6 +112,8 @@ jobs:
     name: Build documentation
     needs: []
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
 
     steps:
@@ -153,6 +147,8 @@ jobs:
     name: Deploy documentation
     needs: []
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:

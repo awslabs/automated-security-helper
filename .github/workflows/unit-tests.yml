@@ -14,19 +14,19 @@ on:
 env:
   COLUMNS: 160
 
-permissions:
-  actions: read
-  checks: write
-  contents: read
-  id-token: write
-  security-events: read
-  pull-requests: write
-  statuses: write
 
 jobs:
   unit-test:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }} ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    permissions:
+      actions: read
+      checks: write
+      pull-requests: write
+      contents: read
+      id-token: write
+      security-events: read
+      statuses: write
 
     strategy:
       fail-fast: false
@@ -35,73 +35,73 @@ jobs:
           # Ubuntu (x86_64)
           - os: Ubuntu
             runner: ubuntu-latest
-            python-version: '3.10'
+            python-version: "3.10"
             arch: x86_64
           - os: Ubuntu
             runner: ubuntu-latest
-            python-version: '3.11'
+            python-version: "3.11"
             arch: x86_64
           - os: Ubuntu
             runner: ubuntu-latest
-            python-version: '3.12'
+            python-version: "3.12"
             arch: x86_64
           - os: Ubuntu
             runner: ubuntu-latest
-            python-version: '3.13'
+            python-version: "3.13"
             arch: x86_64
 
           # Ubuntu (arm64)
           - os: Ubuntu
             runner: ubuntu-24.04-arm
-            python-version: '3.10'
+            python-version: "3.10"
             arch: arm64
           - os: Ubuntu
             runner: ubuntu-24.04-arm
-            python-version: '3.11'
+            python-version: "3.11"
             arch: arm64
           - os: Ubuntu
             runner: ubuntu-24.04-arm
-            python-version: '3.12'
+            python-version: "3.12"
             arch: arm64
           - os: Ubuntu
             runner: ubuntu-24.04-arm
-            python-version: '3.13'
+            python-version: "3.13"
             arch: arm64
 
           # macOS (x86_64)
           - os: macOS
             runner: macos-latest
-            python-version: '3.10'
+            python-version: "3.10"
             arch: x86_64
           - os: macOS
             runner: macos-latest
-            python-version: '3.11'
+            python-version: "3.11"
             arch: x86_64
           - os: macOS
             runner: macos-latest
-            python-version: '3.12'
+            python-version: "3.12"
             arch: x86_64
           - os: macOS
             runner: macos-latest
-            python-version: '3.13'
+            python-version: "3.13"
             arch: x86_64
 
           # Windows
           - os: Windows
             runner: windows-latest
-            python-version: '3.10'
+            python-version: "3.10"
             arch: x86_64
           - os: Windows
             runner: windows-latest
-            python-version: '3.11'
+            python-version: "3.11"
             arch: x86_64
           - os: Windows
             runner: windows-latest
-            python-version: '3.12'
+            python-version: "3.12"
             arch: x86_64
           - os: Windows
             runner: windows-latest
-            python-version: '3.13'
+            python-version: "3.13"
             arch: x86_64
 
     steps:
@@ -112,7 +112,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
+          cache: "pip"
 
       - name: Install Poetry (Linux/macOS)
         if: runner.os != 'Windows'
@@ -147,7 +147,7 @@ jobs:
 
       - name: Code Coverage Report
         uses: irongut/CodeCoverageSummary@v1.3.0
-        if: runner.os == 'Linux' && matrix.python-version == '3.12' # Only run on one configuration
+        if: runner.os == 'Linux' && matrix.python-version == '3.12' && matrix.arch == 'x86_64' # Only run on one configuration
         continue-on-error: true
         with:
           filename: "test-results/pytest.coverage.xml"
