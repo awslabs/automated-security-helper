@@ -41,14 +41,14 @@ repos:
   #         - --python-only
   - repo: https://github.com/awslabs/automated-security-helper
     # pragma: allowlist nextline secret
-    rev: a2dc5a406eafe887036ceb09385f0d313c2ea1fc
+    rev: d2ac7d4c81e7c13ac1ea2fad34538c071e541914
     hooks:
       - id: ash-simple-scan
         args:
           ## DEFAULT / MINIMUM ARGS FOR BEST PRE-COMMIT EXPERIENCE
           # Only run python-based plugins with ASH for speed
           # during pre-commit hook invocation
-          - --python-only
+          - --python-based-plugins-only
           # Show simplified log output from ASH optimized for pre-commit
           - --simple
 
