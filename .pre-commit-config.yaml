@@ -40,8 +40,7 @@ repos:
   #         - --simple
   #         - --python-only
   - repo: https://github.com/awslabs/automated-security-helper
-    # pragma: allowlist nextline secret
-    rev: d2ac7d4c81e7c13ac1ea2fad34538c071e541914
+    rev: e032600b5a6116ff5763475fe87900b5e9baa57e # pragma: allowlist secret
     hooks:
       - id: ash-simple-scan
         args:
