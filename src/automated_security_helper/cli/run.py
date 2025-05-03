@@ -124,6 +124,7 @@ def run(
         typer.Option(
             "--python-only",
             "--python-based-scanners-only",
+            "--python-based-plugins-only",
             help="Exclude execution of any plugins or tools that have depencies external to Python.",
         ),
     ] = False,
