@@ -101,20 +101,18 @@ jobs:
         run: |
           curl -sSL https://install.python-poetry.org | python3 -
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
 
       - name: Install Poetry (Windows)
         if: runner.os == 'Windows'
         run: |
           (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
-          echo "$env:APPDATA\Python\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:APPDATA\Python\Scripts", "User")
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
+          echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
 
       - name: Install dependencies
-        run: poetry install
+        run: |
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+          poetry install
 
       - name: Run PyTest
         run: poetry run pytest
