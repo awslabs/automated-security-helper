@@ -174,6 +174,9 @@ ENV ASH_IN_CONTAINER="YES"
 # in this stage if it is not applicable to ASH outside of CI usage
 FROM core AS ci
 
+RUN python3 -m automated_security_helper.tools.install_dependencies
+ENV PATH="${HOME}/.ash/bin:$PATH"
+
 ENV ASH_TARGET=ci
 
 
@@ -222,6 +225,9 @@ USER ${UID}:${GID}
 ENV HOME=${ASHUSER_HOME}
 ENV ASH_USER=${ASH_USER}
 ENV ASH_GROUP=${ASH_GROUP}
+
+RUN python3 -m automated_security_helper.tools.install_dependencies
+ENV PATH="${HOME}/.ash/bin:$PATH"
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD type ash || exit 1

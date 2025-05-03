@@ -10,6 +10,8 @@ global_settings:
       reason: This path contains .gitignore'd cache data used by dev/build tools.
     - path: '**/.venv'
       reason: This path contains .gitignore'd cache data used by dev/build tools.
+    - path: !ENV ASH_GITHUB_PATH
+      reason: Testing
 build:
   build_mode: ONLINE
   custom_scanners: []
@@ -64,6 +66,8 @@ scanners:
       skip_path: []
   detect-secrets:
     enabled: true
+    options:
+
   npm-audit:
     enabled: true
   grype:
