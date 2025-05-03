@@ -4,6 +4,7 @@
 import os
 import typer
 from automated_security_helper.cli.config import config_app
+from automated_security_helper.cli.dependencies import dependencies_app
 from automated_security_helper.cli.image import image_build
 from automated_security_helper.cli.inspect import inspect_app
 from automated_security_helper.cli.plugin import plugin_app
@@ -33,6 +34,7 @@ Any additional arguments passed will be forwarded to ASH inside the container im
 
 
 app.add_typer(config_app, name="config")
+app.add_typer(dependencies_app, name="dependencies")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(plugin_app, name="plugin")
 

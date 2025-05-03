@@ -588,7 +588,7 @@ def image_build(
     logger.info(f"Resolved OCI_RUNNER to: {resolved_oci_runner}")
 
     # Get ASH root directory
-    ash_root_dir = Path(__file__).parent.parent.parent.parent.resolve()
+    ash_root_dir = Path(__file__).parent.parent.parent.resolve()
     dockerfile_path = ash_root_dir / "Dockerfile"
 
     if not dockerfile_path.exists():

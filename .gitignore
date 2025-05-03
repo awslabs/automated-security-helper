@@ -16,6 +16,7 @@ output/
 /Amazon*.md
 .envrc
 utils/try*.sh
+ASH_COMMIT_SHA
 
 ### macOS ###
 # General

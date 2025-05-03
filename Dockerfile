@@ -10,8 +10,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install -U pip poetry
 WORKDIR /src
-COPY pyproject.toml poetry.lock README.md ./
-COPY src/ src/
+COPY pyproject.toml poetry.lock README.md LICENSE Dockerfile ./
+COPY ci/ ci/
+COPY automated_security_helper/ automated_security_helper/
 RUN poetry build
 
 # Second stage: Core ASH image
@@ -20,7 +21,9 @@ SHELL ["/bin/bash", "-c"]
 ARG BUILD_DATE_EPOCH="-1"
 ARG OFFLINE="NO"
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
+ARG ASH_BIN_PATH="/ash/bin"
 
+ENV ASH_BIN_PATH="${ASH_BIN_PATH}"
 ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
 ENV OFFLINE="${OFFLINE}"
 ENV OFFLINE_AT_BUILD_TIME="${OFFLINE}"
@@ -146,8 +149,10 @@ COPY --from=poetry-reqs /src/dist/*.whl .
 COPY ./pyproject.toml /ash/pyproject.toml
 RUN python3 -m pip install *.whl && rm *.whl
 
-COPY ./utils/*.* /ash/utils/
-COPY ./ash-multi /ash/ash
+# These aren't needed anymore, the Python package now handles
+# the /utils script logic as well as the shell entrypoint.
+# COPY ./utils/*.* /ash/utils/
+# COPY ./ash-multi /ash/ash
 
 #
 # Make sure the ash script is executable
@@ -160,9 +165,11 @@ RUN chmod -R 755 /ash && chmod -R 777 /src /out /deps
 ENV _ASH_EXEC_MODE="local"
 
 #
-# Append /ash to PATH to allow calling `ash` directly
+# Install dependencies via ASH CLI into
 #
-ENV PATH="$PATH:/ash"
+RUN python3 -m automated_security_helper.cli.main dependencies install \
+    --bin-path "${ASH_BIN_PATH}"
+ENV PATH="${ASH_BIN_PATH}:$PATH"
 
 #
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
@@ -173,9 +180,6 @@ ENV ASH_IN_CONTAINER="YES"
 # CI stage -- any customizations specific to CI platform compatibility should be added
 # in this stage if it is not applicable to ASH outside of CI usage
 FROM core AS ci
-
-RUN python3 -m automated_security_helper.tools.install_dependencies
-ENV PATH="${HOME}/.ash/bin:$PATH"
 
 ENV ASH_TARGET=ci
 
@@ -226,11 +230,9 @@ ENV HOME=${ASHUSER_HOME}
 ENV ASH_USER=${ASH_USER}
 ENV ASH_GROUP=${ASH_GROUP}
 
-RUN python3 -m automated_security_helper.tools.install_dependencies
-ENV PATH="${HOME}/.ash/bin:$PATH"
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD type ash || exit 1
 
 ENTRYPOINT [ ]
-CMD [ "ashv3" ]
+CMD [ "python3", "-m", "automated_security_helper.cli.main" ]

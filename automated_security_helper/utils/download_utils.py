@@ -8,11 +8,10 @@ from pathlib import Path
 from typing import Literal, Optional
 import urllib.request
 
-
-from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import run_command
 from automated_security_helper.base.plugin_base import CustomCommand
+from automated_security_helper.core.constants import ASH_BIN_PATH
 
 
 def download_file(url: str, destination: Path, rename_to: Optional[str] = None) -> Path:
@@ -103,27 +102,32 @@ def install_binary_from_url(
 
 def create_url_download_command(
     url: str,
-    destination: str = ASH_BIN_PATH,
+    destination: str = None,
     rename_to: str | None = None,
 ) -> CustomCommand:
     """Create a CustomCommand to download and install a binary from a URL.
 
     Args:
         url: The URL to download from
-        destination: The directory to install the binary to
+        destination: The directory to install the binary to (defaults to ASH_BIN_PATH)
         rename_to: Optional name to rename the binary to
 
     Returns:
         CustomCommand object
     """
+    # Use the provided destination or get the current ASH_BIN_PATH
+    if destination is None:
+        destination = str(ASH_BIN_PATH)
+
     if not Path(destination).exists():
         ASH_LOGGER.verbose(f"Creating ASH bin path directory @ {destination}")
         Path(destination).mkdir(parents=True, exist_ok=True)
+
     return CustomCommand(
         args=[
             sys.executable,
             "-c",
-            f"from automated_security_helper.utils.download_utils import install_binary_from_url; "
+            f"from pathlib import Path; from automated_security_helper.utils.download_utils import install_binary_from_url; "
             f"install_binary_from_url('{url}', Path('{destination}'), '{rename_to}')",
         ],
         shell=False,
