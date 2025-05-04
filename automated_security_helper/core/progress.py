@@ -1,6 +1,5 @@
 from enum import Enum
 import logging
-import os
 import sys
 import time
 from typing import Literal
@@ -66,9 +65,7 @@ class LiveProgressDisplay:
             verbose: Whether to show verbose logs
             debug: Whether to show debug logs
         """
-        self.show_progress = show_progress and os.environ.get(
-            "ASH_IN_CONTAINER", "NO"
-        ).upper() not in ["YES", "1", "TRUE"]
+        self.show_progress = show_progress
         self.console = Console(color_system=color_system)
         self.verbose = verbose
         self.debug = debug

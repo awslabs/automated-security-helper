@@ -111,9 +111,15 @@ def test_detect_secrets_scanner_scan_error(
     """Test DetectSecretsScanner scan with error."""
     mock_secrets_collection.side_effect = Exception("Scan failed")
 
+    # Use a platform-independent nonexistent path
+    nonexistent_path = Path("nonexistent_directory_for_testing")
+
     with pytest.raises(ScannerError) as exc_info:
-        detect_secrets_scanner.scan(Path("/nonexistent"), target_type="source")
-    assert "Target /nonexistent does not exist!" in str(exc_info.value)
+        detect_secrets_scanner.scan(nonexistent_path, target_type="source")
+
+    # Use a more flexible assertion that works across platforms
+    assert "does not exist" in str(exc_info.value)
+    assert str(nonexistent_path) in str(exc_info.value)
 
 
 def test_detect_secrets_scanner_with_no_findings(

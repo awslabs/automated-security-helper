@@ -9,7 +9,6 @@ from subprocess import CalledProcessError, CompletedProcess
 import sys
 import time
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional, List
 import typer
@@ -23,6 +22,7 @@ import threading
 import io
 
 # Import subprocess utilities
+from automated_security_helper.interactions.run_ash_container import BuildTarget
 from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.subprocess_utils import (
     create_process_with_pipes,
@@ -32,16 +32,6 @@ from automated_security_helper.utils.subprocess_utils import (
     get_host_gid,
     find_executable,
 )
-
-
-class BuildTarget(str, Enum):
-    NON_ROOT = "non-root"
-    CI = "ci"
-
-
-class OutputFormat(str, Enum):
-    TEXT = "text"
-    JSON = "json"
 
 
 def validate_path(path: str) -> Path:
@@ -539,7 +529,7 @@ def image_build(
             raise typer.Exit(1)
     else:
         # Default to ash_output in the source directory
-        output_dir = source_dir / "ash_output"
+        output_dir = Path(source_dir).joinpath("ash_output")
         output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Using default output directory: {output_dir}")
 
@@ -588,8 +578,8 @@ def image_build(
     logger.info(f"Resolved OCI_RUNNER to: {resolved_oci_runner}")
 
     # Get ASH root directory
-    ash_root_dir = Path(__file__).parent.parent.parent.parent.resolve()
-    dockerfile_path = ash_root_dir / "Dockerfile"
+    ash_root_dir = Path(__file__).parent.parent.parent.resolve()
+    dockerfile_path = ash_root_dir.joinpath("Dockerfile")
 
     if not dockerfile_path.exists():
         typer.secho(f"Dockerfile not found at {dockerfile_path}", fg=typer.colors.RED)

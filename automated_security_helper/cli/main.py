@@ -4,10 +4,11 @@
 import os
 import typer
 from automated_security_helper.cli.config import config_app
+from automated_security_helper.cli.dependencies import dependencies_app
 from automated_security_helper.cli.image import image_build
 from automated_security_helper.cli.inspect import inspect_app
 from automated_security_helper.cli.plugin import plugin_app
-from automated_security_helper.cli.run import run
+from automated_security_helper.cli.scan import run_ash_scan_cli_command
 
 
 app = typer.Typer(
@@ -19,12 +20,17 @@ app = typer.Typer(
     in ["YES", "1", "TRUE"],
 )
 
-app.callback(invoke_without_command=True)(run)
-app.command(no_args_is_help=False, name="run")(run)
+app.callback(invoke_without_command=True)(run_ash_scan_cli_command)
+app.command(
+    name="scan",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    no_args_is_help=False,
+)(run_ash_scan_cli_command)
 
 app.command(
     name="image",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    no_args_is_help=False,
     help="""Builds the ASH container image then runs a scan with it.
 
 Any additional arguments passed will be forwarded to ASH inside the container image when starting the scan.
@@ -33,6 +39,7 @@ Any additional arguments passed will be forwarded to ASH inside the container im
 
 
 app.add_typer(config_app, name="config")
+app.add_typer(dependencies_app, name="dependencies")
 app.add_typer(inspect_app, name="inspect")
 app.add_typer(plugin_app, name="plugin")
 

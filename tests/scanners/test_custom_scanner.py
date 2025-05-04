@@ -1,6 +1,7 @@
 """Tests for Custom scanner."""
 
 import pytest
+import tempfile
 from pathlib import Path
 from automated_security_helper.scanners.ash_default.custom_scanner import (
     CustomScanner,
@@ -89,7 +90,7 @@ def test_custom_scanner_scan_error(test_plugin_context):
     ):
         # Try to scan with a non-existent command
         with pytest.raises(ScannerError):
-            scanner.scan(Path("/tmp"), target_type="source")
+            scanner.scan(Path("nonexistent_dir"), target_type="source")
 
 
 def test_custom_scanner_with_empty_results(test_custom_scanner, test_source_dir):
@@ -114,8 +115,12 @@ def test_custom_scanner_sarif_metadata(test_plugin_context):
         command="echo",
     )
 
+    # Create a temporary directory for testing
+    temp_dir = Path(tempfile.gettempdir()) / "ash_test_dir"
+    temp_dir.mkdir(exist_ok=True)
+
     # Run the scan
-    results = scanner.scan(Path("/tmp"), target_type="source")
+    results = scanner.scan(temp_dir, target_type="source")
 
     # Check SARIF metadata
     assert results.runs[0].tool.driver.name is not None

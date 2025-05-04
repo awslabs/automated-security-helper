@@ -8,6 +8,7 @@ from typing import Annotated, Dict, List
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -42,6 +43,7 @@ class PluginBase(BaseModel):
         extra="allow", arbitrary_types_allowed=True, use_enum_values=True
     )
     context: PluginContext | None = None
+    config: PluginConfigBase | None = None
 
     output: List[str] = []
     errors: List[str] = []

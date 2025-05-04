@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from typing import Literal
 from pathlib import Path
 
@@ -10,7 +11,11 @@ ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
 ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
 
 ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
-ASH_BIN_PATH = Path.home().joinpath(".ash/bin")
+ASH_BIN_PATH = (
+    Path(os.environ["ASH_BIN_PATH"])
+    if os.environ.get("ASH_BIN_PATH", None) is not None
+    else Path.home().joinpath(".ash", "bin")
+)
 ASH_DEFAULT_SEVERITY_LEVEL = "MEDIUM"
 
 ASH_CONFIG_FILE_NAMES = [
