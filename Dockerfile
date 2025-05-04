@@ -11,7 +11,6 @@ RUN apt-get update && \
 RUN python3 -m pip install -U pip poetry
 WORKDIR /src
 COPY pyproject.toml poetry.lock README.md LICENSE Dockerfile ./
-COPY ci/ ci/
 COPY automated_security_helper/ automated_security_helper/
 RUN poetry build
 

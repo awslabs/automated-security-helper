@@ -42,7 +42,7 @@ def download_file(url: str, destination: Path, rename_to: Optional[str] = None) 
             shutil.copyfileobj(response, temp_file)
 
     # Move the temporary file to the destination
-    dest_path = destination / rename_to
+    dest_path = destination.joinpath(rename_to)
     shutil.move(temp_file.name, dest_path)
 
     ASH_LOGGER.info(f"Downloaded {url} to {dest_path}")

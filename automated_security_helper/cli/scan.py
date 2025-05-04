@@ -1,36 +1,24 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from enum import Enum
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 import typer
 from pathlib import Path
 
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
 )
-from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+from automated_security_helper.interactions.run_ash_scan import (
+    BuildTarget,
+    Phases,
+    Strategy,
+    run_ash_scan,
+    RunMode,
+)
 from automated_security_helper.models.core import ExportFormat
 
 
-class Phases(str, Enum):
-    convert = "convert"
-    scan = "scan"
-    report = "report"
-    inspect = "inspect"
-
-
-class Strategy(str, Enum):
-    parallel = "parallel"
-    sequential = "sequential"
-
-
-class AshBuildTarget(str, Enum):
-    default = "default"
-    ci = "ci"
-
-
-def run(
+def run_ash_scan_cli_command(
     ctx: typer.Context,
     source_dir: Annotated[
         str,
@@ -114,12 +102,18 @@ def run(
             help="Prints version number",
         ),
     ] = False,
+    mode: Annotated[
+        Optional[RunMode],
+        typer.Option(
+            help="Execution mode preset. 'precommit' enables python-based plugins only and simplified output. 'container' runs non-Python plugins in a container. 'local' (default) runs everything in the local Python process.",
+        ),
+    ] = RunMode.local,
     python_based_plugins_only: Annotated[
         bool,
         typer.Option(
-            "--python-only",
-            "--python-based-scanners-only",
-            "--python-based-plugins-only",
+            "--python-only/--full",
+            "--python-based-scanners-only/--all-enabled-scanners",
+            "--python-based-plugins-only/--all-enabled-plugins",
             help="Exclude execution of any plugins or tools that have depencies external to Python.",
         ),
     ] = False,
@@ -130,6 +124,9 @@ def run(
             help="Enable simplified logging. Good for use when you just want brief status and summary of a scan, e.g. during a pre-commit hook."
         ),
     ] = False,
+    show_summary: Annotated[
+        bool, typer.Option(help="Show metrics table and results summary")
+    ] = True,
     verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
@@ -137,6 +134,90 @@ def run(
         bool | None,
         typer.Option(
             help="Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value."
+        ),
+    ] = None,
+    ### CONTAINER-RELATED OPTIONS
+    build: Annotated[
+        bool,
+        typer.Option(
+            "--build/--no-build",
+            "-b/-B",
+            help="Whether to build the ASH container image",
+        ),
+    ] = True,
+    run: Annotated[
+        bool,
+        typer.Option(
+            "--run/--no-run",
+            "-r/-R",
+            help="Whether to run the ASH container image",
+        ),
+    ] = True,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force rebuild of the ASH container image",
+        ),
+    ] = False,
+    oci_runner: Annotated[
+        Optional[str],
+        typer.Option(
+            "--oci-runner",
+            "--oci",
+            "--runner",
+            "-r",
+            help="Use the specified OCI runner instead of docker to run the containerized tools",
+            envvar="OCI_RUNNER",
+        ),
+    ] = None,
+    # preserve_report: Annotated[
+    #     bool,
+    #     typer.Option(
+    #         "--preserve-report",
+    #         "-p",
+    #         help="Add timestamp to the final report file to avoid overwriting it after multiple executions",
+    #     ),
+    # ] = False,
+    # extension: Annotated[
+    #     Optional[str],
+    #     typer.Option(
+    #         "--ext",
+    #         "--extension",
+    #         "-e",
+    #         help="Force a file extension to scan. Defaults to identify files automatically",
+    #     ),
+    # ] = None,
+    build_target: Annotated[
+        BuildTarget,
+        typer.Option(
+            "--build-target",
+            help="Specify the target stage of the ASH image to build",
+            case_sensitive=False,
+        ),
+    ] = BuildTarget.NON_ROOT,
+    offline_semgrep_rulesets: Annotated[
+        str,
+        typer.Option(
+            "--offline-semgrep-rulesets",
+            help="Specify Semgrep rulesets for use in ASH offline mode",
+        ),
+    ] = "p/ci",
+    container_uid: Annotated[
+        Optional[str],
+        typer.Option(
+            "--container-uid",
+            "-u",
+            help="UID to use for the container user",
+        ),
+    ] = None,
+    container_gid: Annotated[
+        Optional[str],
+        typer.Option(
+            "--container-gid",
+            "-g",
+            help="GID to use for the container user",
         ),
     ] = None,
 ):
@@ -150,6 +231,12 @@ def run(
         typer.echo(f"awslabs/automated-security-helper v{__version__}")
         raise typer.Exit()
 
+    # Apply mode presets if specified
+    if mode == RunMode.precommit:
+        python_based_plugins_only = True
+        simple = True
+
+    # Call run_ash_scan with all parameters
     run_ash_scan(
         source_dir=source_dir,
         output_dir=output_dir,
@@ -163,7 +250,6 @@ def run(
         phases=phases,
         inspect=inspect,
         existing_results=existing_results,
-        version=version,
         python_based_plugins_only=python_based_plugins_only,
         quiet=quiet,
         simple=simple,
@@ -171,4 +257,15 @@ def run(
         debug=debug,
         color=color,
         fail_on_findings=fail_on_findings,
+        mode=mode,
+        show_summary=show_summary,
+        # Container-specific params
+        build=build,
+        run=run,
+        force=force,
+        oci_runner=oci_runner,
+        build_target=build_target,
+        offline_semgrep_rulesets=offline_semgrep_rulesets,
+        container_uid=container_uid,
+        container_gid=container_gid,
     )

@@ -24,21 +24,6 @@
 # folder of the git repository where the pre-commit
 # command was invoked from.
 #
-# A useful example pre-commit-config.yaml clause for
-# running the ASH tool on MacOS, where "finch" is
-# used as the containerd user interface is:
-#   - repo: git@github.com:aws-samples/automated-security-helper.git
-#     rev: '1.0.8-e-03May2023'
-#     hooks:
-#     - id: ash
-#       name: scan files using ash
-#       stages: [ manual ]
-#       args: [ "-f" ]
-#
-# With that pre-commit-config, this hook can be run manually
-# against the code repository using this command:
-#   pre-commit run --hook-stage manual ash
-#
 - id: ash-simple-scan
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs various code scanners from Python directly
@@ -46,9 +31,7 @@
   verbose: true
   language: python
   pass_filenames: false
-  args:
-    - --simple
-    - --python-based-plugins-only
+  args: [ --mode=precommit ]
 - id: ash-full-scan
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs full ASH scan with container build and all scanners (takes several minutes)
@@ -56,5 +39,4 @@
   verbose: true
   language: script
   pass_filenames: false
-  args:
-    - --simple
+  args: [ --simple ]

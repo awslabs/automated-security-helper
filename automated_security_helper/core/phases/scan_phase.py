@@ -62,6 +62,11 @@ class ScanPhase(EnginePhase):
         self._scan_results = {}
         self._global_ignore_paths = global_ignore_paths or []
         self._max_workers = max_workers
+        work_dir_contents = [
+            *self.plugin_context.work_dir.glob("*.*"),
+            *self.plugin_context.work_dir.glob("**/*.*"),
+        ]
+        self._include_work_dir = len(work_dir_contents) > 0
 
         try:
             # Update progress to show we're starting
@@ -133,20 +138,24 @@ class ScanPhase(EnginePhase):
                             )
                         ):
                             # Add a single task per scanner that will handle both source and converted directories
+                            task_list = [
+                                {
+                                    "path": self.plugin_context.source_dir,
+                                    "type": "source",
+                                },
+                            ]
+                            if self._include_work_dir:
+                                task_list.append(
+                                    {
+                                        "path": self.plugin_context.work_dir,
+                                        "type": "converted",
+                                    }
+                                )
                             self._queue.put(
                                 (
                                     display_name,
                                     plugin_instance,
-                                    [
-                                        {
-                                            "path": self.plugin_context.source_dir,
-                                            "type": "source",
-                                        },
-                                        {
-                                            "path": self.plugin_context.work_dir,
-                                            "type": "converted",
-                                        },
-                                    ],
+                                    task_list,
                                 )
                             )
                             enabled_scanner_classes.append(plugin_class)

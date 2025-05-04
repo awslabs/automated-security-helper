@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any, Literal
 
+from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -19,9 +20,16 @@ def find_executable(command: str) -> Optional[str]:
         The full path to the executable, or None if not found
     """
     try:
-        return shutil.which(command)
+        found = shutil.which(command)
+        if found:
+            return found
+        else:
+            poss = ASH_BIN_PATH.joinpath(command)
+            if poss.exists():
+                return poss.as_posix()
+            raise FileNotFoundError(f"Executable {command} not found")
     except Exception as e:
-        ASH_LOGGER.debug(f"Error finding executable {command}: {e}")
+        ASH_LOGGER.exception(e)
         return None
 
 

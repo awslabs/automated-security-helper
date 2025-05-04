@@ -274,7 +274,7 @@ class ASHScanOrchestrator(BaseModel):
 
     def execute_scan(
         self, phases: List[ExecutionPhaseType] = ["convert", "scan", "report"]
-    ) -> Dict:
+    ) -> ASHARPModel:
         """Execute the security scan and return results.
 
         Args:
@@ -282,7 +282,7 @@ class ASHScanOrchestrator(BaseModel):
                 Defaults to ["convert", "scan", "report"].
 
         Returns:
-            Dict: The results of the scan.
+            ASHARPModel: The results of the scan.
         """
         ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
         ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
