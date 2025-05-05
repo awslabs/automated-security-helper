@@ -8,15 +8,14 @@ from typing import List, Optional
 
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
 from automated_security_helper.core.metrics_table import display_metrics_table
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.core.phases.inspect_phase import InspectPhase
 from automated_security_helper.core.progress import (
-    ExecutionPhase,
     ExecutionPhaseType,
-    ExecutionStrategy,
     LiveProgressDisplay,
 )
 from automated_security_helper.plugins import ash_plugin_manager

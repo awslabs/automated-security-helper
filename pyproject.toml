@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "automated-security-helper"
-version = "3.0.0"
+version = "3.1.0"
 description = "Automated Security Helper for GitHub Actions"
 readme = "README.md"
 license = "Apache-2.0"
@@ -27,18 +27,13 @@ packages = [
   {include = "automated_security_helper"},
 ]
 include = [
-    # Include assets dir so custom rulesets are packaged
     { path = "automated_security_helper/assets", format = ["sdist", "wheel"] },
-    # Include assets dir so custom rulesets are packaged
-    { path = "Dockerfile", format = ["sdist", "wheel"] },
-    { path = "LICENSE", format = ["sdist", "wheel"] },
-    { path = "README.md", format = ["sdist", "wheel"] },
-    { path = "pyproject.toml", format = ["sdist", "wheel"] },
-    { path = "poetry.lock", format = ["sdist", "wheel"] },
+    { path = "automated_security_helper/assets/ASH_COMMIT_SHA", format = ["sdist", "wheel"] },
+    { path = "automated_security_helper/assets/Dockerfile", format = ["sdist", "wheel"] },
 ]
 
-# [tool.poetry.build]
-# script = "ci/generate_commit_pointer.py"
+[tool.poetry.build]
+script = "ci/stage_build_assets.py"
 
 [tool.poetry.scripts]
 asharp = 'asharp.asharp:main'

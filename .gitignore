@@ -16,7 +16,10 @@ output/
 /Amazon*.md
 .envrc
 utils/try*.sh
-ASH_COMMIT_SHA
+
+### Generated or cloned into the assets directory at time of build/install ###
+automated_security_helper/assets/ASH_COMMIT_SHA
+automated_security_helper/assets/Dockerfile
 
 ### macOS ###
 # General

@@ -13,9 +13,9 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.enums import ExecutionStrategy
 from automated_security_helper.core.progress import (
     ExecutionPhaseType,
-    ExecutionStrategy,
 )
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
@@ -31,7 +31,8 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
 )
 from automated_security_helper.models.asharp_model import ASHARPModel
-from automated_security_helper.models.core import ExportFormat
+from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -119,7 +120,7 @@ class ASHScanOrchestrator(BaseModel):
     def model_post_init(self, context):
         """Post initialization configuration."""
         super().model_post_init(context)
-        ASH_LOGGER.info("Initializing ASH Scanner")
+        ASH_LOGGER.info(f"Initializing ASH v{get_ash_version()}")
 
         self.config = resolve_config(config_path=self.config_path)
 

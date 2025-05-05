@@ -5,11 +5,11 @@ import os
 from typing import Literal
 from pathlib import Path
 
-ASH_WORK_DIR_NAME = "converted"
-
 ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
 ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
+ASH_REPO_LATEST_BRANCH = "beta"
 
+ASH_WORK_DIR_NAME = "converted"
 ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
 ASH_BIN_PATH = (
     Path(os.environ["ASH_BIN_PATH"])

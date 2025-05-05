@@ -4,7 +4,6 @@
 """Core models for security findings."""
 
 from typing import List, Annotated
-from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -12,25 +11,6 @@ class ToolExtraArg(BaseModel):
     model_config = ConfigDict(extra="forbid")
     key: str
     value: str | int | float | bool | None = None
-
-
-class ExportFormat(str, Enum):
-    """Supported export formats."""
-
-    TEXT = "text"
-    FLAT_JSON = "flat-json"
-    YAML = "yaml"
-    CSV = "csv"
-    HTML = "html"
-    DICT = "dict"
-    JUNITXML = "junitxml"
-    MARKDOWN = "markdown"
-    SARIF = "sarif"
-    ASFF = "asff"
-    OCSF = "ocsf"
-    CYCLONEDX = "cyclonedx"
-    SPDX = "spdx"
-    CUSTOM = "custom"
 
 
 class ScanStatistics(BaseModel):

@@ -1,21 +1,28 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import os
-import logging
 import shlex
 from subprocess import CalledProcessError
 import sys
 import time
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
+from typing import List
 import typer
 import threading
 import io
+from importlib.metadata import import_module
 
 # Import subprocess utilities
-from automated_security_helper.utils.log import get_logger
+from automated_security_helper.core.constants import ASH_REPO_LATEST_BRANCH
+from automated_security_helper.core.enums import (
+    BuildTarget,
+    ExportFormat,
+    Phases,
+    Strategy,
+)
 from automated_security_helper.utils.subprocess_utils import (
     create_process_with_pipes,
     create_completed_process,
@@ -24,16 +31,66 @@ from automated_security_helper.utils.subprocess_utils import (
     get_host_gid,
     find_executable,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class BuildTarget(str, Enum):
-    NON_ROOT = "non-root"
-    CI = "ci"
+def get_ash_revision() -> str | None:
+    """
+    Get the revision of the Automated Security Helper repo to install based on how the
+    current version of the package was installed.
 
+    - If ASH is installed in editable mode or is within a full clone of the
+    repository, return 'LOCAL'
+    - If ASH was installed via `pip install` where only the package info and some of
+    the source is available, then attempt to resolve the installed source and provide the
+    target Git revision to install ASH within the container image.
 
-class OutputFormat(str, Enum):
-    TEXT = "text"
-    JSON = "json"
+    Returns:
+        str: The revision of the Automated Security Helper container
+    """
+    return_val = None
+    ash_repo_root = Path(__file__).parent.parent.parent
+    if all(
+        [
+            ash_repo_root.joinpath(".github").exists(),
+            ash_repo_root.joinpath(".gitignore").exists(),
+            ash_repo_root.joinpath(".dockerignore").exists(),
+            ash_repo_root.joinpath("Dockerfile").exists(),
+            ash_repo_root.joinpath("pyproject.toml").exists(),
+            ash_repo_root.joinpath("NOTICE").exists(),
+            ash_repo_root.joinpath("docs").exists(),
+            ash_repo_root.joinpath("tests").exists(),
+        ]
+    ):
+        ASH_LOGGER.info(
+            "ASH installation appears to be alongide the repository contents, building with LOCAL source"
+        )
+        return "LOCAL"
+
+    mod = import_module("automated_security_helper")
+    direct_url_json_path = Path(
+        mod.__path__[0] + "-" + mod.__version__ + ".dist-info"
+    ).joinpath("direct_url.json")
+    if direct_url_json_path.exists():
+        print(
+            f"Found direct_url.json file for module @ {direct_url_json_path.as_posix()}"
+        )
+        direct_url_json = json.loads(direct_url_json_path.read_text())
+        if isinstance(direct_url_json, dict) and "url" in direct_url_json:
+            url = direct_url_json["url"]
+            if "vcs_info" in direct_url_json:
+                vcs = direct_url_json["vcs_info"]["vcs"]
+                revision = (
+                    direct_url_json["vcs_info"]["commit_id"]
+                    or direct_url_json["vcs_info"]["requested_revision"]
+                    or ASH_REPO_LATEST_BRANCH
+                )
+                return_val = f"{vcs}+{url}@{revision}"
+                ASH_LOGGER.info(
+                    f"Resolved source revision for ASH to use during container image build: {return_val}"
+                )
+
+    return return_val
 
 
 def validate_path(path: str) -> Path:
@@ -152,36 +209,39 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
 
 def run_ash_container(
     ctx=None,
-    source_dir=None,
-    output_dir=None,
-    build=True,
-    run=True,
-    force=False,
-    quiet=False,
-    oci_runner=None,
-    build_target=BuildTarget.NON_ROOT,
-    offline=False,
-    offline_semgrep_rulesets="p/ci",
-    container_uid=None,
-    container_gid=None,
-    verbose=False,
-    debug=False,
-    color=True,
-    # Additional parameters for ASH
-    config=None,
-    strategy=None,
-    scanners=None,
-    progress=True,
-    output_formats=None,
-    cleanup=False,
-    phases=None,
-    inspect=False,
-    existing_results=None,
-    python_based_plugins_only=False,
-    simple=False,
-    fail_on_findings=None,
-    mode=None,
-    show_summary=True,
+    source_dir: str = Path.cwd().as_posix(),
+    output_dir: str = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    config: str = None,
+    offline: bool = False,
+    strategy: Strategy = Strategy.parallel.value,
+    scanners: List[str] = [],
+    progress: bool = True,
+    output_formats: List[ExportFormat] = [],
+    cleanup: bool = False,
+    phases: List[Phases] = [
+        Phases.convert,
+        Phases.scan,
+        Phases.report,
+    ],
+    inspect: bool = False,
+    existing_results: str = None,
+    python_based_plugins_only: bool = False,
+    quiet: bool = False,
+    simple: bool = False,
+    verbose: bool = False,
+    debug: bool = False,
+    color: bool = True,
+    fail_on_findings: bool | None = None,
+    # Container-specific args
+    build: bool = True,
+    run: bool = True,
+    force: bool = False,
+    oci_runner: str = None,
+    build_target: BuildTarget = BuildTarget.NON_ROOT,
+    offline_semgrep_rulesets: str = "p/ci",
+    container_uid: str | None = None,
+    container_gid: str | None = None,
+    ash_revision_to_install: str | None = None,
 ):
     """Build and run the ASH container image.
 
@@ -206,42 +266,6 @@ def run_ash_container(
     Returns:
         CompletedProcess: The result of the container execution
     """
-    # Configure logging
-    logger = get_logger(level=logging.DEBUG if debug else logging.INFO)
-
-    # Validate source directory
-    if source_dir:
-        try:
-            source_dir = validate_path(source_dir)
-        except ValueError as e:
-            typer.secho(str(e), fg=typer.colors.RED)
-            return create_completed_process(
-                args=[], returncode=1, stdout="", stderr=str(e)
-            )
-
-    # Set default source directory if not provided
-    if not source_dir:
-        source_dir = Path.cwd()
-        logger.info(f"Using current directory as source: {source_dir}")
-
-    # Validate output directory
-    if output_dir:
-        try:
-            # Create output directory if it doesn't exist
-            output_dir = Path(output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            output_dir = output_dir.resolve()
-        except Exception as e:
-            typer.secho(f"Error creating output directory: {e}", fg=typer.colors.RED)
-            return create_completed_process(
-                args=[], returncode=1, stdout="", stderr=str(e)
-            )
-    else:
-        # Default to ash_output in the source directory
-        output_dir = source_dir.joinpath("ash_output")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Using default output directory: {output_dir}")
-
     # Get host UID and GID using safe subprocess calls
     try:
         host_uid = get_host_uid()
@@ -287,7 +311,7 @@ def run_ash_container(
             resolved_oci_runner = exists
             break
         except Exception:
-            logger.debug(f"Unable to find {runner} -- continuing")
+            ASH_LOGGER.debug(f"Unable to find {runner} -- continuing")
             continue
 
     if not resolved_oci_runner:
@@ -296,7 +320,7 @@ def run_ash_container(
             args=[], returncode=1, stdout="", stderr="Unable to resolve an OCI runner"
         )
 
-    logger.info(f"Resolved OCI_RUNNER to: {resolved_oci_runner}")
+    ASH_LOGGER.info(f"Resolved OCI_RUNNER to: {resolved_oci_runner}")
 
     # Get ASH root directory
     ash_root_dir = Path(__file__).parent.parent.parent.resolve()
@@ -341,6 +365,8 @@ def run_ash_container(
                 build_target.value,
                 "--file",
                 dockerfile_path.as_posix(),
+                "--build-arg",
+                f"INSTALL_ASH_REVISION={ash_revision_to_install if ash_revision_to_install is not None else 'LOCAL'}",
                 "--build-arg",
                 f"OFFLINE={'YES' if offline else 'NO'}",
                 "--build-arg",
@@ -393,6 +419,41 @@ def run_ash_container(
 
     # Run the image if the --run flag is set
     if run:
+        # Validate source directory
+        if source_dir:
+            try:
+                source_dir = validate_path(source_dir)
+            except ValueError as e:
+                typer.secho(str(e), fg=typer.colors.RED)
+                return create_completed_process(
+                    args=[], returncode=1, stdout="", stderr=str(e)
+                )
+
+        # Set default source directory if not provided
+        if not source_dir:
+            source_dir = Path.cwd()
+            ASH_LOGGER.info(f"Using current directory as source: {source_dir}")
+
+        # Validate output directory
+        if output_dir:
+            try:
+                # Create output directory if it doesn't exist
+                output_dir = Path(output_dir)
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_dir = output_dir.resolve()
+            except Exception as e:
+                typer.secho(
+                    f"Error creating output directory: {e}", fg=typer.colors.RED
+                )
+                return create_completed_process(
+                    args=[], returncode=1, stdout="", stderr=str(e)
+                )
+        else:
+            # Default to ash_output in the source directory
+            output_dir = source_dir.joinpath("ash_output")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            ASH_LOGGER.info(f"Using default output directory: {output_dir}")
+
         run_cmd = [
             resolved_oci_runner,
             "run",
@@ -434,7 +495,7 @@ def run_ash_container(
             columns, lines = shutil.get_terminal_size()
             run_cmd.extend(["-e", f"COLUMNS={columns}", "-e", f"LINES={lines}"])
         except Exception as e:
-            logger.debug(f"Unable to determine terminal size via shutil: {e}")
+            ASH_LOGGER.debug(f"Unable to determine terminal size via shutil: {e}")
 
         # Add color support
         if color:
@@ -458,6 +519,8 @@ def run_ash_container(
         # Add parameters based on function arguments
         if quiet:
             ash_args.append("--quiet")
+        if not progress:
+            ash_args.append("--no-progress")
         if not color:
             ash_args.append("--no-color")
         if debug:

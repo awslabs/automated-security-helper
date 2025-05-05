@@ -7,7 +7,7 @@ from pathlib import Path
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
-from automated_security_helper.core.progress import ExecutionPhase
+from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase

@@ -2,7 +2,6 @@
 
 from datetime import datetime
 import sys
-from enum import Enum
 from pathlib import Path
 from typing import Annotated, Dict, List
 
@@ -10,19 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.enums import PackageManager
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.utils.log import ASH_LOGGER
-
-
-class PackageManager(str, Enum):
-    APT = "apt"
-    PIP = "pip"
-    NPM = "npm"
-    BREW = "brew"
-    YUM = "yum"
-    CHOCO = "choco"
-    CUSTOM = "custom"
-    URL = "url"  # For direct URL downloads
 
 
 class PluginDependency(BaseModel):

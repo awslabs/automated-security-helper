@@ -3,7 +3,7 @@
 
 """Package models for Automated Security Helper (ASH)."""
 
-from automated_security_helper.models.core import (
+from automated_security_helper.core.enums import (
     ExportFormat,
 )
 from automated_security_helper.models.asharp_model import ASHARPModel, ReportMetadata

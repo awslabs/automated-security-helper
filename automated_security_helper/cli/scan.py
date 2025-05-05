@@ -8,14 +8,12 @@ from pathlib import Path
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
 )
+from automated_security_helper.core.enums import BuildTarget, Phases, RunMode, Strategy
 from automated_security_helper.interactions.run_ash_scan import (
-    BuildTarget,
-    Phases,
-    Strategy,
     run_ash_scan,
-    RunMode,
 )
-from automated_security_helper.models.core import ExportFormat
+from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.utils.get_ash_version import get_ash_version
 
 
 def run_ash_scan_cli_command(
@@ -220,15 +218,19 @@ def run_ash_scan_cli_command(
             help="GID to use for the container user",
         ),
     ] = None,
+    ash_revision_to_install: Annotated[
+        str | None,
+        typer.Option(
+            help="ASH revision to install in the container image for usage during containerized scans",
+        ),
+    ] = "beta",
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:
         return
 
     if version:
-        from automated_security_helper import __version__
-
-        typer.echo(f"awslabs/automated-security-helper v{__version__}")
+        typer.echo(f"awslabs/automated-security-helper v{get_ash_version()}")
         raise typer.Exit()
 
     # Apply mode presets if specified
@@ -268,4 +270,5 @@ def run_ash_scan_cli_command(
         offline_semgrep_rulesets=offline_semgrep_rulesets,
         container_uid=container_uid,
         container_gid=container_gid,
+        ash_revision_to_install=ash_revision_to_install,
     )
