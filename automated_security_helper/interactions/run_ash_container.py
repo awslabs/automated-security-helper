@@ -244,6 +244,8 @@ def run_ash_container(
     container_uid: str | None = None,
     container_gid: str | None = None,
     ash_revision_to_install: str | None = None,
+    custom_containerfile: str | None = None,
+    custom_build_arg: List[str] = [],
 ):
     """Build and run the ASH container image.
 
@@ -345,14 +347,15 @@ def run_ash_container(
         )
 
     # Set image name from environment or use default
-    ash_image_name = os.environ.get(
-        "ASH_IMAGE_NAME", f"automated-security-helper:{build_target.value}"
+    ash_base_image_tag = build_target.value if custom_containerfile is None else "ci"
+    ash_base_image_name = os.environ.get(
+        "ASH_IMAGE_NAME", f"automated-security-helper:{ash_base_image_tag}"
     )
 
     # Build the image if the --build flag is set
     if build:
         typer.echo(
-            f"Building image {ash_image_name} -- this may take a few minutes during the first build..."
+            f"Building image {ash_base_image_name} -- this may take a few minutes during the first build..."
         )
 
         # Prepare build command
@@ -369,7 +372,7 @@ def run_ash_container(
         build_cmd.extend(
             [
                 "--tag",
-                ash_image_name,
+                ash_base_image_name,
                 "--target",
                 build_target.value,
                 "--file",
@@ -402,7 +405,7 @@ def run_ash_container(
         try:
             if debug:
                 print(
-                    f"Building image {ash_image_name} -- this may take a few minutes during the first build..."
+                    f"Building image {ash_base_image_name} -- this may take a few minutes during the first build..."
                 )
                 print(
                     f"Running build command: {' '.join(str(arg) for arg in build_cmd)}"
@@ -412,6 +415,36 @@ def run_ash_container(
 
             if debug:
                 print(f"Build completed with return code: {build_result.returncode}")
+
+            if custom_containerfile is not None:
+                if not Path(custom_containerfile).exists():
+                    raise FileNotFoundError(
+                        f"Custom containerfile not found at {custom_containerfile}"
+                    )
+
+                # Prepare build command
+                custom_build_cmd = [
+                    resolved_oci_runner,
+                    "build",
+                ]
+
+                custom_build_cmd.extend(
+                    [
+                        "--tag",
+                        "automated-security-helper:custom",
+                        "--file",
+                        Path(custom_containerfile).as_posix(),
+                        "--build-arg",
+                        f"ASH_BASE_IMAGE={ash_base_image_name}",
+                    ]
+                )
+                # Add any extra args (do not map --no-cache at this point, we need
+                # to build on top of the base image that was built just before this.
+                if quiet:
+                    custom_build_cmd.append("-q")
+
+                # Add the build context
+                custom_build_cmd.append(Path(custom_containerfile).parent.as_posix())
 
         except Exception as e:
             typer.secho(f"Error building ASH image: {e}", fg=typer.colors.RED)
@@ -511,7 +544,7 @@ def run_ash_container(
             run_cmd.append("-t")
 
         # Add image name
-        run_cmd.append(ash_image_name)
+        run_cmd.append(ash_base_image_name)
 
         # Add ASH command
         run_cmd.append("ashv3")

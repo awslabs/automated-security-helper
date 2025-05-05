@@ -430,7 +430,7 @@ class ScanExecutionEngine:
                         parallel=(self._strategy == ExecutionStrategy.PARALLEL),
                         max_workers=self._max_workers,
                         global_ignore_paths=self._global_ignore_paths,
-                        python_based_scanners_onlyd_scanners_onlyd_scanners_onlyd_python_based_scanners_onlyly=self._python_only,  # Pass the python_based_plugins_only flag to the scan phase
+                        python_based_plugins_only=self._python_only,  # Pass the python_based_plugins_only flag to the scan phase
                     )
                     # Store the completed scanners for metrics display
                     self._completed_scanners = scan_phase._completed_scanners

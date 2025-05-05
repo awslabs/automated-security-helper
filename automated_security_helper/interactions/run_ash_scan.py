@@ -60,6 +60,8 @@ def run_ash_scan(
     container_uid: str | None = None,
     container_gid: str | None = None,
     ash_revision_to_install: str | None = None,
+    custom_containerfile: str | None = None,
+    custom_build_arg: List[str] = [],
     *args,
     **kwargs,
 ):
@@ -110,6 +112,8 @@ def run_ash_scan(
             simple=simple,
             fail_on_findings=fail_on_findings,
             ash_revision_to_install=ash_revision_to_install,
+            custom_containerfile=custom_containerfile,
+            custom_build_arg=custom_build_arg,
             # *new_args,
             # **kwargs,
         )
