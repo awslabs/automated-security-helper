@@ -326,7 +326,15 @@ def run_ash_container(
     ASH_LOGGER.info(f"Resolved OCI_RUNNER to: {resolved_oci_runner}")
 
     # Get ASH root directory
-    dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
+    rev = get_ash_revision()
+    resolved_revision = (
+        ash_revision_to_install if ash_revision_to_install is not None else rev
+    )
+    dockerfile_path = (
+        ASH_ASSETS_DIR.joinpath("Dockerfile")
+        if resolved_revision != "LOCAL"
+        else Path(__file__).parent.parent.parent.joinpath("Dockerfile")
+    )
 
     if not dockerfile_path.exists():
         typer.secho(f"Dockerfile not found at {dockerfile_path}", fg=typer.colors.RED)
@@ -354,11 +362,11 @@ def run_ash_container(
             "build",
         ]
 
+        # Add other build args
         # Add UID/GID build args
         build_cmd.extend(["--build-arg", f"UID={container_uid}"])
         build_cmd.extend(["--build-arg", f"GID={container_gid}"])
 
-        # Add other build args
         build_cmd.extend(
             [
                 "--tag",
@@ -368,7 +376,7 @@ def run_ash_container(
                 "--file",
                 dockerfile_path.as_posix(),
                 "--build-arg",
-                f"INSTALL_ASH_REVISION={ash_revision_to_install if ash_revision_to_install is not None else 'LOCAL'}",
+                f"INSTALL_ASH_REVISION={resolved_revision}",
                 "--build-arg",
                 f"OFFLINE={'YES' if offline else 'NO'}",
                 "--build-arg",

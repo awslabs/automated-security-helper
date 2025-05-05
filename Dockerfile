@@ -27,9 +27,8 @@ RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
 COPY pyproject.toml* poetry.lock* README.md* LICENSE* Dockerfile* ./
 COPY ci*/ ci/
 COPY automated_security_helper*/ automated_security_helper/
+RUN tree .
 RUN poetry build
-RUN echo "$(pwd)" && tree .
-RUN cat automated_security_helper/cli/scan.py
 
 # Second stage: Core ASH image
 FROM ${BASE_IMAGE} AS core

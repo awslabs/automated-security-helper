@@ -223,7 +223,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             help="ASH revision to install in the container image for usage during containerized scans",
         ),
-    ] = "beta",
+    ] = None,
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:
