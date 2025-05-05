@@ -40,7 +40,7 @@ repos:
   #         - --simple
   #         - --python-only
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: 6fc7cdc4bfdb73aed833c6f942df91643ee74b1d # pragma: allowlist secret
+    rev: 2dcba55621ec28ec15c75d17b7b4339202eb3683 # pragma: allowlist secret
     hooks:
       - id: ash-simple-scan
         args:
