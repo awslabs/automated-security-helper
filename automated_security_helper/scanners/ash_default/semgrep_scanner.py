@@ -4,7 +4,6 @@ import json
 import logging
 import os
 from pathlib import Path
-import shutil
 from typing import Annotated, List, Literal
 
 from pydantic import Field
@@ -29,6 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class SemgrepScannerConfigOptions(ScannerOptionsBase):
@@ -78,7 +78,7 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
 class SemgrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["semgrep"] = "semgrep"
     # Prefer Opengrep by default, but allow users to enable Semgrep if preferred.
-    enabled: bool = shutil.which("opengrep") is None
+    enabled: bool = find_executable("opengrep") is None
     options: Annotated[
         SemgrepScannerConfigOptions, Field(description="Configure Semgrep scanner")
     ] = SemgrepScannerConfigOptions()
@@ -112,7 +112,8 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        return shutil.which(self.command) is not None
+        found = find_executable(self.command)
+        return found is not None
 
     def _process_config_options(self):
         ash_stargrep_rules = [

@@ -10,7 +10,6 @@ This security scanner depends on a valid ScannerPluginConfig to be provided in t
 import json
 from datetime import datetime
 from pathlib import Path
-import shutil
 from typing import Annotated, Any, List, Literal
 
 from pydantic import Field
@@ -44,6 +43,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class CustomScannerConfigOptions(ScannerOptionsBase):
@@ -88,7 +88,8 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        return shutil.which(self.command) is not None
+        found = find_executable(self.command)
+        return found is not None
 
     def scan(
         self,

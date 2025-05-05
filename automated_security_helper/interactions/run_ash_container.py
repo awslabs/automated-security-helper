@@ -16,7 +16,10 @@ import io
 from importlib.metadata import import_module
 
 # Import subprocess utilities
-from automated_security_helper.core.constants import ASH_REPO_LATEST_BRANCH
+from automated_security_helper.core.constants import (
+    ASH_ASSETS_DIR,
+    ASH_REPO_LATEST_REVISION,
+)
 from automated_security_helper.core.enums import (
     BuildTarget,
     ExportFormat,
@@ -77,18 +80,18 @@ def get_ash_revision() -> str | None:
         )
         direct_url_json = json.loads(direct_url_json_path.read_text())
         if isinstance(direct_url_json, dict) and "url" in direct_url_json:
-            url = direct_url_json["url"]
             if "vcs_info" in direct_url_json:
-                vcs = direct_url_json["vcs_info"]["vcs"]
                 revision = (
                     direct_url_json["vcs_info"]["commit_id"]
                     or direct_url_json["vcs_info"]["requested_revision"]
-                    or ASH_REPO_LATEST_BRANCH
+                    or ASH_REPO_LATEST_REVISION
                 )
-                return_val = f"{vcs}+{url}@{revision}"
+                return_val = revision
                 ASH_LOGGER.info(
                     f"Resolved source revision for ASH to use during container image build: {return_val}"
                 )
+    else:
+        return_val = ASH_REPO_LATEST_REVISION
 
     return return_val
 
@@ -323,8 +326,7 @@ def run_ash_container(
     ASH_LOGGER.info(f"Resolved OCI_RUNNER to: {resolved_oci_runner}")
 
     # Get ASH root directory
-    ash_root_dir = Path(__file__).parent.parent.parent.resolve()
-    dockerfile_path = ash_root_dir.joinpath("Dockerfile")
+    dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
 
     if not dockerfile_path.exists():
         typer.secho(f"Dockerfile not found at {dockerfile_path}", fg=typer.colors.RED)
@@ -388,7 +390,7 @@ def run_ash_container(
         build_cmd.extend(docker_extra_args)
 
         # Add the build context
-        build_cmd.append(ash_root_dir.as_posix())
+        build_cmd.append(dockerfile_path.parent.as_posix())
 
         try:
             if debug:

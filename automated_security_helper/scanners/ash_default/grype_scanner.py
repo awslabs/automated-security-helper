@@ -3,7 +3,6 @@
 import json
 import os
 from pathlib import Path
-import shutil
 from typing import Annotated, List, Literal
 
 from pydantic import Field, model_validator
@@ -27,6 +26,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class GrypeScannerConfigOptions(ScannerOptionsBase):
@@ -106,7 +106,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        return shutil.which(self.command) is not None
+        found = find_executable(self.command)
+        return found is not None
 
     def _process_config_options(self):
         # Grype config path
