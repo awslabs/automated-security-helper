@@ -3,7 +3,6 @@
 from importlib.metadata import version
 import json
 from pathlib import Path
-import shutil
 from typing import Annotated, List, Literal
 
 from pydantic import Field
@@ -27,6 +26,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 CheckFrameworks = Literal[
@@ -163,7 +163,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         """
         # Checkov is a dependency this Python module, if the Python import got
         # this far then we know we're in a valid runtime for this scanner.
-        return shutil.which(self.command) is not None
+        found = find_executable(self.command)
+        return found is not None
 
     def _process_config_options(self):
         # Checkov config path

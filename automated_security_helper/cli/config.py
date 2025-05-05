@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from enum import Enum
 import os
 from pathlib import Path
 from typing import Annotated
@@ -21,11 +20,6 @@ config_app = typer.Typer(
     pretty_exceptions_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
     in ["YES", "1", "TRUE"],
 )
-
-
-class ConfigFormat(str, Enum):
-    json = "json"
-    yaml = "yaml"
 
 
 class IndentableYamlDumper(yaml.Dumper):

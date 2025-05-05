@@ -5,12 +5,17 @@ import os
 from typing import Literal
 from pathlib import Path
 
-ASH_WORK_DIR_NAME = "converted"
-
+ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
+ASH_INSTALLED_REVISION_PATH = ASH_ASSETS_DIR.joinpath("ASH_INSTALLED_REVISION")
 ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
 ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
+ASH_REPO_LATEST_REVISION = (
+    ASH_INSTALLED_REVISION_PATH.read_text().strip()
+    if ASH_INSTALLED_REVISION_PATH.exists()
+    else "beta"
+)
 
-ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
+ASH_WORK_DIR_NAME = "converted"
 ASH_BIN_PATH = (
     Path(os.environ["ASH_BIN_PATH"])
     if os.environ.get("ASH_BIN_PATH", None) is not None

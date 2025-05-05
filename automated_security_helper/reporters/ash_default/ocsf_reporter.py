@@ -11,7 +11,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
-from automated_security_helper.schemas.ocsf.vulnerability_finding import (
+from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     VulnerabilityFinding,
     Vulnerability,
     # Cve,

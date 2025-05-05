@@ -22,7 +22,7 @@ import threading
 import io
 
 # Import subprocess utilities
-from automated_security_helper.interactions.run_ash_container import BuildTarget
+from automated_security_helper.core.enums import BuildTarget
 from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.subprocess_utils import (
     create_process_with_pipes,

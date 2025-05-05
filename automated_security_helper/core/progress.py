@@ -1,9 +1,9 @@
-from enum import Enum
 import logging
 import sys
 import time
 from typing import Literal
 
+from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.rich_log_handler import (
     LiveDisplayLogHandler,
@@ -27,22 +27,6 @@ from rich.progress import (
 
 
 ExecutionPhaseType = Literal["convert", "scan", "report", "inspect"]
-
-
-class ExecutionPhase(str, Enum):
-    """Phases of ASH execution."""
-
-    CONVERT = "convert"
-    SCAN = "scan"
-    REPORT = "report"
-    INSPECT = "inspect"
-
-
-class ExecutionStrategy(str, Enum):
-    """Strategy for executing scanners."""
-
-    SEQUENTIAL = "sequential"
-    PARALLEL = "parallel"
 
 
 class LiveProgressDisplay:

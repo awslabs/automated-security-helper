@@ -11,7 +11,7 @@ from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from typing import TYPE_CHECKING, Annotated, Dict, Any, Optional, Union, List
-from automated_security_helper.models.core import ExportFormat
+from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Run,

@@ -3,15 +3,32 @@ ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
 
 # First stage: Build poetry requirements
 FROM ${BASE_IMAGE} AS poetry-reqs
+
 ENV PYTHONDONTWRITEBYTECODE=1
-RUN apt-get update && \
+RUN apt-get clean && \
+    apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y python3-venv && \
+    apt-get install -y python3-venv git tree && \
     rm -rf /var/lib/apt/lists/*
+
+ARG INSTALL_ASH_REVISION="LOCAL"
+ARG ASH_REPO_CLONE_URL="https://github.com/awslabs/automated-security-helper.git"
+ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
+ENV ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
 RUN python3 -m pip install -U pip poetry
+
 WORKDIR /src
-COPY pyproject.toml poetry.lock README.md LICENSE Dockerfile ./
-COPY automated_security_helper/ automated_security_helper/
+RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
+    git clone \
+        --branch ${INSTALL_ASH_REVISION} \
+        ${ASH_REPO_CLONE_URL} \
+        . || echo "Skipping clone of repo for LOCAL revision"
+
+COPY pyproject.toml* poetry.lock* README.md* LICENSE* Dockerfile* ./
+COPY ci*/ ci/
+COPY automated_security_helper*/ automated_security_helper/
+RUN tree .
+RUN git status --short || true
 RUN poetry build
 
 # Second stage: Core ASH image
@@ -20,7 +37,10 @@ SHELL ["/bin/bash", "-c"]
 ARG BUILD_DATE_EPOCH="-1"
 ARG OFFLINE="NO"
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
-ARG ASH_BIN_PATH="/ash/bin"
+ARG ASH_BIN_PATH="/.ash/bin"
+
+ARG INSTALL_ASH_REVISION="LOCAL"
+ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 
 ENV ASH_BIN_PATH="${ASH_BIN_PATH}"
 ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
@@ -136,7 +156,8 @@ WORKDIR /src
 #
 RUN mkdir -p /src && \
     mkdir -p /out && \
-    mkdir -p /ash/utils
+    mkdir -p /ash/utils && \
+    mkdir -p ${ASH_BIN_PATH}
 
 # Limit memory size available for Node to prevent segmentation faults during npm install
 ENV NODE_OPTIONS=--max_old_space_size=512
@@ -145,7 +166,6 @@ ENV NODE_OPTIONS=--max_old_space_size=512
 # COPY ASH source to /ash instead of / to isolate
 #
 COPY --from=poetry-reqs /src/dist/*.whl .
-COPY ./pyproject.toml /ash/pyproject.toml
 RUN python3 -m pip install *.whl && rm *.whl
 
 # These aren't needed anymore, the Python package now handles
@@ -156,7 +176,7 @@ RUN python3 -m pip install *.whl && rm *.whl
 #
 # Make sure the ash script is executable
 #
-RUN chmod -R 755 /ash && chmod -R 777 /src /out /deps
+RUN chmod -R 755 /ash && chmod -R 777 /src /out /deps ${ASH_BIN_PATH}
 
 #
 # Flag ASH as local execution mode since we are running in a container already
@@ -166,8 +186,7 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-RUN python3 -m automated_security_helper.cli.main dependencies install \
-    --bin-path "${ASH_BIN_PATH}"
+RUN ashv3 dependencies install --bin-path "${ASH_BIN_PATH}"
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
 #
@@ -210,9 +229,7 @@ RUN adduser --disabled-password --disabled-login \
         --uid ${UID} --gid ${GID} \
         ${ASH_USER} && \
     mkdir -p ${ASHUSER_HOME}/.ssh && \
-    echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
-    echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
-    echo "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=" >> ${ASHUSER_HOME}/.ssh/known_hosts
+    cp ${HOME}/.ssh/known_hosts ${ASHUSER_HOME}/.ssh/known_hosts
 
 # Change ownership and permissions now that we are running with a non-root
 # user by default.
@@ -231,7 +248,7 @@ ENV ASH_GROUP=${ASH_GROUP}
 
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
-    CMD type ash || exit 1
+    CMD command -v ashv3 || exit 1
 
 ENTRYPOINT [ ]
-CMD [ "python3", "-m", "automated_security_helper.cli.main" ]
+CMD [ "ashv3" ]

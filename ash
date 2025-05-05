@@ -23,6 +23,7 @@ DEBUG="NO"
 OFFLINE="NO"
 OFFLINE_SEMGREP_RULESETS="p/ci"
 TARGET_STAGE="non-root"
+INSTALL_ASH_REVISION="LOCAL"
 # Parse arguments
 while (("$#")); do
   case $1 in
@@ -80,6 +81,10 @@ while (("$#")); do
     --build-target)
       shift
       TARGET_STAGE="$1"
+      ;;
+    --ash-revision | -rev)
+      shift
+      INSTALL_ASH_REVISION="$1"
       ;;
     --help | -h)
       source "${ASH_ROOT_DIR}/ash-multi" --help
@@ -158,6 +163,7 @@ else
         --target ${TARGET_STAGE} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         --build-arg OFFLINE="${OFFLINE}" \
+        --build-arg INSTALL_ASH_REVISION="${INSTALL_ASH_REVISION}" \
         --build-arg OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}" \
         --build-arg BUILD_DATE="$(date +%s)" \
         ${DOCKER_EXTRA_ARGS} \

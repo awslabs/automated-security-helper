@@ -7,7 +7,7 @@ from automated_security_helper.base.converter_plugin import ConverterPluginBase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import ReporterPluginBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
-from automated_security_helper.core.progress import ExecutionPhase
+from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.utils.log import ASH_LOGGER

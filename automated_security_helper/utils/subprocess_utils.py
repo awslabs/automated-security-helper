@@ -23,13 +23,12 @@ def find_executable(command: str) -> Optional[str]:
         found = shutil.which(command)
         if found:
             return found
-        else:
-            poss = ASH_BIN_PATH.joinpath(command)
-            if poss.exists():
-                return poss.as_posix()
-            raise FileNotFoundError(f"Executable {command} not found")
+        poss = ASH_BIN_PATH.joinpath(command)
+        if poss.exists():
+            return poss.as_posix()
+        raise FileNotFoundError(f"Executable {command} not found")
     except Exception as e:
-        ASH_LOGGER.exception(e)
+        ASH_LOGGER.error(e)
         return None
 
 

@@ -3,7 +3,6 @@
 import json
 import logging
 from pathlib import Path
-import shutil
 from typing import Annotated, Dict, List, Literal, Any
 
 from pydantic import Field, model_validator
@@ -37,6 +36,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class NpmAuditScannerConfigOptions(ScannerOptionsBase):
@@ -103,7 +103,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        return shutil.which(self.command) is not None
+        found = find_executable(self.command)
+        return found is not None
 
     def _process_config_options(self):
         return super()._process_config_options()

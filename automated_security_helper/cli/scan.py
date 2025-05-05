@@ -8,14 +8,12 @@ from pathlib import Path
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
 )
+from automated_security_helper.core.enums import BuildTarget, Phases, RunMode, Strategy
 from automated_security_helper.interactions.run_ash_scan import (
-    BuildTarget,
-    Phases,
-    Strategy,
     run_ash_scan,
-    RunMode,
 )
-from automated_security_helper.models.core import ExportFormat
+from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.utils.get_ash_version import get_ash_version
 
 
 def run_ash_scan_cli_command(
@@ -220,21 +218,37 @@ def run_ash_scan_cli_command(
             help="GID to use for the container user",
         ),
     ] = None,
+    ash_revision_to_install: Annotated[
+        str | None,
+        typer.Option(
+            help="ASH branch or tag to install in the container image for usage during containerized scans",
+        ),
+    ] = None,
+    custom_containerfile: Annotated[
+        str | None,
+        typer.Option(
+            help="Path to a custom container definition (e.g. Dockerfile) that you would like to build *after* the ASH container image builds. This is typically used when building a custom container image for ASH and including custom tooling that ASH does not come with by default. The fully qualified image name for the ASH image is passed in as the `ASH_BASE_IMAGE` build-arg so you can use it as a base. IMPORTANT: When a custom_containerfile path is provided, the build-target is set to `ci` so the container run-as configuration is not shifted to the non-root user. If you are using this parameter, you are responsible for securing your final container as appropriate.",
+        ),
+    ] = None,
+    custom_build_arg: Annotated[
+        List[str],
+        typer.Option(
+            help="Custom build arguments to pass to the container build",
+        ),
+    ] = [],
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:
         return
 
     if version:
-        from automated_security_helper import __version__
-
-        typer.echo(f"awslabs/automated-security-helper v{__version__}")
+        typer.echo(f"awslabs/automated-security-helper v{get_ash_version()}")
         raise typer.Exit()
 
     # Apply mode presets if specified
-    if mode == RunMode.precommit:
-        python_based_plugins_only = True
-        simple = True
+    precommit_mode = mode == RunMode.precommit or str(mode).lower() == "precommit"
+    if precommit_mode:
+        print("Starting ASH in precommit mode with minimal outputs")
 
     # Call run_ash_scan with all parameters
     run_ash_scan(
@@ -250,9 +264,9 @@ def run_ash_scan_cli_command(
         phases=phases,
         inspect=inspect,
         existing_results=existing_results,
-        python_based_plugins_only=python_based_plugins_only,
+        python_based_plugins_only=precommit_mode or python_based_plugins_only,
         quiet=quiet,
-        simple=simple,
+        simple=precommit_mode or simple,
         verbose=verbose,
         debug=debug,
         color=color,
@@ -268,4 +282,7 @@ def run_ash_scan_cli_command(
         offline_semgrep_rulesets=offline_semgrep_rulesets,
         container_uid=container_uid,
         container_gid=container_gid,
+        ash_revision_to_install=ash_revision_to_install,
+        custom_containerfile=custom_containerfile,
+        custom_build_arg=custom_build_arg,
     )

@@ -224,12 +224,12 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 try:
                     cfn_model = get_model_from_template(template_path=Path(cfn_file))
                 except Exception as e:
-                    ASH_LOGGER.debug(
+                    ASH_LOGGER.trace(
                         f"Not a CloudFormation file: {cfn_file}. Exception: {e}"
                     )
                     continue
                 if cfn_model is None:
-                    ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
+                    ASH_LOGGER.trace(f"Not a CloudFormation file: {cfn_file}")
                     continue
                 normalized_filename = get_normalized_filename(str_to_normalize=cfn_file)
                 results_file_dir = target_results_dir.joinpath(normalized_filename)

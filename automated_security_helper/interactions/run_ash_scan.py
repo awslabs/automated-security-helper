@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from enum import Enum
 import logging
 import os
 from typing import List
@@ -15,29 +14,14 @@ from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
     ASH_WORK_DIR_NAME,
 )
+from automated_security_helper.core.enums import BuildTarget
+from automated_security_helper.core.enums import Phases
+from automated_security_helper.core.enums import Strategy
+from automated_security_helper.core.enums import RunMode
 from automated_security_helper.interactions.run_ash_container import (
-    BuildTarget,
     run_ash_container,
 )
-from automated_security_helper.models.core import ExportFormat
-
-
-class Phases(str, Enum):
-    convert = "convert"
-    scan = "scan"
-    report = "report"
-    inspect = "inspect"
-
-
-class Strategy(str, Enum):
-    parallel = "parallel"
-    sequential = "sequential"
-
-
-class RunMode(str, Enum):
-    precommit = "precommit"
-    container = "container"
-    local = "local"
+from automated_security_helper.core.enums import ExportFormat
 
 
 def run_ash_scan(
@@ -67,21 +51,24 @@ def run_ash_scan(
     mode: RunMode = RunMode.local,
     show_summary: bool = True,
     # Container-specific args
-    build=True,
-    run=True,
-    force=False,
-    oci_runner=None,
+    build: bool = True,
+    run: bool = True,
+    force: bool = False,
+    oci_runner: str = None,
     build_target: BuildTarget = BuildTarget.NON_ROOT,
-    offline_semgrep_rulesets="p/ci",
-    container_uid=None,
-    container_gid=None,
+    offline_semgrep_rulesets: str = "p/ci",
+    container_uid: str | None = None,
+    container_gid: str | None = None,
+    ash_revision_to_install: str | None = None,
+    custom_containerfile: str | None = None,
+    custom_build_arg: List[str] = [],
     *args,
     **kwargs,
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
 
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
-    from automated_security_helper.core.progress import ExecutionStrategy
+    from automated_security_helper.core.enums import ExecutionStrategy
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
     from automated_security_helper.models.asharp_model import ASHARPModel
     from automated_security_helper.utils.log import get_logger
@@ -124,8 +111,9 @@ def run_ash_scan(
             python_based_plugins_only=python_based_plugins_only,
             simple=simple,
             fail_on_findings=fail_on_findings,
-            mode=mode,
-            show_summary=show_summary,
+            ash_revision_to_install=ash_revision_to_install,
+            custom_containerfile=custom_containerfile,
+            custom_build_arg=custom_build_arg,
             # *new_args,
             # **kwargs,
         )

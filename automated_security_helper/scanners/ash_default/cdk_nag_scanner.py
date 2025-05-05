@@ -197,7 +197,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     outdir=outdir,
                 )
                 if nag_result_dict is None:
-                    ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
+                    ASH_LOGGER.trace(f"Not a CloudFormation file: {cfn_file}")
                     failed_files.append(cfn_file)
                     continue
 
