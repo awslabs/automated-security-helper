@@ -234,7 +234,8 @@ def run_ash_scan_cli_command(
         raise typer.Exit()
 
     # Apply mode presets if specified
-    if mode == RunMode.precommit:
+    if mode == RunMode.precommit or str(mode).lower() == "precommit":
+        print("Starting ASH in precommit mode with minimal outputs")
         python_based_plugins_only = True
         simple = True
 
