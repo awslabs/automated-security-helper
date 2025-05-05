@@ -25,20 +25,22 @@ repos:
         args: [--fix]
       # Run the formatter.
       - id: ruff-format
-  # - repo: local
-  #   hooks:
-  #     - id: ash
-  #       name: (venv) Use ASH for SAST/SCA scanning
-  #       description: Runs various code scanners from Python directly
-  #       entry: .venv/bin/ashv3 --mode=precommit
-  #       verbose: true
-  #       language: python
-  #       pass_filenames: false
-  #       args:
-  #         - --no-fail-on-findings
-  #         - --output-dir=.ash/ash_output_precommit_local
+  - repo: local
+    hooks:
+      - id: ash
+        name: (manual) ASH dev manual scan
+        description: Runs various code scanners from Python directly
+        entry: poetry run ashv3 --mode=precommit
+        verbose: true
+        language: system
+        pass_filenames: false
+        stages:
+          - manual
+        args:
+          - --no-fail-on-findings
+          - --output-dir=.ash/ash_output_precommit_local
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: 2dcba55621ec28ec15c75d17b7b4339202eb3683 # pragma: allowlist secret
+    rev: 0399e5bb79027b84a1f7e006449ce8f484d77d35 # pragma: allowlist secret
     hooks:
       - id: ash-simple-scan
         args:
@@ -57,3 +59,5 @@ repos:
           # This is to allow the pre-commit runs of ASH to not collide with the
           # manual runs so results are retained independently.
           - --output-dir=.ash/ash_output_precommit
+        stages:
+          - pre-commit
