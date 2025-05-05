@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from rich import print
 from typing import Annotated, List, Optional
 import typer
 from pathlib import Path
@@ -261,7 +262,9 @@ def run_ash_scan_cli_command(
     # Apply mode presets if specified
     precommit_mode = mode == RunMode.precommit or str(mode).lower() == "precommit"
     if precommit_mode:
-        print("Starting ASH in precommit mode with minimal outputs")
+        print(
+            "[green]╭───────────── Running ASH in pre-commit mode with minimal output ─────────────╮[/green]"
+        )
 
     # Call run_ash_scan with all parameters
     run_ash_scan(
@@ -287,6 +290,9 @@ def run_ash_scan_cli_command(
         fail_on_findings=fail_on_findings,
         mode=mode,
         show_summary=show_summary,
+        simple=precommit_mode
+        or log_level == AshLogLevel.SIMPLE
+        or str(log_level).lower() == "simple",
         # Container-specific params
         build=build,
         run=run,

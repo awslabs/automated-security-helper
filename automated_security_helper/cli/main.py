@@ -5,10 +5,11 @@ import os
 import typer
 from automated_security_helper.cli.config import config_app
 from automated_security_helper.cli.dependencies import dependencies_app
-from automated_security_helper.cli.image import image_build
+from automated_security_helper.cli.image import build_ash_image_cli_command
 from automated_security_helper.cli.inspect import inspect_app
 from automated_security_helper.cli.plugin import plugin_app
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
+from automated_security_helper.cli.report import report_command
 
 
 app = typer.Typer(
@@ -28,14 +29,16 @@ app.command(
 )(run_ash_scan_cli_command)
 
 app.command(
-    name="image",
+    name="build-image",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     no_args_is_help=False,
     help="""Builds the ASH container image then runs a scan with it.
 
 Any additional arguments passed will be forwarded to ASH inside the container image when starting the scan.
 """,
-)(image_build)
+)(build_ash_image_cli_command)
+
+app.command(name="report")(report_command)
 
 
 app.add_typer(config_app, name="config")
