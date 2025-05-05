@@ -42,7 +42,7 @@ class TestArchiveConverter:
     def sample_tar_file(self, temp_dir):
         """Create a sample tar file with test content."""
         tar_path = temp_dir / "test.tar"
-        with tarfile.open(tar_path, "w") as tf:
+        with tarfile.open(tar_path, mode="w", encoding="utf-8") as tf:
             # Create temporary files to add to tar
             py_file = temp_dir / "temp.py"
             py_file.write_text('print("Hello")')
@@ -90,7 +90,7 @@ class TestArchiveConverter:
             context=test_plugin_context,
             config=ArchiveConverterConfig(),
         )
-        with tarfile.open(sample_tar_file, "r") as tf:
+        with tarfile.open(sample_tar_file, mode="r", encoding="utf-8") as tf:
             members = converter.inspect_members(tf.getmembers())
             assert len(members) == 1  # Should find one .py file
             assert any("test.py" in m.name for m in members)
@@ -167,7 +167,7 @@ class TestJupyterConverter:
         nb.cells.append(code_cell)
 
         notebook_path = temp_dir / "test.ipynb"
-        with open(notebook_path, "w") as f:
+        with open(notebook_path, mode="w", encoding="utf-8") as f:
             nbformat.write(nb, f)
         return notebook_path
 

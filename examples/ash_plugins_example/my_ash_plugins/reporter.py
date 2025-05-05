@@ -69,7 +69,7 @@ class ExampleReporter(ReporterPluginBase[ExampleReporterConfig]):
         # For this example, we'll just return a mock report
         report_path = Path(self.context.output_dir) / "example_report.txt"
 
-        with open(report_path, "w") as f:
+        with open(report_path, mode="w", encoding="utf-8") as f:
             f.write("Example Report\n")
             f.write("=============\n\n")
             f.write(

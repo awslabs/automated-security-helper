@@ -371,7 +371,7 @@ class AshConfig(BaseModel):
     @classmethod
     def from_file(cls, config_path: Path) -> "AshConfig":
         """Load configuration from a file."""
-        with open(config_path, "r") as f:
+        with open(config_path, mode="r", encoding="utf-8") as f:
             # Using `yaml.safe_load()` as it handles both JSON and YAML data the same.
             config_data = yaml.safe_load(f)
         return cls(**config_data)
@@ -415,7 +415,7 @@ class AshConfig(BaseModel):
                     f"Loading configuration from {config_path.as_posix()}"
                 )
                 try:
-                    with open(config_path, "r") as f:
+                    with open(config_path, mode="r", encoding="utf-8") as f:
                         if str(config_path).endswith(".json"):
                             config_data = json.load(f)
                         else:
@@ -444,7 +444,7 @@ class AshConfig(BaseModel):
 
     def save(self, config_path: Path):
         """Save configuration to a file."""
-        with open(config_path, "w") as f:
+        with open(config_path, mode="w", encoding="utf-8") as f:
             yaml.safe_dump(self.model_dump(by_alias=True), f, indent=2)
 
     def get_scanners(self) -> Dict[str, Any]:

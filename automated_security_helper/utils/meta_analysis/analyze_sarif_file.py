@@ -26,7 +26,7 @@ def analyze_sarif_file(
         Tuple of (field paths dict, scanner name)
     """
     try:
-        with open(file_path, "r") as f:
+        with open(file_path, mode="r", encoding="utf-8") as f:
             sarif_data = json.load(f)
 
         # Extract scanner name from the file if not provided

@@ -292,7 +292,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 ),
             )
             sarif_report.runs[0].invocations = [sarif_invocation]
-            with open(sarif_output_file, "w") as fp:
+            with open(sarif_output_file, mode="w", encoding="utf-8") as fp:
                 report_str = sarif_report.model_dump_json(
                     exclude_none=True,
                     exclude_unset=True,

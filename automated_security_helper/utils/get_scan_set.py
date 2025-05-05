@@ -235,7 +235,7 @@ def scan_set(
             debug_echo(f"Writing ash-ignore-report.txt to {output}", debug=debug)
             if not ashignore_path.parent.exists():
                 ashignore_path.parent.mkdir(parents=True)
-            with open(ashignore_path, "w") as f:
+            with open(ashignore_path, mode="w", encoding="utf-8") as f:
                 f.write("\n".join(ashignore_content))
 
         if not ashscanset_imported:
@@ -245,7 +245,7 @@ def scan_set(
             )
             if not ashscanset_path.parent.exists():
                 ashscanset_path.parent.mkdir(parents=True)
-            with open(ashscanset_path, "w") as f:
+            with open(ashscanset_path, mode="w", encoding="utf-8") as f:
                 f.write("\n".join(ashscanset_list))
 
     if print_results:

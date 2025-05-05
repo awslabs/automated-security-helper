@@ -143,7 +143,7 @@ def run_cdk_nag_against_cfn_template(
         template_path=template_path,
     )
 
-    with open(template_path, "r") as f:
+    with open(template_path, mode="r", encoding="utf-8") as f:
         template_lines = f.readlines()
 
     # loggers: Sequence[MemoryLogger] = [MemoryLogger()]
@@ -182,7 +182,7 @@ def run_cdk_nag_against_cfn_template(
         if pack_name not in cdk_nag_report_lines:
             cdk_nag_report_lines[pack_name] = []
 
-        with open(file, "r") as f:
+        with open(file, mode="r", encoding="utf-8") as f:
             nag_dict: dict = json.load(f)
         if nag_dict is None:
             ASH_LOGGER.debug(f"Could not load file as dict: {file}")

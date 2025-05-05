@@ -289,7 +289,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             results_file.parent.mkdir(exist_ok=True, parents=True)
 
             # Find all files to scan from the scan set
-            scannable = (
+            orig_scannable = (
                 [item for item in self.context.work_dir.glob("**/*.*")]
                 if target_type == "converted"
                 else scan_set(
@@ -298,18 +298,23 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     # filter_pattern=r"\.(yaml|yml|json)$",
                 )
             )
-            scannable = [
-                f.strip()
-                for f in scannable
-                if Path(f).name
-                in [
-                    "package-lock.json",
-                    "yarn.lock",
-                    "pnpm-lock.yaml",
-                ]
-            ]
+
+            scannable = []
+            for f in orig_scannable:
+                pf = Path(f)
+                if pf.name == "package.json":
+                    # if (
+                    #     pf.name in [
+                    #         "package-lock.json",
+                    #         "yarn.lock",
+                    #         "pnpm-lock.yaml",
+                    #     ]
+                    # ):
+                    scannable.append(pf.as_posix())
             joined_files = "\n- ".join(scannable)
-            ASH_LOGGER.debug(f"Found {len(scannable)} package locks:\n- {joined_files}")
+            self._scanner_log(
+                f"Found {len(scannable)} package locks:\n- {joined_files}"
+            )
 
             if len(scannable) == 0:
                 self._scanner_log(
@@ -321,7 +326,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 return
 
             if not scannable:
-                ASH_LOGGER.info(f"No package.json files found in {target}")
+                self._scanner_log(f"No package.json files found in {target}")
                 # Return empty SARIF report
                 return SarifReport(
                     version="2.1.0",
@@ -350,17 +355,27 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             # Run npm audit for each package.json file
             all_results = {}
+            lock_files = [
+                "yarn.lock",
+                "pnpm-lock.yaml",
+                "package-lock.json",
+            ]
             for item in scannable:
                 package_file = Path(item)
-                if "package.json" in package_file.name:
+                lock_file = None
+                for item in lock_files:
+                    lf_path = package_file.parent.joinpath(item)
+                    if lf_path.exists():
+                        lock_file = lf_path
+                        break
+                if lock_file is not None:
                     package_dir = package_file.parent
-                    ASH_LOGGER.info(f"Running npm audit in {package_dir}")
 
                     try:
                         # Run npm audit
-                        if package_file.name == "yarn.lock":
+                        if lock_file.name == "yarn.lock":
                             binary = "yarn"
-                        elif package_file.name == "pnpm-lock.yaml":
+                        elif lock_file.name == "pnpm-lock.yaml":
                             binary = "pnpm"
                         else:
                             binary = "npm"
@@ -423,7 +438,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             # Save the combined results
             if all_results:
-                with open(results_file, "w") as f:
+                with open(results_file, mode="w", encoding="utf-8") as f:
                     json.dump(all_results, f, indent=2)
 
             self._post_scan(
@@ -437,7 +452,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
                 # Save SARIF report
                 sarif_file = target_results_dir.joinpath("results_sarif.sarif")
-                with open(sarif_file, "w") as f:
+                with open(sarif_file, mode="w", encoding="utf-8") as f:
                     f.write(
                         sarif_report.model_dump_json(
                             exclude_none=True,

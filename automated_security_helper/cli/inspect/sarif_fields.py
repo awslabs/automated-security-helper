@@ -213,7 +213,7 @@ def analyze_sarif_fields(
 
             try:
                 # Load the SARIF file
-                with open(file_path, "r") as f:
+                with open(file_path, mode="r", encoding="utf-8") as f:
                     sarif_data = json.load(f)
 
                 # Flatten the SARIF results - now returns both included and excluded fields
@@ -244,13 +244,13 @@ def analyze_sarif_fields(
 
     # Write JSON output for included fields
     json_path = os.path.join(output_dir, "sarif_fields.json")
-    with open(json_path, "w") as f:
+    with open(json_path, mode="w", encoding="utf-8") as f:
         json.dump(results_dict, f, indent=2)
     console.print(f"Wrote included fields JSON to [cyan]{json_path}[/cyan]")
 
     # Write JSON output for excluded fields
     excluded_json_path = os.path.join(output_dir, "sarif_excluded_fields.json")
-    with open(excluded_json_path, "w") as f:
+    with open(excluded_json_path, mode="w", encoding="utf-8") as f:
         json.dump(excluded_dict, f, indent=2)
     console.print(f"Wrote excluded fields JSON to [cyan]{excluded_json_path}[/cyan]")
 

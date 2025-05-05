@@ -451,7 +451,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 # Pattern search mode - parse JSON results
                 if results_file.exists():
                     try:
-                        with open(results_file, "r") as f:
+                        with open(results_file, mode="r", encoding="utf-8") as f:
                             results_data = json.load(f)
 
                         # Convert OpenGrep results to findings format
@@ -482,7 +482,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             else:
                 # SARIF mode - parse SARIF results
                 if Path(results_file).exists():
-                    with open(results_file, "r") as f:
+                    with open(results_file, mode="r", encoding="utf-8") as f:
                         opengrep_results = json.load(f)
                     try:
                         sarif_report: SarifReport = SarifReport.model_validate(

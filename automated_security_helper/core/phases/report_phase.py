@@ -216,7 +216,7 @@ class ReportPhase(EnginePhase):
                         ASH_LOGGER.info(
                             f"Writing {display_name} report to {output_file}"
                         )
-                        with open(output_file, "w") as f:
+                        with open(output_file, mode="w", encoding="utf-8") as f:
                             f.write(report_result)
 
                         results.append(report_result)

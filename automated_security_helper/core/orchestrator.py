@@ -89,6 +89,12 @@ class ASHScanOrchestrator(BaseModel):
             description="List of enabled scanners. Defaults to all registered.",
         ),
     ] = []
+    excluded_scanners: Annotated[
+        List[str],
+        Field(
+            description="List of scanners to exclude. Takes precedence over enabled_scanners.",
+        ),
+    ] = []
     oci_runner: Annotated[str, Field("docker", description="OCI runner to use")]
     no_cleanup: Annotated[
         bool, Field(False, description="Keep work directory after scan")
@@ -168,6 +174,7 @@ class ASHScanOrchestrator(BaseModel):
             ),
             strategy=self.strategy,
             enabled_scanners=self.enabled_scanners,
+            excluded_scanners=self.excluded_scanners,
             show_progress=self.show_progress,
             global_ignore_paths=self.config.global_settings.ignore_paths,
             color_system=self.color_system,

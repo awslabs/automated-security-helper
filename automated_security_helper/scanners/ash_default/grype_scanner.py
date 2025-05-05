@@ -193,7 +193,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
 
             grype_results = {}
             Path(results_file).parent.mkdir(exist_ok=True, parents=True)
-            with open(results_file, "r") as f:
+            with open(results_file, mode="r", encoding="utf-8") as f:
                 grype_results = json.load(f)
             try:
                 sarif_report: SarifReport = SarifReport.model_validate(grype_results)

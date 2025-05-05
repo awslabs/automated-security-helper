@@ -217,6 +217,7 @@ def run_ash_container(
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
     scanners: List[str] = [],
+    exclude_scanners: List[str] = [],
     progress: bool = True,
     output_formats: List[ExportFormat] = [],
     cleanup: bool = False,
@@ -592,6 +593,11 @@ def run_ash_container(
         if scanners:
             for scanner in scanners:
                 ash_args.extend(["--scanners", scanner])
+
+        # Add exclude_scanners if specified
+        if exclude_scanners:
+            for scanner in exclude_scanners:
+                ash_args.extend(["--exclude-scanners", scanner])
 
         # Add output formats if specified
         if output_formats:

@@ -34,7 +34,7 @@ def get_model_from_template(
     if template_path is None:
         return None
 
-    with open(template_path, "r") as f:
+    with open(template_path, mode="r", encoding="utf-8") as f:
         template = load_yaml(f.read())
 
     try:

@@ -135,7 +135,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         )
                 # Extract Tarball to target path after inspecting members
                 elif tarfile.is_tarfile(archive_file):
-                    with tarfile.open(archive_file, "r") as tar_ref:
+                    with tarfile.open(
+                        archive_file, mode="r", encoding="utf-8"
+                    ) as tar_ref:
                         tar_ref.extractall(
                             path=target_path,
                             members=self.inspect_members(tar_ref.getmembers()),

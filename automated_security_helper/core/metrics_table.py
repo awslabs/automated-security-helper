@@ -14,6 +14,30 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+def format_duration(duration_seconds: float) -> str:
+    """Format duration in seconds to a human-readable string.
+
+    Args:
+        duration_seconds: Duration in seconds
+
+    Returns:
+        Formatted duration string (e.g., "1.2s", "1m 30s")
+    """
+    if duration_seconds is None:
+        return "N/A"
+
+    if duration_seconds < 0.001:  # Less than 1 millisecond
+        return "<1ms"
+    elif duration_seconds < 1:  # Less than 1 second
+        return f"{int(duration_seconds * 1000)}ms"
+    elif duration_seconds < 60:  # Less than 1 minute
+        return f"{duration_seconds:.1f}s"
+    else:
+        minutes = int(duration_seconds // 60)
+        seconds = int(duration_seconds % 60)
+        return f"{minutes}m {seconds}s"
+
+
 def generate_metrics_table(
     completed_scanners: List[ScannerPluginBase],
     asharp_model: ASHARPModel,
@@ -33,18 +57,25 @@ def generate_metrics_table(
     # Create a table
     table = Table(title="ASH Scan Results Summary", expand=True)
 
-    # Add columns
+    # Determine if we should use shortened headers based on terminal width
+    use_short_headers = False
+    if console:
+        terminal_width = console.width if hasattr(console, "width") else 100
+        use_short_headers = terminal_width < 100
+
+    # Add columns with responsive headers
     table.add_column("Scanner", style="cyan")
-    table.add_column("Critical", style="red")
-    table.add_column("High", style="red")
-    table.add_column("Medium", style="yellow")
-    table.add_column("Low", style="green")
-    table.add_column("Info", style="blue")
+    table.add_column("C" if use_short_headers else "Critical", style="red")
+    table.add_column("H" if use_short_headers else "High", style="red")
+    table.add_column("M" if use_short_headers else "Medium", style="yellow")
+    table.add_column("L" if use_short_headers else "Low", style="green")
+    table.add_column("I" if use_short_headers else "Info", style="blue")
+    table.add_column("Time" if use_short_headers else "Duration", style="magenta")
     table.add_column(
-        "Actionable", style="bold"
+        "Action" if use_short_headers else "Actionable", style="bold"
     )  # Remove white style to allow per-cell coloring
     table.add_column("Result", style="bold")
-    table.add_column("Threshold")
+    table.add_column("Thresh" if use_short_headers else "Threshold")
 
     # Get global severity threshold from config
     global_threshold = ASH_DEFAULT_SEVERITY_LEVEL
@@ -269,6 +300,23 @@ def generate_metrics_table(
         else:
             actionable_text = Text(str(actionable), style="green bold")
 
+        # Extract duration from additional_reports if available
+        duration_seconds = None
+        if scanner_name in asharp_model.additional_reports:
+            for target_type, results in asharp_model.additional_reports[
+                scanner_name
+            ].items():
+                if "duration" in results and results["duration"] is not None:
+                    # If we have multiple target types, use the maximum duration
+                    if (
+                        duration_seconds is None
+                        or results["duration"] > duration_seconds
+                    ):
+                        duration_seconds = results["duration"]
+
+        # Format the duration
+        formatted_duration = format_duration(duration_seconds)
+
         # Add row to table
         table.add_row(
             scanner_name,
@@ -277,6 +325,7 @@ def generate_metrics_table(
             str(medium),
             str(low),
             str(info),
+            formatted_duration,  # Add formatted duration
             actionable_text,
             status_text,
             threshold_text,
@@ -313,9 +362,11 @@ def display_metrics_table(
         # Create a help panel with instructions
         help_text = (
             "How to read this table:\n"
-            "- Threshold: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
+            "- Threshold (Thr): The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
             "- Result: ✅ Passed = No findings at or above threshold, ❌ Failed = Findings at or above threshold\n"
-            "- Actionable: Number of findings at or above the threshold severity level\n"
+            "- Actionable (A): Number of findings at or above the threshold severity level\n"
+            "- Duration (Time): Time taken by the scanner to complete its execution\n"
+            "- Severity levels: Critical (C), High (H), Medium (M), Low (L), Info (I)\n"
             "- Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
         )
         help_panel = Panel(

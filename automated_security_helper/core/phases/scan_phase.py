@@ -34,6 +34,7 @@ class ScanPhase(EnginePhase):
     def _execute_phase(
         self,
         enabled_scanners: List[str] = None,
+        excluded_scanners: List[str] = None,
         parallel: bool = True,
         max_workers: int = 4,
         global_ignore_paths: List[IgnorePathWithReason] = None,
@@ -112,6 +113,18 @@ class ScanPhase(EnginePhase):
                             plugin_instance.config, "name"
                         ):
                             display_name = plugin_instance.config.name
+
+                        # Check if scanner is in the excluded list
+                        is_excluded = (
+                            excluded_scanners
+                            and display_name.lower().strip()
+                            in [s.lower().strip() for s in excluded_scanners]
+                        )
+                        if is_excluded:
+                            ASH_LOGGER.info(
+                                f"Scanner {display_name} is excluded from running"
+                            )
+                            continue
 
                         # Check if scanner is enabled and if python_based_plugins_only is set, check if it's a Python-only scanner
                         is_enabled = hasattr(
@@ -384,6 +397,17 @@ class ScanPhase(EnginePhase):
                         }
 
                     # Set raw results
+                    container.start_time = scanner_plugin.start_time
+                    container.end_time = scanner_plugin.end_time
+                    try:
+                        container.duration = (
+                            scanner_plugin.end_time - scanner_plugin.start_time
+                        ).total_seconds()
+                    except Exception as e:
+                        ASH_LOGGER.debug(
+                            f"Error calculating duration for scanner {scanner_plugin.config.name}: {e}"
+                        )
+                        container.duration = None
                     container.raw_results = raw_results
 
                     # Extract metrics based on result type
@@ -753,6 +777,7 @@ class ScanPhase(EnginePhase):
             "finding_count": results.finding_count,
             "exit_code": results.exit_code,
             "status": results.status,
+            "duration": results.duration,  # Add duration to the metrics
             # "raw_results": results.raw_results,
         }
 

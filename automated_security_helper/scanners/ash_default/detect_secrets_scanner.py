@@ -322,7 +322,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
                 ]
             )
-            with open(results_file, "w") as fp:
+            with open(results_file, mode="w", encoding="utf-8") as fp:
                 report_str = sarif_report.model_dump_json(
                     exclude_none=True,
                     exclude_unset=True,

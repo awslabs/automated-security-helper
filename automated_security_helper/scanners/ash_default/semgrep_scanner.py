@@ -340,7 +340,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
 
             semgrep_results = {}
             if Path(results_file).exists():
-                with open(results_file, "r") as f:
+                with open(results_file, mode="r", encoding="utf-8") as f:
                     semgrep_results = json.load(f)
                 try:
                     sarif_report: SarifReport = SarifReport.model_validate(

@@ -45,7 +45,7 @@ def sample_ash_model():
     sample_aggregated_results = TEST_DATA_DIR.joinpath("outputs").joinpath(
         "ash_aggregated_results.json"
     )
-    with open(sample_aggregated_results, "r") as f:
+    with open(sample_aggregated_results, mode="r", encoding="utf-8") as f:
         sample_aggregated_results = json.loads(f.read())
 
     # Fix the converters section to use proper config objects instead of boolean values
@@ -121,7 +121,7 @@ def test_data_dir() -> Path:
 # def config_file(ash_config: AshConfig):
 #     # Create a temporary config file
 #     config_file = TEST_SOURCE_DIR.joinpath("ash.yaml")
-#     with open(config_file, "w") as f:
+#     with open(config_file, mode="w", encoding="utf-8") as f:
 #         yaml.dump(
 #             ash_config.model_dump_json(),
 #             f,

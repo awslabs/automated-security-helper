@@ -28,17 +28,15 @@ repos:
   # - repo: local
   #   hooks:
   #     - id: ash
-  #       name: Use ASH for SAST/SCA scanning
+  #       name: (venv) Use ASH for SAST/SCA scanning
   #       description: Runs various code scanners from Python directly
-  #       entry: .venv/bin/ashv3
+  #       entry: .venv/bin/ashv3 --mode=precommit
   #       verbose: true
   #       language: python
   #       pass_filenames: false
-  #       stages:
-  #         - pre-push
   #       args:
-  #         - --simple
-  #         - --python-only
+  #         - --no-fail-on-findings
+  #         - --output-dir=.ash/ash_output_precommit_local
   - repo: https://github.com/awslabs/automated-security-helper
     rev: 2dcba55621ec28ec15c75d17b7b4339202eb3683 # pragma: allowlist secret
     hooks:

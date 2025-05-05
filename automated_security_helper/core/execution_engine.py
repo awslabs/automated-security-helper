@@ -49,6 +49,9 @@ class ScanExecutionEngine:
         # there is only a single scanner failing, isolating scans to just that
         # scanner will allow quicker retesting until passing and a full scan can be )
         enabled_scanners: Optional[List[str]] = [],
+        # excluded_scanners is the list of scanner names that should be excluded from running
+        # This takes precedence over enabled_scanners
+        excluded_scanners: Optional[List[str]] = [],
         strategy: Optional[ExecutionStrategy] = ExecutionStrategy.PARALLEL,
         asharp_model: Optional[ASHARPModel] = None,
         show_progress: bool = True,
@@ -100,6 +103,12 @@ class ScanExecutionEngine:
         self._init_enabled_scanners = [
             subitem.strip()
             for item in enabled_scanners
+            if item is not None
+            for subitem in item.split(",")
+        ]
+        self._init_excluded_scanners = [
+            subitem.strip()
+            for item in excluded_scanners
             if item is not None
             for subitem in item.split(",")
         ]
@@ -332,6 +341,18 @@ class ScanExecutionEngine:
             if not isinstance(self._context.config, AshConfig):
                 raise ValueError("Configuration must be an AshConfig instance")
 
+            # Process excluded scanners - this takes precedence over enabled scanners
+            if self._init_excluded_scanners:
+                ASH_LOGGER.info(f"Excluding scanners: {self._init_excluded_scanners}")
+                # If we have both enabled and excluded scanners, we need to filter the enabled list
+                if self._init_enabled_scanners:
+                    self._init_enabled_scanners = [
+                        scanner
+                        for scanner in self._init_enabled_scanners
+                        if scanner.lower()
+                        not in [s.lower() for s in self._init_excluded_scanners]
+                    ]
+
             # Mark initialization complete
             self._initialized = True
 
@@ -427,6 +448,7 @@ class ScanExecutionEngine:
 
                     self._results = scan_phase.execute(
                         enabled_scanners=self._init_enabled_scanners,
+                        excluded_scanners=self._init_excluded_scanners,
                         parallel=(self._strategy == ExecutionStrategy.PARALLEL),
                         max_workers=self._max_workers,
                         global_ignore_paths=self._global_ignore_paths,

@@ -66,7 +66,7 @@ def resolve_config(
                         config  # Return default config if specified file doesn't exist
                     )
 
-                with open(config_path, "r") as f:
+                with open(config_path, mode="r", encoding="utf-8") as f:
                     if str(config_path).endswith(".json"):
                         config_data = json.load(f)
                     else:

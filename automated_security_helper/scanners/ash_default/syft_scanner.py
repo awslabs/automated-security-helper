@@ -223,7 +223,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
             syft_results = {}
             Path(results_file).parent.mkdir(exist_ok=True, parents=True)
-            with open(results_file, "r") as f:
+            with open(results_file, mode="r", encoding="utf-8") as f:
                 syft_results = json.load(f)
             try:
                 sbom_report = CycloneDXReport.model_validate(syft_results)

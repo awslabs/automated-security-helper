@@ -8,7 +8,13 @@ from pathlib import Path
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
 )
-from automated_security_helper.core.enums import BuildTarget, Phases, RunMode, Strategy
+from automated_security_helper.core.enums import (
+    AshLogLevel,
+    BuildTarget,
+    Phases,
+    RunMode,
+    Strategy,
+)
 from automated_security_helper.interactions.run_ash_scan import (
     run_ash_scan,
 )
@@ -48,6 +54,12 @@ def run_ash_scan_cli_command(
     scanners: Annotated[
         List[str],
         typer.Option(help="Specific scanner names to run. Defaults to all scanners."),
+    ] = [],
+    exclude_scanners: Annotated[
+        List[str],
+        typer.Option(
+            help="Specific scanner names to exclude from running. Takes precedence over scanners parameter."
+        ),
     ] = [],
     progress: Annotated[
         bool,
@@ -115,16 +127,17 @@ def run_ash_scan_cli_command(
             help="Exclude execution of any plugins or tools that have depencies external to Python.",
         ),
     ] = False,
-    quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,
-    simple: Annotated[
-        bool,
-        typer.Option(
-            help="Enable simplified logging. Good for use when you just want brief status and summary of a scan, e.g. during a pre-commit hook."
-        ),
-    ] = False,
     show_summary: Annotated[
         bool, typer.Option(help="Show metrics table and results summary")
     ] = True,
+    quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,
+    log_level: Annotated[
+        AshLogLevel,
+        typer.Option(
+            "--log-level",
+            help="Set the log level.",
+        ),
+    ] = AshLogLevel.INFO,
     verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
@@ -258,15 +271,16 @@ def run_ash_scan_cli_command(
         offline=offline,
         strategy=strategy,
         scanners=scanners,
-        progress=progress,
+        exclude_scanners=exclude_scanners,
+        progress=not precommit_mode and progress,
         output_formats=output_formats,
         cleanup=cleanup,
         phases=phases,
         inspect=inspect,
         existing_results=existing_results,
-        python_based_plugins_only=precommit_mode or python_based_plugins_only,
+        python_based_plugins_only=python_based_plugins_only,
+        log_level=log_level,
         quiet=quiet,
-        simple=precommit_mode or simple,
         verbose=verbose,
         debug=debug,
         color=color,

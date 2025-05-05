@@ -277,7 +277,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             )
 
             bandit_results = {}
-            with open(results_file, "r") as f:
+            with open(results_file, mode="r", encoding="utf-8") as f:
                 bandit_results = json.load(f)
             try:
                 sarif_report: SarifReport = SarifReport.model_validate(bandit_results)

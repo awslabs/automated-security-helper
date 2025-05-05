@@ -14,7 +14,7 @@ from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
     ASH_WORK_DIR_NAME,
 )
-from automated_security_helper.core.enums import BuildTarget
+from automated_security_helper.core.enums import AshLogLevel, BuildTarget
 from automated_security_helper.core.enums import Phases
 from automated_security_helper.core.enums import Strategy
 from automated_security_helper.core.enums import RunMode
@@ -31,6 +31,7 @@ def run_ash_scan(
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
     scanners: List[str] = [],
+    exclude_scanners: List[str] = [],
     progress: bool = True,
     output_formats: List[ExportFormat] = [],
     cleanup: bool = False,
@@ -50,6 +51,7 @@ def run_ash_scan(
     fail_on_findings: bool | None = None,
     mode: RunMode = RunMode.local,
     show_summary: bool = True,
+    log_level: AshLogLevel = AshLogLevel.INFO,
     # Container-specific args
     build: bool = True,
     run: bool = True,
@@ -73,6 +75,42 @@ def run_ash_scan(
     from automated_security_helper.models.asharp_model import ASHARPModel
     from automated_security_helper.utils.log import get_logger
 
+    final_log_level = (
+        AshLogLevel.VERBOSE
+        if verbose
+        else AshLogLevel.DEBUG
+        if debug
+        else AshLogLevel.ERROR
+        if (
+            quiet
+            or log_level
+            in [
+                AshLogLevel.QUIET,
+                AshLogLevel.ERROR,
+            ]
+        )
+        else AshLogLevel.INFO
+        if (simple or log_level in [AshLogLevel.SIMPLE])
+        else log_level
+    )
+    final_logging_log_level = logging._nameToLevel.get(
+        final_log_level.value, logging.INFO
+    )
+    # Handle simple mode - this will be used to configure the logger for simplified output
+    simple_logging = simple or log_level == AshLogLevel.SIMPLE
+
+    logger = get_logger(
+        level=final_logging_log_level,
+        output_dir=Path(output_dir),
+        show_progress=progress
+        and not quiet  # Don't show progress in quiet mode
+        and not simple  # Don't show progress in simple mode
+        and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+        not in ["YES", "1", "TRUE"],
+        use_color=color,
+        simple_format=simple_logging,  # Pass the simple flag to the logger
+    )
+
     # If mode is container, run the container version
     if mode == RunMode.container:
         # Pass the current context to run_ash_container
@@ -87,13 +125,15 @@ def run_ash_scan(
             source_dir=source_dir,
             output_dir=output_dir,
             offline=offline,
+            log_level=log_level,
             verbose=verbose,
             debug=debug,
             color=color,
+            simple=simple,
+            quiet=quiet,
             build=build,
             run=run,
             force=force,
-            quiet=quiet,
             oci_runner=oci_runner,
             build_target=build_target,
             offline_semgrep_rulesets=offline_semgrep_rulesets,
@@ -102,6 +142,7 @@ def run_ash_scan(
             config=config,
             strategy=strategy,
             scanners=scanners,
+            exclude_scanners=exclude_scanners,
             progress=progress,
             output_formats=output_formats,
             cleanup=cleanup,
@@ -109,7 +150,6 @@ def run_ash_scan(
             inspect=inspect,
             existing_results=existing_results,
             python_based_plugins_only=python_based_plugins_only,
-            simple=simple,
             fail_on_findings=fail_on_findings,
             ash_revision_to_install=ash_revision_to_install,
             custom_containerfile=custom_containerfile,
@@ -134,11 +174,6 @@ def run_ash_scan(
         # Check if the container run was successful
         if hasattr(container_result, "returncode") and container_result.returncode != 0:
             # If container failed, propagate the error
-            logger = get_logger(
-                level=logging.ERROR if quiet else logging.INFO,
-                output_dir=Path(output_dir),
-                use_color=color,
-            )
             logger.error(
                 f"Container execution failed with code {container_result.returncode}"
             )
@@ -146,56 +181,20 @@ def run_ash_scan(
         # Load the results from the output file
         output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
         if output_file.exists():
-            with open(output_file, "r") as f:
+            with open(output_file, mode="r", encoding="utf-8") as f:
                 content = f.read()
                 try:
                     results = ASHARPModel.model_validate_json(content)
                 except Exception as e:
-                    logger = get_logger(
-                        level=logging.ERROR if quiet else logging.INFO,
-                        output_dir=Path(output_dir),
-                        use_color=color,
-                    )
                     logger.error(f"Failed to parse results file: {e}")
                     raise sys.exit(1) from None
         else:
-            logger = get_logger(
-                level=logging.ERROR if quiet else logging.INFO,
-                output_dir=Path(output_dir),
-                use_color=color,
-            )
             logger.error(f"Results file not found at {output_file}")
             raise sys.exit(1) from None
 
     else:
         # Local mode - use the orchestrator directly
         try:
-            # Handle quiet mode - if quiet is True, set logging level to ERROR
-            # For simple mode, also use ERROR level to show only important messages
-            log_level = (
-                logging.ERROR
-                if quiet or simple  # Set to ERROR for both quiet and simple modes
-                else logging.DEBUG
-                if debug
-                else 15
-                if verbose
-                else logging.INFO
-            )
-
-            # Handle simple mode - this will be used to configure the logger for simplified output
-            simple_logging = simple
-
-            logger = get_logger(
-                level=log_level,
-                output_dir=Path(output_dir),
-                show_progress=progress
-                and not quiet  # Don't show progress in quiet mode
-                and not simple  # Don't show progress in simple mode
-                and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-                not in ["YES", "1", "TRUE"],
-                use_color=color,
-                simple_format=simple_logging,  # Pass the simple flag to the logger
-            )
             # Create orchestrator instance
             source_dir = Path(source_dir)
             output_dir = Path(output_dir)
@@ -221,11 +220,26 @@ def run_ash_scan(
             else:
                 logger.info(f"Using config file specified at: {config}")
 
+            final_scanners = scanners or []
+            if mode == RunMode.precommit:
+                fast_scanners = [
+                    "bandit",
+                    "detect-secrets",
+                    "checkov",
+                    "cdk-nag",
+                    "npm-audit",
+                ]
+                final_scanners = list(set(final_scanners + fast_scanners))
+
+            # Process excluded scanners
+            final_excluded_scanners = exclude_scanners or []
+
             orchestrator = ASHScanOrchestrator(
                 source_dir=source_dir,
                 output_dir=output_dir,
                 work_dir=output_dir.joinpath(ASH_WORK_DIR_NAME),
-                enabled_scanners=scanners,
+                enabled_scanners=final_scanners,
+                excluded_scanners=final_excluded_scanners,
                 config_path=config,
                 verbose=verbose or debug,
                 debug=debug,
@@ -302,7 +316,7 @@ def run_ash_scan(
 
             # Write results to output file
             output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
-            with open(output_file, "w") as f:
+            with open(output_file, mode="w", encoding="utf-8") as f:
                 f.write(content)
 
         except Exception as e:

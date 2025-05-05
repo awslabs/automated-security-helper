@@ -29,7 +29,7 @@ def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
             )
         else:
             resp = None
-            with open(json_schema_path, "w") as f:
+            with open(json_schema_path, mode="w", encoding="utf-8") as f:
                 json.dump(
                     schema,
                     f,

@@ -598,5 +598,5 @@ def generate_html_report(
     html.append("</html>")
 
     # Write the HTML file
-    with open(output_path, "w") as f:
+    with open(output_path, mode="w", encoding="utf-8") as f:
         f.write("\n".join(html))

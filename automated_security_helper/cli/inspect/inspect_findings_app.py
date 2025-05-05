@@ -316,7 +316,7 @@ class FindingsExplorerApp(App):
                         )
 
                         if file_path.exists():
-                            with open(file_path, "r") as f:
+                            with open(file_path, mode="r", encoding="utf-8") as f:
                                 lines = f.readlines()
 
                             # Get line number (adjust for 0-based indexing)
@@ -368,7 +368,7 @@ class FindingsExplorerApp(App):
                 )
 
                 if file_path.exists():
-                    with open(file_path, "r") as f:
+                    with open(file_path, mode="r", encoding="utf-8") as f:
                         lines = f.readlines()
 
                     # Get line number (adjust for 0-based indexing)

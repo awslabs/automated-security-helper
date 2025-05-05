@@ -94,10 +94,10 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     f"Converting {ipynb_file} to target_path: {Path(target_path).as_posix()}"
                 )
 
-                with open(ipynb_file, "r") as f:
+                with open(ipynb_file, mode="r", encoding="utf-8") as f:
                     (python_code, _) = py_exporter.from_file(f)
                     target_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(target_path, "w") as py_file:
+                    with open(target_path, mode="w", encoding="utf-8") as py_file:
                         py_file.write(python_code)
                     results.append(target_path)
             except Exception as e:

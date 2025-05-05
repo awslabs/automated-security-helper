@@ -1,6 +1,16 @@
 from enum import Enum
 
 
+class AshLogLevel(str, Enum):
+    QUIET = "QUIET"
+    SIMPLE = "SIMPLE"
+    ERROR = "ERROR"
+    INFO = "INFO"
+    VERBOSE = "VERBOSE"
+    DEBUG = "DEBUG"
+    TRACE = "TRACE"
+
+
 class PackageManager(str, Enum):
     APT = "apt"
     PIP = "pip"
