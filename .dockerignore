@@ -10,3 +10,4 @@ utils
 tests
 test-results
 *.bak
+*.pyc

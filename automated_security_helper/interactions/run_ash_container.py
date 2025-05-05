@@ -82,8 +82,7 @@ def get_ash_revision() -> str | None:
         if isinstance(direct_url_json, dict) and "url" in direct_url_json:
             if "vcs_info" in direct_url_json:
                 revision = (
-                    direct_url_json["vcs_info"]["commit_id"]
-                    or direct_url_json["vcs_info"]["requested_revision"]
+                    direct_url_json["vcs_info"]["requested_revision"]
                     or ASH_REPO_LATEST_REVISION
                 )
                 return_val = revision

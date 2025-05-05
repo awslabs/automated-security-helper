@@ -221,7 +221,7 @@ def run_ash_scan_cli_command(
     ash_revision_to_install: Annotated[
         str | None,
         typer.Option(
-            help="ASH revision to install in the container image for usage during containerized scans",
+            help="ASH branch or tag to install in the container image for usage during containerized scans",
         ),
     ] = None,
 ):

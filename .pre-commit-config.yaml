@@ -40,18 +40,15 @@ repos:
   #         - --simple
   #         - --python-only
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: 09ae66949ac657f6af27b9147b959e0f746e3f5d # pragma: allowlist secret
+    rev: 6fc7cdc4bfdb73aed833c6f942df91643ee74b1d # pragma: allowlist secret
     hooks:
       - id: ash-simple-scan
         args:
-          ## DEFAULT / MINIMUM ARGS FOR BEST PRE-COMMIT EXPERIENCE
-          # Only run python-based plugins with ASH for speed
-          # during pre-commit hook invocation
-          - --python-based-plugins-only
-          # Show simplified log output from ASH optimized for pre-commit
-          - --simple
+          ## REQUIRED ARGS
+          # N/A - ASH pre-commit hooks include `--mode=precommit` by default.
+          # The only ARGS needed are custom args past what is available by default.
 
-          ## EXTRA ARGS (these are specific to this repo's usage of the hook)
+          ## EXTRA ARGS (these are specific to this repo's usage of the hook and are not required)
           # Default behavior is to fail if any actionable findings are found.
           # We are working through resolution right now while still needing
           # to run this hook, so we are disabling the '--fail-on-findings' default

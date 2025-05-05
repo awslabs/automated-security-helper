@@ -28,7 +28,7 @@ packages = [
 ]
 include = [
     { path = "automated_security_helper/assets", format = ["sdist", "wheel"] },
-    { path = "automated_security_helper/assets/ASH_COMMIT_SHA", format = ["sdist", "wheel"] },
+    { path = "automated_security_helper/assets/ASH_INSTALLED_REVISION", format = ["sdist", "wheel"] },
     { path = "automated_security_helper/assets/Dockerfile", format = ["sdist", "wheel"] },
 ]
 

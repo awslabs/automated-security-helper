@@ -28,6 +28,7 @@ COPY pyproject.toml* poetry.lock* README.md* LICENSE* Dockerfile* ./
 COPY ci*/ ci/
 COPY automated_security_helper*/ automated_security_helper/
 RUN tree .
+RUN git status --short || true
 RUN poetry build
 
 # Second stage: Core ASH image
