@@ -34,15 +34,15 @@ repos:
         name: (manual) ASH dev manual scan
         description: Runs various code scanners from Python directly
         entry: poetry run ashv3 --mode=precommit
+        pass_filenames: false
         verbose: true
         language: system
-        pass_filenames: false
         args:
           - --exclude-scanners=cdk-nag
           - --no-fail-on-findings
           - --output-dir=.ash/ash_output_precommit_local
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: c5fc59935d7781a8083009d1b9e1316f189f024d # pragma: allowlist secret
+    rev: f47965cdf52e696386e33cf5f60528736973e669 # pragma: allowlist secret
     hooks:
       - id: ash-simple-scan
         verbose: false
