@@ -108,14 +108,13 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         if self.config is None:
             self.config = OpengrepScannerConfig()
         self.command = "opengrep"
+        self.subcommands = ["scan"]
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,
             output_arg="--sarif-output",
             scan_path_arg=None,
-            extra_args=[
-                ToolExtraArg(key="scan", value=""),
-            ],
+            extra_args=[],
         )
         super().model_post_init(context)
 

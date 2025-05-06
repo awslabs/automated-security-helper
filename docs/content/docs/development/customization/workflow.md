@@ -89,7 +89,7 @@ orchestrator = ASHScanOrchestrator(
 Same sample as CLI:
 
 ```sh
-ashv3 --source-dir "." --output-dir "./ash_output" --config-path "./ash.yaml" --scan-output-formats json,sarif,cyclonedx,html,junitxml
+ash --source-dir "." --output-dir "./ash_output" --config-path "./ash.yaml" --scan-output-formats json,sarif,cyclonedx,html,junitxml
 ```
 
 

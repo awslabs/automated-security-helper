@@ -186,7 +186,7 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-RUN ashv3 dependencies install --bin-path "${ASH_BIN_PATH}"
+RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
 #
@@ -248,7 +248,7 @@ ENV ASH_GROUP=${ASH_GROUP}
 
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
-    CMD command -v ashv3 || exit 1
+    CMD command -v ash || exit 1
 
 ENTRYPOINT [ ]
-CMD [ "ashv3" ]
+CMD [ "ash" ]

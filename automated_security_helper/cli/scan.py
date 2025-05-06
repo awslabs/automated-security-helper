@@ -40,12 +40,16 @@ def run_ash_scan_cli_command(
     ] = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
     scanners: Annotated[
         List[str],
-        typer.Option(help="Specific scanner names to run. Defaults to all scanners."),
+        typer.Option(
+            help="Specific scanner names to run. Defaults to all scanners.",
+            envvar="ASH_SCANNERS",
+        ),
     ] = [],
     exclude_scanners: Annotated[
         List[str],
         typer.Option(
-            help="Specific scanner names to exclude from running. Takes precedence over scanners parameter."
+            help="Specific scanner names to exclude from running. Takes precedence over scanners parameter.",
+            envvar="ASH_EXCLUDED_SCANNERS",
         ),
     ] = [],
     config: Annotated[
@@ -127,6 +131,7 @@ def run_ash_scan_cli_command(
         Optional[RunMode],
         typer.Option(
             help="Execution mode preset. 'precommit' enables python-based plugins only and simplified output. 'container' runs non-Python plugins in a container. 'local' (default) runs everything in the local Python process.",
+            envvar="ASH_MODE",
         ),
     ] = RunMode.local,
     python_based_plugins_only: Annotated[
@@ -266,7 +271,7 @@ def run_ash_scan_cli_command(
     precommit_mode = mode == RunMode.precommit or str(mode).lower() == "precommit"
     if precommit_mode:
         print(
-            "[green]╭───────────── Running ASH in pre-commit mode with minimal output ─────────────╮[/green]"
+            "[green]-------------- Running ASH in pre-commit mode with minimal output --------------[/green]"
         )
 
     # Call run_ash_scan with all parameters

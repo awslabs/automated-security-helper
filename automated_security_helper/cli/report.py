@@ -3,47 +3,52 @@
 
 import logging
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional
 import typer
 from rich import print, print_json
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
-from automated_security_helper.core.enums import AshLogLevel
+from automated_security_helper.core.enums import AshLogLevel, ReportFormat
 from automated_security_helper.models.asharp_model import ASHARPModel
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.interfaces import IReporter
 from automated_security_helper.utils.log import get_logger
 
 
+def get_report_formats(incomplete: str = None) -> List[str]:
+    report_formats = []
+    # Get values from ReportFormat str enum
+    for report_format in ReportFormat:
+        if incomplete != "" and incomplete not in report_format.value:
+            continue
+        report_formats.append(report_format.value)
+    return report_formats
+
+
 def report_command(
-    fmt: Annotated[
+    report_format: Annotated[
         str,
-        typer.Argument(
-            help="Report format to generate (reporter plugin name). Defaults to 'text'.",
-        ),
-    ] = "text",
-    results_file: Annotated[
-        Optional[Path],
         typer.Option(
-            help="Path to the ash_aggregated_results.json file. Defaults to the latest results.",
-            writable=True,
+            "--format",
+            help=f"Report format to generate (reporter plugin name). Defaults to 'text'. Examples values: {', '.join(get_report_formats(''))}",
+            autocompletion=get_report_formats,
+            shell_complete=get_report_formats,
         ),
-    ] = None,
+    ] = ReportFormat.text.value,
+    output_dir: Annotated[
+        str,
+        typer.Option(
+            help="The directory to output results to",
+            envvar="ASH_OUTPUT_DIR",
+        ),
+    ] = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
     config: Annotated[
         Optional[Path],
         typer.Option(
             "--config",
             "-c",
             help="Path to ASH configuration file.",
-        ),
-    ] = None,
-    output_dir: Annotated[
-        Optional[Path],
-        typer.Option(
-            "--output-dir",
-            "-o",
-            help="Output directory for generated reports.",
         ),
     ] = None,
     log_level: Annotated[
@@ -77,40 +82,30 @@ def report_command(
         final_log_level.value, logging.INFO
     )
     ASH_LOGGER = get_logger(level=final_logging_log_level)
+    results_file = None
+    output_dir_path = Path(output_dir)
+    results_file_paths = [
+        output_dir_path.joinpath(".ash", "ash_output", "ash_aggregated_results.json"),
+        output_dir_path.joinpath("ash_output", "ash_aggregated_results.json"),
+        output_dir_path.joinpath("ash_aggregated_results.json"),
+    ]
+    for poss_result_file in results_file_paths:
+        if poss_result_file.exists():
+            results_file = poss_result_file
+            break
 
     # Ensure results file exists if provided explicitly
     if results_file is not None and not results_file.exists():
         print(f"[red]Error: Results file not found: {results_file}[/red]")
         raise typer.Exit(1)
 
-    # Find the results file if not specified
-    if results_file is None:
-        # Look in current directory, then .ash/ash_output
-        potential_paths = [
-            Path.cwd() / "ash_aggregated_results.json",
-            Path.cwd() / ".ash" / "ash_output" / "ash_aggregated_results.json",
-        ]
-
-        for path in potential_paths:
-            if path is None:
-                continue
-            if Path(path).exists():
-                results_file = path
-                break
-
-        if results_file is None:
-            print("[red]Error: Could not find ash_aggregated_results.json file.[/red]")
-            print(
-                "[yellow]Please specify the path to the results file or run from a directory containing the results.[/yellow]"
-            )
-            raise typer.Exit(1)
-
     # Determine output directory
     if output_dir is None:
         output_dir = results_file.parent
+        output_dir_path = Path(output_dir)
 
     # Ensure output directory exists
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # Load the ASH configuration
     ash_config = resolve_config(config_path=config)
@@ -118,8 +113,8 @@ def report_command(
     # Create plugin context
     plugin_context = PluginContext(
         source_dir=Path.cwd(),
-        output_dir=output_dir,
-        work_dir=output_dir / "work",
+        output_dir=output_dir_path,
+        work_dir=output_dir_path.joinpath("work"),
         config=ash_config,
     )
 
@@ -149,7 +144,7 @@ def report_command(
             if hasattr(plugin_instance, "config") and hasattr(
                 plugin_instance.config, "name"
             ):
-                if plugin_instance.config.name.lower() == fmt.lower():
+                if plugin_instance.config.name.lower() == report_format.lower():
                     ASH_LOGGER.info(f"Found reporter plugin {plugin_class.__name__}")
                     reporter_plugin = plugin_instance
                     break
@@ -159,7 +154,7 @@ def report_command(
             )
 
     if reporter_plugin is None:
-        print(f"[red]Error: Reporter plugin '{fmt}' not found.[/red]")
+        print(f"[red]Error: Reporter plugin '{report_format}' not found.[/red]")
         print("[yellow]Available reporter formats:[/yellow]")
         for plugin_class in reporter_plugins:
             try:
@@ -175,7 +170,7 @@ def report_command(
     # Generate the report
     try:
         report_content = reporter_plugin.report(model)
-        if fmt in [
+        if report_format in [
             "asff",
             # "csv",
             "cyclonedx",

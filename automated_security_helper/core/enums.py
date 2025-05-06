@@ -1,6 +1,23 @@
 from enum import Enum
 
 
+class ReportFormat(str, Enum):
+    """Supported report formats."""
+
+    aggregated = "aggregated"
+    asff = "asff"
+    csv = "csv"
+    cyclonedx = "cyclonedx"
+    html = "html"
+    json = "flat-json"
+    junitxml = "junitxml"
+    ocsf = "ocsf"
+    sarif = "sarif"
+    spdx = "spdx"
+    text = "text"
+    yaml = "yaml"
+
+
 class AshLogLevel(str, Enum):
     QUIET = "QUIET"
     SIMPLE = "SIMPLE"

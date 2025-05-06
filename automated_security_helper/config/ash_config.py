@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import re
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -275,8 +276,11 @@ class AshConfig(BaseModel):
 
     # Project information
     project_name: Annotated[
-        str, Field(description="Name of the project being scanned")
-    ] = "ash-target"
+        str,
+        Field(
+            description="Name of the project being scanned",
+        ),
+    ] = os.environ.get("ASH_PROJECT_NAME", "ash-target")
 
     # Build configuration - use a default instance instead of calling the constructor
     build: Annotated[

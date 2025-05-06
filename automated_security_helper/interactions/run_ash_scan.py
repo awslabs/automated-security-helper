@@ -1,8 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from datetime import timedelta
 import logging
 import os
+import time
 from typing import List
 import typer
 import json
@@ -22,6 +24,23 @@ from automated_security_helper.interactions.run_ash_container import (
     run_ash_container,
 )
 from automated_security_helper.core.enums import ExportFormat
+
+
+def format_duration(seconds):
+    """Format duration in seconds to a human-readable string."""
+    duration = timedelta(seconds=seconds)
+
+    # Extract hours, minutes, seconds
+    hours, remainder = divmod(duration.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    # Format the duration string
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
 
 
 def run_ash_scan(
@@ -68,6 +87,12 @@ def run_ash_scan(
     **kwargs,
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
+
+    # Record the start time for calculating scan duration
+    scan_start_time = time.time()
+
+    source_dir = Path(source_dir).absolute().as_posix()
+    output_dir = Path(output_dir).absolute().as_posix()
 
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
     from automated_security_helper.core.enums import ExecutionStrategy
@@ -200,7 +225,10 @@ def run_ash_scan(
             output_dir = Path(output_dir)
 
             if not quiet and not simple:
-                logger.debug(f"Scanners specified: {scanners}")
+                logger.verbose(f"Source directory: {source_dir.as_posix()}")
+                logger.verbose(f"Output directory: {output_dir.as_posix()}")
+                logger.verbose(f"Scanners specified: {scanners}")
+                logger.verbose(f"Scanners excluded: {exclude_scanners}")
 
             if config is None:
                 for config_file in ASH_CONFIG_FILE_NAMES:
@@ -344,18 +372,24 @@ def run_ash_scan(
 
     # Only display the final metrics and guidance if show_summary is True
     if show_summary:
+        # Calculate scan duration
+        scan_duration = time.time() - scan_start_time
+        duration_str = format_duration(scan_duration)
+
         # Add helpful guidance about where to find reports
         relative_out_dir = (
             Path(output_dir).relative_to(source_dir)
             if Path(output_dir).is_relative_to(source_dir)
-            else output_dir
+            else Path(output_dir)
         )
         out_dir_alias = os.environ.get(
             "ASH_ACTUAL_OUTPUT_DIR",
             relative_out_dir.as_posix(),
         )
         if not quiet:
-            print("\n[cyan]=== Scan Complete: Next Steps ===[/cyan]")
+            print(
+                f"\n[cyan]=== ASH Scan Completed in {duration_str}: Next Steps ===[/cyan]"
+            )
             print("View detailed findings...")
             print(f"  - HTML report of findings: '{out_dir_alias}/reports/ash.html'")
             print(f"  - Markdown summary: '{out_dir_alias}/reports/ash.summary.md'")

@@ -138,9 +138,9 @@ jobs:
         continue-on-error: true
         run: |
           echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }})"
-          ashv3 --version
-          ashv3 --help
-          ashv3 scan --mode=container --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress
+          ash --version
+          ash --help
+          ash scan --mode=container --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'
@@ -150,9 +150,9 @@ jobs:
         continue-on-error: true
         run: |
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
-          ashv3 --version
-          ashv3 --help
-          ashv3 scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress
+          ash --version
+          ash --help
+          ash scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress
 
       ############ PowerShell #########
 

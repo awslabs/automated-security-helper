@@ -92,14 +92,13 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         if self.config is None:
             self.config = SemgrepScannerConfig()
         self.command = "semgrep"
+        self.subcommands = ["scan"]
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,
             output_arg="--sarif-output",
             scan_path_arg=None,
-            extra_args=[
-                ToolExtraArg(key="scan", value=""),
-            ],
+            extra_args=[],
         )
         super().model_post_init(context)
 
@@ -279,7 +278,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         try:
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
-            results_file.parent.mkdir(exist_ok=True, parents=True)
+            target_results_dir.mkdir(exist_ok=True, parents=True)
 
             # Add global ignore paths as exclude patterns
             # for ignore_path in global_ignore_paths:
