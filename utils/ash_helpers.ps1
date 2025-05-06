@@ -131,6 +131,9 @@ function Invoke-ASH {
         [switch]
         $NoFailOnFindings,
         [parameter()]
+        [switch]
+        $ShowSummary,
+        [parameter()]
         [string]
         $OfflineSemgrepRulesets = "p/ci",
         [parameter(ValueFromRemainingArguments)]
@@ -159,6 +162,12 @@ function Invoke-ASH {
         }
         else {
             $ashCmdArgs.Add('--no-progress')
+        }
+        if ($ShowSummary) {
+            $ashCmdArgs.Add('--show-summary')
+        }
+        else {
+            $ashCmdArgs.Add('--no-show-summary')
         }
         if ($NoFailOnFindings) {
             $ashCmdArgs.Add('--no-fail-on-findings')
