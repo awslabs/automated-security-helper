@@ -276,8 +276,8 @@ def run_ash_scan_cli_command(
 
     # Call run_ash_scan with all parameters
     run_ash_scan(
-        source_dir=source_dir,
-        output_dir=output_dir,
+        source_dir=Path(source_dir).absolute().as_posix(),
+        output_dir=Path(output_dir).absolute().as_posix(),
         config=config,
         offline=offline,
         strategy=strategy,
