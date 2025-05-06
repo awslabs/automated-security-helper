@@ -38,7 +38,7 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
             by_alias=True,
             exclude_none=True,
             exclude_unset=True,
-            exclude_defaults=True,
+            # exclude_defaults=True,
         )
         # clean_sarif = clean_dict(
         #     input=model.sarif.model_dump(
