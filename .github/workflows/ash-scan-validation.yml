@@ -49,26 +49,30 @@ jobs:
             platform: linux/aarch64
 
           # macOS runners
-          - os: macos-latest
-            method: bash
-            platform: darwin/amd64
-          - os: macos-latest
-            method: powershell
-            platform: darwin/amd64
-          - os: macos-latest
-            method: python-container
-            platform: darwin/amd64
+          ### Disabled: Docker on the hosted MacOS runners isn't
+          ###           very well supported right now
+          # - os: macos-latest
+          #   method: bash
+          #   platform: darwin/amd64
+          # - os: macos-latest
+          #   method: powershell
+          #   platform: darwin/amd64
+          # - os: macos-latest
+          #   method: python-container
+          #   platform: darwin/amd64
           - os: macos-latest
             method: python-local
             platform: darwin/amd64
 
           # Windows runners
-          - os: windows-latest
-            method: powershell
-            platform: windows/amd64
-          - os: windows-latest
-            method: python-container
-            platform: windows/amd64
+          ### Disabled: Docker on the hosted Windows runners isn't
+          ###           very well supported right
+          # - os: windows-latest
+          #   method: powershell
+          #   platform: windows/amd64
+          # - os: windows-latest
+          #   method: python-container
+          #   platform: windows/amd64
           - os: windows-latest
             method: python-local
             platform: windows/amd64
@@ -79,21 +83,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install docker on MacOS
-        if: runner.os == 'macos' && matrix.method == 'python-local'
-        run: |
-          brew install docker
-          docker info
+      # - name: Install docker on MacOS
+      #   if: runner.os == 'macos' && matrix.method == 'python-local'
+      #   run: |
+      #     brew install docker
+      #     docker info
 
-      - name: Set up Docker Buildx on Linux/MacOS
-        if: matrix.os != 'windows-latest' && matrix.method != 'python-local'
-        uses: docker/setup-buildx-action@v3
+      # - name: Set up Docker Buildx on MacOS
+      #   if: contains(matrix.os, 'macos') && matrix.method != 'python-local'
+      #   uses: docker/setup-buildx-action@v3
 
-      - name: Set up Docker Buildx on Windows
-        if: matrix.os == 'windows-latest' && matrix.method != 'python-local'
+      # - name: Set up Docker Buildx on Windows
+      #   if: contains(matrix.os, 'windows') && matrix.method != 'python-local'
+      #   uses: docker/setup-buildx-action@v3
+      #   with:
+      #     install: true
+
+      - name: Set up Docker Buildx on Linux
+        if: contains(matrix.os, 'ubuntu') && matrix.method != 'python-local'
         uses: docker/setup-buildx-action@v3
-        with:
-          install: true
 
       - name: Create output directory
         shell: bash
@@ -124,17 +132,19 @@ jobs:
         if: matrix.method == 'python-container'
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
         # It should fail if there are findings in the scan, but that's a valid test for us still.
+        shell: bash
         continue-on-error: true
         run: |
           echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }})"
           ashv3 --version
           ashv3 --help
-          ashv3 scan --mode=container --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug
+          ashv3 scan --mode=container --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug --no-progress
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
         # It should fail if there are findings in the scan, but that's a valid test for us still.
+        shell: bash
         continue-on-error: true
         run: |
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
