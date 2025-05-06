@@ -131,6 +131,7 @@ def run_ash_scan_cli_command(
         Optional[RunMode],
         typer.Option(
             help="Execution mode preset. 'precommit' enables python-based plugins only and simplified output. 'container' runs non-Python plugins in a container. 'local' (default) runs everything in the local Python process.",
+            envvar="ASH_MODE",
         ),
     ] = RunMode.local,
     python_based_plugins_only: Annotated[

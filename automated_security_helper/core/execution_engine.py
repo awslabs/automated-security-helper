@@ -2,6 +2,7 @@
 
 import multiprocessing
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -391,6 +392,9 @@ class ScanExecutionEngine:
         ASH_LOGGER.info("===== ASH Security Scan Starting =====")
         ASH_LOGGER.info(f"Executing phases: {', '.join(ordered_phases)}")
 
+        # Record the start time for calculating scan duration
+        scan_start_time = time.time()
+
         # Start the progress display before executing any phases
         # Only start if it's not already started
         if (
@@ -498,7 +502,21 @@ class ScanExecutionEngine:
 
             # Display the final metrics table
             if not self._simple_mode:
-                ASH_LOGGER.info("===== ASH Security Scan Complete =====")
+                # Calculate scan duration
+                scan_duration = time.time() - scan_start_time
+                minutes, seconds = divmod(int(scan_duration), 60)
+                hours, minutes = divmod(minutes, 60)
+
+                if hours > 0:
+                    duration_str = f"{hours}h {minutes}m {seconds}s"
+                elif minutes > 0:
+                    duration_str = f"{minutes}m {seconds}s"
+                else:
+                    duration_str = f"{seconds}s"
+
+                ASH_LOGGER.info(
+                    f"===== ASH Security Scan Completed in {duration_str} ====="
+                )
 
             if self._completed_scanners:
                 # Get color setting from progress display
