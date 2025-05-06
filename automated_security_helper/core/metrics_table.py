@@ -243,9 +243,9 @@ def generate_metrics_table(
             actionable = critical
 
         # Determine status based on the appropriate severity threshold
-        status = "✅ Passed"
+        status = "[bold green]Passed[/bold green]"
         if actionable > 0:
-            status = "❌ Failed"
+            status = "[bold red]Failed[/bold red]"
             ASH_LOGGER.debug(
                 f"Scanner {scanner_name} failed with {evaluation_threshold} threshold: {actionable} actionable findings"
             )
@@ -286,7 +286,7 @@ def generate_metrics_table(
 
         if terminal_width < 100:
             # Use text-only format with color for small terminals
-            if status == "✅ Passed":
+            if "Passed" in status:
                 status_text = Text("Passed", style="green bold")
             else:
                 status_text = Text("Failed", style="red bold")
@@ -362,12 +362,12 @@ def display_metrics_table(
         # Create a help panel with instructions
         help_text = (
             "How to read this table:\n"
-            "- Threshold (Thr): The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
-            "- Result: ✅ Passed = No findings at or above threshold, ❌ Failed = Findings at or above threshold\n"
-            "- Actionable (A): Number of findings at or above the threshold severity level\n"
-            "- Duration (Time): Time taken by the scanner to complete its execution\n"
-            "- Severity levels: Critical (C), High (H), Medium (M), Low (L), Info (I)\n"
-            "- Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
+            "- [italic gray]Severity levels[/italic gray]: Critical (C), High (H), Medium (M), Low (L), Info (I)\n"
+            "- [italic gray]Duration (Time)[/italic gray]: Time taken by the scanner to complete its execution\n"
+            "- [italic gray]Actionable (A)[/italic gray]: Number of findings at or above the threshold severity level\n"
+            "- [italic gray]Result[/italic gray]: [bold green]Passed[/bold green] = No findings at or above threshold, [bold red]Failed[/bold red] = Findings at or above threshold\n"
+            "- [italic gray]Threshold[/italic gray] (Thr): The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
+            "- [italic gray]Example[/italic gray]: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
         )
         help_panel = Panel(
             help_text, title="Results Guide", border_style="blue", expand=True

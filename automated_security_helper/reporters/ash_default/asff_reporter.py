@@ -44,4 +44,7 @@ class AsffReporter(ReporterPluginBase[ASFFReporterConfig]):
     def report(self, model: "ASHARPModel") -> str:
         """Format ASH model in Amazon Security Finding Format (ASFF)."""
         # TODO - Replace with ASFF reporter
-        return yaml.dump(model.model_dump(by_alias=True), indent=2)
+        return yaml.dump(
+            model.model_dump(by_alias=True, exclude_unset=True, exclude_none=True),
+            indent=2,
+        )

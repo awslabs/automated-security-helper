@@ -28,7 +28,6 @@
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs various code scanners from Python directly
   entry: ashv3
-  verbose: true
   language: python
   pass_filenames: false
   args: []
@@ -36,7 +35,6 @@
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs various code scanners from Python directly
   entry: ashv3 --mode=precommit
-  verbose: true
   language: python
   pass_filenames: false
   args: []
@@ -44,7 +42,6 @@
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs full ASH scan with container build and all scanners (takes several minutes)
   entry: ashv3 --mode=container --simple
-  verbose: true
   language: script
   pass_filenames: false
   args: []

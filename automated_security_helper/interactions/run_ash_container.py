@@ -21,6 +21,7 @@ from automated_security_helper.core.constants import (
     ASH_REPO_LATEST_REVISION,
 )
 from automated_security_helper.core.enums import (
+    AshLogLevel,
     BuildTarget,
     ExportFormat,
     Phases,
@@ -213,6 +214,7 @@ def run_ash_container(
     ctx=None,
     source_dir: str = Path.cwd().as_posix(),
     output_dir: str = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    log_level: AshLogLevel = AshLogLevel.INFO,
     config: str = None,
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,

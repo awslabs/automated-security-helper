@@ -83,14 +83,14 @@ def run_ash_scan(
         else AshLogLevel.ERROR
         if (
             quiet
+            or simple
             or log_level
             in [
                 AshLogLevel.QUIET,
                 AshLogLevel.ERROR,
+                AshLogLevel.SIMPLE,
             ]
         )
-        else AshLogLevel.INFO
-        if (simple or log_level in [AshLogLevel.SIMPLE])
         else log_level
     )
     final_logging_log_level = logging._nameToLevel.get(
