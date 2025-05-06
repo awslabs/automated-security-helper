@@ -152,6 +152,7 @@ def mock_scanner_plugin():
 
         def scan(self, target, config=None, *args, **kwargs):
             return SarifReport(
+                version="2.1.0",
                 runs=[
                     Run(
                         tool=Tool(

@@ -1,0 +1,166 @@
+name: ASH - Scan Validation
+
+on:
+  push:
+    branches:
+      - "!main"
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch: {}
+
+env:
+  PYTHON_VERSION: "3.12"
+  COLUMNS: 160
+
+jobs:
+  validate-scan-methods:
+    name: Validate ASH Scan Methods
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux runners (x86)
+          - os: ubuntu-latest
+            method: bash
+            platform: linux/amd64
+          - os: ubuntu-latest
+            method: powershell
+            platform: linux/amd64
+          - os: ubuntu-latest
+            method: python-container
+            platform: linux/amd64
+          - os: ubuntu-latest
+            method: python-local
+            platform: linux/amd64
+
+          # Linux runners (ARM)
+          - os: ubuntu-24.04-arm
+            method: bash
+            platform: linux/aarch64
+          - os: ubuntu-24.04-arm
+            method: powershell
+            platform: linux/aarch64
+          - os: ubuntu-24.04-arm
+            method: python-container
+            platform: linux/aarch64
+          - os: ubuntu-24.04-arm
+            method: python-local
+            platform: linux/aarch64
+
+          # macOS runners
+          - os: macos-latest
+            method: bash
+            platform: darwin/amd64
+          - os: macos-latest
+            method: powershell
+            platform: darwin/amd64
+          - os: macos-latest
+            method: python-container
+            platform: darwin/amd64
+          - os: macos-latest
+            method: python-local
+            platform: darwin/amd64
+
+          # Windows runners
+          - os: windows-latest
+            method: powershell
+            platform: windows/amd64
+          - os: windows-latest
+            method: python-container
+            platform: windows/amd64
+          - os: windows-latest
+            method: python-local
+            platform: windows/amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker
+        if: matrix.os != 'windows-latest' && matrix.method != 'python-local'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Docker on Windows
+        if: matrix.os == 'windows-latest' && matrix.method != 'python-local'
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
+      - name: Create output directory
+        shell: bash
+        run: mkdir -p .ash/ash_output
+
+      # Call the appropriate workflow based on matrix.method
+      ############ Python #########
+      - name: Set up Python
+        if: contains(matrix.method, 'python')
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      - name: Install ASH Python package at commit SHA
+        if: contains(matrix.method, 'python')
+        run: |
+          echo "Installing ASH using Python on ${{ matrix.os }} (${{ matrix.platform }})"
+          python -m pip install --upgrade pip
+          python -m pip install git+https://github.com/awslabs/automated-security-helper@${{ github.sha }}
+
+      - name: Update GITHUB_PATH with Python scripts path on Windows
+        if: contains(matrix.method, 'python') && matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+
+      - name: Validate ASH using Python + Container
+        if: matrix.method == 'python-container'
+        run: |
+          echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }})"
+          ashv3 --version
+          ashv3 --help
+          ashv3 scan --mode=container --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output"
+
+      - name: Validate ASH using Python Local
+        if: matrix.method == 'python-local'
+        run: |
+          echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
+          ashv3 --version
+          ashv3 --help
+          ashv3 scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output"
+
+      ############ PowerShell #########
+
+      - name: Validate ASH using PowerShell
+        if: matrix.method == 'powershell'
+        shell: pwsh
+        run: |
+          Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
+          . ./utils/invoke-ash.ps1
+          Get-Help Invoke-ASH -Full
+          Invoke-ASH -SourceDir "$($PWD.Path)" -OutputDir (Join-Path $PWD.Path ".ash" "ash_output")
+
+      ############ Bash #########
+
+      - name: Validate ASH using Bash
+        if: matrix.method == 'bash'
+        shell: bash
+        run: |
+          echo "Testing ASH using Bash on ${{ matrix.os }} (${{ matrix.platform }})"
+          chmod +x ./ash
+          ./ash --version
+          ./ash --help
+          ./ash --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output"
+
+
+      - name: Verify scan completed
+        shell: bash
+        run: |
+          echo "Verifying scan completed successfully on ${{ matrix.os }} using ${{ matrix.method }}"
+          if [[ -f ".ash/ash_output/ash_aggregated_results.json" ]] && [[ -f ".ash/ash_output/reports/ash.sarif ]]; then
+            echo "Scan completed successfully"
+          else
+            echo "Scan output directory not found"
+            exit 1
+          fi

@@ -27,14 +27,27 @@ def run_ash_scan_cli_command(
     ctx: typer.Context,
     source_dir: Annotated[
         str,
-        typer.Option(help="The source directory to scan"),
+        typer.Option(
+            help="The source directory to scan",
+        ),
     ] = Path.cwd().as_posix(),
     output_dir: Annotated[
         str,
         typer.Option(
             help="The directory to output results to",
+            envvar="ASH_OUTPUT_DIR",
         ),
     ] = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    scanners: Annotated[
+        List[str],
+        typer.Option(help="Specific scanner names to run. Defaults to all scanners."),
+    ] = [],
+    exclude_scanners: Annotated[
+        List[str],
+        typer.Option(
+            help="Specific scanner names to exclude from running. Takes precedence over scanners parameter."
+        ),
+    ] = [],
     config: Annotated[
         str,
         typer.Option(
@@ -48,20 +61,17 @@ def run_ash_scan_cli_command(
             help="Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage."
         ),
     ] = False,
+    offline_semgrep_rulesets: Annotated[
+        str,
+        typer.Option(
+            "--offline-semgrep-rulesets",
+            help="Specify Semgrep rulesets for use in ASH offline mode",
+        ),
+    ] = "p/ci",
     strategy: Annotated[
         Strategy,
         typer.Option(help="Whether to run scanners in parallel or sequential"),
     ] = Strategy.parallel.value,
-    scanners: Annotated[
-        List[str],
-        typer.Option(help="Specific scanner names to run. Defaults to all scanners."),
-    ] = [],
-    exclude_scanners: Annotated[
-        List[str],
-        typer.Option(
-            help="Specific scanner names to exclude from running. Takes precedence over scanners parameter."
-        ),
-    ] = [],
     progress: Annotated[
         bool,
         typer.Option(
@@ -209,13 +219,6 @@ def run_ash_scan_cli_command(
             case_sensitive=False,
         ),
     ] = BuildTarget.NON_ROOT,
-    offline_semgrep_rulesets: Annotated[
-        str,
-        typer.Option(
-            "--offline-semgrep-rulesets",
-            help="Specify Semgrep rulesets for use in ASH offline mode",
-        ),
-    ] = "p/ci",
     container_uid: Annotated[
         Optional[str],
         typer.Option(

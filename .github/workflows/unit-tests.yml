@@ -3,9 +3,7 @@ name: ASH - Matrix Unit Tests
 on:
   push:
     branches:
-      - "*"
-    tags:
-      - "*"
+      - "!main"
   pull_request:
     branches:
       - "*"
@@ -17,7 +15,7 @@ env:
 
 jobs:
   unit-test:
-    name: Python ${{ matrix.python-version }} on ${{ matrix.os }} ${{ matrix.arch }}
+    name: Unit Tests - Python ${{ matrix.python-version }} on ${{ matrix.os }} ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     permissions:
       actions: read

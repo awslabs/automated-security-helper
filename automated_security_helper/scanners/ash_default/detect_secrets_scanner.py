@@ -314,13 +314,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 ),
             )
             sarif_report = SarifReport(
+                version="2.1.0",
                 runs=[
                     Run(
                         tool=sarif_tool,
                         invocations=[sarif_invocation],
                         results=results,
                     )
-                ]
+                ],
             )
             with open(results_file, mode="w", encoding="utf-8") as fp:
                 report_str = sarif_report.model_dump_json(

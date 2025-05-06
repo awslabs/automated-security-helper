@@ -238,7 +238,10 @@ class TestScannerPlugin:
             **kwargs,
         ):
             self.output.append("hello world")
-            return SarifReport(runs=[])
+            return SarifReport(
+                version="2.1.0",
+                runs=[],
+            )
 
     def test_model_post_init_no_config(self, test_plugin_context):
         """Test model_post_init with no config raises error."""

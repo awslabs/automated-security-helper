@@ -134,6 +134,7 @@ class ASHARPModel(BaseModel):
         SarifReport | None,
         Field(description="The SARIF formatted vulnerability report"),
     ] = SarifReport(
+        version="2.1.0",
         runs=[
             Run(
                 tool=Tool(

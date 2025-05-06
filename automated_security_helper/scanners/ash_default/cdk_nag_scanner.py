@@ -256,6 +256,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             ),
         )
         report = SarifReport(
+            version="2.1.0",
             runs=[
                 Run(
                     tool=tool,
@@ -283,7 +284,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         ),
                     ],
                 )
-            ]
+            ],
         )
         with open(outdir.joinpath("ash-cdk-nag.sarif"), "w") as fp:
             report_str = report.model_dump_json(

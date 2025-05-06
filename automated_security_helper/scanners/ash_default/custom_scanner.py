@@ -162,6 +162,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
             )
             # Create and return report
             return SarifReport(
+                version="2.1.0",
                 runs=[
                     Run(
                         tool=tool,

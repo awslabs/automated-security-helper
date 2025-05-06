@@ -25,20 +25,23 @@ repos:
         args: [--fix]
       # Run the formatter.
       - id: ruff-format
-  # - repo: local
-  #   hooks:
-  #     - id: ash
-  #       name: (manual) ASH dev manual scan
-  #       description: Runs various code scanners from Python directly
-  #       entry: poetry run ashv3 --mode=precommit
-  #       verbose: true
-  #       language: system
-  #       pass_filenames: false
-  #       args:
-  #         - --no-fail-on-findings
-  #         - --output-dir=.ash/ash_output_precommit_local
+
+  # Local ASH development hooks to help validate ASH is running as expected with
+  # local versions
+  - repo: local
+    hooks:
+      - id: ash
+        name: (manual) ASH dev manual scan
+        description: Runs various code scanners from Python directly
+        entry: poetry run ashv3 --mode=precommit
+        verbose: true
+        language: system
+        pass_filenames: false
+        args:
+          - --no-fail-on-findings
+          - --output-dir=.ash/ash_output_precommit_local
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: 45c10895213264736ce1804ffca164968d0969ea # pragma: allowlist secret
+    rev: 1cc8d70a8f78133fbf265831d02639365e860b71 # pragma: allowlist secret
     hooks:
       - id: ash-simple-scan
         verbose: false
