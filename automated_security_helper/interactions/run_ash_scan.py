@@ -91,6 +91,9 @@ def run_ash_scan(
     # Record the start time for calculating scan duration
     scan_start_time = time.time()
 
+    source_dir = Path(source_dir).absolute().as_posix()
+    output_dir = Path(output_dir).absolute().as_posix()
+
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
     from automated_security_helper.core.enums import ExecutionStrategy
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator

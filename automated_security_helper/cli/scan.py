@@ -271,13 +271,13 @@ def run_ash_scan_cli_command(
     precommit_mode = mode == RunMode.precommit or str(mode).lower() == "precommit"
     if precommit_mode:
         print(
-            "[green]╭───────────── Running ASH in pre-commit mode with minimal output ─────────────╮[/green]"
+            "[green]-------------- Running ASH in pre-commit mode with minimal output --------------[/green]"
         )
 
     # Call run_ash_scan with all parameters
     run_ash_scan(
-        source_dir=Path(source_dir).absolute().as_posix(),
-        output_dir=Path(output_dir).absolute().as_posix(),
+        source_dir=source_dir,
+        output_dir=output_dir,
         config=config,
         offline=offline,
         strategy=strategy,
