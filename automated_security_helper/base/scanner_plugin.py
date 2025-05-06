@@ -72,6 +72,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.results_dir = self.context.output_dir.joinpath("scanners").joinpath(
             self.config.name
         )
+        self.results_dir.mkdir(parents=True, exist_ok=True)
 
         self._process_config_options()
 
