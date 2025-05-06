@@ -154,7 +154,7 @@ jobs:
           Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
           . ./utils/ash_helpers.ps1
           Get-Help Invoke-ASH -Full
-          Invoke-ASH -SourceDir "$($PWD.Path)" -OutputDir (Join-Path $PWD.Path ".ash" "ash_output") -Verbose -Debug
+          Invoke-ASH -SourceDir "$($PWD.Path)" -OutputDir "$(Join-Path $PWD.Path '.ash' 'ash_output')" -Verbose -Debug
 
       ############ Bash #########
 
