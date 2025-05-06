@@ -78,9 +78,9 @@ function Invoke-ASH {
     Get-Help Invoke-ASH
     #>
     [CmdletBinding()]
-    Param(
-        [parameter(Position=0)]
-        [ValidateScript({Test-Path $_})]
+    param(
+        [parameter(Position = 0)]
+        [ValidateScript({ Test-Path $_ })]
         [string]
         $SourceDir = $PWD.Path,
         [parameter()]
@@ -92,16 +92,23 @@ function Invoke-ASH {
         [parameter()]
         [string]
         $AshImageName = $(if ($null -ne $env:ASH_IMAGE_NAME) {
-            $env:ASH_IMAGE_NAME
-        } else {
-            "automated-security-helper"
-        }),
+                $env:ASH_IMAGE_NAME
+            }
+            else {
+                "automated-security-helper"
+            }),
         [parameter()]
         [switch]
         $NoBuild,
         [parameter()]
         [switch]
         $NoRun,
+        [parameter()]
+        [string[]]
+        $Scanners,
+        [parameter()]
+        [string[]]
+        $ExcludeScanners,
         [parameter()]
         [string]
         $ContainerUID,
@@ -118,13 +125,19 @@ function Invoke-ASH {
         [switch]
         $Offline,
         [parameter()]
+        [switch]
+        $Progress,
+        [parameter()]
+        [switch]
+        $NoFailOnFindings,
+        [parameter()]
         [string]
         $OfflineSemgrepRulesets = "p/ci",
         [parameter(ValueFromRemainingArguments)]
         [string]
         $AshArgs = $null
     )
-    Begin {
+    begin {
         $ashRoot = (Get-Item $PSScriptRoot).Parent.FullName
         $buildArgs = [System.Collections.Generic.List[string]]::new()
         $runArgs = [System.Collections.Generic.List[string]]::new()
@@ -141,11 +154,45 @@ function Invoke-ASH {
         if ("$AshArgs" -match '(\-\-no-color|\-c)') {
             $ashCmdArgs.Add('--no-color')
         }
+        if ($Progress) {
+            $ashCmdArgs.Add('--progress')
+        }
+        else {
+            $ashCmdArgs.Add('--no-progress')
+        }
+        if ($NoFailOnFindings) {
+            $ashCmdArgs.Add('--no-fail-on-findings')
+        }
+        else {
+            $ashCmdArgs.Add('--fail-on-findings')
+        }
+        if ($PSBoundParameters.ContainsKey('Verbose')) {
+            $ashCmdArgs.Add('--verbose')
+        }
+        if ($PSBoundParameters.ContainsKey('Debug')) {
+            $ashCmdArgs.Add('--debug')
+        }
+        if ($Offline) {
+            $ashCmdArgs.Add('--offline')
+        }
+        if ($PSBoundParameters.ContainsKey('Scanners')) {
+            foreach ($scanner in $Scanners) {
+                $ashCmdArgs.Add("--scanners")
+                $ashCmdArgs.Add($scanner)
+            }
+        }
+        if ($PSBoundParameters.ContainsKey('ExcludeScanners')) {
+            foreach ($scanner in $ExcludeScanners) {
+                $ashCmdArgs.Add("--exclude-scanners")
+                $ashCmdArgs.Add($scanner)
+            }
+        }
 
         # Resolve OCI runner
         $runners = if ($null -ne $OCIRunner) {
             @($OCIRunner)
-        } else {
+        }
+        else {
             @('docker', 'finch', 'nerdctl', 'podman')
         }
 
@@ -182,7 +229,7 @@ function Invoke-ASH {
             $runArgs.Add("-t")
         }
     }
-    Process {
+    process {
         try {
             $RESOLVED_OCI_RUNNER = $null
             foreach ($runner in $runners) {
@@ -194,7 +241,8 @@ function Invoke-ASH {
             if ($null -eq $RESOLVED_OCI_RUNNER) {
                 Write-Error "Unable to resolve an OCI_RUNNER -- exiting"
                 exit 1
-            } else {
+            }
+            else {
                 Write-Verbose "Resolved OCI_RUNNER to: $RESOLVED_OCI_RUNNER"
 
                 # Build the container if not skipped
@@ -241,7 +289,7 @@ function Invoke-ASH {
                 # Run the container if not skipped
                 if (-not $NoRun) {
                     Write-Host "Running ASH scan using built image..."
-                    $ashDebug="$(if($PSBoundParameters.ContainsKey('Debug')){"YES"}else{"NO"})".Trim()
+                    $ashDebug = "$(if($PSBoundParameters.ContainsKey('Debug')){"YES"}else{"NO"})".Trim()
                     $runCmd = @(
                         $RESOLVED_OCI_RUNNER
                         'run'
@@ -296,7 +344,8 @@ function Invoke-ASH {
                     return $exitCode
                 }
             }
-        } catch {
+        }
+        catch {
             Write-Error $_
             throw $_
         }
@@ -311,7 +360,7 @@ Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'OCIRunner' -S
         'nerdctl'
         'podman'
     )
-    $exampleOCIRunners | Where-Object {$_ -match $wordToComplete} | ForEach-Object {
+    $exampleOCIRunners | Where-Object { $_ -match $wordToComplete } | ForEach-Object {
         [System.Management.Automation.CompletionResult]::new(
             $_, $_, 'ParameterValue', $_)
     }

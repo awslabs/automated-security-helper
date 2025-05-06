@@ -38,7 +38,7 @@ repos:
         language: system
         pass_filenames: false
         args:
-          - --scanners=bandit
+          - --exclude-scanners=cdk-nag
           - --no-fail-on-findings
           - --output-dir=.ash/ash_output_precommit_local
   - repo: https://github.com/awslabs/automated-security-helper

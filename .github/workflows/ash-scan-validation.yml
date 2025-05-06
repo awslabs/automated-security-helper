@@ -122,11 +122,14 @@ jobs:
 
       - name: Validate ASH using Python + Container
         if: matrix.method == 'python-container'
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        continue-on-error: true
         run: |
           echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }})"
           ashv3 --version
           ashv3 --help
-          ashv3 scan --mode=container --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output"
+          ashv3 scan --mode=container --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'
@@ -137,7 +140,7 @@ jobs:
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
           ashv3 --version
           ashv3 --help
-          ashv3 scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output"
+          ashv3 scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug
 
       ############ PowerShell #########
 
@@ -151,7 +154,7 @@ jobs:
           Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
           . ./utils/ash_helpers.ps1
           Get-Help Invoke-ASH -Full
-          Invoke-ASH -SourceDir "$($PWD.Path)" -OutputDir (Join-Path $PWD.Path ".ash" "ash_output")
+          Invoke-ASH -SourceDir "$($PWD.Path)" -OutputDir (Join-Path $PWD.Path ".ash" "ash_output") -Verbose -Debug
 
       ############ Bash #########
 
@@ -166,16 +169,22 @@ jobs:
           chmod +x ./ash
           ./ash --version
           ./ash --help
-          ./ash --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output"
+          ./ash --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug
 
 
       - name: Verify scan completed
-        shell: bash
+        shell: pwsh
         run: |
-          echo "Verifying scan completed successfully on ${{ matrix.os }} using ${{ matrix.method }}"
-          if [[ -f ".ash/ash_output/ash_aggregated_results.json" ]] && [[ -f ".ash/ash_output/reports/ash.sarif ]]; then
-            echo "Scan completed successfully"
-          else
-            echo "Scan output directory not found"
-            exit 1
-          fi
+          Write-Host "Verifying scan completed successfully on ${{ matrix.os }} using ${{ matrix.method }}"
+          $PathsToValidate = @(
+            ".ash/ash_output/ash_aggregated_results.json"
+            ".ash/ash_output/reports/ash.sarif"
+          )
+          foreach ($ValPath in $PathsToValidate) {
+            if (Test-Path $ValPath) {
+              Write-Host "$ValPath found"
+            } else {
+              Write-Host "$ValPath NOT found"
+              exit 1
+            }
+          }
