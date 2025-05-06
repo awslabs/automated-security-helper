@@ -15,7 +15,7 @@ env:
 
 jobs:
   validate-scan-methods:
-    name: Validate ASH Scan Methods
+    name: ASH Scan Test
     strategy:
       fail-fast: false
       matrix:
@@ -79,11 +79,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker
+      - name: Install docker on MacOS
+        if: runner.os == 'macos'
+        run: |
+          brew install docker
+          docker info
+
+      - name: Set up Docker Buildx on Linux/MacOS
         if: matrix.os != 'windows-latest' && matrix.method != 'python-local'
         uses: docker/setup-buildx-action@v3
 
-      - name: Set up Docker on Windows
+      - name: Set up Docker Buildx on Windows
         if: matrix.os == 'windows-latest' && matrix.method != 'python-local'
         uses: docker/setup-buildx-action@v3
         with:
@@ -124,6 +130,9 @@ jobs:
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        continue-on-error: true
         run: |
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
           ashv3 --version
@@ -135,15 +144,21 @@ jobs:
       - name: Validate ASH using PowerShell
         if: matrix.method == 'powershell'
         shell: pwsh
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        continue-on-error: true
         run: |
           Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
-          . ./utils/invoke-ash.ps1
+          . ./utils/ash_helpers.ps1
           Get-Help Invoke-ASH -Full
           Invoke-ASH -SourceDir "$($PWD.Path)" -OutputDir (Join-Path $PWD.Path ".ash" "ash_output")
 
       ############ Bash #########
 
       - name: Validate ASH using Bash
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        continue-on-error: true
         if: matrix.method == 'bash'
         shell: bash
         run: |

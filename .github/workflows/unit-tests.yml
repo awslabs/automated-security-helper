@@ -12,10 +12,9 @@ on:
 env:
   COLUMNS: 160
 
-
 jobs:
   unit-test:
-    name: Unit Tests - Python ${{ matrix.python-version }} on ${{ matrix.os }} ${{ matrix.arch }}
+    name: Unit Test Python
     runs-on: ${{ matrix.runner }}
     permissions:
       actions: read

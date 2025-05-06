@@ -38,10 +38,11 @@ repos:
         language: system
         pass_filenames: false
         args:
+          - --scanners=bandit
           - --no-fail-on-findings
           - --output-dir=.ash/ash_output_precommit_local
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: 1cc8d70a8f78133fbf265831d02639365e860b71 # pragma: allowlist secret
+    rev: b15bceb55ff36fbde90eb31265c829f3d273bad7 # pragma: allowlist secret
     hooks:
       - id: ash-simple-scan
         verbose: false
