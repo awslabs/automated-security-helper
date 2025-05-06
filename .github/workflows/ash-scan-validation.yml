@@ -139,7 +139,7 @@ jobs:
           echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }})"
           ashv3 --version
           ashv3 --help
-          ashv3 scan --mode=container --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug --no-progress
+          ashv3 scan --mode=container --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug --no-progress
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'
@@ -165,7 +165,7 @@ jobs:
           Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
           . ./utils/ash_helpers.ps1
           Get-Help Invoke-ASH -Full
-          Invoke-ASH -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker
 
       ############ Bash #########
 
@@ -180,7 +180,7 @@ jobs:
           chmod +x ./ash
           ./ash --version
           ./ash --help
-          ./ash --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug
+          ./ash --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug
 
 
       - name: Verify scan completed

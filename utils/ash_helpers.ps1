@@ -119,8 +119,9 @@ function Invoke-ASH {
         [string]
         $OutputFormat = "text",
         [parameter()]
+        [ValidateSet("ci", "non-root")]
         [string]
-        $BuildTarget = "non-root",
+        $BuildTarget = $(if($env:CI -or $env:IsCI){"ci"}else{"non-root"}),
         [parameter()]
         [switch]
         $Offline,
