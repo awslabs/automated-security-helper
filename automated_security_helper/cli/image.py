@@ -535,7 +535,7 @@ def build_ash_image_cli_command(
 #             run_result = cmd_streamer.run_cmd(run_cmd)
 #             # Return the exit code from the run command
 #             if run_result.returncode != 0:
-#                 raise sys.exit(run_result.returncode) from None
+#                 raise sys.sys.exit(run_result.returncode) from None
 #             return sys.exit(run_result.returncode)
 #         except CalledProcessError as e:
 #             raise sys.exit(e.returncode) from None
