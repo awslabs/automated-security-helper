@@ -175,7 +175,7 @@ jobs:
       - name: Verify scan completed
         shell: pwsh
         run: |
-          Write-Host "Verifying scan completed successfully on ${{ matrix.os }} using ${{ matrix.method }}"
+          Write-Host "Verifying scan completed successfully on ${{ matrix.os }} using method '${{ matrix.method }}'"
           $PathsToValidate = @(
             ".ash/ash_output/ash_aggregated_results.json"
             ".ash/ash_output/reports/ash.sarif"
