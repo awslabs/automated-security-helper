@@ -37,7 +37,7 @@ script = "ci/stage_build_assets.py"
 
 [tool.poetry.scripts]
 asharp = 'asharp.asharp:main'
-ashv3 = "automated_security_helper.cli:ash_cli"
+ash = "automated_security_helper.cli:ash_cli"
 schemagen = 'automated_security_helper.schemas.generate_schemas:main'
 get-scan-set = 'automated_security_helper.utils.get_scan_set:main'
 

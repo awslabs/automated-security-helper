@@ -510,7 +510,7 @@ def build_ash_image_cli_command(
 #         run_cmd.append(ash_image_name)
 
 #         # Add ASH command
-#         run_cmd.append("ashv3")
+#         run_cmd.append("ash")
 
 #         # Add ASH arguments
 #         run_cmd.extend(["--source-dir", "/src", "--output-dir", "/out"])

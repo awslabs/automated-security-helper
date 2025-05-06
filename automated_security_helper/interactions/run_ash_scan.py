@@ -348,7 +348,7 @@ def run_ash_scan(
         relative_out_dir = (
             Path(output_dir).relative_to(source_dir)
             if Path(output_dir).is_relative_to(source_dir)
-            else output_dir
+            else Path(output_dir)
         )
         out_dir_alias = os.environ.get(
             "ASH_ACTUAL_OUTPUT_DIR",
