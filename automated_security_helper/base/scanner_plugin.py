@@ -72,7 +72,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.results_dir = self.context.output_dir.joinpath("scanners").joinpath(
             self.config.name
         )
-        self.results_dir.mkdir(parents=True, exist_ok=True)
 
         self._process_config_options()
 
@@ -188,6 +187,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             options: Optional scanner-specific options
         """
         self.start_time = datetime.now(timezone.utc)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
 
         self._scanner_log(
             "Starting scan",
