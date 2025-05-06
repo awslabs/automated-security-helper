@@ -80,7 +80,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install docker on MacOS
-        if: runner.os == 'macos'
+        if: runner.os == 'macos' && matrix.method == 'python-local'
         run: |
           brew install docker
           docker info
