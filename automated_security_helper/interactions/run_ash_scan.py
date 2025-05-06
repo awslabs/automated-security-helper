@@ -200,7 +200,10 @@ def run_ash_scan(
             output_dir = Path(output_dir)
 
             if not quiet and not simple:
-                logger.debug(f"Scanners specified: {scanners}")
+                logger.verbose(f"Source directory: {source_dir.as_posix()}")
+                logger.verbose(f"Output directory: {output_dir.as_posix()}")
+                logger.verbose(f"Scanners specified: {scanners}")
+                logger.verbose(f"Scanners excluded: {exclude_scanners}")
 
             if config is None:
                 for config_file in ASH_CONFIG_FILE_NAMES:
