@@ -140,7 +140,7 @@ jobs:
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
           ashv3 --version
           ashv3 --help
-          ashv3 scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug
+          ashv3 scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress --debug
 
       ############ PowerShell #########
 
