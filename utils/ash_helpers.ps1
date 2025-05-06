@@ -82,10 +82,10 @@ function Invoke-ASH {
         [parameter(Position = 0)]
         [ValidateScript({ Test-Path $_ })]
         [string]
-        $SourceDir = $PWD.Path,
+        $SourceDir = (Get-Location).Path,
         [parameter()]
         [string]
-        $OutputDir = $(Join-Path $PWD.Path '.ash' 'ash_output'),
+        $OutputDir = $(Join-Path (Get-Location).Path '.ash' 'ash_output'),
         [parameter()]
         [string]
         $OCIRunner = $env:ASH_OCI_RUNNER,

@@ -165,7 +165,7 @@ jobs:
           Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
           . ./utils/ash_helpers.ps1
           Get-Help Invoke-ASH -Full
-          Invoke-ASH -Verbose -Debug
+          Invoke-ASH -Verbose -Debug -OCIRunner docker
 
       ############ Bash #########
 
