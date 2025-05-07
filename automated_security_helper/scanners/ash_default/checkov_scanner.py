@@ -250,6 +250,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         except ScannerError as exc:
             raise exc
 
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
+
         try:
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")

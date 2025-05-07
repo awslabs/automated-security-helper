@@ -100,8 +100,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         if self.config is None:
             self.config = BanditScannerConfig()
         self.command = "bandit"
-        self.description = "Bandit is a Python source code security analyzer."
         self.tool_type = "SAST"
+        self.description = "Bandit is a Python source code security analyzer."
         self.tool_version = version("bandit")
         extra_args = [
             ToolExtraArg(
@@ -152,8 +152,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # Bandit is a direct dependency of this Python package. If the Python import
-        # reached this point then we know we're in a valid runtime for this scanner.
         found = find_executable(self.command)
         return found is not None
 
@@ -249,64 +247,61 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             ScannerError: If the scan fails or results cannot be parsed
         """
         try:
-            try:
-                self._pre_scan(
-                    target=target,
-                    target_type=target_type,
-                    config=config,
-                )
-            except ScannerError as exc:
-                raise exc
-
-            target_results_dir = Path(self.results_dir).joinpath(target_type)
-            results_file = target_results_dir.joinpath("bandit.sarif")
-            Path(results_file).parent.mkdir(exist_ok=True, parents=True)
-            self.config.options.excluded_paths.extend(global_ignore_paths)
-
-            final_args = self._resolve_arguments(
-                target=target, results_file=results_file
-            )
-            self._run_subprocess(
-                command=final_args,
-                results_dir=target_results_dir,
-            )
-
-            self._post_scan(
+            self._pre_scan(
                 target=target,
                 target_type=target_type,
+                config=config,
             )
+        except ScannerError as exc:
+            raise exc
 
-            bandit_results = {}
-            with open(results_file, mode="r", encoding="utf-8") as f:
-                bandit_results = json.load(f)
-            try:
-                sarif_report: SarifReport = SarifReport.model_validate(bandit_results)
-                sarif_report.runs[0].invocations = [
-                    Invocation(
-                        commandLine=final_args[0],
-                        arguments=final_args[1:],
-                        startTimeUtc=self.start_time,
-                        endTimeUtc=self.end_time,
-                        executionSuccessful=True,
-                        exitCode=self.exit_code,
-                        exitCodeDescription="\n".join(self.errors),
-                        workingDirectory=ArtifactLocation(
-                            uri=get_shortest_name(input=target),
-                        ),
-                        properties=PropertyBag(
-                            tool=sarif_report.runs[0].tool,
-                        ),
-                    )
-                ]
-            except Exception as e:
-                ASH_LOGGER.warning(f"Failed to parse Bandit results as SARIF: {str(e)}")
-                sarif_report = bandit_results
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
 
-            return sarif_report
+        target_results_dir = Path(self.results_dir).joinpath(target_type)
+        results_file = target_results_dir.joinpath("bandit.sarif")
+        Path(results_file).parent.mkdir(exist_ok=True, parents=True)
+        self.config.options.excluded_paths.extend(global_ignore_paths)
 
+        final_args = self._resolve_arguments(target=target, results_file=results_file)
+        self._run_subprocess(
+            command=final_args,
+            results_dir=target_results_dir,
+        )
+
+        self._post_scan(
+            target=target,
+            target_type=target_type,
+        )
+
+        bandit_results = {}
+        with open(results_file, mode="r", encoding="utf-8") as f:
+            bandit_results = json.load(f)
+        try:
+            sarif_report: SarifReport = SarifReport.model_validate(bandit_results)
+            sarif_report.runs[0].invocations = [
+                Invocation(
+                    commandLine=final_args[0],
+                    arguments=final_args[1:],
+                    startTimeUtc=self.start_time,
+                    endTimeUtc=self.end_time,
+                    executionSuccessful=True,
+                    exitCode=self.exit_code,
+                    exitCodeDescription="\n".join(self.errors),
+                    workingDirectory=ArtifactLocation(
+                        uri=get_shortest_name(input=target),
+                    ),
+                    properties=PropertyBag(
+                        tool=sarif_report.runs[0].tool,
+                    ),
+                )
+            ]
         except Exception as e:
-            # Check if there are useful error details
-            raise ScannerError(f"Bandit scan failed: {str(e)}")
+            ASH_LOGGER.warning(f"Failed to parse Bandit results as SARIF: {str(e)}")
+            sarif_report = bandit_results
+
+        return sarif_report
 
 
 if __name__ == "__main__":

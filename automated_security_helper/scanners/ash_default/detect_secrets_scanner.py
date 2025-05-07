@@ -101,6 +101,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if self.config is None:
             self.config = DetectSecretsScannerConfig()
         self.command = "detect-secrets"
+        self.tool_type = "SECRETS"
         self.tool_version = version("detect-secrets")
         self._secrets_collection = SecretsCollection()
         super().model_post_init(context)
@@ -114,8 +115,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # detect-secrets is a dependency of this Python module, if the Python import got
-        # this far then we know we're in a valid runtime for this scanner.
+        # detect-secrets is a dependency of this Python module and we interact with it
+        # purely through Python. If the Python import got this far then we know we're
+        # in a valid runtime for this scanner.
         return True
 
     def _process_config_options(self):
@@ -190,6 +192,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
+
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
+
         ASH_LOGGER.debug(f"self.config: {self.config}")
         ASH_LOGGER.debug(f"config: {config}")
 

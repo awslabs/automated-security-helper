@@ -27,6 +27,7 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     """
 
     config: T | ReporterPluginConfigBase | None = None
+    dependencies_satisfied: bool = True
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
@@ -65,6 +66,12 @@ class ReporterPluginBase(PluginBase, Generic[T]):
                                      no mappings are available.
         """
         return None
+
+    def validate(self) -> bool:
+        """Validate reporter configuration and requirements.
+
+        Defaults to returning True as most reporter plugins are entirely Python based."""
+        return self.dependencies_satisfied
 
     ### Methods that require implementation by plugins.
     @abstractmethod

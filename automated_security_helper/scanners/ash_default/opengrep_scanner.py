@@ -32,6 +32,7 @@ from automated_security_helper.utils.download_utils import (
     create_url_download_command,
     get_opengrep_url,
 )
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class OpengrepScannerConfigOptions(ScannerOptionsBase):
@@ -109,6 +110,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             self.config = OpengrepScannerConfig()
         self.command = "opengrep"
         self.subcommands = ["scan"]
+        self.tool_type = "SAST"
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,
@@ -188,28 +190,29 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # Check if opengrep is installed
-        try:
-            result = self._run_subprocess(
-                [self.command, "--version"],
-                stdout_preference="return",
-                stderr_preference="return",
-            )
-            if result.get("returncode", 1) != 0:
-                self._scanner_log(
-                    f"OpenGrep is not installed or not working properly: {result.get('stderr', '')}",
-                    level=logging.ERROR,
-                )
-                return False
+        found = find_executable(self.command)
+        return found is not None
+        # try:
+        #     result = self._run_subprocess(
+        #         [self.command, "--version"],
+        #         stdout_preference="return",
+        #         stderr_preference="return",
+        #     )
+        #     if result.get("returncode", 1) != 0:
+        #         self._scanner_log(
+        #             f"OpenGrep is not installed or not working properly: {result.get('stderr', '')}",
+        #             level=logging.ERROR,
+        #         )
+        #         return False
 
-            self.tool_version = result.get("stdout", "").strip()
-            self._scanner_log(
-                f"OpenGrep version: {self.tool_version}", level=logging.INFO
-            )
-            return True
-        except Exception as e:
-            self._scanner_log(f"Error validating OpenGrep: {e}", level=logging.ERROR)
-            return False
+        #     self.tool_version = result.get("stdout", "").strip()
+        #     self._scanner_log(
+        #         f"OpenGrep version: {self.tool_version}", level=logging.INFO
+        #     )
+        #     return True
+        # except Exception as e:
+        #     self._scanner_log(f"Error validating OpenGrep: {e}", level=logging.ERROR)
+        #     return False
 
     def _process_config_options(self):
         ash_stargrep_rules = [
@@ -387,6 +390,10 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
+
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
 
         try:
             target_results_dir = self.results_dir.joinpath(target_type)

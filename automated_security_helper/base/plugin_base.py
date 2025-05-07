@@ -39,6 +39,7 @@ class PluginBase(BaseModel):
     results_dir: Path | None = None
     tool_version: str | None = None
     tool_description: str | None = None
+    dependencies_satisfied: bool = False
     start_time: datetime | None = None
     end_time: datetime | None = None
     exit_code: int = 0

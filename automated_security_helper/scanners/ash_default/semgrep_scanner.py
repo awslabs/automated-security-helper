@@ -93,6 +93,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             self.config = SemgrepScannerConfig()
         self.command = "semgrep"
         self.subcommands = ["scan"]
+        self.tool_type = "SAST"
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,
@@ -274,6 +275,10 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
+
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
 
         try:
             target_results_dir = self.results_dir.joinpath(target_type)

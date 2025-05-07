@@ -43,10 +43,9 @@ repos:
           - --output-dir=.ash/ash_output_precommit_local
           - --no-cleanup
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: f47965cdf52e696386e33cf5f60528736973e669 # pragma: allowlist secret
+    rev: 5669956a4ea26ebc2a27b26a075287f5993ef2b0 # pragma: allowlist secret
     hooks:
       - id: ash-simple-scan
-        verbose: true
         args:
           ## REQUIRED ARGS
           # N/A - ASH pre-commit hooks include `--mode=precommit` by default.

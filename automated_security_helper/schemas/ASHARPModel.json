@@ -15215,6 +15215,11 @@
           "title": "Dependencies",
           "type": "object"
         },
+        "dependencies_satisfied": {
+          "default": false,
+          "title": "Dependencies Satisfied",
+          "type": "boolean"
+        },
         "end_time": {
           "anyOf": [
             {

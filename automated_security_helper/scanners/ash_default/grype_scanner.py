@@ -65,6 +65,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         if self.config is None:
             self.config = GrypeScannerConfig()
         self.command = "grype"
+        self.tool_type = "SAST"
         self.args = ToolArgs(
             format_arg="--output",
             format_arg_value="sarif",
@@ -171,6 +172,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
+
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
 
         try:
             target_results_dir = self.results_dir.joinpath(target_type)

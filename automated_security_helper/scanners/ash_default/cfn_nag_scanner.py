@@ -31,6 +31,7 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class CfnNagScannerConfigOptions(ScannerOptionsBase):
@@ -54,6 +55,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         if self.config is None:
             self.config = CfnNagScannerConfig()
         self.command = "cfn_nag_scan"
+        self.tool_type = "IAC"
         self.rule_directory = ASH_ASSETS_DIR.joinpath("appsec_cfn_rules")
         extra_args = [
             ToolExtraArg(
@@ -115,24 +117,26 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        try:
-            tool_version = self._run_subprocess(
-                command=[self.command, "--version"],
-                results_dir=self.context.output_dir,
-                stdout_preference="return",
-                stderr_preference="return",
-            )
-            if isinstance(tool_version, dict):
-                self.tool_version = tool_version.get("stdout", "").strip()
-            else:
-                self.tool_version = None
+        found = find_executable(self.command)
+        return found is not None
+        # try:
+        #     tool_version = self._run_subprocess(
+        #         command=[self.command, "--version"],
+        #         results_dir=self.context.output_dir,
+        #         stdout_preference="return",
+        #         stderr_preference="return",
+        #     )
+        #     if isinstance(tool_version, dict):
+        #         self.tool_version = tool_version.get("stdout", "").strip()
+        #     else:
+        #         self.tool_version = None
 
-            return self.tool_version is not None
-        except Exception as e:
-            self._scanner_log(
-                f"Error validating {self.config.name} scanner: {e}", level=logging.ERROR
-            )
-            return False
+        #     return self.tool_version is not None
+        # except Exception as e:
+        #     self._scanner_log(
+        #         f"Error validating {self.config.name} scanner: {e}", level=logging.ERROR
+        #     )
+        #     return False
 
     def _process_config_options(self):
         # Add any additional config option parsing here, if necessary
@@ -166,6 +170,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
+
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
 
         try:
             target_results_dir = self.results_dir.joinpath(target_type)

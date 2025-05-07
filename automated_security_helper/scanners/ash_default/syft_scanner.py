@@ -20,6 +20,7 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class SyftScannerConfigOptions(ScannerOptionsBase):
@@ -71,7 +72,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         if self.config is None:
             self.config = SyftScannerConfig()
         self.command = "syft"
-        # self.tool_version = version("syft")
+        self.tool_type = "DEPENDENCY"
         super().model_post_init(context)
 
     @model_validator(mode="after")
@@ -104,9 +105,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # Syft is a dependency this Python module, if the Python import got
-        # this far then we know we're in a valid runtime for this scanner.
-        return True
+        found = find_executable(self.command)
+        return found is not None
 
     def _process_config_options(self):
         # Syft config path
@@ -177,6 +177,10 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
+
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
 
         try:
             target_results_dir = Path(self.results_dir).joinpath(target_type)

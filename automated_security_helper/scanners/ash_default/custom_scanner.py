@@ -120,6 +120,11 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
+
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
+
         ASH_LOGGER.debug(f"self.config: {self.config}")
         ASH_LOGGER.debug(f"config: {config}")
 
