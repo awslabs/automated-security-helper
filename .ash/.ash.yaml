@@ -39,7 +39,7 @@ reporters:
   spdx:
     enabled: false
   yaml:
-    enabled: true
+    enabled: false
 scanners:
   bandit:
     enabled: true

@@ -163,8 +163,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 or pf.name.endswith(".yml")
             ):
                 scannable.append(pf.as_posix())
-        joined_files = "\n- ".join(scannable)
-        ASH_LOGGER.debug(f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}")
 
         if len(scannable) == 0:
             self._scanner_log(
@@ -173,7 +171,16 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 level=logging.WARNING,
                 append_to_stream="stderr",
             )
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return
+        else:
+            joined_files = "\n- ".join(scannable)
+            ASH_LOGGER.debug(
+                f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}"
+            )
 
         # Process each template file
         failed_files = []
@@ -290,12 +297,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 )
             ],
         )
-        with open(outdir.joinpath("ash-cdk-nag.sarif"), "w") as fp:
-            report_str = report.model_dump_json(
+        out_path = outdir.joinpath("ash-cdk-nag.sarif")
+        outdir.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            report.model_dump_json(
                 exclude_none=True,
                 exclude_unset=True,
             )
-            fp.write(report_str)
+        )
 
         return report
 
