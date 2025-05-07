@@ -3,7 +3,7 @@
 from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from automated_security_helper.models.asharp_model import ASHARPModel
+    from automated_security_helper.models.asharp_model import AshAggregatedResult
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -32,7 +32,7 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
             self.config = SARIFReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: "ASHARPModel") -> str:
+    def report(self, model: "AshAggregatedResult") -> str:
         """Format ASH model in SARIF."""
         return model.sarif.model_dump_json(
             by_alias=True,

@@ -8,7 +8,7 @@ from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.core.enums import ExecutionPhase
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResult
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -40,7 +40,7 @@ class ScanPhase(EnginePhase):
         global_ignore_paths: List[IgnorePathWithReason] = None,
         python_based_plugins_only: bool = False,
         **kwargs,
-    ) -> ASHARPModel:
+    ) -> AshAggregatedResult:
         """Execute the Scan phase.
 
         Args:
@@ -51,7 +51,7 @@ class ScanPhase(EnginePhase):
             **kwargs: Additional arguments
 
         Returns:
-            ASHARPModel: Results of the scan
+            AshAggregatedResult: Results of the scan
         """
         ASH_LOGGER.debug("Entering: ScanPhase.execute()")
 
@@ -235,10 +235,10 @@ class ScanPhase(EnginePhase):
                 description="Finalizing scan results...",
             )
 
-            # Save ASHARPModel as JSON alongside results if output_dir is configured
+            # Save AshAggregatedResult as JSON alongside results if output_dir is configured
             if self.plugin_context.output_dir:
                 ASH_LOGGER.debug(
-                    f"Saving ASHARPModel to {self.plugin_context.output_dir}"
+                    f"Saving AshAggregatedResult to {self.plugin_context.output_dir}"
                 )
                 self.asharp_model.save_model(self.plugin_context.output_dir)
 
@@ -492,7 +492,7 @@ class ScanPhase(EnginePhase):
             raise
 
     def _execute_sequential(self) -> None:
-        """Execute scanners sequentially and update ASHARPModel."""
+        """Execute scanners sequentially and update AshAggregatedResult."""
         # On MacOS, qsize() raises NotImplementedError, so we need to count items differently
         # First, get all items from the queue into a list
         scanner_tuples = []
@@ -571,7 +571,7 @@ class ScanPhase(EnginePhase):
                 completed += 1
 
     def _execute_parallel(self) -> None:
-        """Execute scanners in parallel and update ASHARPModel."""
+        """Execute scanners in parallel and update AshAggregatedResult."""
         # Get all scanner tasks from the queue first to avoid qsize() which is not implemented on macOS
         scanner_tuples = []
         while True:
@@ -701,7 +701,7 @@ class ScanPhase(EnginePhase):
                         )
 
     def _process_results(self, results: ScanResultsContainer) -> None:
-        """Process scanner results and update ASHARPModel.
+        """Process scanner results and update AshAggregatedResult.
 
         Args:
             results: Container with scanner results
@@ -863,7 +863,7 @@ class ScanPhase(EnginePhase):
             self.asharp_model.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(results.raw_results, CycloneDXReport):
             self.asharp_model.cyclonedx = results.raw_results
-        elif isinstance(results.raw_results, ASHARPModel):
+        elif isinstance(results.raw_results, AshAggregatedResult):
             self.asharp_model.merge_model(results.raw_results)
         else:
             self.asharp_model.additional_reports[scanner_name][results.target_type][

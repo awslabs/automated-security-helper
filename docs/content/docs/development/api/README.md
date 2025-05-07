@@ -108,7 +108,7 @@
 - [`scanner_factory.ScannerFactory`](./core.scanner_factory.md#class-scannerfactory): Factory class for creating and configuring scanner instances.
 - [`aggregation.FindingAggregator`](./models.aggregation.md#class-findingaggregator): Aggregates and correlates findings from multiple scans.
 - [`aggregation.TrendAnalyzer`](./models.aggregation.md#class-trendanalyzer): Analyzes finding trends over time.
-- [`asharp_model.ASHARPModel`](./models.asharp_model.md#class-asharpmodel): Main model class for parsing security scan reports from ASH tooling.
+- [`asharp_model.AshAggregatedResult`](./models.asharp_model.md#class-asharpmodel): Main model class for parsing security scan reports from ASH tooling.
 - [`core.BaseFinding`](./models.core.md#class-basefinding): Base model for all security findings.
 - [`core.ExportFormat`](./models.core.md#class-exportformat): Supported export formats.
 - [`core.FileInvocationConfig`](./models.core.md#class-fileinvocationconfig): Configuration for file scanning.

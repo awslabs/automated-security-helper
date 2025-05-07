@@ -33,7 +33,7 @@ from automated_security_helper.plugins.interfaces import IConverter, IReporter, 
 from automated_security_helper.config.ash_config import (
     AshConfig,
 )
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResult
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -54,7 +54,7 @@ class ScanExecutionEngine:
         # This takes precedence over enabled_scanners
         excluded_scanners: Optional[List[str]] = [],
         strategy: Optional[ExecutionStrategy] = ExecutionStrategy.PARALLEL,
-        asharp_model: Optional[ASHARPModel] = None,
+        asharp_model: Optional[AshAggregatedResult] = None,
         show_progress: bool = True,
         global_ignore_paths: List[IgnorePathWithReason] = [],
         color_system: str = "auto",
@@ -70,7 +70,7 @@ class ScanExecutionEngine:
             enabled_scanners: List of scanner names to enable. If None, all scanners are enabled.
                 If empty list, no scanners are enabled.
             strategy: Execution strategy to use for scanner execution (default: PARALLEL)
-            asharp_model: Optional ASHARPModel to use for results
+            asharp_model: Optional AshAggregatedResult to use for results
             show_progress: Whether to show progress bars
             global_ignore_paths: List of paths to ignore globally
             color_system: Color system to use for progress display
@@ -89,7 +89,7 @@ class ScanExecutionEngine:
         self._asharp_model = (
             asharp_model
             if asharp_model is not None
-            else ASHARPModel(
+            else AshAggregatedResult(
                 name=f"ASH Scan {datetime.now().isoformat()}",
                 description="Aggregated security scan results",
                 ash_config=context.config,
@@ -360,7 +360,7 @@ class ScanExecutionEngine:
     def execute_phases(
         self,
         phases: List[ExecutionPhaseType] = ["convert", "scan", "report"],
-    ) -> ASHARPModel:
+    ) -> AshAggregatedResult:
         """Execute the specified phases in the correct order.
 
         Args:
@@ -371,7 +371,7 @@ class ScanExecutionEngine:
                 Defaults to None.
 
         Returns:
-            ASHARPModel: The results of the scan.
+            AshAggregatedResult: The results of the scan.
         """
         ASH_LOGGER.debug(f"Entering: ScanExecutionEngine.execute_phases({phases})")
 

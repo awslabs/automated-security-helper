@@ -91,8 +91,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         if self.config is None:
             self.config = CdkNagScannerConfig()
         self.command = "python"
-        self.description = "CDK Nag is a security scanner for AWS CloudFormation templates that applies industry standard checks against AWS infrastructure-as-code."
         self.tool_type = "IAC"
+        self.description = "CDK Nag is a security scanner for AWS CloudFormation templates that applies industry standard checks against AWS infrastructure-as-code."
         self.tool_version = version("cdk_nag")
         return super().model_post_init(context)
 

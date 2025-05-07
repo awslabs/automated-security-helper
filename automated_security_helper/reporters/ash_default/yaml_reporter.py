@@ -5,7 +5,7 @@ import yaml
 from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from automated_security_helper.models.asharp_model import ASHARPModel
+    from automated_security_helper.models.asharp_model import AshAggregatedResult
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -34,7 +34,7 @@ class YamlReporter(ReporterPluginBase[YAMLReporterConfig]):
             self.config = YAMLReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: "ASHARPModel") -> str:
+    def report(self, model: "AshAggregatedResult") -> str:
         """Format ASH model as YAML string."""
 
         return yaml.dump(model.model_dump(by_alias=True), indent=2)

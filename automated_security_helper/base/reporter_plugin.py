@@ -10,7 +10,7 @@ from pydantic import model_validator
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResult
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -75,8 +75,8 @@ class ReporterPluginBase(PluginBase, Generic[T]):
 
     ### Methods that require implementation by plugins.
     @abstractmethod
-    def report(self, model: ASHARPModel) -> str | None:
-        """Execute the reporter against the aggregated ASHARPModel.
+    def report(self, model: AshAggregatedResult) -> str | None:
+        """Execute the reporter against the aggregated AshAggregatedResult.
 
         Returns a string containing the report or the response from the remote
         receiving the report.

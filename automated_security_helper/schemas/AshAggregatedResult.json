@@ -20443,6 +20443,6 @@
       "description": "The SARIF formatted vulnerability report"
     }
   },
-  "title": "ASHARPModel",
+  "title": "AshAggregatedResult",
   "type": "object"
 }

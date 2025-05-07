@@ -26,7 +26,7 @@ from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sa
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
-__all__ = ["ASHARPModel"]
+__all__ = ["AshAggregatedResult"]
 
 
 class ReportMetadata(BaseModel):
@@ -103,7 +103,7 @@ class ReportMetadata(BaseModel):
             )
 
 
-class ASHARPModel(BaseModel):
+class AshAggregatedResult(BaseModel):
     """Main model class for parsing security scan reports from ASH tooling."""
 
     model_config = ConfigDict(
@@ -180,7 +180,7 @@ class ASHARPModel(BaseModel):
         return super().model_post_init(context)
 
     def to_flat_vulnerabilities(self) -> List[FlatVulnerability]:
-        """Convert the ASHARPModel to a list of flattened vulnerability objects.
+        """Convert the AshAggregatedResult to a list of flattened vulnerability objects.
 
         Returns:
             List[FlatVulnerability]: A list of flattened vulnerability objects
@@ -395,15 +395,15 @@ class ASHARPModel(BaseModel):
         return flat_vulns
 
     @classmethod
-    def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "ASHARPModel":
-        """Parse JSON data into an ASHARPModel instance.
+    def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "AshAggregatedResult":
+        """Parse JSON data into an AshAggregatedResult instance.
 
         Args:
             json_data: Either a JSON string or dictionary containing the report data.
                 Must include metadata and findings fields.
 
         Returns:
-            ASHARPModel instance populated with the report data.
+            AshAggregatedResult instance populated with the report data.
 
         Raises:
             ValidationError: If the JSON data is missing required fields or has invalid values.
@@ -431,7 +431,7 @@ class ASHARPModel(BaseModel):
             raise ValueError("Invalid report type")
 
     def save_model(self, output_dir: Path) -> None:
-        """Save ASHARPModel as JSON alongside aggregated results."""
+        """Save AshAggregatedResult as JSON alongside aggregated results."""
 
         report_dir = output_dir.joinpath("reports")
         report_dir.mkdir(parents=True, exist_ok=True)
@@ -447,8 +447,8 @@ class ASHARPModel(BaseModel):
         )
 
     @classmethod
-    def load_model(cls, json_path: Path) -> Optional["ASHARPModel"]:
-        """Load ASHARPModel from JSON file."""
+    def load_model(cls, json_path: Path) -> Optional["AshAggregatedResult"]:
+        """Load AshAggregatedResult from JSON file."""
         if not json_path.exists():
             return None
 
@@ -459,5 +459,5 @@ class ASHARPModel(BaseModel):
 
 
 if __name__ == "__main__":
-    model = ASHARPModel()
+    model = AshAggregatedResult()
     print(model.model_dump_json(indent=2))

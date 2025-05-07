@@ -5,7 +5,7 @@ import json
 from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from automated_security_helper.models.asharp_model import ASHARPModel
+    from automated_security_helper.models.asharp_model import AshAggregatedResult
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -54,7 +54,7 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
             "runs[0].results[0].properties.tags": "tags",
         }
 
-    def report(self, model: "ASHARPModel") -> str:
+    def report(self, model: "AshAggregatedResult") -> str:
         """Format ASH model as JSON string."""
 
         flat_vulns = model.to_flat_vulnerabilities()

@@ -12,10 +12,10 @@ class TestSchemaGeneration:
         schema = generate_schemas("dict")
         assert isinstance(schema, dict)
         assert "AshConfig" in schema
-        assert "ASHARPModel" in schema
+        assert "AshAggregatedResult" in schema
 
         # Check that the schema has the expected structure
         # The schema structure might be different depending on Pydantic version
         # So we just check that we have a dictionary with the expected keys
         assert isinstance(schema["AshConfig"], dict)
-        assert isinstance(schema["ASHARPModel"], dict)
+        assert isinstance(schema["AshAggregatedResult"], dict)

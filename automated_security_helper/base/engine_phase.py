@@ -8,7 +8,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import ReporterPluginBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.enums import ExecutionPhase
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResult
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -23,19 +23,19 @@ class EnginePhase(ABC):
             ConverterPluginBase | ScannerPluginBase | ReporterPluginBase
         ] = [],
         progress_display: Optional[Any] = None,
-        asharp_model: Optional[ASHARPModel] = None,
+        asharp_model: Optional[AshAggregatedResult] = None,
     ):
         """Initialize the engine phase.
 
         Args:
             plugin_context: Plugin context with paths and configuration
             progress_display: Progress display to use for reporting progress
-            asharp_model: ASHARPModel to update with results
+            asharp_model: AshAggregatedResult to update with results
         """
         self.plugin_context = plugin_context
         self.plugins = plugins
         self.progress_display = progress_display
-        self.asharp_model = asharp_model or ASHARPModel()
+        self.asharp_model = asharp_model or AshAggregatedResult()
         self.phase_task = None
 
     @property
