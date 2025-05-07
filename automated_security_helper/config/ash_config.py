@@ -11,15 +11,9 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import ReporterPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
+    ScannerPluginConfigBase,
 )
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.config.scanner_types import (
-    CfnNagScannerConfig,
-    NpmAuditScannerConfig,
-    SemgrepScannerConfig,
-    GrypeScannerConfig,
-    SyftScannerConfig,
-)
 from automated_security_helper.converters.ash_default.archive_converter import (
     ArchiveConverterConfig,
 )
@@ -75,17 +69,29 @@ from automated_security_helper.scanners.ash_default.bandit_scanner import (
 from automated_security_helper.scanners.ash_default.cdk_nag_scanner import (
     CdkNagScannerConfig,
 )
+from automated_security_helper.scanners.ash_default.cfn_nag_scanner import (
+    CfnNagScannerConfig,
+)
 from automated_security_helper.scanners.ash_default.checkov_scanner import (
     CheckovScannerConfig,
-)
-from automated_security_helper.scanners.ash_default.custom_scanner import (
-    CustomScannerConfig,
 )
 from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
     DetectSecretsScannerConfig,
 )
+from automated_security_helper.scanners.ash_default.grype_scanner import (
+    GrypeScannerConfig,
+)
+from automated_security_helper.scanners.ash_default.npm_audit_scanner import (
+    NpmAuditScannerConfig,
+)
 from automated_security_helper.scanners.ash_default.opengrep_scanner import (
     OpengrepScannerConfig,
+)
+from automated_security_helper.scanners.ash_default.semgrep_scanner import (
+    SemgrepScannerConfig,
+)
+from automated_security_helper.scanners.ash_default.syft_scanner import (
+    SyftScannerConfig,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -140,7 +146,7 @@ class ScannerConfigSegment(BaseModel):
         extra="allow",
     )
 
-    __pydantic_extra__: Dict[str, Any | CustomScannerConfig] = {}
+    __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
 
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
@@ -457,8 +463,7 @@ class AshConfig(BaseModel):
             scanner.config.name: scanner for scanner in self.build.custom_scanners
         }
         scanner: (
-            CustomScannerConfig
-            | BanditScannerConfig
+            BanditScannerConfig
             | CdkNagScannerConfig
             | CfnNagScannerConfig
             | CheckovScannerConfig

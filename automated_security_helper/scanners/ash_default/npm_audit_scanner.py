@@ -64,6 +64,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         if self.config is None:
             self.config = NpmAuditScannerConfig()
         self.command = "npm"
+        self.tool_type = "DEPENDENCY"
         self.args = ToolArgs(
             format_arg="--output",
             format_arg_value="json",
@@ -282,6 +283,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             )
         except ScannerError as exc:
             raise exc
+
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
 
         try:
             target_results_dir = self.results_dir.joinpath(target_type)

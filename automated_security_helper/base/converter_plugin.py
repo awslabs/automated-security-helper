@@ -26,6 +26,7 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     """
 
     config: T | ConverterPluginConfigBase | None = None
+    dependencies_satisfied: bool = True
 
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
@@ -56,11 +57,11 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         if config:
             self.config = config
 
-    ### Methods that require implementation by plugins.
-    @abstractmethod
     def validate(self) -> bool:
-        """Validate converter configuration and requirements."""
-        pass
+        """Validate converter configuration and requirements.
+
+        Defaults to returning True as most converter plugins are entirely Python based."""
+        return True
 
     @abstractmethod
     def convert(self, target: Path | str) -> List[Path]:

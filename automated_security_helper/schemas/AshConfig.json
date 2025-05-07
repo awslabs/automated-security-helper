@@ -282,8 +282,7 @@
               "name": "cfn-nag",
               "options": {
                 "severity_threshold": null
-              },
-              "type": "IAC"
+              }
             },
             "checkov": {
               "enabled": true,
@@ -321,17 +320,18 @@
               "enabled": true,
               "name": "grype",
               "options": {
+                "config_file": null,
+                "offline": false,
                 "severity_threshold": null
-              },
-              "type": "SAST"
+              }
             },
             "npm-audit": {
               "enabled": true,
               "name": "npm-audit",
               "options": {
+                "offline": false,
                 "severity_threshold": null
-              },
-              "type": "DEPENDENCY"
+              }
             },
             "opengrep": {
               "enabled": true,
@@ -352,20 +352,32 @@
               }
             },
             "semgrep": {
-              "enabled": true,
+              "enabled": false,
               "name": "semgrep",
               "options": {
+                "config": "auto",
+                "exclude": [
+                  "*-converted.py",
+                  "*_report_result.txt"
+                ],
+                "exclude_rule": [],
+                "metrics": "auto",
+                "offline": false,
+                "severity": [],
                 "severity_threshold": null
-              },
-              "type": "SAST"
+              }
             },
             "syft": {
               "enabled": true,
               "name": "syft",
               "options": {
+                "additional_outputs": [
+                  "syft-table"
+                ],
+                "config_file": null,
+                "exclude": [],
                 "severity_threshold": null
-              },
-              "type": "SBOM"
+              }
             }
           },
           "description": "Scanner configurations by name."
@@ -705,11 +717,9 @@
     },
     "CfnNagScannerConfig": {
       "additionalProperties": true,
-      "description": "CFN Nag IAC SAST scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -720,30 +730,41 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
+          "$ref": "#/$defs/CfnNagScannerConfigOptions",
           "default": {
             "severity_threshold": null
           },
-          "description": "Enable CFN Nag IAC scanner"
-        },
-        "type": {
-          "default": "IAC",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
+          "description": "Configure CFN Nag scanner"
         }
       },
       "title": "CfnNagScannerConfig",
+      "type": "object"
+    },
+    "CfnNagScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "CfnNagScannerConfigOptions",
       "type": "object"
     },
     "CheckovScannerConfig": {
@@ -1038,74 +1059,6 @@
         "args"
       ],
       "title": "CustomCommand",
-      "type": "object"
-    },
-    "CustomScannerConfig": {
-      "additionalProperties": true,
-      "description": "Custom scanner configuration.",
-      "properties": {
-        "enabled": {
-          "default": true,
-          "title": "Enabled",
-          "type": "boolean"
-        },
-        "name": {
-          "default": "custom",
-          "title": "Name",
-          "type": "string"
-        },
-        "options": {
-          "$ref": "#/$defs/CustomScannerConfigOptions",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Configure custom scanner"
-        },
-        "type": {
-          "default": "CUSTOM",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "title": "CustomScannerConfig",
-      "type": "object"
-    },
-    "CustomScannerConfigOptions": {
-      "additionalProperties": true,
-      "properties": {
-        "severity_threshold": {
-          "anyOf": [
-            {
-              "enum": [
-                "ALL",
-                "LOW",
-                "MEDIUM",
-                "HIGH",
-                "CRITICAL"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
-          "title": "Severity Threshold"
-        }
-      },
-      "title": "CustomScannerConfigOptions",
       "type": "object"
     },
     "CycloneDXReporterConfig": {
@@ -1410,11 +1363,9 @@
     },
     "GrypeScannerConfig": {
       "additionalProperties": true,
-      "description": "Grype SAST scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -1425,30 +1376,65 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
+          "$ref": "#/$defs/GrypeScannerConfigOptions",
           "default": {
+            "config_file": null,
+            "offline": false,
             "severity_threshold": null
           },
           "description": "Configure Grype scanner"
-        },
-        "type": {
-          "default": "SAST",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
         }
       },
       "title": "GrypeScannerConfig",
+      "type": "object"
+    },
+    "GrypeScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to Grype configuration file, relative to current source directory. Defaults to searching for `.grype.yaml` and `.grype.yml` in the root of the source directory.",
+          "title": "Config File"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, disabling database updates and validation",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "GrypeScannerConfigOptions",
       "type": "object"
     },
     "HTMLReporterConfig": {
@@ -1643,11 +1629,9 @@
     },
     "NpmAuditScannerConfig": {
       "additionalProperties": true,
-      "description": "JS/TS Dependency scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -1658,30 +1642,48 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
+          "$ref": "#/$defs/NpmAuditScannerConfigOptions",
           "default": {
+            "offline": false,
             "severity_threshold": null
           },
-          "description": "Enable NPM/PNPM/Yarn Audit dependency scanner"
-        },
-        "type": {
-          "default": "DEPENDENCY",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
+          "description": "Configure NpmAudit scanner"
         }
       },
       "title": "NpmAuditScannerConfig",
+      "type": "object"
+    },
+    "NpmAuditScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, using locally cached data",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "NpmAuditScannerConfigOptions",
       "type": "object"
     },
     "OCSFReporterConfig": {
@@ -2186,7 +2188,7 @@
         "anyOf": [
           {},
           {
-            "$ref": "#/$defs/CustomScannerConfig"
+            "$ref": "#/$defs/ScannerPluginConfigBase"
           }
         ]
       },
@@ -2232,8 +2234,7 @@
             "name": "cfn-nag",
             "options": {
               "severity_threshold": null
-            },
-            "type": "IAC"
+            }
           },
           "description": "Configure the options for CfnNag"
         },
@@ -2283,9 +2284,10 @@
             "enabled": true,
             "name": "grype",
             "options": {
+              "config_file": null,
+              "offline": false,
               "severity_threshold": null
-            },
-            "type": "SAST"
+            }
           },
           "description": "Configure the options for Grype"
         },
@@ -2295,9 +2297,9 @@
             "enabled": true,
             "name": "npm-audit",
             "options": {
+              "offline": false,
               "severity_threshold": null
-            },
-            "type": "DEPENDENCY"
+            }
           },
           "description": "Configure the options for NpmAudit"
         },
@@ -2326,12 +2328,20 @@
         "semgrep": {
           "$ref": "#/$defs/SemgrepScannerConfig",
           "default": {
-            "enabled": true,
+            "enabled": false,
             "name": "semgrep",
             "options": {
+              "config": "auto",
+              "exclude": [
+                "*-converted.py",
+                "*_report_result.txt"
+              ],
+              "exclude_rule": [],
+              "metrics": "auto",
+              "offline": false,
+              "severity": [],
               "severity_threshold": null
-            },
-            "type": "SAST"
+            }
           },
           "description": "Configure the options for Semgrep"
         },
@@ -2341,9 +2351,13 @@
             "enabled": true,
             "name": "syft",
             "options": {
+              "additional_outputs": [
+                "syft-table"
+              ],
+              "config_file": null,
+              "exclude": [],
               "severity_threshold": null
-            },
-            "type": "SBOM"
+            }
           },
           "description": "Configure the options for Syft"
         }
@@ -2452,6 +2466,11 @@
           "description": "Dependencies by platform and architecture",
           "title": "Dependencies",
           "type": "object"
+        },
+        "dependencies_satisfied": {
+          "default": false,
+          "title": "Dependencies Satisfied",
+          "type": "boolean"
         },
         "end_time": {
           "anyOf": [
@@ -2599,11 +2618,9 @@
     },
     "SemgrepScannerConfig": {
       "additionalProperties": true,
-      "description": "Semgrep SAST scanner configuration.",
       "properties": {
         "enabled": {
-          "default": true,
-          "description": "Whether the custom scanner is enabled.",
+          "default": false,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -2614,39 +2631,115 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
+          "$ref": "#/$defs/SemgrepScannerConfigOptions",
           "default": {
+            "config": "auto",
+            "exclude": [
+              "*-converted.py",
+              "*_report_result.txt"
+            ],
+            "exclude_rule": [],
+            "metrics": "auto",
+            "offline": false,
+            "severity": [],
             "severity_threshold": null
           },
           "description": "Configure Semgrep scanner"
-        },
-        "type": {
-          "default": "SAST",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
         }
       },
       "title": "SemgrepScannerConfig",
       "type": "object"
     },
+    "SemgrepScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config": {
+          "default": "auto",
+          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+          "title": "Config",
+          "type": "string"
+        },
+        "exclude": {
+          "default": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "description": "Skip any file or directory whose path matches the pattern.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude",
+          "type": "array"
+        },
+        "exclude_rule": {
+          "default": [],
+          "description": "Skip any rule with the given id.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Rule",
+          "type": "array"
+        },
+        "metrics": {
+          "default": "auto",
+          "description": "Configures how usage metrics are sent to the Semgrep server.",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "title": "Metrics",
+          "type": "string"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, using locally cached rules.",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "severity": {
+          "default": [],
+          "description": "Report findings only from rules matching the supplied severity level.",
+          "items": {
+            "enum": [
+              "INFO",
+              "WARNING",
+              "ERROR"
+            ],
+            "type": "string"
+          },
+          "title": "Severity",
+          "type": "array"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "SemgrepScannerConfigOptions",
+      "type": "object"
+    },
     "SyftScannerConfig": {
       "additionalProperties": true,
-      "description": "Syft SBOM scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
-          "description": "Whether the custom scanner is enabled.",
           "title": "Enabled",
           "type": "boolean"
         },
@@ -2657,30 +2750,90 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
+          "$ref": "#/$defs/SyftScannerConfigOptions",
           "default": {
+            "additional_outputs": [
+              "syft-table"
+            ],
+            "config_file": null,
+            "exclude": [],
             "severity_threshold": null
           },
           "description": "Configure Syft scanner"
-        },
-        "type": {
-          "default": "SBOM",
-          "enum": [
-            "CONTAINER",
-            "DAST",
-            "DEPENDENCY",
-            "IAC",
-            "SAST",
-            "SBOM",
-            "SECRETS",
-            "UNKNOWN",
-            "CUSTOM"
-          ],
-          "title": "Type",
-          "type": "string"
         }
       },
       "title": "SyftScannerConfig",
+      "type": "object"
+    },
+    "SyftScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "additional_outputs": {
+          "default": [
+            "syft-table"
+          ],
+          "description": "List of additional formats to output. Defaults to syft-table.",
+          "items": {
+            "enum": [
+              "cyclonedx-json",
+              "cyclonedx-xml",
+              "github-json",
+              "spdx-json",
+              "spdx-tag-value",
+              "syft-json",
+              "syft-table",
+              "syft-text"
+            ],
+            "type": "string"
+          },
+          "title": "Additional Outputs",
+          "type": "array"
+        },
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to Syft configuration file, relative to current source directory. Defaults to searching for `.syft.yaml` and `.syft.yml` in the root of the source directory.",
+          "title": "Config File"
+        },
+        "exclude": {
+          "default": [],
+          "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
+          "items": {
+            "$ref": "#/$defs/IgnorePathWithReason"
+          },
+          "title": "Exclude",
+          "type": "array"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "SyftScannerConfigOptions",
       "type": "object"
     },
     "TextReporterConfig": {

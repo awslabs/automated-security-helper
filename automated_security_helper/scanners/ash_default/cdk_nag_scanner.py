@@ -136,6 +136,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         except ScannerError as exc:
             raise exc
 
+        if not self.dependencies_satisfied:
+            # Logging of this has been done in the central self._pre_scan() method.
+            return
+
         # Find all files to scan from the scan set
         orig_scannable = (
             [item for item in self.context.work_dir.glob("**/*.*")]

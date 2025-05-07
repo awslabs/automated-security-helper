@@ -28,6 +28,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     """
 
     config: T | ScannerPluginConfigBase | None = None
+    dependencies_satisfied: bool = False
 
     tool_type: str = "UNKNOWN"
 
@@ -189,6 +190,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.start_time = datetime.now(timezone.utc)
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
+        self.dependencies_satisfied = self.validate()
+
+        if not self.dependencies_satisfied:
+            self._scanner_log(
+                "Scanner dependencies were not satisfied, unable to start scan!",
+                target_type=target_type,
+                level=logging.WARNING,
+                append_to_stream="stderr",
+            )
+            return
+
         self._scanner_log(
             "Starting scan",
             target_type=target_type,
@@ -309,14 +321,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return {"error": str(e)}
 
     ### Methods that require implementation by plugins.
-    @abstractmethod
     def validate(self) -> bool:
-        """Validate scanner configuration.
-
-        Returns:
-            bool: True if validation passes
-        """
-        pass
+        """Validate scanner configuration and requirements."""
+        return self.dependencies_satisfied
 
     @abstractmethod
     def scan(

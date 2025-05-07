@@ -7,7 +7,6 @@ from automated_security_helper.scanners.ash_default.cfn_nag_scanner import CfnNa
 from automated_security_helper.scanners.ash_default.checkov_scanner import (
     CheckovScanner,
 )
-from automated_security_helper.scanners.ash_default.custom_scanner import CustomScanner
 from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
     DetectSecretsScanner,
 )
@@ -26,7 +25,6 @@ __all__ = [
     "CdkNagScanner",
     "CfnNagScanner",
     "CheckovScanner",
-    "CustomScanner",
     "DetectSecretsScanner",
     "GrypeScanner",
     "NpmAuditScanner",
