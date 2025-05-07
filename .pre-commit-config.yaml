@@ -43,7 +43,7 @@ repos:
           - --output-dir=.ash/ash_output_precommit_local
           - --no-cleanup
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: 5669956a4ea26ebc2a27b26a075287f5993ef2b0 # pragma: allowlist secret
+    rev: a84dec1b7ba96875765ec9b522dd4fa64a226423 # pragma: allowlist secret
     hooks:
       - id: ash-simple-scan
         args:

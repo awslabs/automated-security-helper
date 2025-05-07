@@ -94,6 +94,15 @@ class EnginePhase(ABC):
             python_based_plugins_only=python_based_plugins_only, **kwargs
         )
 
+        # Update summary statistics if the method exists
+        if hasattr(self, "_update_summary_stats") and callable(
+            getattr(self, "_update_summary_stats")
+        ):
+            ASH_LOGGER.debug(
+                f"EnginePhase.execute: Updating summary statistics for {self.phase_name}"
+            )
+            self._update_summary_stats()
+
         # Notify phase complete
         complete_event = f"{self.phase_name.upper()}_COMPLETE"
         ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {complete_event} event")

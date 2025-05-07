@@ -1,6 +1,15 @@
 from enum import Enum
 
 
+class ScannerStatus(str, Enum):
+    """Status of a scanner execution."""
+
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    MISSING = "MISSING"
+    SKIPPED = "SKIPPED"
+
+
 class ReportFormat(str, Enum):
     """Supported report formats."""
 

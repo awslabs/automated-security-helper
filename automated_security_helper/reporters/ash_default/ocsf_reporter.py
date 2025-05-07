@@ -62,7 +62,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
         metadata = Metadata(
             product=product,
-            version="1.0.0",  # OCSF schema version
+            version="1.1.0",  # OCSF schema version
             logged_time=current_time_ms,
         )
 
@@ -184,6 +184,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 type_uid=200201,  # Vulnerability Finding type ID
                 class_uid=2002,  # Vulnerability Finding class ID
                 category_uid=2,  # Vulnerability Finding category ID
+                category_name="Findings",
                 time=current_time_ms,
                 metadata=metadata,
                 finding_info=finding_info,
@@ -208,7 +209,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                             "vendor_name": "Amazon Web Services",
                             "version": get_ash_version(),
                         },
-                        "version": "1.0.0",
+                        "version": "1.1.0",
                         "logged_time": current_time_ms,
                     },
                     "vulnerabilities_count": len(vulnerabilities),

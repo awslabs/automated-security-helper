@@ -8,10 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
+from automated_security_helper.core.enums import ExportFormat, ScannerStatus
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from typing import TYPE_CHECKING, Annotated, Dict, Any, Optional, Union, List
-from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Run,
@@ -27,6 +27,14 @@ if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
 __all__ = ["AshAggregatedResults"]
+
+
+class ScannerStatusInfo(BaseModel):
+    """Information about scanner status."""
+
+    status: ScannerStatus = ScannerStatus.PASSED
+    dependencies_satisfied: bool = True
+    excluded: bool = False
 
 
 class ReportMetadata(BaseModel):
@@ -71,7 +79,12 @@ class ReportMetadata(BaseModel):
         "low": 0,
         "info": 0,
         "actionable": 0,
+        "passed": 0,
+        "failed": 0,
+        "missing": 0,
+        "skipped": 0,
     }
+    scanner_status: Dict[str, ScannerStatusInfo] = Field(default_factory=dict)
 
     @field_validator("project_name")
     @classmethod

@@ -6,6 +6,8 @@ from typing import Annotated, Any, Dict, Literal
 
 from pydantic import BaseModel, Field
 
+from automated_security_helper.core.enums import ScannerStatus
+
 
 class ScanResultsContainer(BaseModel):
     """Container for scanner results with metadata."""
@@ -56,6 +58,11 @@ class ScanResultsContainer(BaseModel):
         Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None
     ) = None
     status: Literal["passed", "failed", "warning"] = "passed"
+
+    # New properties for tracking scanner status
+    scanner_status: ScannerStatus = ScannerStatus.PASSED
+    dependencies_satisfied: bool = True
+    excluded: bool = False
 
     def add_metadata(self, key: str, value: Any) -> None:
         """Add metadata to the container.
