@@ -472,7 +472,7 @@ def display_metrics_table(
             "  - [bold red]FAILED[/bold red] = Findings at or above threshold\n"
             "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
             "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
-            "- [bold]*Threshold*[/bold] (Thresh): The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
+            "- [bold]*Threshold (Thresh)*[/bold]: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
             "- [bold]*Example*[/bold]: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
         )
         help_panel = Panel(
