@@ -354,7 +354,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
         config: OpengrepScannerConfig | None = None,
-    ) -> SarifReport:
+    ) -> SarifReport | bool:
         """Execute Opengrep scan and return results.
 
         Args:
@@ -380,20 +380,22 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 level=20,
                 append_to_stream="stderr",  # This will add the message to self.errors
             )
-            return
+            return True
 
         try:
-            self._pre_scan(
+            validated = self._pre_scan(
                 target=target,
                 target_type=target_type,
                 config=config,
             )
+            if not validated:
+                return False
         except ScannerError as exc:
             raise exc
 
         if not self.dependencies_satisfied:
             # Logging of this has been done in the central self._pre_scan() method.
-            return
+            return False
 
         try:
             target_results_dir = self.results_dir.joinpath(target_type)

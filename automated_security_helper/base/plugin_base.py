@@ -29,7 +29,9 @@ class PluginBase(BaseModel):
     """Base plugin class with common functionality for all plugin types."""
 
     model_config = ConfigDict(
-        extra="allow", arbitrary_types_allowed=True, use_enum_values=True
+        extra="allow",
+        arbitrary_types_allowed=True,
+        use_enum_values=True,
     )
     context: PluginContext | None = None
     config: PluginConfigBase | None = None
