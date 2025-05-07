@@ -405,7 +405,7 @@ def run_ash_scan(
             print("\n[magenta]=== Actionable findings detected! ===[/magenta]")
             print("To investigate...")
             print(
-                "  1. Open one of the summary reports for a user-friendly table of the findings: '{out_dir_alias}/reports/ash.html'"
+                "  1. Open one of the summary reports for a user-friendly table of the findings:"
             )
             print(
                 f"    - HTML report of all findings: '{out_dir_alias}/reports/ash.html'"
