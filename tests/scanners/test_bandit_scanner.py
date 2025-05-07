@@ -121,11 +121,16 @@ def test_bandit_scanner_scan(test_bandit_scanner, test_source_dir):
     assert results is not None
 
 
-def test_bandit_scanner_scan_error(test_bandit_scanner):
+def test_bandit_scanner_scan_nonexistent_path(test_bandit_scanner):
     """Test BanditScanner scan method with error."""
     # Try to scan a non-existent directory
-    with pytest.raises(Exception):
-        test_bandit_scanner.scan(Path("/nonexistent"), target_type="source")
+    resp = test_bandit_scanner.scan(Path("/nonexistent"), target_type="source")
+    assert resp is not None
+    assert resp is True
+    assert (
+        "(bandit) Target directory /nonexistent is empty or doesn't exist. Skipping scan."
+        in test_bandit_scanner.errors
+    )
 
 
 def test_bandit_scanner_additional_formats(test_plugin_context):

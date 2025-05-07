@@ -254,7 +254,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             self._scanner_log(
                 message,
                 target_type=target_type,
-                level=20,
+                level=15,
                 append_to_stream="stderr",  # This will add the message to self.errors
             )
             return True

@@ -128,9 +128,6 @@ def test_process_config_options_skip_paths(test_plugin_context):
 
 def test_checkov_scanner_scan(test_checkov_scanner, test_data_dir):
     """Test CheckovScanner scan method."""
-    # Use a test CloudFormation template
-    test_template = test_data_dir.joinpath("scanners/cdk/insecure-s3-template.yaml")
-
     # Mock the scan to avoid actual execution
     import unittest.mock
 
@@ -140,7 +137,7 @@ def test_checkov_scanner_scan(test_checkov_scanner, test_data_dir):
         unittest.mock.patch("json.load", return_value={}),
     ):
         # Run the scan
-        results = test_checkov_scanner.scan(test_template, target_type="source")
+        results = test_checkov_scanner.scan(test_data_dir, target_type="source")
 
     # Check that results were returned
     assert results is not None
@@ -149,8 +146,13 @@ def test_checkov_scanner_scan(test_checkov_scanner, test_data_dir):
 def test_checkov_scanner_scan_error(test_checkov_scanner):
     """Test CheckovScanner scan method with error."""
     # Try to scan a non-existent directory
-    with pytest.raises(Exception):
-        test_checkov_scanner.scan(Path("/nonexistent"), target_type="source")
+    resp = test_checkov_scanner.scan(Path("/nonexistent"), target_type="source")
+    assert resp is not None
+    assert resp is True
+    assert (
+        "(checkov) Target directory /nonexistent is empty or doesn't exist. Skipping scan."
+        in test_checkov_scanner.errors
+    )
 
 
 def test_checkov_scanner_additional_formats(test_plugin_context):

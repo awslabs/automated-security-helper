@@ -191,29 +191,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             ScannerError: If validation fails
         """
         found = find_executable(self.command)
-        ASH_LOGGER.warning(f"---- FOUND OPENGREP?? {found} ----")
         return found is not None
-        # try:
-        #     result = self._run_subprocess(
-        #         [self.command, "--version"],
-        #         stdout_preference="return",
-        #         stderr_preference="return",
-        #     )
-        #     if result.get("returncode", 1) != 0:
-        #         self._scanner_log(
-        #             f"OpenGrep is not installed or not working properly: {result.get('stderr', '')}",
-        #             level=logging.ERROR,
-        #         )
-        #         return False
-
-        #     self.tool_version = result.get("stdout", "").strip()
-        #     self._scanner_log(
-        #         f"OpenGrep version: {self.tool_version}", level=logging.INFO
-        #     )
-        #     return True
-        # except Exception as e:
-        #     self._scanner_log(f"Error validating OpenGrep: {e}", level=logging.ERROR)
-        #     return False
 
     def _process_config_options(self):
         ash_stargrep_rules = [
