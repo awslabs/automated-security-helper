@@ -12,7 +12,7 @@ from automated_security_helper.core.constants import (
     ASH_REPO_URL,
     ASH_WORK_DIR_NAME,
 )
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -59,7 +59,7 @@ def sample_ash_model():
         if "jupyter" in converters and converters["jupyter"] is True:
             converters["jupyter"] = {"name": "jupyter", "enabled": True}
 
-    model = ASHARPModel(**sample_aggregated_results)
+    model = AshAggregatedResults(**sample_aggregated_results)
     return model
 
 

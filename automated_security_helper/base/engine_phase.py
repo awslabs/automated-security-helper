@@ -8,7 +8,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import ReporterPluginBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.enums import ExecutionPhase
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -23,19 +23,19 @@ class EnginePhase(ABC):
             ConverterPluginBase | ScannerPluginBase | ReporterPluginBase
         ] = [],
         progress_display: Optional[Any] = None,
-        asharp_model: Optional[ASHARPModel] = None,
+        asharp_model: Optional[AshAggregatedResults] = None,
     ):
         """Initialize the engine phase.
 
         Args:
             plugin_context: Plugin context with paths and configuration
             progress_display: Progress display to use for reporting progress
-            asharp_model: ASHARPModel to update with results
+            asharp_model: AshAggregatedResults to update with results
         """
         self.plugin_context = plugin_context
         self.plugins = plugins
         self.progress_display = progress_display
-        self.asharp_model = asharp_model or ASHARPModel()
+        self.asharp_model = asharp_model or AshAggregatedResults()
         self.phase_task = None
 
     @property
@@ -93,6 +93,15 @@ class EnginePhase(ABC):
         results = self._execute_phase(
             python_based_plugins_only=python_based_plugins_only, **kwargs
         )
+
+        # Update summary statistics if the method exists
+        if hasattr(self, "_update_summary_stats") and callable(
+            getattr(self, "_update_summary_stats")
+        ):
+            ASH_LOGGER.debug(
+                f"EnginePhase.execute: Updating summary statistics for {self.phase_name}"
+            )
+            self._update_summary_stats()
 
         # Notify phase complete
         complete_event = f"{self.phase_name.upper()}_COMPLETE"

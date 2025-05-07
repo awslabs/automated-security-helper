@@ -17,43 +17,43 @@
 
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/models/asharp_model.py#L36"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
-## <kbd>class</kbd> `ASHARPModel`
-Main model class for parsing security scan reports from ASH tooling. 
+## <kbd>class</kbd> `AshAggregatedResults`
+Main model class for parsing security scan reports from ASH tooling.
 
 
 ---
 
 #### <kbd>property</kbd> model_extra
 
-Get extra fields set during validation. 
+Get extra fields set during validation.
 
 
 
 **Returns:**
-  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`. 
+  A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`.
 
 ---
 
 #### <kbd>property</kbd> model_fields_set
 
-Returns the set of fields that have been explicitly set on this model instance. 
+Returns the set of fields that have been explicitly set on this model instance.
 
 
 
 **Returns:**
-  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults. 
+  A set of strings representing the fields that have been set,  i.e. that were not filled from defaults.
 
 ---
 
 #### <kbd>property</kbd> scanners
 
-Get scanners as Scanner objects for backward compatibility. 
+Get scanners as Scanner objects for backward compatibility.
 
 
 
 **Returns:**
- 
- - <b>`List[Scanner]`</b>:  List of Scanner objects converted from scanners_used data.  Returns empty list if no scanners are defined. 
+
+ - <b>`List[Scanner]`</b>:  List of Scanner objects converted from scanners_used data.  Returns empty list if no scanners are defined.
 
 
 
@@ -67,13 +67,13 @@ Get scanners as Scanner objects for backward compatibility.
 add_report(reporter: str, report: SarifReport | CycloneDXReport | str)
 ```
 
-Add a report to the model. 
+Add a report to the model.
 
 
 
 **Args:**
- 
- - <b>`report`</b>:  The report to add. Can be a SarifReport, CycloneDXReport, or a JSON string. 
+
+ - <b>`report`</b>:  The report to add. Can be a SarifReport, CycloneDXReport, or a JSON string.
 
 ---
 
@@ -85,7 +85,7 @@ Add a report to the model.
 format(output_formats: List[ExportFormat], output_dir: Path | None = None) → str
 ```
 
-Format ASH model using specified formatter. 
+Format ASH model using specified formatter.
 
 ---
 
@@ -94,27 +94,27 @@ Format ASH model using specified formatter.
 ### <kbd>classmethod</kbd> `from_json`
 
 ```python
-from_json(json_data: Union[str, Dict[str, Any]]) → ASHARPModel
+from_json(json_data: Union[str, Dict[str, Any]]) → AshAggregatedResults
 ```
 
-Parse JSON data into an ASHARPModel instance. 
+Parse JSON data into an AshAggregatedResults instance.
 
 
 
 **Args:**
- 
- - <b>`json_data`</b>:  Either a JSON string or dictionary containing the report data.  Must include metadata and findings fields. 
+
+ - <b>`json_data`</b>:  Either a JSON string or dictionary containing the report data.  Must include metadata and findings fields.
 
 
 
 **Returns:**
- ASHARPModel instance populated with the report data. 
+ AshAggregatedResults instance populated with the report data.
 
 
 
 **Raises:**
- 
- - <b>`ValidationError`</b>:  If the JSON data is missing required fields or has invalid values. 
+
+ - <b>`ValidationError`</b>:  If the JSON data is missing required fields or has invalid values.
 
 ---
 
@@ -123,10 +123,10 @@ Parse JSON data into an ASHARPModel instance.
 ### <kbd>classmethod</kbd> `load_model`
 
 ```python
-load_model(json_path: Path) → Optional[ForwardRef('ASHARPModel')]
+load_model(json_path: Path) → Optional[ForwardRef('AshAggregatedResults')]
 ```
 
-Load ASHARPModel from JSON file. 
+Load AshAggregatedResults from JSON file.
 
 ---
 
@@ -138,7 +138,7 @@ Load ASHARPModel from JSON file.
 model_post_init(context)
 ```
 
-Initialize aggregator and trend analyzer with current findings. 
+Initialize aggregator and trend analyzer with current findings.
 
 ---
 
@@ -150,7 +150,7 @@ Initialize aggregator and trend analyzer with current findings.
 save_model(output_dir: Path) → None
 ```
 
-Save ASHARPModel as JSON alongside aggregated results. 
+Save AshAggregatedResults as JSON alongside aggregated results.
 
 ---
 

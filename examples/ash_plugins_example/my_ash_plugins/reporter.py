@@ -15,7 +15,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -46,13 +46,13 @@ class ExampleReporter(ReporterPluginBase[ExampleReporterConfig]):
         ).joinpath(self.config.name)
         return super().model_post_init(context)
 
-    def report(self, model: ASHARPModel) -> str:
+    def report(self, model: AshAggregatedResults) -> str:
         """Generate a report from scan results.
 
         This example reporter simply logs the model and returns a mock report.
 
         Args:
-            model: ASHARPModel containing scan results
+            model: AshAggregatedResults containing scan results
 
         Returns:
             str: Report content

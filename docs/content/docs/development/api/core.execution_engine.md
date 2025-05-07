@@ -68,7 +68,7 @@ __init__(
     output_dir: Path = None,
     enabled_scanners: Optional[List[str]] = [],
     strategy: Optional[ExecutionStrategy] = <ExecutionStrategy.PARALLEL: 'parallel'>,
-    asharp_model: Optional[ASHARPModel] = None,
+    asharp_model: Optional[AshAggregatedResults] = None,
     config: Optional[AshConfig] = None,
     show_progress: bool = True
 )
@@ -177,7 +177,7 @@ The Prepare phase of ASH runs any tasks that need to be ran before scanning star
 ### <kbd>method</kbd> `run_scan_phase`
 
 ```python
-run_scan_phase(config: Optional[AshConfig] = None) → ASHARPModel
+run_scan_phase(config: Optional[AshConfig] = None) → AshAggregatedResults
 ```
 
 Execute registered scanners based on provided configuration.
@@ -192,7 +192,7 @@ Execute registered scanners based on provided configuration.
 
 **Returns:**
 
- - <b>`Dict[str, Any]`</b>:  Results dictionary with scanner results and ASHARPModel
+ - <b>`Dict[str, Any]`</b>:  Results dictionary with scanner results and AshAggregatedResults
 
 
 

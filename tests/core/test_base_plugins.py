@@ -25,7 +25,7 @@ from automated_security_helper.models.core import (
     ToolExtraArg,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 
 class TestConverterPlugin:
@@ -135,7 +135,7 @@ class TestReporterPlugin:
         def validate(self) -> bool:
             return True
 
-        def report(self, model: ASHARPModel) -> str:
+        def report(self, model: AshAggregatedResults) -> str:
             return '{"report": "complete"}'
 
     def test_setup_paths_default(self, test_plugin_context):
@@ -182,16 +182,16 @@ class TestReporterPlugin:
         assert isinstance(reporter.end_time, datetime)
 
     def test_report_with_model(self, test_plugin_context):
-        """Test report method with ASHARPModel."""
+        """Test report method with AshAggregatedResults."""
         reporter = self.DummyReporter(context=test_plugin_context)
-        model = ASHARPModel(findings=[], metadata={})
+        model = AshAggregatedResults(findings=[], metadata={})
         result = reporter.report(model)
         assert result == '{"report": "complete"}'
 
     def test_report_end_to_end(self, test_plugin_context):
-        """Test report method end to end with ASHARPModel."""
+        """Test report method end to end with AshAggregatedResults."""
         reporter = self.DummyReporter(context=test_plugin_context)
-        model = ASHARPModel(findings=[], metadata={})
+        model = AshAggregatedResults(findings=[], metadata={})
 
         reporter._pre_report()
         result = reporter.report(model)

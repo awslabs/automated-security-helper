@@ -10,7 +10,7 @@ from rich import print, print_json
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.enums import AshLogLevel, ReportFormat
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.interfaces import IReporter
 from automated_security_helper.utils.log import get_logger
@@ -124,7 +124,7 @@ def report_command(
     # Load the results file
     try:
         with open(results_file, "r") as f:
-            model = ASHARPModel.model_validate_json(f.read())
+            model = AshAggregatedResults.model_validate_json(f.read())
     except Exception as e:
         print(f"[red]Error loading results file: {e}[/red]")
         raise typer.Exit(1)

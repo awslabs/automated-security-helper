@@ -2,7 +2,7 @@
 
 import pytest
 from automated_security_helper.reporters.ash_default.html_reporter import HtmlReporter
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     Message,
@@ -17,10 +17,10 @@ class TestHTMLReporter:
     """Test cases for HTMLReporter."""
 
     def test_html_reporter_with_sarif_results(
-        self, sample_ash_model: ASHARPModel, test_plugin_context
+        self, sample_ash_model: AshAggregatedResults, test_plugin_context
     ):
         """Test that the HTML reporter correctly formats SARIF results."""
-        # Create a test ASHARPModel with SARIF results
+        # Create a test AshAggregatedResults with SARIF results
 
         # Add some test results to the SARIF report
         sample_ash_model.sarif.runs[0].results = [
@@ -68,7 +68,7 @@ class TestHTMLReporter:
 
     def test_html_reporter_with_empty_results(self, test_plugin_context):
         """Test that the HTML reporter handles empty results correctly."""
-        model = ASHARPModel()
+        model = AshAggregatedResults()
         reporter = HtmlReporter(context=test_plugin_context)
         html_output = reporter.report(model)
         assert "No findings to display" in html_output
@@ -81,7 +81,7 @@ class TestHTMLReporter:
 
     def test_html_reporter_with_missing_location(self, test_plugin_context):
         """Test that the HTML reporter handles results with missing location info."""
-        model = ASHARPModel()
+        model = AshAggregatedResults()
         model.sarif.runs[0].results = [
             Result(
                 ruleId="TEST003",

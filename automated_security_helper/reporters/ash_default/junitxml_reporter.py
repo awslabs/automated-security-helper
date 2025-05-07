@@ -3,7 +3,7 @@
 from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from automated_security_helper.models.asharp_model import ASHARPModel
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -38,7 +38,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
             self.config = JUnitXMLReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: "ASHARPModel") -> str:
+    def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model in JUnitXML.
 
         Creates a test suite for each finding type, with individual findings as test cases.

@@ -9,7 +9,7 @@ from rich.panel import Panel
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
-from automated_security_helper.models.asharp_model import ASHARPModel
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -40,7 +40,7 @@ def format_duration(duration_seconds: float) -> str:
 
 def generate_metrics_table(
     completed_scanners: List[ScannerPluginBase],
-    asharp_model: ASHARPModel,
+    asharp_model: AshAggregatedResults,
     scan_results: Dict[str, Any] = None,
     console: Console = None,
 ) -> Table:
@@ -48,7 +48,7 @@ def generate_metrics_table(
 
     Args:
         completed_scanners: List of completed scanner plugins
-        asharp_model: The ASHARPModel with scan results
+        asharp_model: The AshAggregatedResults with scan results
         scan_results: Optional dictionary of additional scan results
 
     Returns:
@@ -242,10 +242,47 @@ def generate_metrics_table(
         elif evaluation_threshold == "CRITICAL":
             actionable = critical
 
-        # Determine status based on the appropriate severity threshold
-        status = "[bold green]Passed[/bold green]"
-        if actionable > 0:
-            status = "[bold red]Failed[/bold red]"
+        # Determine status based on dependencies, exclusion, and findings
+        status = "[bold green]PASSED[/bold green]"
+        status_text = Text("PASSED", style="green bold")
+
+        # Check if scanner was excluded or has missing dependencies
+        scanner_excluded = False
+        dependencies_missing = False
+
+        if scanner_name in asharp_model.additional_reports:
+            scanner_results = asharp_model.additional_reports[scanner_name]
+
+            # Check for excluded status
+            for target_type, results in scanner_results.items():
+                if isinstance(results, dict):
+                    if results.get("excluded", False):
+                        scanner_excluded = True
+                        break
+                    if not results.get("dependencies_satisfied", True):
+                        dependencies_missing = True
+
+        # Check if scanner status is in metadata
+        if (
+            hasattr(asharp_model.metadata, "scanner_status")
+            and scanner_name in asharp_model.metadata.scanner_status
+        ):
+            scanner_status_info = asharp_model.metadata.scanner_status[scanner_name]
+            if scanner_status_info.excluded:
+                scanner_excluded = True
+            if not scanner_status_info.dependencies_satisfied:
+                dependencies_missing = True
+
+        # Apply status precedence: SKIPPED > MISSING > FAILED > PASSED
+        if scanner_excluded:
+            status = "[bold blue]SKIPPED[/bold blue]"
+            status_text = Text("SKIPPED", style="blue bold")
+        elif dependencies_missing:
+            status = "[bold yellow]MISSING[/bold yellow]"
+            status_text = Text("MISSING", style="yellow bold")
+        elif actionable > 0:
+            status = "[bold red]FAILED[/bold red]"
+            status_text = Text("FAILED", style="red bold")
             ASH_LOGGER.debug(
                 f"Scanner {scanner_name} failed with {evaluation_threshold} threshold: {actionable} actionable findings"
             )
@@ -286,10 +323,7 @@ def generate_metrics_table(
 
         if terminal_width < 100:
             # Use text-only format with color for small terminals
-            if "Passed" in status:
-                status_text = Text("Passed", style="green bold")
-            else:
-                status_text = Text("Failed", style="red bold")
+            status_text = status_text  # Already set above
         else:
             # Use emoji format for larger terminals
             status_text = status
@@ -336,7 +370,7 @@ def generate_metrics_table(
 
 def display_metrics_table(
     completed_scanners: List[ScannerPluginBase],
-    asharp_model: ASHARPModel,
+    asharp_model: AshAggregatedResults,
     scan_results: Dict[str, Any] = None,
     use_color: bool = True,
 ) -> None:
@@ -344,7 +378,7 @@ def display_metrics_table(
 
     Args:
         completed_scanners: List of completed scanner plugins
-        asharp_model: The ASHARPModel with scan results
+        asharp_model: The AshAggregatedResults with scan results
         scan_results: Optional dictionary of additional scan results
         use_color: Whether to use color in the output (respects --no-color flag)
     """
@@ -365,7 +399,11 @@ def display_metrics_table(
             "- [italic gray]Severity levels[/italic gray]: Critical (C), High (H), Medium (M), Low (L), Info (I)\n"
             "- [italic gray]Duration (Time)[/italic gray]: Time taken by the scanner to complete its execution\n"
             "- [italic gray]Actionable (A)[/italic gray]: Number of findings at or above the threshold severity level\n"
-            "- [italic gray]Result[/italic gray]: [bold green]Passed[/bold green] = No findings at or above threshold, [bold red]Failed[/bold red] = Findings at or above threshold\n"
+            "- [italic gray]Result[/italic gray]: \n"
+            "  - [bold green]PASSED[/bold green] = No findings at or above threshold\n"
+            "  - [bold red]FAILED[/bold red] = Findings at or above threshold\n"
+            "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
+            "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
             "- [italic gray]Threshold[/italic gray] (Thr): The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
             "- [italic gray]Example[/italic gray]: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
         )

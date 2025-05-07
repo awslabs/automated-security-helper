@@ -5,20 +5,20 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from automated_security_helper.models.asharp_model import ASHARPModel
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from collections import Counter
 
 
 class ReportContentEmitter:
     """
-    A reusable class for generating report content from ASHARPModel.
+    A reusable class for generating report content from AshAggregatedResults.
     This class provides methods to generate different sections of a report
     that can be used by different reporter implementations.
     """
 
-    def __init__(self, model: "ASHARPModel"):
-        """Initialize with an ASHARPModel."""
+    def __init__(self, model: "AshAggregatedResults"):
+        """Initialize with an AshAggregatedResults."""
         self.model = model
         self.flat_vulns = model.to_flat_vulnerabilities()
         self.ash_conf = model.ash_config

@@ -12724,6 +12724,13 @@
           "title": "Report Id",
           "type": "string"
         },
+        "scanner_status": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ScannerStatusInfo"
+          },
+          "title": "Scanner Status",
+          "type": "object"
+        },
         "summary_stats": {
           "additionalProperties": {
             "type": "integer"
@@ -12731,10 +12738,14 @@
           "default": {
             "actionable": 0,
             "critical": 0,
+            "failed": 0,
             "high": 0,
             "info": 0,
             "low": 0,
             "medium": 0,
+            "missing": 0,
+            "passed": 0,
+            "skipped": 0,
             "total": 0
           },
           "description": "Summary statistics (e.g., count by severity)",
@@ -15376,6 +15387,38 @@
         }
       },
       "title": "ScannerPluginConfigBase",
+      "type": "object"
+    },
+    "ScannerStatus": {
+      "description": "Status of a scanner execution.",
+      "enum": [
+        "PASSED",
+        "FAILED",
+        "MISSING",
+        "SKIPPED"
+      ],
+      "title": "ScannerStatus",
+      "type": "string"
+    },
+    "ScannerStatusInfo": {
+      "description": "Information about scanner status.",
+      "properties": {
+        "dependencies_satisfied": {
+          "default": true,
+          "title": "Dependencies Satisfied",
+          "type": "boolean"
+        },
+        "excluded": {
+          "default": false,
+          "title": "Excluded",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/ScannerStatus",
+          "default": "PASSED"
+        }
+      },
+      "title": "ScannerStatusInfo",
       "type": "object"
     },
     "Scope": {
@@ -20443,6 +20486,6 @@
       "description": "The SARIF formatted vulnerability report"
     }
   },
-  "title": "ASHARPModel",
+  "title": "AshAggregatedResults",
   "type": "object"
 }

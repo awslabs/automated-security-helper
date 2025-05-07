@@ -8,10 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
+from automated_security_helper.core.enums import ExportFormat, ScannerStatus
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from typing import TYPE_CHECKING, Annotated, Dict, Any, Optional, Union, List
-from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Run,
@@ -26,7 +26,15 @@ from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sa
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
-__all__ = ["ASHARPModel"]
+__all__ = ["AshAggregatedResults"]
+
+
+class ScannerStatusInfo(BaseModel):
+    """Information about scanner status."""
+
+    status: ScannerStatus = ScannerStatus.PASSED
+    dependencies_satisfied: bool = True
+    excluded: bool = False
 
 
 class ReportMetadata(BaseModel):
@@ -71,7 +79,12 @@ class ReportMetadata(BaseModel):
         "low": 0,
         "info": 0,
         "actionable": 0,
+        "passed": 0,
+        "failed": 0,
+        "missing": 0,
+        "skipped": 0,
     }
+    scanner_status: Dict[str, ScannerStatusInfo] = Field(default_factory=dict)
 
     @field_validator("project_name")
     @classmethod
@@ -103,7 +116,7 @@ class ReportMetadata(BaseModel):
             )
 
 
-class ASHARPModel(BaseModel):
+class AshAggregatedResults(BaseModel):
     """Main model class for parsing security scan reports from ASH tooling."""
 
     model_config = ConfigDict(
@@ -180,7 +193,7 @@ class ASHARPModel(BaseModel):
         return super().model_post_init(context)
 
     def to_flat_vulnerabilities(self) -> List[FlatVulnerability]:
-        """Convert the ASHARPModel to a list of flattened vulnerability objects.
+        """Convert the AshAggregatedResults to a list of flattened vulnerability objects.
 
         Returns:
             List[FlatVulnerability]: A list of flattened vulnerability objects
@@ -395,15 +408,15 @@ class ASHARPModel(BaseModel):
         return flat_vulns
 
     @classmethod
-    def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "ASHARPModel":
-        """Parse JSON data into an ASHARPModel instance.
+    def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "AshAggregatedResults":
+        """Parse JSON data into an AshAggregatedResults instance.
 
         Args:
             json_data: Either a JSON string or dictionary containing the report data.
                 Must include metadata and findings fields.
 
         Returns:
-            ASHARPModel instance populated with the report data.
+            AshAggregatedResults instance populated with the report data.
 
         Raises:
             ValidationError: If the JSON data is missing required fields or has invalid values.
@@ -431,7 +444,7 @@ class ASHARPModel(BaseModel):
             raise ValueError("Invalid report type")
 
     def save_model(self, output_dir: Path) -> None:
-        """Save ASHARPModel as JSON alongside aggregated results."""
+        """Save AshAggregatedResults as JSON alongside aggregated results."""
 
         report_dir = output_dir.joinpath("reports")
         report_dir.mkdir(parents=True, exist_ok=True)
@@ -447,8 +460,8 @@ class ASHARPModel(BaseModel):
         )
 
     @classmethod
-    def load_model(cls, json_path: Path) -> Optional["ASHARPModel"]:
-        """Load ASHARPModel from JSON file."""
+    def load_model(cls, json_path: Path) -> Optional["AshAggregatedResults"]:
+        """Load AshAggregatedResults from JSON file."""
         if not json_path.exists():
             return None
 
@@ -459,5 +472,5 @@ class ASHARPModel(BaseModel):
 
 
 if __name__ == "__main__":
-    model = ASHARPModel()
+    model = AshAggregatedResults()
     print(model.model_dump_json(indent=2))

@@ -4,7 +4,7 @@
 from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from automated_security_helper.models.asharp_model import ASHARPModel
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -48,7 +48,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             self.config = OCSFReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: "ASHARPModel") -> str:
+    def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model in Open Cybersecurity Schema Framework (OCSF) format."""
         # Get current timestamp in milliseconds since epoch
         current_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -62,7 +62,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
         metadata = Metadata(
             product=product,
-            version="1.0.0",  # OCSF schema version
+            version="1.1.0",  # OCSF schema version
             logged_time=current_time_ms,
         )
 
@@ -184,6 +184,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 type_uid=200201,  # Vulnerability Finding type ID
                 class_uid=2002,  # Vulnerability Finding class ID
                 category_uid=2,  # Vulnerability Finding category ID
+                category_name="Findings",
                 time=current_time_ms,
                 metadata=metadata,
                 finding_info=finding_info,
@@ -208,7 +209,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                             "vendor_name": "Amazon Web Services",
                             "version": get_ash_version(),
                         },
-                        "version": "1.0.0",
+                        "version": "1.1.0",
                         "logged_time": current_time_ms,
                     },
                     "vulnerabilities_count": len(vulnerabilities),
