@@ -3,7 +3,7 @@
 from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from automated_security_helper.models.asharp_model import AshAggregatedResult
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -32,7 +32,7 @@ class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
             self.config = CycloneDXReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: "AshAggregatedResult") -> str:
+    def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model in CycloneDX."""
 
         return model.cyclonedx.model_dump_json(

@@ -98,7 +98,7 @@ def run_ash_scan(
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
     from automated_security_helper.core.enums import ExecutionStrategy
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
-    from automated_security_helper.models.asharp_model import AshAggregatedResult
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.utils.log import get_logger
 
     final_log_level = (
@@ -211,7 +211,7 @@ def run_ash_scan(
             with open(output_file, mode="r", encoding="utf-8") as f:
                 content = f.read()
                 try:
-                    results = AshAggregatedResult.model_validate_json(content)
+                    results = AshAggregatedResults.model_validate_json(content)
                 except Exception as e:
                     logger.error(f"Failed to parse results file: {e}")
                     raise sys.exit(1) from None
@@ -340,7 +340,7 @@ def run_ash_scan(
             if simple and not quiet:
                 typer.echo("\nASH scan completed.")
 
-            if isinstance(results, AshAggregatedResult):
+            if isinstance(results, AshAggregatedResults):
                 content = results.model_dump_json(indent=2, by_alias=True)
             else:
                 content = json.dumps(results, indent=2, default=str)

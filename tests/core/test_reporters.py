@@ -5,14 +5,14 @@ from automated_security_helper.reporters.ash_default.flatjson_reporter import (
 )
 from automated_security_helper.reporters.ash_default.html_reporter import HtmlReporter
 from automated_security_helper.reporters.ash_default.csv_reporter import CsvReporter
-from automated_security_helper.models.asharp_model import AshAggregatedResult
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 
 class TestJSONFormatter:
     """Test cases for JSONReporter."""
 
     def test_json_formatter(
-        self, sample_ash_model: AshAggregatedResult, test_plugin_context
+        self, sample_ash_model: AshAggregatedResults, test_plugin_context
     ):
         """Test JSON formatter output structure."""
         formatter = FlatJSONReporter(context=test_plugin_context)

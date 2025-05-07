@@ -25,7 +25,7 @@ from automated_security_helper.core.constants import (
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
-from automated_security_helper.models.asharp_model import AshAggregatedResult
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.reporters.ash_default.asff_reporter import (
     ASFFReporterConfig,
@@ -557,4 +557,4 @@ ConverterConfigSegment.model_rebuild()
 ScannerConfigSegment.model_rebuild()
 ReporterConfigSegment.model_rebuild()
 PluginContext.model_rebuild()
-AshAggregatedResult.model_rebuild()
+AshAggregatedResults.model_rebuild()

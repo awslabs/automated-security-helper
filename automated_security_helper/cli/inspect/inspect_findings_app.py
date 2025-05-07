@@ -6,7 +6,7 @@ from textual.containers import Horizontal, ScrollableContainer
 from textual.screen import Screen
 from textual.binding import Binding
 
-from automated_security_helper.models.asharp_model import AshAggregatedResult
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -458,7 +458,7 @@ class FindingsExplorerApp(App):
 
 
 def extract_findings(model):
-    """Extract findings from the AshAggregatedResult."""
+    """Extract findings from the AshAggregatedResults."""
     findings = []
 
     # Extract findings from SARIF reports
@@ -585,7 +585,7 @@ def findings_command(
     # Try to load the model from the output directory
     try:
         report_file_actual = Path(output_dir).joinpath(report_file)
-        model = AshAggregatedResult.load_model(Path(report_file_actual))
+        model = AshAggregatedResults.load_model(Path(report_file_actual))
         if model is None:
             typer.echo(
                 "No model or report file available. Please run a scan first or provide a report file."

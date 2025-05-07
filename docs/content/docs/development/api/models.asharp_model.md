@@ -17,7 +17,7 @@
 
 <a href="https://github.com/example/my-project/blob/main/src/automated_security_helper/models/asharp_model.py#L36"><img align="right" style="float:right;" src="https://img.shields.io/badge/-source-cccccc?style=flat-square"></a>
 
-## <kbd>class</kbd> `AshAggregatedResult`
+## <kbd>class</kbd> `AshAggregatedResults`
 Main model class for parsing security scan reports from ASH tooling.
 
 
@@ -94,10 +94,10 @@ Format ASH model using specified formatter.
 ### <kbd>classmethod</kbd> `from_json`
 
 ```python
-from_json(json_data: Union[str, Dict[str, Any]]) → AshAggregatedResult
+from_json(json_data: Union[str, Dict[str, Any]]) → AshAggregatedResults
 ```
 
-Parse JSON data into an AshAggregatedResult instance.
+Parse JSON data into an AshAggregatedResults instance.
 
 
 
@@ -108,7 +108,7 @@ Parse JSON data into an AshAggregatedResult instance.
 
 
 **Returns:**
- AshAggregatedResult instance populated with the report data.
+ AshAggregatedResults instance populated with the report data.
 
 
 
@@ -123,10 +123,10 @@ Parse JSON data into an AshAggregatedResult instance.
 ### <kbd>classmethod</kbd> `load_model`
 
 ```python
-load_model(json_path: Path) → Optional[ForwardRef('AshAggregatedResult')]
+load_model(json_path: Path) → Optional[ForwardRef('AshAggregatedResults')]
 ```
 
-Load AshAggregatedResult from JSON file.
+Load AshAggregatedResults from JSON file.
 
 ---
 
@@ -150,7 +150,7 @@ Initialize aggregator and trend analyzer with current findings.
 save_model(output_dir: Path) → None
 ```
 
-Save AshAggregatedResult as JSON alongside aggregated results.
+Save AshAggregatedResults as JSON alongside aggregated results.
 
 ---
 

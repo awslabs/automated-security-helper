@@ -30,7 +30,7 @@ from automated_security_helper.core.exceptions import (
     ASHValidationError,
     ASHConfigValidationError,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResult
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
@@ -168,7 +168,7 @@ class ASHScanOrchestrator(BaseModel):
                 old_file.unlink()
             exec_engine_params = {}
         else:
-            asharp_model = AshAggregatedResult.model_validate_json(
+            asharp_model = AshAggregatedResults.model_validate_json(
                 Path(self.existing_results_path).read_text()
             )
             exec_engine_params = {"asharp_model": asharp_model}
@@ -291,7 +291,7 @@ class ASHScanOrchestrator(BaseModel):
 
     def execute_scan(
         self, phases: List[ExecutionPhaseType] = ["convert", "scan", "report"]
-    ) -> AshAggregatedResult:
+    ) -> AshAggregatedResults:
         """Execute the security scan and return results.
 
         Args:
@@ -299,7 +299,7 @@ class ASHScanOrchestrator(BaseModel):
                 Defaults to ["convert", "scan", "report"].
 
         Returns:
-            AshAggregatedResult: The results of the scan.
+            AshAggregatedResults: The results of the scan.
         """
         ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
         ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
@@ -334,14 +334,14 @@ class ASHScanOrchestrator(BaseModel):
                 )
                 try:
                     from automated_security_helper.models.asharp_model import (
-                        AshAggregatedResult,
+                        AshAggregatedResults,
                     )
 
                     with open(self.existing_results_path, "r") as f:
                         model_data = json.load(f)
 
                     # Load the model from the existing results
-                    asharp_model = AshAggregatedResult.from_json(model_data)
+                    asharp_model = AshAggregatedResults.from_json(model_data)
 
                     # Update the execution engine's model
                     if hasattr(self.execution_engine, "_asharp_model"):
@@ -395,7 +395,7 @@ class ASHScanOrchestrator(BaseModel):
                 # Process and validate results
                 # if not asharp_model_results:
                 #     ASH_LOGGER.debug("No results returned, using empty result set")
-                #     asharp_model_results = AshAggregatedResult(
+                #     asharp_model_results = AshAggregatedResults(
                 #         description="ASH execution engine returned no results!"
                 #     )
                 # else:

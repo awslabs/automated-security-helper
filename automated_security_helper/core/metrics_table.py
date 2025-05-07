@@ -9,7 +9,7 @@ from rich.panel import Panel
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
-from automated_security_helper.models.asharp_model import AshAggregatedResult
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -40,7 +40,7 @@ def format_duration(duration_seconds: float) -> str:
 
 def generate_metrics_table(
     completed_scanners: List[ScannerPluginBase],
-    asharp_model: AshAggregatedResult,
+    asharp_model: AshAggregatedResults,
     scan_results: Dict[str, Any] = None,
     console: Console = None,
 ) -> Table:
@@ -48,7 +48,7 @@ def generate_metrics_table(
 
     Args:
         completed_scanners: List of completed scanner plugins
-        asharp_model: The AshAggregatedResult with scan results
+        asharp_model: The AshAggregatedResults with scan results
         scan_results: Optional dictionary of additional scan results
 
     Returns:
@@ -336,7 +336,7 @@ def generate_metrics_table(
 
 def display_metrics_table(
     completed_scanners: List[ScannerPluginBase],
-    asharp_model: AshAggregatedResult,
+    asharp_model: AshAggregatedResults,
     scan_results: Dict[str, Any] = None,
     use_color: bool = True,
 ) -> None:
@@ -344,7 +344,7 @@ def display_metrics_table(
 
     Args:
         completed_scanners: List of completed scanner plugins
-        asharp_model: The AshAggregatedResult with scan results
+        asharp_model: The AshAggregatedResults with scan results
         scan_results: Optional dictionary of additional scan results
         use_color: Whether to use color in the output (respects --no-color flag)
     """

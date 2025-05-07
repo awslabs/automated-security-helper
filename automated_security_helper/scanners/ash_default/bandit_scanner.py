@@ -29,7 +29,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from distutils.spawn import find_executable
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class BanditScannerConfigOptions(ScannerOptionsBase):

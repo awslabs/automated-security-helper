@@ -4,7 +4,7 @@ import yaml
 from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from automated_security_helper.models.asharp_model import AshAggregatedResult
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -33,7 +33,7 @@ class SpdxReporter(ReporterPluginBase[SPDXReporterConfig]):
             self.config = SPDXReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: "AshAggregatedResult") -> str:
+    def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model in SPDX."""
         # TODO - Replace with SPDX adapter
         return yaml.dump(model.model_dump(by_alias=True), indent=2)

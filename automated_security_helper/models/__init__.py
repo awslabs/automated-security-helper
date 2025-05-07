@@ -7,7 +7,7 @@ from automated_security_helper.core.enums import (
     ExportFormat,
 )
 from automated_security_helper.models.asharp_model import (
-    AshAggregatedResult,
+    AshAggregatedResults,
     ReportMetadata,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
@@ -15,6 +15,6 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 __all__ = [
     "ReportMetadata",
     "ExportFormat",
-    "AshAggregatedResult",
+    "AshAggregatedResults",
     "FlatVulnerability",
 ]
