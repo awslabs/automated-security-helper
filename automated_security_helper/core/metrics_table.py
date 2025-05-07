@@ -464,16 +464,16 @@ def display_metrics_table(
         # Create a help panel with instructions
         help_text = (
             "How to read this table:\n"
-            "- [italic gray]Severity levels[/italic gray]: Critical (C), High (H), Medium (M), Low (L), Info (I)\n"
-            "- [italic gray]Duration (Time)[/italic gray]: Time taken by the scanner to complete its execution\n"
-            "- [italic gray]Actionable (A)[/italic gray]: Number of findings at or above the threshold severity level\n"
-            "- [italic gray]Result[/italic gray]: \n"
+            "- [bold magenta]Severity levels[/bold magenta]: Critical (C), High (H), Medium (M), Low (L), Info (I)\n"
+            "- [bold magenta]Duration (Time)[/bold magenta]: Time taken by the scanner to complete its execution\n"
+            "- [bold magenta]Actionable (Action)[/bold magenta]: Number of findings at or above the threshold severity level\n"
+            "- [bold magenta]Result[/bold magenta]: \n"
             "  - [bold green]PASSED[/bold green] = No findings at or above threshold\n"
             "  - [bold red]FAILED[/bold red] = Findings at or above threshold\n"
             "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
             "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
-            "- [italic gray]Threshold[/italic gray] (Thr): The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
-            "- [italic gray]Example[/italic gray]: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
+            "- [bold magenta]Threshold[/bold magenta] (Thresh): The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
+            "- [bold magenta]Example[/bold magenta]: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
         )
         help_panel = Panel(
             help_text, title="Results Guide", border_style="blue", expand=True
