@@ -114,7 +114,11 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 "    - `global` (global_settings section in the ASH_CONFIG used)"
             )
             md_parts.append(
-                "- **Result**: ✅ Passed = No findings at or above threshold, ❌ Failed = Findings at or above threshold"
+                "- **Result**: \n"
+                "  - ✅ **Passed** = No findings at or above threshold\n"
+                "  - ❌ **Failed** = Findings at or above threshold\n"
+                "  - ⚠️ **Missing** = Required dependencies not available\n"
+                "  - ⏭️ **Skipped** = Scanner explicitly disabled"
             )
             md_parts.append(
                 "- **Example**: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure\n"
@@ -130,13 +134,28 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             # Add scanner result rows
             scanner_results = emitter.get_scanner_results()
             for result in scanner_results:
-                status = "✅ Passed" if result["passed"] else "❌ Failed"
+                # Determine status text and emoji based on status field
+                if "status" in result:
+                    status = result["status"]
+                    if status == "PASSED":
+                        status_text = "✅ Passed"
+                    elif status == "FAILED":
+                        status_text = "❌ Failed"
+                    elif status == "MISSING":
+                        status_text = "⚠️ Missing"
+                    elif status == "SKIPPED":
+                        status_text = "⏭️ Skipped"
+                    else:
+                        status_text = status
+                else:
+                    status_text = "✅ Passed" if result["passed"] else "❌ Failed"
+
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 
                 md_parts.append(
                     f"| {result['scanner_name']} | {result['critical']} | {result['high']} | "
                     f"{result['medium']} | {result['low']} | {result['info']} | {result['actionable']} | "
-                    f"{status} | {threshold_text} |"
+                    f"{status_text} | {threshold_text} |"
                 )
 
             md_parts.append("")

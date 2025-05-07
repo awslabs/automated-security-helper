@@ -116,7 +116,8 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 "    - 'global' (global_settings section in the ASH_CONFIG used)"
             )
             text_parts.append(
-                "- Result: PASS = No findings at or above threshold, FAIL = Findings at or above threshold"
+                "- Result: PASS = No findings at or above threshold, FAIL = Findings at or above threshold, "
+                "MISSING = Required dependencies not available, SKIPPED = Scanner explicitly disabled"
             )
             text_parts.append(
                 "- Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
@@ -136,7 +137,12 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
             # Add scanner result rows
             for result in scanner_results:
-                status = "PASS" if result["passed"] else "FAIL"
+                # Determine status text based on status field
+                if "status" in result:
+                    status = result["status"]
+                else:
+                    status = "PASS" if result["passed"] else "FAIL"
+
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 
                 text_parts.append(

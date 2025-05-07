@@ -9,6 +9,7 @@ from rich.panel import Panel
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -250,33 +251,100 @@ def generate_metrics_table(
         scanner_excluded = False
         dependencies_missing = False
 
-        if scanner_name in asharp_model.additional_reports:
-            scanner_results = asharp_model.additional_reports[scanner_name]
-
-            # Check for excluded status
-            for target_type, results in scanner_results.items():
-                if isinstance(results, dict):
-                    if results.get("excluded", False):
-                        scanner_excluded = True
-                        break
-                    if not results.get("dependencies_satisfied", True):
-                        dependencies_missing = True
-
-        # Check if scanner status is in metadata
+        # First check if scanner status is in metadata (most accurate)
         if (
             hasattr(asharp_model.metadata, "scanner_status")
             and scanner_name in asharp_model.metadata.scanner_status
         ):
             scanner_status_info = asharp_model.metadata.scanner_status[scanner_name]
-            if scanner_status_info.excluded:
-                scanner_excluded = True
-            if not scanner_status_info.dependencies_satisfied:
-                dependencies_missing = True
+            ASH_LOGGER.debug(
+                f"Found scanner status in metadata for {scanner_name}: {scanner_status_info}"
+            )
 
-        # Apply status precedence: SKIPPED > MISSING > FAILED > PASSED
-        if scanner_excluded:
-            status = "[bold blue]SKIPPED[/bold blue]"
-            status_text = Text("SKIPPED", style="blue bold")
+            if scanner_status_info.status == ScannerStatus.SKIPPED:
+                scanner_excluded = True
+                status = "[bold blue]SKIPPED[/bold blue]"
+                status_text = Text("SKIPPED", style="blue bold")
+                ASH_LOGGER.debug(
+                    f"Scanner {scanner_name} marked as SKIPPED from metadata"
+                )
+            elif scanner_status_info.status == ScannerStatus.MISSING:
+                dependencies_missing = True
+                status = "[bold yellow]MISSING[/bold yellow]"
+                status_text = Text("MISSING", style="yellow bold")
+                ASH_LOGGER.debug(
+                    f"Scanner {scanner_name} marked as MISSING from metadata"
+                )
+            elif scanner_status_info.status == ScannerStatus.FAILED:
+                status = "[bold red]FAILED[/bold red]"
+                status_text = Text("FAILED", style="red bold")
+                ASH_LOGGER.debug(
+                    f"Scanner {scanner_name} marked as FAILED from metadata"
+                )
+        # Then check in additional_reports if not found in metadata
+        elif scanner_name in asharp_model.additional_reports:
+            scanner_results = asharp_model.additional_reports[scanner_name]
+            ASH_LOGGER.debug(f"Checking additional_reports for {scanner_name} status")
+
+            # Check for excluded status or missing dependencies
+            for target_type, results in scanner_results.items():
+                if isinstance(results, dict):
+                    if results.get("excluded", False):
+                        scanner_excluded = True
+                        status = "[bold blue]SKIPPED[/bold blue]"
+                        status_text = Text("SKIPPED", style="blue bold")
+                        ASH_LOGGER.debug(
+                            f"Scanner {scanner_name} marked as SKIPPED from additional_reports"
+                        )
+                        break
+                    if not results.get("dependencies_satisfied", True):
+                        dependencies_missing = True
+                        status = "[bold yellow]MISSING[/bold yellow]"
+                        status_text = Text("MISSING", style="yellow bold")
+                        ASH_LOGGER.debug(
+                            f"Scanner {scanner_name} marked as MISSING from additional_reports"
+                        )
+                        break
+                    if "scanner_status" in results:
+                        scanner_status = results["scanner_status"]
+                        if scanner_status == ScannerStatus.SKIPPED:
+                            scanner_excluded = True
+                            status = "[bold blue]SKIPPED[/bold blue]"
+                            status_text = Text("SKIPPED", style="blue bold")
+                            ASH_LOGGER.debug(
+                                f"Scanner {scanner_name} marked as SKIPPED from scanner_status in results"
+                            )
+                            break
+                        elif scanner_status == ScannerStatus.MISSING:
+                            dependencies_missing = True
+                            status = "[bold yellow]MISSING[/bold yellow]"
+                            status_text = Text("MISSING", style="yellow bold")
+                            ASH_LOGGER.debug(
+                                f"Scanner {scanner_name} marked as MISSING from scanner_status in results"
+                            )
+                            break
+
+        # Finally, check if scanner has dependencies_satisfied attribute directly
+        if (
+            not scanner_excluded
+            and not dependencies_missing
+            and hasattr(scanner, "dependencies_satisfied")
+        ):
+            if not scanner.dependencies_satisfied:
+                dependencies_missing = True
+                status = "[bold yellow]MISSING[/bold yellow]"
+                status_text = Text("MISSING", style="yellow bold")
+                ASH_LOGGER.debug(
+                    f"Scanner {scanner_name} marked as MISSING from scanner.dependencies_satisfied"
+                )
+
+        # If not excluded or missing dependencies, check for actionable findings
+        if not scanner_excluded and not dependencies_missing and actionable > 0:
+            status = "[bold red]FAILED[/bold red]"
+            status_text = Text("FAILED", style="red bold")
+            ASH_LOGGER.debug(
+                f"Scanner {scanner_name} marked as FAILED due to actionable findings"
+            )
         elif dependencies_missing:
             status = "[bold yellow]MISSING[/bold yellow]"
             status_text = Text("MISSING", style="yellow bold")

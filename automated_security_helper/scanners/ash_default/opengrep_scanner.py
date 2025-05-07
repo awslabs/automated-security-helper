@@ -191,6 +191,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             ScannerError: If validation fails
         """
         found = find_executable(self.command)
+        ASH_LOGGER.warning(f"---- FOUND OPENGREP?? {found} ----")
         return found is not None
         # try:
         #     result = self._run_subprocess(

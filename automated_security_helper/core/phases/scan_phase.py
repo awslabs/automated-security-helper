@@ -8,7 +8,10 @@ from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ScannerStatusInfo,
+)
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -124,6 +127,76 @@ class ScanPhase(EnginePhase):
                             ASH_LOGGER.info(
                                 f"Scanner {display_name} is excluded from running"
                             )
+
+                            # Create a ScanResultsContainer with excluded=True
+                            results_container = ScanResultsContainer(
+                                scanner_name=display_name,
+                                excluded=True,
+                                scanner_status=ScannerStatus.SKIPPED,
+                            )
+
+                            # Add to results
+                            self.asharp_model.additional_reports[display_name] = {
+                                "source": results_container.model_dump()
+                            }
+
+                            # Add to completed scanners for metrics display
+                            self._completed_scanners.append(plugin_instance)
+
+                            # Add to scanner status metadata
+                            if not hasattr(
+                                self.asharp_model.metadata, "scanner_status"
+                            ):
+                                self.asharp_model.metadata.scanner_status = {}
+
+                            self.asharp_model.metadata.scanner_status[display_name] = (
+                                ScannerStatusInfo(
+                                    status=ScannerStatus.SKIPPED,
+                                    excluded=True,
+                                    dependencies_satisfied=True,
+                                )
+                            )
+
+                            continue
+
+                        # Check dependencies early
+                        plugin_instance.dependencies_satisfied = (
+                            plugin_instance.validate()
+                        )
+                        if not plugin_instance.dependencies_satisfied:
+                            ASH_LOGGER.warning(
+                                f"Scanner {display_name} dependencies are not satisfied, marking as MISSING"
+                            )
+
+                            # Create a ScanResultsContainer with dependencies_satisfied=False
+                            results_container = ScanResultsContainer(
+                                scanner_name=display_name,
+                                dependencies_satisfied=False,
+                                scanner_status=ScannerStatus.MISSING,
+                            )
+
+                            # Add to results
+                            self.asharp_model.additional_reports[display_name] = {
+                                "source": results_container.model_dump()
+                            }
+
+                            # Add to completed scanners for metrics display
+                            self._completed_scanners.append(plugin_instance)
+
+                            # Add to scanner status metadata
+                            if not hasattr(
+                                self.asharp_model.metadata, "scanner_status"
+                            ):
+                                self.asharp_model.metadata.scanner_status = {}
+
+                            self.asharp_model.metadata.scanner_status[display_name] = (
+                                ScannerStatusInfo(
+                                    status=ScannerStatus.MISSING,
+                                    dependencies_satisfied=False,
+                                    excluded=False,
+                                )
+                            )
+
                             continue
 
                         # Check if scanner is enabled and if python_based_plugins_only is set, check if it's a Python-only scanner
@@ -396,10 +469,9 @@ class ScanPhase(EnginePhase):
                             "output": scanner_plugin.output or [],
                         }
                     elif not raw_results:
-                        ASH_LOGGER.verbose(
+                        ASH_LOGGER.debug(
                             f"Scanner {scanner_plugin.__class__.__name__} returned False for {target_type} -- plugin is missing dependencies"
                         )
-                        container.status = "warning"
                         container.scanner_status = ScannerStatus.MISSING
 
                     # Set raw results
@@ -481,6 +553,9 @@ class ScanPhase(EnginePhase):
                             container.add_metadata(key, value)
 
                     # Add this container to our results
+                    ASH_LOGGER.trace(
+                        f"Appending {scanner_plugin.__class__.__name__} container to results: {container.model_dump_json(by_alias=True, exclude_unset=True)}"
+                    )
                     results.append(container)
 
             # Mark scanner as completed
@@ -784,8 +859,24 @@ class ScanPhase(EnginePhase):
             "exit_code": results.exit_code,
             "status": results.status,
             "duration": results.duration,  # Add duration to the metrics
+            # Add scanner status information
+            "scanner_status": results.scanner_status,
+            "dependencies_satisfied": results.dependencies_satisfied,
+            "excluded": results.excluded,
             # "raw_results": results.raw_results,
         }
+
+        # Update scanner status in metadata
+        if not hasattr(self.asharp_model.metadata, "scanner_status"):
+            self.asharp_model.metadata.scanner_status = {}
+
+        # Only update if not already set (to maintain precedence)
+        if scanner_name not in self.asharp_model.metadata.scanner_status:
+            self.asharp_model.metadata.scanner_status[scanner_name] = ScannerStatusInfo(
+                status=results.scanner_status,
+                dependencies_satisfied=results.dependencies_satisfied,
+                excluded=results.excluded,
+            )
 
         # Process the raw results based on type
         if isinstance(results.raw_results, SarifReport):

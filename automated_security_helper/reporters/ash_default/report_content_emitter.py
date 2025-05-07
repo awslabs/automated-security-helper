@@ -104,6 +104,15 @@ class ReportContentEmitter:
             for scanner_name in self.ash_conf.scanners.model_dump(by_alias=True).keys():
                 all_scanners.add(scanner_name)
 
+        # Add scanners from metadata.scanner_status
+        if hasattr(self.model.metadata, "scanner_status"):
+            for scanner_name in self.model.metadata.scanner_status.keys():
+                all_scanners.add(scanner_name)
+
+        # Add scanners from additional_reports
+        for scanner_name in self.model.additional_reports.keys():
+            all_scanners.add(scanner_name)
+
         # Process each scanner's results
         results = []
         for scanner_name in sorted(all_scanners):
@@ -112,14 +121,6 @@ class ReportContentEmitter:
                 plugin_type="scanner",
                 plugin_name=scanner_name,
             )
-
-            # Skip disabled scanners
-            if (
-                scanner_config_entry
-                and hasattr(scanner_config_entry, "enabled")
-                and not scanner_config_entry.enabled
-            ):
-                continue
 
             # Initialize scanner_threshold to None
             scanner_threshold = None
@@ -174,23 +175,35 @@ class ReportContentEmitter:
                 else self.global_threshold
             )
 
-            # Determine status based on the appropriate severity threshold
-            passed = True
-            if evaluation_threshold == "ALL":
-                if total > 0:
-                    passed = False
-            elif evaluation_threshold == "LOW":
-                if critical > 0 or high > 0 or medium > 0 or low > 0:
-                    passed = False
-            elif evaluation_threshold == "MEDIUM":
-                if critical > 0 or high > 0 or medium > 0:
-                    passed = False
-            elif evaluation_threshold == "HIGH":
-                if critical > 0 or high > 0:
-                    passed = False
-            elif evaluation_threshold == "CRITICAL":
-                if critical > 0:
-                    passed = False
+            # Calculate actionable findings
+            actionable = self.calculate_actionable_count(
+                critical, high, medium, low, info, evaluation_threshold
+            )
+
+            # Get scanner results from additional_reports
+            scanner_results = None
+            if scanner_name in self.model.additional_reports:
+                scanner_results = self.model.additional_reports[scanner_name]
+
+            # Determine scanner status
+            status, scanner_excluded, dependencies_missing = (
+                self.determine_scanner_status(
+                    scanner_name, scanner_results=scanner_results, actionable=actionable
+                )
+            )
+
+            # Skip disabled scanners that aren't explicitly excluded or missing dependencies
+            if (
+                not scanner_excluded
+                and not dependencies_missing
+                and scanner_config_entry
+                and hasattr(scanner_config_entry, "enabled")
+                and not scanner_config_entry.enabled
+            ):
+                continue
+
+            # Determine if passed based on status
+            passed = status in ["PASSED", "SKIPPED", "MISSING"]
 
             # Add result to list
             results.append(
@@ -205,11 +218,14 @@ class ReportContentEmitter:
                     "passed": passed,
                     "threshold": evaluation_threshold,
                     "threshold_source": scanner_threshold_def,
-                    "actionable": self.calculate_actionable_count(
-                        critical, high, medium, low, info, evaluation_threshold
-                    ),
+                    "actionable": actionable,
+                    "status": status,
+                    "excluded": scanner_excluded,
+                    "dependencies_missing": dependencies_missing,
                 }
             )
+
+        return results
 
         return results
 
@@ -347,3 +363,83 @@ class ReportContentEmitter:
             detailed_findings.append(finding)
 
         return detailed_findings
+
+    def determine_scanner_status(
+        self, scanner_name, scanner_results=None, scanner_plugin=None, actionable=0
+    ):
+        """
+        Determine the status of a scanner based on metadata, results, and plugin attributes.
+
+        Args:
+            scanner_name: Name of the scanner
+            scanner_results: Optional dictionary of scanner results from additional_reports
+            scanner_plugin: Optional scanner plugin instance
+            actionable: Number of actionable findings
+
+        Returns:
+            tuple: (status, status_text, scanner_excluded, dependencies_missing)
+                status: String status (PASSED, FAILED, MISSING, SKIPPED)
+                scanner_excluded: Boolean indicating if scanner was excluded
+                dependencies_missing: Boolean indicating if dependencies are missing
+        """
+        # Default values
+        status = "PASSED"
+        scanner_excluded = False
+        dependencies_missing = False
+
+        # First check if scanner status is in metadata (most accurate)
+        if (
+            hasattr(self.model.metadata, "scanner_status")
+            and scanner_name in self.model.metadata.scanner_status
+        ):
+            scanner_status_info = self.model.metadata.scanner_status[scanner_name]
+
+            if scanner_status_info.status == "SKIPPED":
+                scanner_excluded = True
+                status = "SKIPPED"
+            elif scanner_status_info.status == "MISSING":
+                dependencies_missing = True
+                status = "MISSING"
+            elif scanner_status_info.status == "FAILED":
+                status = "FAILED"
+
+        # Then check in additional_reports if not found in metadata
+        elif scanner_results:
+            # Check for excluded status or missing dependencies
+            for target_type, results in scanner_results.items():
+                if isinstance(results, dict):
+                    if results.get("excluded", False):
+                        scanner_excluded = True
+                        status = "SKIPPED"
+                        break
+                    if not results.get("dependencies_satisfied", True):
+                        dependencies_missing = True
+                        status = "MISSING"
+                        break
+                    if "scanner_status" in results:
+                        scanner_status = results["scanner_status"]
+                        if scanner_status == "SKIPPED":
+                            scanner_excluded = True
+                            status = "SKIPPED"
+                            break
+                        elif scanner_status == "MISSING":
+                            dependencies_missing = True
+                            status = "MISSING"
+                            break
+
+        # Finally, check if scanner has dependencies_satisfied attribute directly
+        if (
+            not scanner_excluded
+            and not dependencies_missing
+            and scanner_plugin
+            and hasattr(scanner_plugin, "dependencies_satisfied")
+        ):
+            if not scanner_plugin.dependencies_satisfied:
+                dependencies_missing = True
+                status = "MISSING"
+
+        # If not excluded or missing dependencies, check for actionable findings
+        if not scanner_excluded and not dependencies_missing and actionable > 0:
+            status = "FAILED"
+
+        return status, scanner_excluded, dependencies_missing
