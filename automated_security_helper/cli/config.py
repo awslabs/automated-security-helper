@@ -3,6 +3,7 @@
 
 import os
 from pathlib import Path
+import sys
 from typing import Annotated
 import yaml
 import typer
@@ -104,23 +105,37 @@ def validate(
         typer.secho(f"Config file does not exist at {config_path}", fg=typer.colors.RED)
         raise typer.Exit(1)
     try:
-        config = resolve_config(config_path)
+        config = resolve_config(config_path=config_path, fallback_to_default=False)
+
         if config.project_name:
-            typer.secho(
-                f"Config file '{Path(config_path).absolute().as_posix()}' is valid",
-                fg=typer.colors.GREEN,
-            )
+            if config_path:
+                typer.secho(
+                    f"Config file '{Path(config_path).absolute().as_posix()}' is valid",
+                    fg=typer.colors.GREEN,
+                )
+            else:
+                typer.secho(
+                    f"Config file for project '{config.project_name}' is valid",
+                    fg=typer.colors.GREEN,
+                )
             return True
 
         raise ASHConfigValidationError(
             "Config validation passed, but project_name was not found on the resolved config."
         )
     except Exception as e:
-        typer.secho(
-            f"Config file '{Path(config_path).absolute().as_posix()}' is not valid: {e}",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(1)
+        if config_path:
+            typer.secho(
+                f"Config file '{Path(config_path).absolute().as_posix()}' is not valid: {e}",
+                fg=typer.colors.RED,
+            )
+            raise sys.exit(1) from None
+        else:
+            typer.secho(
+                "Unable to resolve a valid configuration from the input details provided",
+                fg=typer.colors.RED,
+            )
+        raise sys.exit(1) from None
 
 
 if __name__ == "__main__":

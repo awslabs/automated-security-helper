@@ -135,32 +135,32 @@ class ScanExecutionEngine:
 
         # Discover external plugins if enabled
         ash_plugin_manager.set_context(self._context)
-        ash_plugin_modules = (
+
+        # Combine plugin modules from config and CLI parameters
+        config_plugin_modules = (
             getattr(self._context.config, "ash_plugin_modules", [])
             if self._context.config
             and hasattr(self._context.config, "ash_plugin_modules")
             else []
         )
-        if len(ash_plugin_modules) > 0:
-            # Import additional plugin modules from config
-            if self._context.config and hasattr(
-                self._context.config, "ash_plugin_modules"
-            ):
-                additional_modules = getattr(
-                    self._context.config, "ash_plugin_modules", []
-                )
-                if additional_modules:
-                    ASH_LOGGER.info(
-                        f"Loading additional plugin modules: {additional_modules}"
-                    )
-                    from automated_security_helper.plugins.loader import (
-                        load_additional_plugin_modules,
-                    )
 
-                    load_additional_plugin_modules(additional_modules)
+        # CLI parameters take precedence over config
+        combined_plugin_modules = list(set(ash_plugin_modules + config_plugin_modules))
+
+        if len(combined_plugin_modules) > 0:
+            ASH_LOGGER.info(f"Loading plugin modules: {combined_plugin_modules}")
+
+            # Import additional plugin modules
+            from automated_security_helper.plugins.loader import (
+                load_additional_plugin_modules,
+            )
+
+            load_additional_plugin_modules(combined_plugin_modules)
 
             # Discover plugins from specified modules
-            discovered_plugins = discover_plugins(plugin_modules=ash_plugin_modules)
+            discovered_plugins = discover_plugins(
+                plugin_modules=combined_plugin_modules
+            )
 
             # Register adapters for discovered plugins
             if discovered_plugins.get("converters"):

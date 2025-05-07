@@ -123,6 +123,14 @@ class ASHScanOrchestrator(BaseModel):
         ),
     ] = False
 
+    ash_plugin_modules: Annotated[
+        List[str],
+        Field(
+            description="List of Python modules to import containing ASH plugins and/or event subscribers",
+            default_factory=list,
+        ),
+    ] = []
+
     def model_post_init(self, context):
         """Post initialization configuration."""
         super().model_post_init(context)
@@ -180,7 +188,8 @@ class ASHScanOrchestrator(BaseModel):
             color_system=self.color_system,
             verbose=self.verbose,
             debug=self.debug,
-            python_based_plugins_only=self.python_based_plugins_only,  # Pass the python_based_plugins_only flag to the execution engine
+            python_based_plugins_only=self.python_based_plugins_only,
+            ash_plugin_modules=self.ash_plugin_modules,  # Pass the ash_plugin_modules to the execution engine
             **exec_engine_params,
         )
 

@@ -4,7 +4,7 @@
 import json
 import os
 import shlex
-from subprocess import CalledProcessError
+from subprocess import CalledProcessError  # nosec B404 - Using the exception class to evaluate subprocess invocations
 import sys
 import time
 from datetime import datetime
@@ -249,6 +249,7 @@ def run_ash_container(
     ash_revision_to_install: str | None = None,
     custom_containerfile: str | None = None,
     custom_build_arg: List[str] = [],
+    ash_plugin_modules: List[str] = [],
 ):
     """Build and run the ASH container image.
 
@@ -616,6 +617,11 @@ def run_ash_container(
         # Add existing results if specified
         if existing_results:
             ash_args.extend(["--existing-results", existing_results])
+
+        # Add ash_plugin_modules if specified
+        if ash_plugin_modules:
+            for module in ash_plugin_modules:
+                ash_args.extend(["--ash-plugin-modules", module])
 
         # Add strategy if not default
         if strategy:

@@ -83,6 +83,7 @@ def run_ash_scan(
     ash_revision_to_install: str | None = None,
     custom_containerfile: str | None = None,
     custom_build_arg: List[str] = [],
+    ash_plugin_modules: List[str] = [],
     *args,
     **kwargs,
 ):
@@ -179,6 +180,7 @@ def run_ash_scan(
             ash_revision_to_install=ash_revision_to_install,
             custom_containerfile=custom_containerfile,
             custom_build_arg=custom_build_arg,
+            ash_plugin_modules=ash_plugin_modules,
             # *new_args,
             # **kwargs,
         )
@@ -302,7 +304,8 @@ def run_ash_scan(
                 existing_results_path=(
                     Path(existing_results) if existing_results else None
                 ),
-                python_based_plugins_only=python_based_plugins_only,  # Pass the python_based_plugins_only flag to the orchestrator
+                python_based_plugins_only=python_based_plugins_only,
+                ash_plugin_modules=ash_plugin_modules,  # Pass the ash_plugin_modules parameter to the orchestrator
             )
 
             # Determine which phases to run. Process them in required order to build the
@@ -391,11 +394,8 @@ def run_ash_scan(
                 f"\n[cyan]=== ASH Scan Completed in {duration_str}: Next Steps ===[/cyan]"
             )
             print("View detailed findings...")
-            print(f"  - HTML report of findings: '{out_dir_alias}/reports/ash.html'")
-            print(f"  - Markdown summary: '{out_dir_alias}/reports/ash.summary.md'")
-            print(f"  - Text summary: '{out_dir_alias}/reports/ash.summary.txt'")
-            print(f"  - Full SARIF report: '{out_dir_alias}/reports/ash.sarif'")
-            print(f"  - Full JUnitXML report: '{out_dir_alias}/reports/ash.junit.xml'")
+            print(f"  - SARIF: '{out_dir_alias}/reports/ash.sarif'")
+            print(f"  - JUnit: '{out_dir_alias}/reports/ash.junit.xml'")
             print(
                 f"  - ASH aggregated results JSON available at: '{out_dir_alias}/{output_file.relative_to(output_dir).as_posix()}'"
             )
@@ -404,10 +404,22 @@ def run_ash_scan(
         if actionable_findings > 0:
             print("\n[magenta]=== Actionable findings detected! ===[/magenta]")
             print("To investigate...")
-            print("  1. Open the HTML report for a user-friendly view")
-            print("  2. Use `ash inspect findings` for an interactive exploration")
             print(
-                f"  3. Review scanner-specific reports and outputs in the '{out_dir_alias}/scanners' directory"
+                "  1. Open one of the summary reports for a user-friendly table of the findings: '{out_dir_alias}/reports/ash.html'"
+            )
+            print(
+                f"    - HTML report of all findings: '{out_dir_alias}/reports/ash.html'"
+            )
+            print(f"    - Markdown summary: '{out_dir_alias}/reports/ash.summary.md'")
+            print(f"    - Text summary: '{out_dir_alias}/reports/ash.summary.txt'")
+            print(
+                "  2. Use [magenta]ash report[/magenta] to view a short text summary of the scan in your terminal"
+            )
+            print(
+                "  3. Use [magenta]ash inspect findings[/magenta] to explore the findings interactively"
+            )
+            print(
+                f"  4. Review scanner-specific reports and outputs in the '{out_dir_alias}/scanners' directory"
             )
 
     # Exit with non-zero code if configured to fail on findings and there are actionable findings

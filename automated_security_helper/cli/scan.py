@@ -59,6 +59,13 @@ def run_ash_scan_cli_command(
             envvar="ASH_CONFIG",
         ),
     ] = None,
+    ash_plugin_modules: Annotated[
+        List[str],
+        typer.Option(
+            help="List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.",
+            envvar="ASH_PLUGIN_MODULES",
+        ),
+    ] = [],
     offline: Annotated[
         bool,
         typer.Option(
@@ -301,6 +308,8 @@ def run_ash_scan_cli_command(
         simple=precommit_mode
         or log_level == AshLogLevel.SIMPLE
         or str(log_level).lower() == "simple",
+        # Pass the ash_plugin_modules parameter
+        ash_plugin_modules=ash_plugin_modules,
         # Container-specific params
         build=build,
         run=run,
