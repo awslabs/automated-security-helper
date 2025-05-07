@@ -352,7 +352,7 @@
               }
             },
             "semgrep": {
-              "enabled": false,
+              "enabled": true,
               "name": "semgrep",
               "options": {
                 "config": "auto",
@@ -2328,7 +2328,7 @@
         "semgrep": {
           "$ref": "#/$defs/SemgrepScannerConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "name": "semgrep",
             "options": {
               "config": "auto",
@@ -2635,7 +2635,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },

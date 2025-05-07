@@ -396,6 +396,9 @@ class ScanPhase(EnginePhase):
                             "output": scanner_plugin.output or [],
                         }
                     elif not raw_results:
+                        ASH_LOGGER.verbose(
+                            f"Scanner {scanner_plugin.__class__.__name__} returned False for {target_type} -- plugin is missing dependencies"
+                        )
                         container.status = "warning"
                         container.scanner_status = ScannerStatus.MISSING
 
