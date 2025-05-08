@@ -58,14 +58,21 @@ def generate_metrics_table(
     Returns:
         Table: Rich table with scanner metrics
     """
+    source_dir_rel = (
+        Path(source_dir).relative_to(Path.cwd())
+        if Path(source_dir).is_relative_to(Path.cwd())
+        else source_dir
+    )
+    output_dir_rel = (
+        Path(output_dir).relative_to(Path.cwd())
+        if Path(output_dir).is_relative_to(Path.cwd())
+        else output_dir
+    )
     # Create a table
     table = Table(
         title="ASH Scan Results Summary",
         expand=False,
-        caption=f"""
-source-dir: {source_dir}
-output-dir: {output_dir}
-""",
+        caption=f"source-dir: '{source_dir_rel.as_posix()}'\noutput-dir: '{output_dir_rel.as_posix()}'",
     )
 
     # Determine if we should use shortened headers based on terminal width
