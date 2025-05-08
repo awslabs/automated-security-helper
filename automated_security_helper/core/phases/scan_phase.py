@@ -159,6 +159,46 @@ class ScanPhase(EnginePhase):
 
                             continue
 
+                        # Check dependencies early
+                        plugin_instance.dependencies_satisfied = (
+                            plugin_instance.validate()
+                        )
+                        if not plugin_instance.dependencies_satisfied:
+                            ASH_LOGGER.warning(
+                                f"Scanner {display_name} dependencies are not satisfied, marking as MISSING"
+                            )
+
+                            # Create a ScanResultsContainer with dependencies_satisfied=False
+                            results_container = ScanResultsContainer(
+                                scanner_name=display_name,
+                                dependencies_satisfied=False,
+                                scanner_status=ScannerStatus.MISSING,
+                            )
+
+                            # Add to results
+                            self.asharp_model.additional_reports[display_name] = {
+                                "source": results_container.model_dump()
+                            }
+
+                            # Add to completed scanners for metrics display
+                            self._completed_scanners.append(plugin_instance)
+
+                            # Add to scanner status metadata
+                            if not hasattr(
+                                self.asharp_model.metadata, "scanner_status"
+                            ):
+                                self.asharp_model.metadata.scanner_status = {}
+
+                            self.asharp_model.metadata.scanner_status[display_name] = (
+                                ScannerStatusInfo(
+                                    status=ScannerStatus.MISSING,
+                                    dependencies_satisfied=False,
+                                    excluded=False,
+                                )
+                            )
+
+                            continue
+
                         # Check if scanner is enabled and if python_based_plugins_only is set, check if it's a Python-only scanner
                         is_enabled = hasattr(
                             plugin_instance.config, "enabled"
@@ -407,11 +447,6 @@ class ScanPhase(EnginePhase):
                             target_type=target_type,
                             global_ignore_paths=self._global_ignore_paths,
                         )
-                        container.dependencies_satisfied = (
-                            scanner_plugin.dependencies_satisfied
-                        )
-                        if not scanner_plugin.dependencies_satisfied:
-                            container.scanner_status = ScannerStatus.MISSING
                     else:
                         ASH_LOGGER.warning(f"{scanner_config.name} is not enabled!")
                 except Exception as e:
@@ -433,6 +468,11 @@ class ScanPhase(EnginePhase):
                             "errors": scanner_plugin.errors or [],
                             "output": scanner_plugin.output or [],
                         }
+                    elif not raw_results:
+                        ASH_LOGGER.debug(
+                            f"Scanner {scanner_plugin.__class__.__name__} returned False for {target_type} -- plugin is missing dependencies"
+                        )
+                        container.scanner_status = ScannerStatus.MISSING
 
                     # Set raw results
                     container.start_time = scanner_plugin.start_time
@@ -496,31 +536,16 @@ class ScanPhase(EnginePhase):
                     # Get exit code from scanner
                     container.exit_code = getattr(scanner_plugin, "exit_code", 0)
 
-                    # Determine status based on severity counts and update scanner status
+                    # Determine status based on severity counts
                     if (
                         container.severity_counts.get("critical", 0) > 0
                         or container.severity_counts.get("high", 0) > 0
                     ):
                         container.status = "failed"
-                        container.scanner_status = ScannerStatus.FAILED
                     elif container.severity_counts.get("medium", 0) > 0:
                         container.status = "warning"
-                        container.scanner_status = ScannerStatus.FAILED
                     else:
                         container.status = "passed"
-                        container.scanner_status = ScannerStatus.PASSED
-
-                    # Update scanner status in metadata
-                    if not hasattr(self.asharp_model.metadata, "scanner_status"):
-                        self.asharp_model.metadata.scanner_status = {}
-
-                    self.asharp_model.metadata.scanner_status[scanner_name] = (
-                        ScannerStatusInfo(
-                            status=container.scanner_status,
-                            dependencies_satisfied=True,
-                            excluded=False,
-                        )
-                    )
 
                     # Extract and add metadata if present
                     if isinstance(raw_results, dict) and "metadata" in raw_results:
@@ -528,6 +553,9 @@ class ScanPhase(EnginePhase):
                             container.add_metadata(key, value)
 
                     # Add this container to our results
+                    ASH_LOGGER.trace(
+                        f"Appending {scanner_plugin.__class__.__name__} container to results: {container.model_dump_json(by_alias=True, exclude_unset=True)}"
+                    )
                     results.append(container)
 
             # Mark scanner as completed
@@ -831,8 +859,24 @@ class ScanPhase(EnginePhase):
             "exit_code": results.exit_code,
             "status": results.status,
             "duration": results.duration,  # Add duration to the metrics
+            # Add scanner status information
+            "scanner_status": results.scanner_status,
+            "dependencies_satisfied": results.dependencies_satisfied,
+            "excluded": results.excluded,
             # "raw_results": results.raw_results,
         }
+
+        # Update scanner status in metadata
+        if not hasattr(self.asharp_model.metadata, "scanner_status"):
+            self.asharp_model.metadata.scanner_status = {}
+
+        # Only update if not already set (to maintain precedence)
+        if scanner_name not in self.asharp_model.metadata.scanner_status:
+            self.asharp_model.metadata.scanner_status[scanner_name] = ScannerStatusInfo(
+                status=results.scanner_status,
+                dependencies_satisfied=results.dependencies_satisfied,
+                excluded=results.excluded,
+            )
 
         # Process the raw results based on type
         if isinstance(results.raw_results, SarifReport):
@@ -922,71 +966,3 @@ class ScanPhase(EnginePhase):
             self.asharp_model.additional_reports[scanner_name][results.target_type][
                 "raw_results"
             ] = results.raw_results
-
-    def _update_summary_stats(self) -> None:
-        """Update summary statistics in the AshAggregatedResults."""
-        # Initialize counters
-        total_findings = 0
-        severity_counts = {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 0,
-        }
-        scanner_counts = {
-            "total": len(self._completed_scanners),
-            "passed": 0,
-            "failed": 0,
-            "missing": 0,
-            "skipped": 0,
-        }
-        actionable_findings = 0
-
-        # Process each scanner's results
-        for scanner_name, reports in self.asharp_model.additional_reports.items():
-            # Check scanner status from metadata
-            scanner_status = ScannerStatus.PASSED
-            if (
-                hasattr(self.asharp_model.metadata, "scanner_status")
-                and scanner_name in self.asharp_model.metadata.scanner_status
-            ):
-                scanner_status_info = self.asharp_model.metadata.scanner_status[
-                    scanner_name
-                ]
-                scanner_status = scanner_status_info.status
-
-                # Update scanner counts based on status
-                if scanner_status == ScannerStatus.SKIPPED:
-                    scanner_counts["skipped"] += 1
-                elif scanner_status == ScannerStatus.MISSING:
-                    scanner_counts["missing"] += 1
-                elif scanner_status == ScannerStatus.FAILED:
-                    scanner_counts["failed"] += 1
-                else:
-                    scanner_counts["passed"] += 1
-
-            # Only count findings from scanners that actually ran (not SKIPPED or MISSING)
-            if scanner_status not in [ScannerStatus.SKIPPED, ScannerStatus.MISSING]:
-                for target_type, results in reports.items():
-                    if isinstance(results, dict) and "severity_counts" in results:
-                        # Add to total findings
-                        for severity, count in results["severity_counts"].items():
-                            if severity in severity_counts:
-                                severity_counts[severity] += count
-                                total_findings += count
-
-                                # Count actionable findings based on severity threshold
-                                # This is a simplified version - in reality you'd use the scanner's threshold
-                                if severity in ["critical", "high", "medium"]:
-                                    actionable_findings += count
-
-        # Update summary stats
-        self.asharp_model.metadata.summary_stats.update(
-            {
-                "total": total_findings,
-                **severity_counts,
-                "actionable": actionable_findings,
-                **scanner_counts,
-            }
-        )

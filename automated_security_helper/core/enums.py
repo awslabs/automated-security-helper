@@ -1,6 +1,20 @@
 from enum import Enum
 
 
+class ScannerToolType(str, Enum):
+    """Type of scanner tool."""
+
+    SAST = "SAST"
+    DAST = "DAST"
+    SCA = "SCA"
+    IAC = "IAC"
+    SECRETS = "SECRETS"
+    CONTAINER = "CONTAINER"
+    SBOM = "SBOM"
+    CUSTOM = "CUSTOM"
+    UNKNOWN = "UNKNOWN"
+
+
 class ScannerStatus(str, Enum):
     """Status of a scanner execution."""
 

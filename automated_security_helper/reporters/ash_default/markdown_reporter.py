@@ -95,8 +95,22 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             # Generate scanner results table
             md_parts.append("### Scanner Results\n")
             md_parts.append(
-                "The table below shows findings by scanner, with pass/fail status based on severity thresholds:\n"
+                "The table below shows findings by scanner, with status based on severity thresholds and dependencies:\n"
             )
+            md_parts.append(
+                "- **Severity levels**: Critical (C), High (H), Medium (M), Low (L), Info (I)"
+            )
+            md_parts.append(
+                "- **Duration (Time)**: Time taken by the scanner to complete its execution"
+            )
+            md_parts.append(
+                "- **Actionable**: Number of findings at or above the threshold severity level"
+            )
+            md_parts.append("- **Result**:")
+            md_parts.append("  - ✅ **PASSED** = No findings at or above threshold")
+            md_parts.append("  - ❌ **FAILED** = Findings at or above threshold")
+            md_parts.append("  - ⚠️ **MISSING** = Required dependencies not available")
+            md_parts.append("  - ⏭️ **SKIPPED** = Scanner explicitly disabled")
             md_parts.append(
                 "- **Threshold**: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL)"
             )
@@ -114,9 +128,6 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 "    - `global` (global_settings section in the ASH_CONFIG used)"
             )
             md_parts.append(
-                "- **Result**: ✅ Passed = No findings at or above threshold, ❌ Failed = Findings at or above threshold"
-            )
-            md_parts.append(
                 "- **Example**: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure\n"
             )
 
@@ -130,13 +141,28 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             # Add scanner result rows
             scanner_results = emitter.get_scanner_results()
             for result in scanner_results:
-                status = "✅ Passed" if result["passed"] else "❌ Failed"
+                # Determine status text and emoji based on status field
+                if "status" in result:
+                    status = result["status"]
+                    if status == "PASSED":
+                        status_text = "✅ Passed"
+                    elif status == "FAILED":
+                        status_text = "❌ Failed"
+                    elif status == "MISSING":
+                        status_text = "⚠️ Missing"
+                    elif status == "SKIPPED":
+                        status_text = "⏭️ Skipped"
+                    else:
+                        status_text = status
+                else:
+                    status_text = "✅ Passed" if result["passed"] else "❌ Failed"
+
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 
                 md_parts.append(
                     f"| {result['scanner_name']} | {result['critical']} | {result['high']} | "
                     f"{result['medium']} | {result['low']} | {result['info']} | {result['actionable']} | "
-                    f"{status} | {threshold_text} |"
+                    f"{status_text} | {threshold_text} |"
                 )
 
             md_parts.append("")

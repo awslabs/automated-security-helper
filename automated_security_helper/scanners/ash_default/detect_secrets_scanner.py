@@ -172,7 +172,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
         config: DetectSecretsScannerConfig | None = None,
-    ) -> SarifReport:
+    ) -> SarifReport | bool:
         """Execute detect-secrets scan and return results.
 
         Args:
@@ -184,18 +184,33 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        # Check if the target directory is empty or doesn't exist
+        if not target.exists() or not any(target.iterdir()):
+            message = (
+                f"Target directory {target} is empty or doesn't exist. Skipping scan."
+            )
+            self._scanner_log(
+                message,
+                target_type=target_type,
+                level=20,
+                append_to_stream="stderr",  # This will add the message to self.errors
+            )
+            return True
+
         try:
-            self._pre_scan(
+            validated = self._pre_scan(
                 target=target,
                 target_type=target_type,
                 config=config,
             )
+            if not validated:
+                return False
         except ScannerError as exc:
             raise exc
 
         if not self.dependencies_satisfied:
             # Logging of this has been done in the central self._pre_scan() method.
-            return
+            return False
 
         ASH_LOGGER.debug(f"self.config: {self.config}")
         ASH_LOGGER.debug(f"config: {config}")

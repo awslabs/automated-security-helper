@@ -352,7 +352,7 @@
               }
             },
             "semgrep": {
-              "enabled": false,
+              "enabled": true,
               "name": "semgrep",
               "options": {
                 "config": "auto",
@@ -2328,7 +2328,7 @@
         "semgrep": {
           "$ref": "#/$defs/SemgrepScannerConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "name": "semgrep",
             "options": {
               "config": "auto",
@@ -2568,9 +2568,8 @@
           "title": "Tool Description"
         },
         "tool_type": {
-          "default": "UNKNOWN",
-          "title": "Tool Type",
-          "type": "string"
+          "$ref": "#/$defs/ScannerToolType",
+          "default": "UNKNOWN"
         },
         "tool_version": {
           "anyOf": [
@@ -2616,11 +2615,27 @@
       "title": "ScannerPluginConfigBase",
       "type": "object"
     },
+    "ScannerToolType": {
+      "description": "Type of scanner tool.",
+      "enum": [
+        "SAST",
+        "DAST",
+        "SCA",
+        "IAC",
+        "SECRETS",
+        "CONTAINER",
+        "SBOM",
+        "CUSTOM",
+        "UNKNOWN"
+      ],
+      "title": "ScannerToolType",
+      "type": "string"
+    },
     "SemgrepScannerConfig": {
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },

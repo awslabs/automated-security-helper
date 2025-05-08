@@ -95,8 +95,22 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             # Generate scanner results table
             text_parts.append("Scanner Results:")
             text_parts.append(
-                "The table below shows findings by scanner, with pass/fail status based on severity thresholds:"
+                "The table below shows findings by scanner, with status based on severity thresholds and dependencies:"
             )
+            text_parts.append(
+                "- Severity levels: Critical (C), High (H), Medium (M), Low (L), Info (I)"
+            )
+            text_parts.append(
+                "- Duration (Time): Time taken by the scanner to complete its execution"
+            )
+            text_parts.append(
+                "- Actionable: Number of findings at or above the threshold severity level"
+            )
+            text_parts.append("- Result:")
+            text_parts.append("  - PASSED = No findings at or above threshold")
+            text_parts.append("  - FAILED = Findings at or above threshold")
+            text_parts.append("  - MISSING = Required dependencies not available")
+            text_parts.append("  - SKIPPED = Scanner explicitly disabled")
             text_parts.append(
                 "- Threshold: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL)"
             )
@@ -116,9 +130,6 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 "    - 'global' (global_settings section in the ASH_CONFIG used)"
             )
             text_parts.append(
-                "- Result: PASS = No findings at or above threshold, FAIL = Findings at or above threshold"
-            )
-            text_parts.append(
                 "- Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
             )
             text_parts.append("")
@@ -136,7 +147,12 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
             # Add scanner result rows
             for result in scanner_results:
-                status = "PASS" if result["passed"] else "FAIL"
+                # Determine status text based on status field
+                if "status" in result:
+                    status = result["status"]
+                else:
+                    status = "PASS" if result["passed"] else "FAIL"
+
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 
                 text_parts.append(

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import logging
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
@@ -30,7 +31,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
 
-    tool_type: str = "UNKNOWN"
+    tool_type: ScannerToolType = ScannerToolType.UNKNOWN
 
     command: Annotated[
         str,
@@ -180,7 +181,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
         **kwargs,
-    ) -> None:
+    ) -> bool:
         """Perform pre-scan setup.
 
         Args:
@@ -194,12 +195,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         if not self.dependencies_satisfied:
             self._scanner_log(
-                "Scanner dependencies were not satisfied, unable to start scan!",
+                "Scanner is missing dependencies and will be skipped.",
                 target_type=target_type,
                 level=logging.WARNING,
                 append_to_stream="stderr",
             )
-            return
+            return False
 
         self._scanner_log(
             "Starting scan",
@@ -240,6 +241,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             target_type=target_type,
             level=logging.DEBUG,
         )
+
+        return True
 
     def _post_scan(
         self,

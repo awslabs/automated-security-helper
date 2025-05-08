@@ -38,8 +38,8 @@ script = "ci/stage_build_assets.py"
 [tool.poetry.scripts]
 ash = "automated_security_helper.cli:ash_cli"
 ashv3 = "automated_security_helper.cli:ash_cli"
-asharp = 'asharp.asharp:main'
-schemagen = 'automated_security_helper.schemas.generate_schemas:main'
+automated-security-helper = "automated_security_helper.cli:ash_cli"
+generate-ash-schemas = 'automated_security_helper.schemas.generate_schemas:main'
 get-scan-set = 'automated_security_helper.utils.get_scan_set:main'
 
 [tool.poetry.dependencies]
