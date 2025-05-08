@@ -1572,7 +1572,7 @@
               }
             },
             "opengrep": {
-              "enabled": true,
+              "enabled": false,
               "name": "opengrep",
               "options": {
                 "config": "auto",
@@ -10474,7 +10474,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": true,
+          "default": false,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -15079,7 +15079,7 @@
         "opengrep": {
           "$ref": "#/$defs/OpengrepScannerConfig",
           "default": {
-            "enabled": true,
+            "enabled": false,
             "name": "opengrep",
             "options": {
               "config": "auto",

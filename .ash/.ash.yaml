@@ -40,41 +40,41 @@ reporters:
     enabled: false
   yaml:
     enabled: false
-scanners:
-  bandit:
-    enabled: true
-    options:
-      confidence_level: all
-      ignore_nosec: false
-      config_file: .ash/bandit.yaml
-  cdk-nag:
-    enabled: true
-    options:
-      nag_packs:
-        AwsSolutionsChecks: true
-        HIPAASecurityChecks: true
-        NIST80053R4Checks: true
-        NIST80053R5Checks: true
-        PCIDSS321Checks: true
-  cfn-nag:
-    enabled: true
-  checkov:
-    enabled: true
-    options:
-      frameworks:
-        - all
-      additional_formats:
-        - cyclonedx_json
-      skip_path: []
-  detect-secrets:
-    enabled: true
-  npm-audit:
-    enabled: true
-  grype:
-    enabled: true
-  opengrep:
-    enabled: true
-  semgrep:
-    enabled: false
-  syft:
-    enabled: true
+# scanners:
+#   bandit:
+#     enabled: true
+#     options:
+#       confidence_level: all
+#       ignore_nosec: false
+#       config_file: .ash/bandit.yaml
+#   cdk-nag:
+#     enabled: true
+#     options:
+#       nag_packs:
+#         AwsSolutionsChecks: true
+#         HIPAASecurityChecks: true
+#         NIST80053R4Checks: true
+#         NIST80053R5Checks: true
+#         PCIDSS321Checks: true
+#   cfn-nag:
+#     enabled: true
+#   checkov:
+#     enabled: true
+#     options:
+#       frameworks:
+#         - all
+#       additional_formats:
+#         - cyclonedx_json
+#       skip_path: []
+#   detect-secrets:
+#     enabled: true
+#   npm-audit:
+#     enabled: true
+#   grype:
+#     enabled: true
+#   opengrep:
+#     enabled: true
+#   semgrep:
+#     enabled: false
+#   syft:
+#     enabled: true

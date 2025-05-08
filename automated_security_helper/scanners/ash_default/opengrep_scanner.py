@@ -15,7 +15,6 @@ from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
 )
-from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
@@ -95,13 +94,14 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["opengrep"] = "opengrep"
-    enabled: bool = True
+    enabled: bool = False
     options: Annotated[
         OpengrepScannerConfigOptions, Field(description="Configure Opengrep scanner")
     ] = OpengrepScannerConfigOptions()
 
 
-@ash_scanner_plugin
+### Currently troubleshooting this plugin - @scrthq - 2025-05-07
+# @ash_scanner_plugin
 class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
     """OpengrepScanner implements code scanning using Opengrep."""
 

@@ -56,7 +56,7 @@ def generate_metrics_table(
         Table: Rich table with scanner metrics
     """
     # Create a table
-    table = Table(title="ASH Scan Results Summary", expand=True)
+    table = Table(title="ASH Scan Results Summary", expand=False)
 
     # Determine if we should use shortened headers based on terminal width
     use_short_headers = False
@@ -476,7 +476,10 @@ def display_metrics_table(
             "- [bold]*Example*[/bold]: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
         )
         help_panel = Panel(
-            help_text, title="Results Guide", border_style="blue", expand=True
+            help_text,
+            title="Results Guide",
+            border_style="blue",
+            expand=False,
         )
 
         # Print everything with some spacing
