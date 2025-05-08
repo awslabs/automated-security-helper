@@ -139,7 +139,7 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
         print(f"Running command: {' '.join(shlex.quote(arg) for arg in cmd_list)}")
 
     # Create process using subprocess_utils
-    process = create_process_with_pipes(
+    process = create_process_with_pipes(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
         args=cmd_list,
         text=True,
         shell=shell,

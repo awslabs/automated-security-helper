@@ -38,7 +38,7 @@ def download_file(url: str, destination: Path, rename_to: Optional[str] = None) 
 
     with tempfile.NamedTemporaryFile(delete=False) as temp_file:
         ASH_LOGGER.info(f"Downloading {url} to {temp_file.name}")
-        with urllib.request.urlopen(url) as response:
+        with urllib.request.urlopen(url) as response:  # nosec B310 - This url is evaluated for https scheme a few lines above
             shutil.copyfileobj(response, temp_file)
 
     # Move the temporary file to the destination

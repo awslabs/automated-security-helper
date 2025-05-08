@@ -35,6 +35,7 @@ def mock_secrets_collection():
                     PotentialSecret(
                         type="Base64 High Entropy String",
                         filename="test_file.py",
+                        # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
                         secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                         line_number=10,
                         is_secret=True,
@@ -83,6 +84,7 @@ def test_detect_secrets_scanner_scan(
 
     # Create a test file with a potential secret
     test_file = target_dir / "test_file.py"
+    # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
     test_file.write_text('secret = "base64_encoded_secret=="')
 
     detect_secrets_scanner.source_dir = test_source_dir
@@ -161,6 +163,7 @@ def test_detect_secrets_scanner_sarif_output(
                 PotentialSecret(
                     type="Base64 High Entropy String",
                     filename="test_file.py",
+                    # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
                     secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                     line_number=10,
                     is_secret=True,
@@ -205,6 +208,7 @@ def test_detect_secrets_scanner_with_multiple_files(
                 PotentialSecret(
                     type="Secret1",
                     filename="test_file.py",
+                    # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
                     secret="hash1",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
                     line_number=81,
                     is_secret=True,

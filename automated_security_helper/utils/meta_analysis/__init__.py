@@ -21,7 +21,7 @@ SCANNER_NAME_MAP = {
     "Checkov": "checkov",
     "Grype": "grype",
     "Syft": "syft",
-    "detect-secrets": "detect-secrets",
+    "detect-secrets": "detect-secrets",  # pragma: allowlist secret - Not actually a secret
     "npm-audit": "npm-audit",
     "cdk-nag": "cdk-nag",
 }

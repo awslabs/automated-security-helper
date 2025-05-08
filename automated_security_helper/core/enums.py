@@ -8,7 +8,7 @@ class ScannerToolType(str, Enum):
     DAST = "DAST"
     SCA = "SCA"
     IAC = "IAC"
-    SECRETS = "SECRETS"
+    SECRETS = "SECRETS"  # pragma: allowlist secret - not actually a secret, just the word "SECRETS"
     CONTAINER = "CONTAINER"
     SBOM = "SBOM"
     CUSTOM = "CUSTOM"

@@ -204,7 +204,9 @@ class HashContent(RootModel):
     root: str = Field(
         ...,
         description="The value of the hash.",
-        examples=["3942447fac867ae5cdb3229b658f4d48"],
+        examples=[
+            "3942447fac867ae5cdb3229b658f4d48"
+        ],  # pragma: allowlist secret - Not actually a secret
         title="Hash Value",
         pattern=r"^([a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64}|[a-fA-F0-9]{96}|[a-fA-F0-9]{128})$",
     )
@@ -1570,8 +1572,11 @@ class CertificateProperties(BaseModel):
 
 
 class Type10(str, Enum):
+    # pragma: allowlist nextline secret - Not actually a secret
     private_key = "private-key"
+    # pragma: allowlist nextline secret - Not actually a secret
     public_key = "public-key"
+    # pragma: allowlist nextline secret - Not actually a secret
     secret_key = "secret-key"  # nosec - False positive, not a hardcoded password
     key = "key"
     ciphertext = "ciphertext"
@@ -1581,11 +1586,14 @@ class Type10(str, Enum):
     nonce = "nonce"
     seed = "seed"
     salt = "salt"
+    # pragma: allowlist nextline secret - Not actually a secret
     shared_secret = "shared-secret"  # nosec - False positive, not a hardcoded password
     tag = "tag"
     additional_data = "additional-data"
+    # pragma: allowlist nextline secret - Not actually a secret
     password = "password"  # nosec - False positive, not a hardcoded password
     credential = "credential"
+    # pragma: allowlist nextline secret - Not actually a secret
     token = "token"  # nosec - False positive, not a hardcoded password
     other = "other"
     unknown = "unknown"

@@ -279,6 +279,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                     "detect-secrets",
                                     "secret",
                                     "security",
+                                    f"tool_name::{self.config.name}",
+                                    f"tool_type::{self.tool_type or 'UNKNOWN'}",
                                 ],
                             ),
                             level=Level.error,

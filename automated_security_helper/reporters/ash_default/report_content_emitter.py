@@ -4,6 +4,8 @@
 from datetime import datetime, timezone
 from typing import Dict, List, Any, TYPE_CHECKING
 
+from automated_security_helper.utils.log import ASH_LOGGER
+
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
@@ -62,8 +64,9 @@ class ReportContentEmitter:
                     except ValueError:
                         continue
             except Exception:
-                # If parsing fails, we'll just not show the delta
-                pass
+                ASH_LOGGER.debug(
+                    "Report parsing has failed, showing what had been resolved"
+                )
 
         return {
             "project": self.model.metadata.project_name or "Unknown",

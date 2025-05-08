@@ -2,7 +2,7 @@
 
 import logging
 import shutil
-import subprocess
+import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any, Literal
 
@@ -74,7 +74,7 @@ def run_command(
     ASH_LOGGER.log(log_level, f"Running command: {cmd_str}")
 
     try:
-        result = subprocess.run(  # nosec B603 - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+        result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=env,
@@ -155,7 +155,7 @@ def run_command_with_output_handling(
     ASH_LOGGER.verbose(f"Running: {cmd_str}")
 
     try:
-        result = subprocess.run(  # nosec B603 - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+        result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             command,
             capture_output=True,
             text=True,
@@ -234,7 +234,7 @@ def run_command_get_output(
     Raises:
         subprocess.CalledProcessError: If check=True and the command fails
     """
-    result = run_command(
+    result = run_command(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
         args=args,
         cwd=cwd,
         env=env,
@@ -275,7 +275,7 @@ def run_command_stream_output(
     ASH_LOGGER.info(f"Running command: {cmd_str}")
 
     try:
-        process = subprocess.Popen(  # nosec B603 - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+        process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=env,
@@ -398,7 +398,7 @@ def create_process_with_pipes(
     stderr = subprocess.STDOUT if stderr_to_stdout else subprocess.PIPE
 
     try:
-        process = subprocess.Popen(  # nosec B603 - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
+        process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=env,

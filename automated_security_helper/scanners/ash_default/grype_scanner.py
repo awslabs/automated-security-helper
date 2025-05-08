@@ -117,9 +117,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             for item in [
                 self.config.options.config_file,
                 ".grype.yaml",
+                ".grype/config.yaml",
                 ".ash/.grype.yaml",
-                ".grype.yml",
-                ".ash/.grype.yml",
+                ".ash/grype.yaml",
             ]
             if item is not None
         ]

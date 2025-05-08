@@ -250,6 +250,8 @@ def run_cdk_nag_against_cfn_template(
                         line.rule_id,
                         resource_log_id,
                         cfn_resource.Type,
+                        "tool_name::cdk-nag",
+                        "tool_type::IAC",
                     ],
                 ),
                 ruleId=line.rule_id,
