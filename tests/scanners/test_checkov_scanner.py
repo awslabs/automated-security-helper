@@ -146,11 +146,11 @@ def test_checkov_scanner_scan(test_checkov_scanner, test_data_dir):
 def test_checkov_scanner_scan_error(test_checkov_scanner):
     """Test CheckovScanner scan method with error."""
     # Try to scan a non-existent directory
-    resp = test_checkov_scanner.scan(Path("/nonexistent"), target_type="source")
+    resp = test_checkov_scanner.scan(Path("nonexistent"), target_type="source")
     assert resp is not None
     assert resp is True
     assert (
-        "(checkov) Target directory /nonexistent is empty or doesn't exist. Skipping scan."
+        "(checkov) Target directory nonexistent is empty or doesn't exist. Skipping scan."
         in test_checkov_scanner.errors
     )
 

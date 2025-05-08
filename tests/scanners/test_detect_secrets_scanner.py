@@ -107,12 +107,12 @@ def test_detect_secrets_scanner_scan(
 def test_bandit_scanner_scan_nonexistent_path(detect_secrets_scanner):
     """Test BanditScanner scan method with error."""
     # Try to scan a non-existent directory
-    nonexistent_path = Path("/nonexistent")
+    nonexistent_path = Path("nonexistent")
     resp = detect_secrets_scanner.scan(nonexistent_path, target_type="source")
     assert resp is not None
     assert resp is True
     assert (
-        "(detect-secrets) Target directory /nonexistent is empty or doesn't exist. Skipping scan."
+        "(detect-secrets) Target directory nonexistent is empty or doesn't exist. Skipping scan."
         in detect_secrets_scanner.errors
     )
 
