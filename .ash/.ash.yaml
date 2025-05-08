@@ -66,6 +66,7 @@ scanners:
       additional_formats:
         - cyclonedx_json
       skip_path: []
+      config_file: .ash/.checkov.yaml
   detect-secrets:
     enabled: true
   npm-audit:
@@ -73,7 +74,7 @@ scanners:
   grype:
     enabled: true
     options:
-      config_file: .ash/grype.yaml
+      config_file: .ash/.grype.yaml
   opengrep:
     enabled: true
   semgrep:
