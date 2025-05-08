@@ -1,5 +1,6 @@
 """Module for generating metrics tables for ASH scan results."""
 
+from pathlib import Path
 import shutil
 from typing import Dict, List, Any
 from rich.console import Console
@@ -42,6 +43,8 @@ def format_duration(duration_seconds: float) -> str:
 def generate_metrics_table(
     completed_scanners: List[ScannerPluginBase],
     asharp_model: AshAggregatedResults,
+    source_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
     scan_results: Dict[str, Any] = None,
     console: Console = None,
 ) -> Table:
@@ -56,7 +59,14 @@ def generate_metrics_table(
         Table: Rich table with scanner metrics
     """
     # Create a table
-    table = Table(title="ASH Scan Results Summary", expand=False)
+    table = Table(
+        title="ASH Scan Results Summary",
+        expand=False,
+        caption=f"""
+source-dir: {source_dir}
+output-dir: {output_dir}
+""",
+    )
 
     # Determine if we should use shortened headers based on terminal width
     use_short_headers = False
@@ -440,6 +450,8 @@ def display_metrics_table(
     completed_scanners: List[ScannerPluginBase],
     asharp_model: AshAggregatedResults,
     scan_results: Dict[str, Any] = None,
+    source_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
     use_color: bool = True,
 ) -> None:
     """Display a Rich table with metrics for each scanner.
@@ -458,7 +470,12 @@ def display_metrics_table(
 
         # Generate the metrics table
         table = generate_metrics_table(
-            completed_scanners, asharp_model, scan_results, console
+            completed_scanners=completed_scanners,
+            asharp_model=asharp_model,
+            source_dir=source_dir,
+            output_dir=output_dir,
+            scan_results=scan_results,
+            console=console,
         )
 
         # Create a help panel with instructions

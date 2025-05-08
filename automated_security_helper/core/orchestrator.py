@@ -162,7 +162,13 @@ class ASHScanOrchestrator(BaseModel):
             for old_file in [
                 file
                 for file in self.output_dir.glob("*.*")
-                if "ash.log" not in file.name
+                if file.name
+                in [
+                    "ash_aggregated_results.json",
+                    "ash-ignore-report.txt",
+                    "ash-scan-set-files-list.txt",
+                    "ash.log",
+                ]
             ]:
                 ASH_LOGGER.debug(f"Removing old file: {old_file}")
                 old_file.unlink()

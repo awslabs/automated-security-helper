@@ -531,5 +531,11 @@ class ScanExecutionEngine:
                     completed_scanners=self._completed_scanners,
                     asharp_model=self._asharp_model,
                     scan_results=self._scan_results,
+                    source_dir=os.environ.get(
+                        "ASH_ACTUAL_SOURCE_DIR", self._context.source_dir.as_posix()
+                    ),
+                    output_dir=os.environ.get(
+                        "ASH_ACTUAL_OUTPUT_DIR", self._context.output_dir.as_posix()
+                    ),
                     use_color=use_color,
                 )
