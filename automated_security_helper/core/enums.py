@@ -34,6 +34,7 @@ class ReportFormat(str, Enum):
     html = "html"
     json = "flat-json"
     junitxml = "junitxml"
+    markdown = "markdown"
     ocsf = "ocsf"
     sarif = "sarif"
     spdx = "spdx"

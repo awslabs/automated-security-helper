@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from datetime import datetime, timezone
+import json
 from typing import Dict, List, Any, TYPE_CHECKING
 
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -338,12 +339,17 @@ class ReportContentEmitter:
         return findings
 
     def get_detailed_findings(self, max_findings: int = 20) -> List[Dict[str, Any]]:
-        """Get detailed information for findings, limited to max_findings."""
+        """Get detailed information for actionable findings, limited to max_findings."""
         if not self.flat_vulns:
             return []
 
+        # Filter to only include actionable findings
+        actionable_findings = [
+            vuln for vuln in self.flat_vulns if self.is_finding_actionable(vuln)
+        ]
+
         # Limit the number of detailed findings
-        findings_to_show = self.flat_vulns[:max_findings]
+        findings_to_show = actionable_findings[:max_findings]
 
         detailed_findings = []
         for vuln in findings_to_show:
@@ -352,6 +358,43 @@ class ReportContentEmitter:
                 location += f":{vuln.line_start}"
                 if vuln.line_end and vuln.line_end != vuln.line_start:
                     location += f"-{vuln.line_end}"
+
+            # Use the code_snippet field if available
+            code_snippet = vuln.code_snippet
+
+            # If no snippet is directly available, try to extract from raw data
+            if not code_snippet and vuln.raw_data:
+                try:
+                    raw_data = json.loads(vuln.raw_data)
+                    # Look for snippet in different possible locations based on scanner format
+                    if isinstance(raw_data, dict):
+                        # Try to find snippet in common locations
+                        if "snippet" in raw_data:
+                            code_snippet = raw_data["snippet"]
+                        elif "codeFlows" in raw_data and raw_data["codeFlows"]:
+                            for flow in raw_data["codeFlows"]:
+                                if "threadFlows" in flow and flow["threadFlows"]:
+                                    for thread in flow["threadFlows"]:
+                                        if (
+                                            "locations" in thread
+                                            and thread["locations"]
+                                        ):
+                                            for loc in thread["locations"]:
+                                                if "snippet" in loc:
+                                                    code_snippet = loc["snippet"][
+                                                        "text"
+                                                    ]
+                                                    break
+                        # For SARIF format
+                        elif "message" in raw_data and "text" in raw_data["message"]:
+                            # Some scanners include snippets in the message
+                            if "```" in raw_data["message"]["text"]:
+                                parts = raw_data["message"]["text"].split("```")
+                                if len(parts) >= 3:  # Has at least one code block
+                                    code_snippet = parts[1]
+                except (json.JSONDecodeError, AttributeError, KeyError, TypeError):
+                    # If we can't parse the raw data or find a snippet, just continue
+                    pass
 
             finding = {
                 "title": vuln.title or "Unknown Issue",
@@ -362,6 +405,7 @@ class ReportContentEmitter:
                 "description": vuln.description or "",
                 "cve_id": vuln.cve_id,
                 "cwe_id": vuln.cwe_id,
+                "code_snippet": code_snippet,
             }
             detailed_findings.append(finding)
 

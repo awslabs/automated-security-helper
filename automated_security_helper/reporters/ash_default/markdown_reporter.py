@@ -210,7 +210,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 # Determine if we should use collapsible details
                 use_collapsible = self.config.options.use_collapsible_details
                 findings_count = len(detailed_findings)
-                total_findings = len(emitter.flat_vulns)
+                total_findings = len(
+                    [v for v in emitter.flat_vulns if emitter.is_finding_actionable(v)]
+                )
 
                 # Start the detailed findings section with the header outside the collapsible element
                 md_parts.append("<h2>Detailed Findings</h2>\n")
@@ -219,7 +221,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     # Create a collapsible section with HTML details/summary tags
                     md_parts.append("<details>")
                     md_parts.append(
-                        f"<summary>Show {findings_count}{' of ' + str(total_findings) if findings_count < total_findings else ''} detailed findings</summary>\n"
+                        f"<summary>Show {findings_count}{' of ' + str(total_findings) if findings_count < total_findings else ''} actionable findings</summary>\n"
                     )
 
                 # Add each finding
@@ -239,14 +241,19 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     md_parts.append("\n**Description**:")
                     md_parts.append(f"{finding['description']}\n")
 
+                    # Add code snippet if available
+                    if finding.get("code_snippet"):
+                        md_parts.append("**Code Snippet**:")
+                        md_parts.append(f"```\n{finding['code_snippet']}\n```\n")
+
                     # Add a separator between findings
                     if i < len(detailed_findings) - 1:
                         md_parts.append("---\n")
 
                 # Add note if findings were limited
-                if len(emitter.flat_vulns) > self.config.options.max_detailed_findings:
+                if total_findings > self.config.options.max_detailed_findings:
                     md_parts.append(
-                        f"\n> Note: Showing {self.config.options.max_detailed_findings} of {len(emitter.flat_vulns)} total findings. Configure `max_detailed_findings` to adjust this limit.\n"
+                        f"\n> Note: Showing {self.config.options.max_detailed_findings} of {total_findings} total actionable findings. Configure `max_detailed_findings` to adjust this limit.\n"
                     )
 
                 # Close the details tag if using collapsible section
