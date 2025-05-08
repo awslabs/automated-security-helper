@@ -83,8 +83,8 @@ def resolve_config(
                 return config
 
             ASH_LOGGER.debug("Validating file config")
-            config = AshConfig.model_validate(config_data)
-            ASH_LOGGER.debug(f"Loaded config from file: {config}")
+            config = AshConfig.model_validate(config_data, strict=True)
+            ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
             return config
 
         except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:

@@ -100,7 +100,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 class BuildConfig(BaseModel):
     """Configuration model for build-time settings."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     build_mode: Annotated[
         Literal["ONLINE", "OFFLINE"],

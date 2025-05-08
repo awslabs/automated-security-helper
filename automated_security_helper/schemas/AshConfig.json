@@ -536,7 +536,7 @@
       "type": "object"
     },
     "BuildConfig": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Configuration model for build-time settings.",
       "properties": {
         "build_mode": {
