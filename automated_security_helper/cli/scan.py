@@ -29,6 +29,8 @@ def run_ash_scan_cli_command(
         str,
         typer.Option(
             help="The source directory to scan",
+            envvar="ASH_SOURCE_DIR",
+            writable=False,
         ),
     ] = Path.cwd().as_posix(),
     output_dir: Annotated[
@@ -36,6 +38,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             help="The directory to output results to",
             envvar="ASH_OUTPUT_DIR",
+            writable=True,
         ),
     ] = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
     scanners: Annotated[
@@ -273,6 +276,12 @@ def run_ash_scan_cli_command(
     if version:
         typer.echo(f"awslabs/automated-security-helper v{get_ash_version()}")
         raise typer.Exit()
+
+    if Path(source_dir).absolute().as_posix() == Path(output_dir).absolute().as_posix():
+        output_dir = Path(output_dir).joinpath(".ash", "ash_output")
+        print(
+            f"[bold yellow]output-dir has been adjusted to the following to avoid collisions and potential impact to source code: {Path(output_dir).as_posix()}[/bold yellow]"
+        )
 
     # Apply mode presets if specified
     precommit_mode = mode == RunMode.precommit or str(mode).lower() == "precommit"
