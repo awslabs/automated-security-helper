@@ -78,7 +78,7 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
 class SemgrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["semgrep"] = "semgrep"
     # Prefer Opengrep by default, but allow users to enable Semgrep if preferred.
-    enabled: bool = find_executable("opengrep") is None
+    enabled: bool = True
     options: Annotated[
         SemgrepScannerConfigOptions, Field(description="Configure Semgrep scanner")
     ] = SemgrepScannerConfigOptions()
