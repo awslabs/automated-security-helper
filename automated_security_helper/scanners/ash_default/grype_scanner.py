@@ -128,7 +128,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             if Path(conf_path).exists():
                 self.args.extra_args.append(
                     ToolExtraArg(
-                        key="--config-file",
+                        key="--config",
                         value=get_shortest_name(input=conf_path),
                     )
                 )
