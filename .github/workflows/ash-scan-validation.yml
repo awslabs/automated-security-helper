@@ -140,7 +140,7 @@ jobs:
           echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }})"
           ash --version
           ash --help
-          ash scan --mode=container --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress
+          ash scan --mode=container --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress  --config ./.ash/.ash_no_ignore.yaml
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'
@@ -152,7 +152,7 @@ jobs:
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
           ash --version
           ash --help
-          ash scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress
+          ash scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress --config ./.ash/.ash_no_ignore.yaml
 
       ############ PowerShell #########
 
@@ -166,7 +166,7 @@ jobs:
           Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
           . ./utils/ash_helpers.ps1
           Get-Help Invoke-ASH -Full
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -Config "./.ash/.ash_no_ignore.yaml"
 
       ############ Bash #########
 
@@ -181,7 +181,7 @@ jobs:
           chmod +x ./ash
           ./ash --version
           ./ash --help
-          ./ash --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug
+          ./ash --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug --config ./.ash/.ash_no_ignore.yaml
 
 
       - name: Verify scan completed

@@ -88,6 +88,9 @@ function Invoke-ASH {
         $OutputDir = $(Join-Path (Get-Location).Path '.ash' 'ash_output'),
         [parameter()]
         [string]
+        $Config = $env:ASH_CONFIG,
+        [parameter()]
+        [string]
         $OCIRunner = $env:ASH_OCI_RUNNER,
         [parameter()]
         [string]
@@ -147,7 +150,7 @@ function Invoke-ASH {
         $runArgs = [System.Collections.Generic.List[string]]::new()
         $ashCmdArgs = [System.Collections.Generic.List[string]]::new()
 
-        # Process AshArgs to extract options
+        # Process AshArgs to extract options)
         if ("$AshArgs" -match '\-\-force') {
             $buildArgs.Add('--no-cache')
         }
@@ -184,6 +187,10 @@ function Invoke-ASH {
         }
         if ($Offline) {
             $ashCmdArgs.Add('--offline')
+        }
+        if ($PSBoundParameters.ContainsKey('Config')) {
+            $ashCmdArgs.Add("--config")
+            $ashCmdArgs.Add($Config)
         }
         if ($PSBoundParameters.ContainsKey('Scanners')) {
             foreach ($scanner in $Scanners) {
