@@ -201,7 +201,7 @@ def attach_scanner_details(
     return sarif_report
 
 
-def _path_matches_pattern(path: str, pattern: str) -> bool:
+def path_matches_pattern(path: str, pattern: str) -> bool:
     """
     Check if a path matches a pattern.
 
@@ -270,7 +270,7 @@ def apply_suppressions_to_sarif(
                         if uri:
                             for ignore_path in ignore_paths:
                                 # Check if the URI matches the ignore path pattern
-                                if _path_matches_pattern(uri, ignore_path.path):
+                                if path_matches_pattern(uri, ignore_path.path):
                                     # Initialize suppressions list if it doesn't exist
                                     if not result.suppressions:
                                         result.suppressions = []

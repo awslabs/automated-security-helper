@@ -340,8 +340,8 @@ class AshAggregatedResults(BaseModel):
                                 parts = description.split("```")
                                 if len(parts) >= 3:  # Has at least one code block
                                     code_snippet = parts[1].strip()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                ASH_LOGGER.debug(e)
 
                         # Try to extract from locations
                         if (
