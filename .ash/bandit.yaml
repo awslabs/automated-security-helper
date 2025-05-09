@@ -4,7 +4,7 @@
 exclude_dirs:
   - .venv
   - test-results
-  - ash_output
+  - .ash
   - .mypy_cache
   - .pytest_cache
   - .ruff_cache

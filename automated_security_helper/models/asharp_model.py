@@ -256,10 +256,22 @@ class AshAggregatedResults(BaseModel):
                     file_path = None
                     line_start = None
                     line_end = None
+                    code_snippet = None
+                    # region: Region | None = None
+                    # contextRegion: Region | None = None
 
                     if result.locations and len(result.locations) > 0:
                         location = result.locations[0]
                         if location.physicalLocation:
+                            # try:
+                            #     region = location.physicalLocation.root.region
+                            #     contextRegion = (
+                            #         location.physicalLocation.root.contextRegion
+                            #     )
+                            # except Exception as exc:
+                            #     ASH_LOGGER.debug(
+                            #         f"Hit error parsing region/contextRegion: {exc}"
+                            #     )
                             if (
                                 hasattr(location.physicalLocation, "root")
                                 and location.physicalLocation.root
@@ -276,6 +288,26 @@ class AshAggregatedResults(BaseModel):
                             if (
                                 hasattr(location.physicalLocation, "root")
                                 and location.physicalLocation.root
+                                and hasattr(
+                                    location.physicalLocation.root, "contextRegion"
+                                )
+                                and location.physicalLocation.root.contextRegion
+                            ):
+                                line_start = location.physicalLocation.root.contextRegion.startLine
+                                line_end = (
+                                    location.physicalLocation.root.contextRegion.endLine
+                                )
+                                if (
+                                    location.physicalLocation.root.contextRegion.snippet
+                                    is not None
+                                    and location.physicalLocation.root.contextRegion.snippet.text
+                                    is not None
+                                ):
+                                    code_snippet = location.physicalLocation.root.contextRegion.snippet.text
+
+                            elif (
+                                hasattr(location.physicalLocation, "root")
+                                and location.physicalLocation.root
                                 and hasattr(location.physicalLocation.root, "region")
                                 and location.physicalLocation.root.region
                             ):
@@ -283,11 +315,49 @@ class AshAggregatedResults(BaseModel):
                                     location.physicalLocation.root.region.startLine
                                 )
                                 line_end = location.physicalLocation.root.region.endLine
+                                if (
+                                    location.physicalLocation.root.region.snippet
+                                    is not None
+                                    and location.physicalLocation.root.region.snippet.text
+                                    is not None
+                                ):
+                                    code_snippet = location.physicalLocation.root.region.snippet.text
 
                     # Extract additional properties
                     properties = {}
                     if result.properties:
                         properties = result.properties.model_dump(exclude_none=True)
+
+                    # Extract code snippet if available and not already extracted
+                    if code_snippet is None:
+                        if result.properties and hasattr(result.properties, "snippet"):
+                            code_snippet = result.properties.snippet
+
+                        # Try to extract snippet from message if not found in properties
+                        if not code_snippet and description and "```" in description:
+                            # Some scanners include snippets in the message text
+                            try:
+                                parts = description.split("```")
+                                if len(parts) >= 3:  # Has at least one code block
+                                    code_snippet = parts[1].strip()
+                            except Exception as e:
+                                ASH_LOGGER.debug(e)
+
+                        # Try to extract from locations
+                        if (
+                            not code_snippet
+                            and result.locations
+                            and len(result.locations) > 0
+                        ):
+                            location = result.locations[0]
+                            if (
+                                location.physicalLocation
+                                and hasattr(location.physicalLocation, "root")
+                                and location.physicalLocation.root
+                                and hasattr(location.physicalLocation.root, "snippet")
+                                and location.physicalLocation.root.snippet
+                            ):
+                                code_snippet = location.physicalLocation.root.snippet
 
                     # Extract tags
                     tags = []
@@ -351,6 +421,7 @@ class AshAggregatedResults(BaseModel):
                         file_path=file_path,
                         line_start=line_start,
                         line_end=line_end,
+                        code_snippet=code_snippet,
                         tags=json.dumps(tags, default=str) if tags else None,
                         properties=json.dumps(properties, default=str)
                         if properties

@@ -265,7 +265,11 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     properties=PropertyBag(
                         rule_level=finding_props.get("rule_level", "unknown"),
                         rule_info=finding_props.get("rule_info", "unknown"),
-                        tags=finding_props.get("tags", []),
+                        tags=finding_props.get("tags", [])
+                        + [
+                            f"tool_name::{self.config.name}",
+                            f"tool_type::{self.tool_type or 'UNKNOWN'}",
+                        ],
                     ),
                     # help,
                 )

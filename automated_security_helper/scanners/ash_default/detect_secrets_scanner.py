@@ -234,15 +234,23 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
                 self._secrets_collection.root = Path(target).absolute()
             # Find all files to scan from the scan set
-            scannable = (
-                [item for item in self.context.work_dir.glob("**/*.*")]
-                if target_type == "converted"
-                else scan_set(
-                    source=self.context.source_dir,
-                    output=self.context.output_dir,
-                    # filter_pattern=r"\.(yaml|yml|json)$",
+            scannable = [
+                item
+                for item in (
+                    [item for item in self.context.work_dir.glob("**/*.*")]
+                    if target_type == "converted"
+                    else scan_set(
+                        source=self.context.source_dir,
+                        output=self.context.output_dir,
+                        # filter_pattern=r"\.(yaml|yml|json)$",
+                    )
                 )
-            )
+                if Path(item).name
+                not in [
+                    "ash_aggregated_results.json",
+                ]
+            ]
+
             self._scanner_log(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets",
                 level=15,
@@ -279,6 +287,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                                     "detect-secrets",
                                     "secret",
                                     "security",
+                                    f"tool_name::{self.config.name}",
+                                    f"tool_type::{self.tool_type or 'UNKNOWN'}",
                                 ],
                             ),
                             level=Level.error,

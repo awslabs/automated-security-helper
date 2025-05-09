@@ -180,7 +180,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             fullDescription=MultiformatMessageString(text=description),
                             helpUri=via.get("url", ""),
                             properties=PropertyBag(
-                                tags=["security", "npm-audit", severity],
+                                tags=[
+                                    "security",
+                                    "npm-audit",
+                                    severity,
+                                    f"tool_name::{self.config.name}",
+                                    f"tool_type::{self.tool_type or 'UNKNOWN'}",
+                                ],
                                 security_severity=via.get("cvss", {}).get("score", 0),
                             ),
                         )

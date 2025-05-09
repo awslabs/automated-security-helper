@@ -72,7 +72,7 @@ def generate_metrics_table(
     table = Table(
         title="ASH Scan Results Summary",
         expand=False,
-        caption=f"source-dir: '{source_dir_rel.as_posix()}'\noutput-dir: '{output_dir_rel.as_posix()}'",
+        caption=f"source-dir: '{Path(source_dir_rel).as_posix()}'\noutput-dir: '{Path(output_dir_rel).as_posix()}'",
     )
 
     # Determine if we should use shortened headers based on terminal width

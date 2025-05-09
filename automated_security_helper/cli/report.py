@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, List, Optional
 import typer
 from rich import print, print_json
+from rich.markdown import Markdown
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
@@ -31,11 +32,11 @@ def report_command(
         str,
         typer.Option(
             "--format",
-            help=f"Report format to generate (reporter plugin name). Defaults to 'text'. Examples values: {', '.join(get_report_formats(''))}",
+            help=f"Report format to generate (reporter plugin name). Defaults to 'markdown'. Examples values: {', '.join(get_report_formats(''))}",
             autocompletion=get_report_formats,
             shell_complete=get_report_formats,
         ),
-    ] = ReportFormat.text.value,
+    ] = ReportFormat.markdown.value,
     output_dir: Annotated[
         str,
         typer.Option(
@@ -185,6 +186,8 @@ def report_command(
             # "yaml",
         ]:
             print_json(report_content)
+        elif report_format == "markdown":
+            print(Markdown(report_content))
         else:
             print(report_content)
     except Exception as e:

@@ -55,7 +55,7 @@ def run_command(args: List[str], shell: bool = False) -> int:
     from automated_security_helper.utils.subprocess_utils import run_command as run_cmd
 
     try:
-        result = run_cmd(args=args, shell=shell, check=False, log_level=logging.INFO)
+        result = run_cmd(args=args, shell=shell, check=False, log_level=logging.INFO)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
         return result.returncode
     except Exception as e:
         print(f"[bold red]Error running command {' '.join(args)}: {str(e)}[/bold red]")

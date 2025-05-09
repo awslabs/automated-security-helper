@@ -117,9 +117,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             for item in [
                 self.config.options.config_file,
                 ".grype.yaml",
+                ".grype/config.yaml",
                 ".ash/.grype.yaml",
-                ".grype.yml",
-                ".ash/.grype.yml",
+                ".ash/grype.yaml",
             ]
             if item is not None
         ]
@@ -128,7 +128,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             if Path(conf_path).exists():
                 self.args.extra_args.append(
                     ToolExtraArg(
-                        key="--config-file",
+                        key="--config",
                         value=get_shortest_name(input=conf_path),
                     )
                 )

@@ -23,6 +23,7 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.utils.sarif_utils import path_matches_pattern
 
 
 class JupyterConverterConfigOptions(ConverterOptionsBase):
@@ -82,6 +83,26 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
 
         for ipynb_file in ipynb_files:
             try:
+                skip_item = False
+                # Skip directories
+                if Path(ipynb_file).is_dir():
+                    ASH_LOGGER.debug(f"Skipping directory: {ipynb_file}")
+                    skip_item = True
+                else:
+                    for ignore_path in self.context.config.global_settings.ignore_paths:
+                        rel_path = (
+                            Path(ipynb_file)
+                            .relative_to(self.context.source_dir)
+                            .as_posix()
+                        )
+                        if path_matches_pattern(rel_path, ignore_path.path):
+                            ASH_LOGGER.debug(
+                                f"Skipping conversion of ignored path: {ipynb_file} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'"
+                            )
+                            skip_item = True
+                            break
+                if skip_item:
+                    continue
                 ASH_LOGGER.debug(f"Converting {ipynb_file} to .py")
                 short_ipynb_file = get_shortest_name(ipynb_file)
                 normalized_ipynb_file = get_normalized_filename(short_ipynb_file)

@@ -226,6 +226,71 @@ def run_ash_scan(
             source_dir = Path(source_dir)
             output_dir = Path(output_dir)
 
+            # Check if source_dir is a git repository and create a shallow clone if it is
+
+            # Create a temporary directory for the clone if needed
+            temp_clone_dir = None
+
+            # Check if we're in a git repository
+            try:
+                # Save current directory
+                original_dir = os.getcwd()
+
+                # # Change to source directory to check git status
+                # os.chdir(source_dir)
+
+                # # Check if this is a git repository
+                # returncode, stdout, stderr = run_command_get_output(
+                #     ["git", "rev-parse", "--is-inside-work-tree"],
+                #     cwd=source_dir
+                # )
+
+                # is_git_repo = returncode == 0 and stdout.strip() == "true"
+
+                # if is_git_repo:
+                #     # Create temporary directory for the clone
+                #     temp_clone_dir = tempfile.mkdtemp(prefix="ash_git_clone_")
+
+                #     # Configure git to allow operations in the source and temp directories
+                #     run_command_get_output(
+                #         ["git", "config", "--global", "--add", "safe.directory", str(source_dir)],
+                #         cwd=source_dir
+                #     )
+                #     run_command_get_output(
+                #         ["git", "config", "--global", "--add", "safe.directory", temp_clone_dir],
+                #         cwd=source_dir
+                #     )
+
+                #     # Clone the repository to the temporary directory
+                #     logger.info(f"Cloning git repository to temporary directory: {temp_clone_dir}")
+                #     returncode, stdout, stderr = run_command_get_output(
+                #         ["git", "clone", str(source_dir), temp_clone_dir, "--depth=1"],
+                #         cwd=source_dir
+                #     )
+
+                #     if returncode == 0:
+                #         logger.info("Repository cloned successfully.")
+                #         # Update source_dir to point to the cloned repository
+                #         source_dir = Path(temp_clone_dir)
+                #     else:
+                #         logger.warning(f"Failed to clone repository: {stderr}")
+                #         # Clean up the temporary directory if clone failed
+                #         if os.path.exists(temp_clone_dir):
+                #             import shutil
+                #             shutil.rmtree(temp_clone_dir)
+                #         temp_clone_dir = None
+                # else:
+                #     logger.debug("No git repository found in source folder.")
+
+                # # Return to original directory
+                # os.chdir(original_dir)
+
+            except Exception as e:
+                logger.warning(f"Error while checking git repository: {e}")
+                # Ensure we return to the original directory
+                if "original_dir" in locals():
+                    os.chdir(original_dir)
+
             if not quiet and not simple:
                 logger.verbose(f"Source directory: {source_dir.as_posix()}")
                 logger.verbose(f"Output directory: {output_dir.as_posix()}")
@@ -349,6 +414,22 @@ def run_ash_scan(
             output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
             with open(output_file, mode="w", encoding="utf-8") as f:
                 f.write(content)
+
+            # Clean up the temporary clone directory if it was created
+            try:
+                if (
+                    "temp_clone_dir" in locals()
+                    and temp_clone_dir
+                    and os.path.exists(temp_clone_dir)
+                ):
+                    import shutil
+
+                    shutil.rmtree(temp_clone_dir)
+                    logger.debug(
+                        f"Cleaned up temporary clone directory: {temp_clone_dir}"
+                    )
+            except Exception as e:
+                logger.warning(f"Error cleaning up temporary clone directory: {e}")
 
         except Exception as e:
             logger.exception(e)

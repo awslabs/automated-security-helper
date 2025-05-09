@@ -28,7 +28,7 @@ packages = [
 ]
 include = [
     { path = "automated_security_helper/assets", format = ["sdist", "wheel"] },
-    { path = "automated_security_helper/assets/ASH_INSTALLED_REVISION", format = ["sdist", "wheel"] },
+    { path = "automated_security_helper/assets/ASH_INSTALLED_REVISION", format = ["sdist", "wheel"] },  # pragma: allowlist secret - Not actually a secret
     { path = "automated_security_helper/assets/Dockerfile", format = ["sdist", "wheel"] },
 ]
 
