@@ -22,6 +22,11 @@ build:
 reporters:
   asff:
     enabled: false
+  # cloudwatch-logs:
+  #   enabled: true
+  #   options:
+  #     aws_region: us-west-2
+  #     log_group_name: !ENV ASH_LOG_GROUP_NAME
   csv:
     enabled: true
   cyclonedx:

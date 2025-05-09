@@ -240,7 +240,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                         ]
                     )
                 else:
-                    self._scanner_log(
+                    self._plugin_log(
                         "No Opengrep rules found in cache directory, falling back to p/ci",
                         level=logging.WARNING,
                     )
@@ -251,7 +251,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                         )
                     )
             else:
-                self._scanner_log(
+                self._plugin_log(
                     "OPENGREP_RULES_CACHE_DIR not set but offline mode enabled, falling back to p/ci",
                     level=logging.WARNING,
                 )
@@ -353,7 +353,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
-            self._scanner_log(
+            self._plugin_log(
                 message,
                 target_type=target_type,
                 level=20,
@@ -390,7 +390,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 results_file=results_file,
             )
 
-            self._scanner_log(
+            self._plugin_log(
                 f"Running command: {' '.join(final_args)}",
                 target_type=target_type,
                 level=15,
@@ -456,12 +456,12 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                             )
                         return {"findings": findings}
                     except Exception as e:
-                        self._scanner_log(
+                        self._plugin_log(
                             f"Error parsing OpenGrep results: {e}", level=logging.ERROR
                         )
                         return {"findings": []}
                 else:
-                    self._scanner_log(
+                    self._plugin_log(
                         f"No results file found at {results_file}",
                         level=logging.WARNING,
                     )
@@ -494,7 +494,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                         ]
                         return sarif_report
                     except Exception as e:
-                        self._scanner_log(
+                        self._plugin_log(
                             f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
                             target_type=target_type,
                             level=logging.ERROR,
@@ -502,7 +502,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                         )
                         return
                 else:
-                    self._scanner_log(
+                    self._plugin_log(
                         f"No results file found at {results_file}",
                         target_type=target_type,
                         level=logging.WARNING,

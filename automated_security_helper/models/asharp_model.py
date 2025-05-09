@@ -120,6 +120,7 @@ class AshAggregatedResults(BaseModel):
     """Main model class for parsing security scan reports from ASH tooling."""
 
     model_config = ConfigDict(
+        extra="ignore",
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
         exclude={"_aggregator", "_trend_analyzer", "_scanners"},
@@ -191,6 +192,34 @@ class AshAggregatedResults(BaseModel):
     def model_post_init(self, context):
         """Initialize aggregator and trend analyzer with current findings."""
         return super().model_post_init(context)
+
+    def to_simple_dict(self) -> dict:
+        """Convert the AshAggregatedResults to a simple dictionary representation.
+
+        Returns:
+            dict: A simple dictionary representation of the AshAggregatedResults
+        """
+        reduced_reports = {}
+        for key, value in self.additional_reports.items():
+            reduced_reports[key] = {}
+            if not isinstance(value, dict):
+                continue
+            for subkey, subvalue in value.items():
+                if subkey != "raw_results":
+                    reduced_reports[key][subkey] = subvalue
+        return {
+            "name": self.name,
+            "description": self.description,
+            "metadata": self.metadata.model_dump(
+                exclude_none=True,
+                exclude_unset=True,
+            ),
+            "ash_config": self.ash_config.model_dump(
+                exclude_none=True,
+                exclude_unset=True,
+            ),
+            "scanners": reduced_reports,
+        }
 
     def to_flat_vulnerabilities(self) -> List[FlatVulnerability]:
         """Convert the AshAggregatedResults to a list of flattened vulnerability objects.

@@ -1,9 +1,10 @@
 """Module containing the PluginBase class."""
 
 from datetime import datetime
+import logging
 import sys
 from pathlib import Path
-from typing import Annotated, Dict, List
+from typing import Annotated, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -60,6 +61,41 @@ class PluginBase(BaseModel):
             description="Custom installation commands by platform and architecture",
         ),
     ] = {}
+
+    def _plugin_log(
+        self,
+        *msg: str,
+        level: int | str = 15,
+        target_type: str = None,
+        append_to_stream: Literal["stderr", "stdout", "none"] = "none",
+    ):
+        """Log a message to the plugin's log file.
+
+        Args:
+            *msg: Message to log
+            level: Log level
+            target_type: Target type (e.g. source, converted)
+            append_to_stream: Append to stdout or stderr stream
+        """
+        tt = None
+        if target_type is not None:
+            tt = f" @ [magenta]{target_type}[/magenta]"
+
+        ASH_LOGGER._log(
+            level,
+            f"([yellow]{self.config.name or self.__class__.__name__}[/yellow]{tt})"
+            + "\t"
+            + "\n".join(msg),
+            args=(),
+        )
+        if level == logging.ERROR or append_to_stream == "stderr":
+            self.errors.append(
+                f"({self.config.name or self.__class__.__name__}) " + "\n".join(msg)
+            )
+        elif append_to_stream == "stdout":
+            self.output.append(
+                f"({self.config.name or self.__class__.__name__}) " + "\n".join(msg)
+            )
 
     def is_python_only(self) -> bool:
         """

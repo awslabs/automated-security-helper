@@ -30,6 +30,9 @@ from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.reporters.ash_default.asff_reporter import (
     ASFFReporterConfig,
 )
+from automated_security_helper.reporters.ash_default.cloudwatch_logs_reporter import (
+    CloudWatchLogsReporterConfig,
+)
 from automated_security_helper.reporters.ash_default.csv_reporter import (
     CSVReporterConfig,
 )
@@ -201,6 +204,13 @@ class ReporterConfigSegment(BaseModel):
         ASFFReporterConfig,
         Field(description="Configure the options for the ASFF reporter"),
     ] = ASFFReporterConfig()
+    cloudwatch_logs: Annotated[
+        CloudWatchLogsReporterConfig,
+        Field(
+            description="Configure the options for the CloudWatchLogs reporter",
+            alias="cloudwatch-logs",
+        ),
+    ] = CloudWatchLogsReporterConfig()
     csv: Annotated[
         CSVReporterConfig,
         Field(description="Configure the options for the CSV reporter"),

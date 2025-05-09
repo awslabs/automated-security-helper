@@ -3,6 +3,7 @@
 
 from automated_security_helper.reporters.ash_default import (
     AsffReporter,
+    CloudWatchLogsReporter,
     CsvReporter,
     CycloneDXReporter,
     FlatJsonReporter,
@@ -19,6 +20,7 @@ from automated_security_helper.reporters.ash_default import (
 # Make plugins discoverable
 ASH_REPORTERS = [
     AsffReporter,
+    CloudWatchLogsReporter,
     CsvReporter,
     CycloneDXReporter,
     FlatJsonReporter,

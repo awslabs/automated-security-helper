@@ -16,13 +16,13 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class ASFFReporterConfigOptions(ReporterOptionsBase):
-    aws_account_id: Annotated[str, Field(pattern=r"^\d{12}$")] = "123456789012"
+    aws_account_id: Annotated[str | None, Field(pattern=r"^\d{12}$")] = None
     aws_region: Annotated[
-        str,
+        str | None,
         Field(
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}"
         ),
-    ] = "us-east-1"
+    ] = None
 
 
 class ASFFReporterConfig(ReporterPluginConfigBase):

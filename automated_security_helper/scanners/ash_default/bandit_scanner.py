@@ -251,7 +251,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
-            self._scanner_log(
+            self._plugin_log(
                 message,
                 target_type=target_type,
                 level=15,

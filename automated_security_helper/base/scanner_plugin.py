@@ -82,41 +82,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         )
         return super().model_post_init(context)
 
-    def _scanner_log(
-        self,
-        *msg: str,
-        level: int | str = 15,
-        target_type: str = None,
-        append_to_stream: Literal["stderr", "stdout", "none"] = "none",
-    ):
-        """Log a message to the scanner's log file.
-
-        Args:
-            *msg: Message to log
-            level: Log level
-            target_type: Target type (e.g. source, converted)
-            append_to_stream: Append to stdout or stderr stream
-        """
-        tt = None
-        if target_type is not None:
-            tt = f" @ [magenta]{target_type}[/magenta]"
-
-        ASH_LOGGER._log(
-            level,
-            f"([yellow]{self.config.name or self.__class__.__name__}[/yellow]{tt})"
-            + "\t"
-            + "\n".join(msg),
-            args=(),
-        )
-        if level == logging.ERROR or append_to_stream == "stderr":
-            self.errors.append(
-                f"({self.config.name or self.__class__.__name__}) " + "\n".join(msg)
-            )
-        elif append_to_stream == "stdout":
-            self.output.append(
-                f"({self.config.name or self.__class__.__name__}) " + "\n".join(msg)
-            )
-
     def _process_config_options(self) -> None:
         """By default, returns False to indicate that the scanner did not perform any
         configuration option processing.
@@ -194,7 +159,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.dependencies_satisfied = self.validate()
 
         if not self.dependencies_satisfied:
-            self._scanner_log(
+            self._plugin_log(
                 "Scanner is missing dependencies and will be skipped.",
                 target_type=target_type,
                 level=logging.WARNING,
@@ -202,12 +167,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
             return False
 
-        self._scanner_log(
+        self._plugin_log(
             "Starting scan",
             target_type=target_type,
             level=logging.INFO,
         )
-        self._scanner_log(
+        self._plugin_log(
             f"self.config: {self.config}",
             target_type=target_type,
             level=logging.DEBUG,
@@ -216,7 +181,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             if hasattr(config, "model_dump") and callable(config.model_dump):
                 config = config.model_dump(by_alias=True)
             self.config = self.config.__class__.model_validate(config)
-        self._scanner_log(
+        self._plugin_log(
             f"config: {config}",
             target_type=target_type,
             level=logging.DEBUG,
@@ -233,7 +198,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             self.results_dir.mkdir(parents=True, exist_ok=True)
 
         # Log the paths being used
-        self._scanner_log(
+        self._plugin_log(
             f"Using source_dir: {self.context.source_dir}",
             f"Using output_dir: {self.context.output_dir}",
             f"Using work_dir: {self.context.work_dir}",
@@ -258,7 +223,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.end_time = datetime.now(timezone.utc)
 
         # ec_color = "bold green" if self.exit_code == 0 else "bold red"
-        self._scanner_log(
+        self._plugin_log(
             f"Scan completed in {(self.end_time - self.start_time).total_seconds()} seconds",
             # f"Scan completed in {(self.end_time - self.start_time).total_seconds()} seconds with an exit code of [{ec_color}]{self.exit_code}[/{ec_color}]",
             target_type=target_type,

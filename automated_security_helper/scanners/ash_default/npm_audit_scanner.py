@@ -286,7 +286,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
-            self._scanner_log(
+            self._plugin_log(
                 message,
                 target_type=target_type,
                 level=20,
@@ -338,12 +338,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     # ):
                     scannable.append(pf.as_posix())
             joined_files = "\n- ".join(scannable)
-            self._scanner_log(
-                f"Found {len(scannable)} package locks:\n- {joined_files}"
-            )
+            self._plugin_log(f"Found {len(scannable)} package locks:\n- {joined_files}")
 
             if len(scannable) == 0:
-                self._scanner_log(
+                self._plugin_log(
                     f"No package lock files found in {target_type} directory to scan. Exiting.",
                     target_type=target_type,
                     level=logging.WARNING,
@@ -352,7 +350,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 return
 
             if not scannable:
-                self._scanner_log(f"No package.json files found in {target}")
+                self._plugin_log(f"No package.json files found in {target}")
                 # Return empty SARIF report
                 return SarifReport(
                     version="2.1.0",

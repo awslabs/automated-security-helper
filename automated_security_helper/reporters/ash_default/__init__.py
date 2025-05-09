@@ -1,4 +1,7 @@
 from automated_security_helper.reporters.ash_default.asff_reporter import AsffReporter
+from automated_security_helper.reporters.ash_default.cloudwatch_logs_reporter import (
+    CloudWatchLogsReporter,
+)
 from automated_security_helper.reporters.ash_default.csv_reporter import CsvReporter
 from automated_security_helper.reporters.ash_default.cyclonedx_reporter import (
     CycloneDXReporter,
@@ -24,6 +27,7 @@ from automated_security_helper.reporters.ash_default.yaml_reporter import YamlRe
 
 __all__ = [
     "AsffReporter",
+    "CloudWatchLogsReporter",
     "CsvReporter",
     "CycloneDXReporter",
     "HtmlReporter",

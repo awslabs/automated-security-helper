@@ -170,6 +170,11 @@ def report_command(
 
     # Generate the report
     try:
+        plugin_config = ash_config.get_plugin_config(
+            plugin_type="reporter", plugin_name=report_format
+        )
+        if plugin_config is not None:
+            reporter_plugin.config = plugin_config
         report_content = reporter_plugin.report(model)
         if report_format in [
             "asff",

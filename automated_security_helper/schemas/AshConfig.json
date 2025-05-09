@@ -22,8 +22,8 @@
         "options": {
           "$ref": "#/$defs/ASFFReporterConfigOptions",
           "default": {
-            "aws_account_id": "123456789012",
-            "aws_region": "us-east-1"
+            "aws_account_id": null,
+            "aws_region": null
           }
         }
       },
@@ -34,16 +34,30 @@
       "additionalProperties": true,
       "properties": {
         "aws_account_id": {
-          "default": "123456789012",
-          "pattern": "^\\d{12}$",
-          "title": "Aws Account Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "^\\d{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aws Account Id"
         },
         "aws_region": {
-          "default": "us-east-1",
-          "pattern": "(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\\d{1}",
-          "title": "Aws Region",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\\d{1}",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aws Region"
         }
       },
       "title": "ASFFReporterConfigOptions",
@@ -162,8 +176,19 @@
               "extension": "asff",
               "name": "asff",
               "options": {
-                "aws_account_id": "123456789012",
-                "aws_region": "us-east-1"
+                "aws_account_id": null,
+                "aws_region": null
+              }
+            },
+            "cloudwatch-logs": {
+              "enabled": false,
+              "extension": "cwlog.json",
+              "name": "cloudwatch-logs",
+              "options": {
+                "aws_account_id": null,
+                "aws_region": null,
+                "log_group_name": null,
+                "log_stream_name": "ASHScanResults"
               }
             },
             "csv": {
@@ -978,6 +1003,88 @@
         }
       },
       "title": "CheckovScannerConfigOptions",
+      "type": "object"
+    },
+    "CloudWatchLogsReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "cwlog.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "cloudwatch-logs",
+          "default": "cloudwatch-logs",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CloudWatchLogsReporterConfigOptions",
+          "default": {
+            "aws_account_id": null,
+            "aws_region": null,
+            "log_group_name": null,
+            "log_stream_name": "ASHScanResults"
+          }
+        }
+      },
+      "title": "CloudWatchLogsReporterConfig",
+      "type": "object"
+    },
+    "CloudWatchLogsReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "aws_account_id": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aws Account Id"
+        },
+        "aws_region": {
+          "anyOf": [
+            {
+              "pattern": "(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\\d{1}",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aws Region"
+        },
+        "log_group_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Log Group Name"
+        },
+        "log_stream_name": {
+          "default": "ASHScanResults",
+          "title": "Log Stream Name",
+          "type": "string"
+        }
+      },
+      "title": "CloudWatchLogsReporterConfigOptions",
       "type": "object"
     },
     "ConverterConfigSegment": {
@@ -1944,11 +2051,26 @@
             "extension": "asff",
             "name": "asff",
             "options": {
-              "aws_account_id": "123456789012",
-              "aws_region": "us-east-1"
+              "aws_account_id": null,
+              "aws_region": null
             }
           },
           "description": "Configure the options for the ASFF reporter"
+        },
+        "cloudwatch-logs": {
+          "$ref": "#/$defs/CloudWatchLogsReporterConfig",
+          "default": {
+            "enabled": false,
+            "extension": "cwlog.json",
+            "name": "cloudwatch-logs",
+            "options": {
+              "aws_account_id": null,
+              "aws_region": null,
+              "log_group_name": null,
+              "log_stream_name": "ASHScanResults"
+            }
+          },
+          "description": "Configure the options for the CloudWatchLogs reporter"
         },
         "csv": {
           "$ref": "#/$defs/CSVReporterConfig",

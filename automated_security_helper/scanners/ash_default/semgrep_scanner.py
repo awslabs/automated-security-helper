@@ -160,7 +160,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                         ]
                     )
                 else:
-                    self._scanner_log(
+                    self._plugin_log(
                         "No Semgrep rules found in cache directory, falling back to p/ci",
                         level=logging.WARNING,
                     )
@@ -171,7 +171,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                         )
                     )
             else:
-                self._scanner_log(
+                self._plugin_log(
                     "SEMGREP_RULES_CACHE_DIR not set but offline mode enabled, falling back to p/ci",
                     level=logging.WARNING,
                 )
@@ -259,7 +259,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             message = (
                 f"Target directory {target} is empty or doesn't exist. Skipping scan."
             )
-            self._scanner_log(
+            self._plugin_log(
                 message,
                 target_type=target_type,
                 level=20,
@@ -303,7 +303,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
 
             # Semgrep expects the target directory at the end of the command
             # final_args.append(str(target))
-            self._scanner_log(
+            self._plugin_log(
                 f"Running command: {' '.join(final_args)}",
                 target_type=target_type,
                 level=15,
@@ -371,7 +371,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     ]
                     return sarif_report
                 except Exception as e:
-                    self._scanner_log(
+                    self._plugin_log(
                         f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
                         target_type=target_type,
                         level=logging.ERROR,
@@ -379,7 +379,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     )
                     return
             else:
-                self._scanner_log(
+                self._plugin_log(
                     f"No results file found at {results_file}",
                     target_type=target_type,
                     level=logging.WARNING,
