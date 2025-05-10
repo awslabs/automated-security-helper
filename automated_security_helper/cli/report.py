@@ -82,7 +82,11 @@ def report_command(
     final_logging_log_level = logging._nameToLevel.get(
         final_log_level.value, logging.INFO
     )
-    ASH_LOGGER = get_logger(level=final_logging_log_level)
+    ASH_LOGGER = get_logger(
+        level=final_logging_log_level,
+        show_progress=False,
+        use_color=color,
+    )
     results_file = None
     output_dir_path = Path(output_dir)
     results_file_paths = [
@@ -178,6 +182,7 @@ def report_command(
         report_content = reporter_plugin.report(model)
         if report_format in [
             "asff",
+            "cloudwatch-logs",
             # "csv",
             "cyclonedx",
             # "html",
@@ -185,7 +190,11 @@ def report_command(
             # "junitxml",
             # "markdown",
             "ocsf",
+            "opensearch",
+            "s3",
             "sarif",
+            "security-hub",
+            "security-lake",
             "spdx",
             # "text",
             # "yaml",

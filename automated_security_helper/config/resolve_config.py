@@ -1,5 +1,7 @@
 import json
+import os
 from pathlib import Path
+import re
 
 from pydantic import ValidationError
 import yaml
@@ -74,7 +76,48 @@ def resolve_config(
                 if str(config_path).endswith(".json"):
                     config_data = json.load(f)
                 else:
-                    config_data = yaml.safe_load(f)
+                    pattern = re.compile(r"^\${(\w+):?(.*)?}")
+                    loader = yaml.SafeLoader
+                    loader.add_implicit_resolver("!ENV", pattern, None)
+
+                    def constructor_env_variables(loader, node):
+                        value = loader.construct_scalar(node)
+                        match = pattern.findall(
+                            value
+                        )  # to find all env variables in line
+                        if match:
+                            full_value = value
+                            for g in match:
+                                ASH_LOGGER.debug(f"Evaluating env var match: {g}")
+                                var_name = g[0] if isinstance(g, tuple) else g
+                                default_val = g[1] if isinstance(g, tuple) else None
+                                if default_val == "None":
+                                    default_val = None
+                                resolved_var = os.environ.get(var_name, None)
+                                if resolved_var is None:
+                                    ASH_LOGGER.warning(
+                                        f"Environment variable {var_name} not set"
+                                        + (
+                                            f", using default value of {default_val}"
+                                            if isinstance(g, tuple)
+                                            else ""
+                                        )
+                                    )
+                                    if default_val is None:
+                                        resolved_var = ""
+                                    else:
+                                        resolved_var = default_val
+                                rep_val = ":".join(g) if isinstance(g, tuple) else g
+                                full_value = full_value.replace(
+                                    f"${{{rep_val}}}", resolved_var
+                                )
+                            if full_value.strip() == "":
+                                return None
+                            return full_value.strip()
+                        return value
+
+                    loader.add_constructor("!ENV", constructor_env_variables)
+                    config_data = yaml.load(f, Loader=loader)
 
             if not isinstance(config_data, dict) and fallback_to_default:
                 ASH_LOGGER.warning(

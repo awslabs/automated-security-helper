@@ -265,6 +265,10 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 level=20,
                 append_to_stream="stderr",  # This will add the message to self.errors
             )
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return True
 
         try:
@@ -274,12 +278,20 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 config=config,
             )
             if not validated:
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
                 return False
         except ScannerError as exc:
             raise exc
 
         if not self.dependencies_satisfied:
             # Logging of this has been done in the central self._pre_scan() method.
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return False
 
         try:
@@ -369,6 +381,10 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                             ),
                         )
                     ]
+                    self._post_scan(
+                        target=target,
+                        target_type=target_type,
+                    )
                     return sarif_report
                 except Exception as e:
                     self._plugin_log(
@@ -377,6 +393,10 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                         level=logging.ERROR,
                         append_to_stream="stderr",
                     )
+                    self._post_scan(
+                        target=target,
+                        target_type=target_type,
+                    )
                     return
             else:
                 self._plugin_log(
@@ -384,6 +404,10 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     target_type=target_type,
                     level=logging.WARNING,
                     append_to_stream="stderr",
+                )
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
                 )
                 return
 

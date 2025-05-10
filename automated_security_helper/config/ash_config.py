@@ -27,10 +27,10 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.reporters.ash_default.asff_reporter import (
+from automated_security_helper.plugin_modules.ash_aws_plugins.asff_reporter import (
     ASFFReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.cloudwatch_logs_reporter import (
+from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
     CloudWatchLogsReporterConfig,
 )
 from automated_security_helper.reporters.ash_default.csv_reporter import (

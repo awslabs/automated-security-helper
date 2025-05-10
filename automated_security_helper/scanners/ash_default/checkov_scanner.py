@@ -252,6 +252,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 level=20,
                 append_to_stream="stderr",  # This will add the message to self.errors
             )
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return True
 
         try:
@@ -261,6 +265,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 config=config,
             )
             if not validated:
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
                 return False
         except ScannerError as exc:
             raise exc

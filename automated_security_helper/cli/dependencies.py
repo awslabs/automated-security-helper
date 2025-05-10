@@ -7,7 +7,7 @@ import logging
 import platform
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 import typer
 from rich import print
@@ -19,7 +19,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_BIN_PATH, ASH_WORK_DIR_NAME
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import get_logger
 
 dependencies_app = typer.Typer(
     name="dependencies",
@@ -69,6 +69,7 @@ def install_dependencies(
         "--bin-path",
         "-b",
         help="Path to install binaries to.",
+        envvar="ASH_BIN_PATH",
     ),
     plugin_types: List[str] = typer.Option(
         ["converter", "scanner", "reporter"],
@@ -76,9 +77,9 @@ def install_dependencies(
         "-t",
         help="Plugin types to install dependencies for",
     ),
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Enable verbose output"
-    ),
+    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
+    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ) -> int:
     """Install dependencies for ASH plugins.
 
@@ -87,22 +88,20 @@ def install_dependencies(
 
     Binary tools will be installed to the specified bin path (defaults to ~/.ash/bin).
     """
-    # Set up logging
-    if verbose:
-        ASH_LOGGER.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler()
-        handler.setLevel(logging.DEBUG)
-        ASH_LOGGER.addHandler(handler)
-
-    # Use provided bin path or default
-    target_bin_path = bin_path or ASH_BIN_PATH
-
-    # Create bin directory if it doesn't exist
-    target_bin_path.mkdir(parents=True, exist_ok=True)
-
     # Set the ASH_BIN_PATH environment variable to override the default
     import os
 
+    # Set up logging
+    get_logger(
+        level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
+        show_progress=False,
+        use_color=color,
+    )
+
+    # Use provided bin path or default if bin_path was null
+    target_bin_path = bin_path or ASH_BIN_PATH
+    # Create target_bin_path directory if it doesn't exist
+    target_bin_path.mkdir(parents=True, exist_ok=True)
     os.environ["ASH_BIN_PATH"] = str(target_bin_path)
 
     console.print(

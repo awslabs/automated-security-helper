@@ -452,7 +452,7 @@ def run_ash_scan(
     )
 
     # Get the count of actionable findings from summary_stats
-    actionable_findings = results.metadata.summary_stats.get("actionable", 0)
+    actionable_findings = results.metadata.summary_stats.actionable
 
     # Only display the final metrics and guidance if show_summary is True
     if show_summary:

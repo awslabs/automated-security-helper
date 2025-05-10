@@ -10,16 +10,18 @@ class BuilderOptionsBase(BaseModel):
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
 
-class ConverterOptionsBase(BaseModel):
+class PluginOptionsBase(BaseModel):
+    """Base class for plugin options."""
+
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+
+class ConverterOptionsBase(PluginOptionsBase):
     """Base class for converter options."""
 
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
-
-class ScannerOptionsBase(BaseModel):
+class ScannerOptionsBase(PluginOptionsBase):
     """Base class for scanner options."""
-
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     severity_threshold: Annotated[
         Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None,
@@ -29,7 +31,5 @@ class ScannerOptionsBase(BaseModel):
     ] = None
 
 
-class ReporterOptionsBase(BaseModel):
+class ReporterOptionsBase(PluginOptionsBase):
     """Base class for reporter options."""
-
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)

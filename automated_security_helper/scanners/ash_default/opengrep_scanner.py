@@ -359,6 +359,10 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 level=20,
                 append_to_stream="stderr",  # This will add the message to self.errors
             )
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return True
 
         try:
@@ -368,12 +372,20 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 config=config,
             )
             if not validated:
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
                 return False
         except ScannerError as exc:
             raise exc
 
         if not self.dependencies_satisfied:
             # Logging of this has been done in the central self._pre_scan() method.
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return False
 
         try:
@@ -454,16 +466,28 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                                     "code": match.get("content", ""),
                                 }
                             )
+                        self._post_scan(
+                            target=target,
+                            target_type=target_type,
+                        )
                         return {"findings": findings}
                     except Exception as e:
                         self._plugin_log(
                             f"Error parsing OpenGrep results: {e}", level=logging.ERROR
+                        )
+                        self._post_scan(
+                            target=target,
+                            target_type=target_type,
                         )
                         return {"findings": []}
                 else:
                     self._plugin_log(
                         f"No results file found at {results_file}",
                         level=logging.WARNING,
+                    )
+                    self._post_scan(
+                        target=target,
+                        target_type=target_type,
                     )
                     return {"findings": []}
             else:
@@ -492,6 +516,10 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                                 ),
                             )
                         ]
+                        self._post_scan(
+                            target=target,
+                            target_type=target_type,
+                        )
                         return sarif_report
                     except Exception as e:
                         self._plugin_log(
@@ -500,6 +528,10 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                             level=logging.ERROR,
                             append_to_stream="stderr",
                         )
+                        self._post_scan(
+                            target=target,
+                            target_type=target_type,
+                        )
                         return
                 else:
                     self._plugin_log(
@@ -507,6 +539,10 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                         target_type=target_type,
                         level=logging.WARNING,
                         append_to_stream="stderr",
+                    )
+                    self._post_scan(
+                        target=target,
+                        target_type=target_type,
                     )
                     return
 

@@ -2,11 +2,12 @@
 
 from abc import abstractmethod
 from pathlib import Path
-from typing import Generic, List, TypeVar
+from typing import Annotated, Generic, List, TypeVar
 from typing_extensions import Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
+from automated_security_helper.base.options import ConverterOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
@@ -14,7 +15,9 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class ConverterPluginConfigBase(PluginConfigBase):
-    pass
+    options: Annotated[ConverterOptionsBase, Field(description="Converter options")] = (
+        ConverterOptionsBase()
+    )
 
 
 T = TypeVar("T", bound=ConverterPluginConfigBase)

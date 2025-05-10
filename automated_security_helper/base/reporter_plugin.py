@@ -2,11 +2,12 @@
 
 from abc import abstractmethod
 from datetime import datetime, timezone
-from typing import Generic, TypeVar
+from typing import Annotated, Generic, TypeVar
 from typing_extensions import Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
+from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.exceptions import ScannerError
@@ -15,6 +16,9 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class ReporterPluginConfigBase(PluginConfigBase):
+    options: Annotated[ReporterOptionsBase, Field(description="Reporter options")] = (
+        ReporterOptionsBase()
+    )
     extension: str | None = None
 
 

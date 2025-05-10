@@ -9,23 +9,19 @@
     },
     {
       "args": [
-        "run",
-        "--source-dir",
-        "${workspaceFolder}",
-        "--output-dir",
-        "${workspaceFolder}/ash_output",
-        "--config",
-        "${workspaceFolder}/.ash.yaml",
+        "scan",
         "--verbose",
         "--no-progress",
-        "--no-cleanup"
+        "--",
+        "--scanners=\"npm-audit\"",
+        "--exclude-scanners=\"cdk-nag\""
       ],
       "console": "integratedTerminal",
       "env": {
         "PATH": "${workspaceFolder}/.venv/bin:${env.PATH}"
       },
       "name": "ASH: Test CLI",
-      "program": "${workspaceFolder}/src/automated_security_helper/cli/main.py",
+      "program": "${workspaceFolder}/.venv/bin/ash",
       "request": "launch",
       "type": "debugpy"
     },
@@ -33,7 +29,7 @@
       "args": [],
       "console": "integratedTerminal",
       "name": "ASH: Test CDK Nag Headless Wrapper",
-      "program": "./src/automated_security_helper/utils/cdk_nag_wrapper.py",
+      "program": "./automated_security_helper/utils/cdk_nag_wrapper.py",
       "request": "launch",
       "type": "debugpy"
     },

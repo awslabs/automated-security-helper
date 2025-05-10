@@ -4,7 +4,6 @@ import importlib
 from typing import Dict, List, Any
 
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -48,21 +47,33 @@ def load_internal_plugins():
     return loaded_plugins
 
 
-def load_additional_plugin_modules(plugin_modules: List[str] = None):
+def load_additional_plugin_modules(plugin_modules: List[str] = []) -> dict:
     """Load additional plugin modules specified in configuration.
 
     Args:
         plugin_modules: List of module paths to import
     """
-    if not plugin_modules:
-        return
+    discovered = {"converters": [], "scanners": [], "reporters": []}
 
-    for module_path in plugin_modules:
+    unique = list(set(plugin_modules))
+    for module_path in unique:
         try:
             ASH_LOGGER.info(f"Importing additional plugin module: {module_path}")
             importlib.import_module(module_path)
+            module = importlib.import_module(module_path)
+            # The import itself should trigger plugin registration
+            # via the AshPlugin metaclass
+            # Track what was discovered
+            if hasattr(module, "ASH_CONVERTERS"):
+                discovered["converters"].extend(module.ASH_CONVERTERS)
+            if hasattr(module, "ASH_SCANNERS"):
+                discovered["scanners"].extend(module.ASH_SCANNERS)
+            if hasattr(module, "ASH_REPORTERS"):
+                discovered["reporters"].extend(module.ASH_REPORTERS)
         except ImportError as e:
             ASH_LOGGER.warning(f"Failed to import plugin module {module_path}: {e}")
+
+    return discovered
 
 
 def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
@@ -85,15 +96,13 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
     if plugin_context:
         ash_plugin_manager.set_context(plugin_context)
 
-    # Load any additional plugin modules specified in configuration
-    if additional_plugin_modules:
-        load_additional_plugin_modules(additional_plugin_modules)
-
     # Load internal plugins
     internal_plugins = load_internal_plugins()
 
-    # Load external plugins
-    external_plugins = discover_plugins(plugin_modules=additional_plugin_modules)
+    # Load any additional plugin modules specified in configuration
+    external_plugins = {}
+    if additional_plugin_modules:
+        external_plugins = load_additional_plugin_modules(additional_plugin_modules)
 
     # Combine internal and external plugins
     all_plugins = {

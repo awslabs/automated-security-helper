@@ -16,7 +16,6 @@ def get_reporter_mappings() -> Dict[str, Dict[str, str]]:
     # Try to import reporter plugins dynamically
     try:
         from automated_security_helper.reporters.ash_default import (
-            AsffReporter,
             CsvReporter,
             CycloneDXReporter,
             HtmlReporter,
@@ -100,7 +99,6 @@ def get_reporter_mappings() -> Dict[str, Dict[str, str]]:
 
         # Try to get mappings from reporter instances if they have a sarif_field_mappings attribute
         reporters = [
-            AsffReporter,
             CsvReporter,
             CycloneDXReporter,
             HtmlReporter,

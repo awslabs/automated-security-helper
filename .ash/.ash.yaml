@@ -1,6 +1,8 @@
 # yaml-language-server: $schema=../automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
+ash_plugin_modules:
+  - automated_security_helper.plugin_modules.ash_aws_plugins
 global_settings:
   severity_threshold: MEDIUM
   ignore_paths:
@@ -22,11 +24,11 @@ build:
 reporters:
   asff:
     enabled: false
-  # cloudwatch-logs:
-  #   enabled: true
-  #   options:
-  #     aws_region: us-west-2
-  #     log_group_name: !ENV ASH_LOG_GROUP_NAME
+  cloudwatch-logs:
+    enabled: true
+    options:
+      aws_region: !ENV ${AWS_REGION:None}
+      log_group_name: !ENV ${ASH_CLOUDWATCH_LOG_GROUP:None}
   csv:
     enabled: true
   cyclonedx:
@@ -70,8 +72,7 @@ scanners:
     options:
       frameworks:
         - all
-      additional_formats:
-        - cyclonedx_json
+      additional_formats: []
       skip_path: []
       config_file: .ash/.checkov.yaml
   detect-secrets:
