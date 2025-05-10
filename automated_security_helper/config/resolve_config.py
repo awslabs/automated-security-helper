@@ -117,7 +117,7 @@ def resolve_config(
                         return value
 
                     loader.add_constructor("!ENV", constructor_env_variables)
-                    config_data = yaml.load(f, Loader=loader)
+                    config_data = yaml.load(f, Loader=loader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation
 
             if not isinstance(config_data, dict) and fallback_to_default:
                 ASH_LOGGER.warning(
