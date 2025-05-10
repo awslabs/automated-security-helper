@@ -10,7 +10,9 @@ from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
+    ScannerSeverityCount,
     ScannerStatusInfo,
+    ScannerTargetStatusInfo,
 )
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
@@ -132,7 +134,7 @@ class ScanPhase(EnginePhase):
                             results_container = ScanResultsContainer(
                                 scanner_name=display_name,
                                 excluded=True,
-                                scanner_status=ScannerStatus.SKIPPED,
+                                status=ScannerStatus.SKIPPED,
                             )
 
                             # Add to results
@@ -147,9 +149,9 @@ class ScanPhase(EnginePhase):
                             if not hasattr(
                                 self.asharp_model.metadata, "scanner_status"
                             ):
-                                self.asharp_model.metadata.scanner_status = {}
+                                self.asharp_model.scanner_results = {}
 
-                            self.asharp_model.metadata.scanner_status[display_name] = (
+                            self.asharp_model.scanner_results[display_name] = (
                                 ScannerStatusInfo(
                                     status=ScannerStatus.SKIPPED,
                                     excluded=True,
@@ -172,7 +174,7 @@ class ScanPhase(EnginePhase):
                             results_container = ScanResultsContainer(
                                 scanner_name=display_name,
                                 dependencies_satisfied=False,
-                                scanner_status=ScannerStatus.MISSING,
+                                status=ScannerStatus.MISSING,
                             )
 
                             # Add to results
@@ -187,9 +189,9 @@ class ScanPhase(EnginePhase):
                             if not hasattr(
                                 self.asharp_model.metadata, "scanner_status"
                             ):
-                                self.asharp_model.metadata.scanner_status = {}
+                                self.asharp_model.scanner_results = {}
 
-                            self.asharp_model.metadata.scanner_status[display_name] = (
+                            self.asharp_model.scanner_results[display_name] = (
                                 ScannerStatusInfo(
                                     status=ScannerStatus.MISSING,
                                     dependencies_satisfied=False,
@@ -472,7 +474,7 @@ class ScanPhase(EnginePhase):
                         ASH_LOGGER.debug(
                             f"Scanner {scanner_plugin.__class__.__name__} returned False for {target_type} -- plugin is missing dependencies"
                         )
-                        container.scanner_status = ScannerStatus.MISSING
+                        container.status = ScannerStatus.MISSING
 
                     # Set raw results
                     container.start_time = scanner_plugin.start_time
@@ -537,15 +539,40 @@ class ScanPhase(EnginePhase):
                     container.exit_code = getattr(scanner_plugin, "exit_code", 0)
 
                     # Determine status based on severity counts
-                    if (
-                        container.severity_counts.get("critical", 0) > 0
-                        or container.severity_counts.get("high", 0) > 0
-                    ):
-                        container.status = "failed"
-                    elif container.severity_counts.get("medium", 0) > 0:
-                        container.status = "warning"
+                    if container.severity_counts.get("critical", 0) > 0:
+                        container.status = ScannerStatus.FAILED
+                    elif container.severity_counts.get(
+                        "high", 0
+                    ) > 0 and scanner_config.options.severity_threshold in [
+                        "ALL",
+                        "LOW",
+                        "MEDIUM",
+                        "HIGH",
+                    ]:
+                        container.status = ScannerStatus.FAILED
+                    elif container.severity_counts.get(
+                        "medium", 0
+                    ) > 0 and scanner_config.options.severity_threshold in [
+                        "ALL",
+                        "LOW",
+                        "MEDIUM",
+                    ]:
+                        container.status = ScannerStatus.FAILED
+                    elif container.severity_counts.get(
+                        "low", 0
+                    ) > 0 and scanner_config.options.severity_threshold in [
+                        "ALL",
+                        "LOW",
+                    ]:
+                        container.status = ScannerStatus.FAILED
+                    elif container.severity_counts.get(
+                        "info", 0
+                    ) > 0 and scanner_config.options.severity_threshold in [
+                        "ALL",
+                    ]:
+                        container.status = ScannerStatus.FAILED
                     else:
-                        container.status = "passed"
+                        container.status = ScannerStatus.PASSED
 
                     # Extract and add metadata if present
                     if isinstance(raw_results, dict) and "metadata" in raw_results:
@@ -819,11 +846,11 @@ class ScanPhase(EnginePhase):
             "low",
             "info",
         ]:
-            self.asharp_model.metadata.summary_stats[sev] += results.severity_counts[
-                sev
-            ]
-            self.asharp_model.metadata.summary_stats["total"] += (
-                results.severity_counts[sev]
+            self.asharp_model.metadata.summary_stats.bump(
+                sev, results.severity_counts[sev]
+            )
+            self.asharp_model.metadata.summary_stats.bump(
+                "total", results.severity_counts[sev]
             )
 
         actionable = 0
@@ -849,34 +876,68 @@ class ScanPhase(EnginePhase):
         elif evaluation_threshold == "CRITICAL":
             actionable = results.severity_counts["critical"]
 
-        self.asharp_model.metadata.summary_stats["actionable"] += actionable
-
-        # Store metrics in the additional_reports
-        self.asharp_model.additional_reports[scanner_name][results.target_type] = {
-            "severity_counts": results.severity_counts,
-            "actionable_finding_count": actionable,
-            "finding_count": results.finding_count,
-            "exit_code": results.exit_code,
-            "status": results.status,
-            "duration": results.duration,  # Add duration to the metrics
-            # Add scanner status information
-            "scanner_status": results.scanner_status,
-            "dependencies_satisfied": results.dependencies_satisfied,
-            "excluded": results.excluded,
-            # "raw_results": results.raw_results,
-        }
-
-        # Update scanner status in metadata
-        if not hasattr(self.asharp_model.metadata, "scanner_status"):
-            self.asharp_model.metadata.scanner_status = {}
+        self.asharp_model.metadata.summary_stats.bump("actionable", actionable)
 
         # Only update if not already set (to maintain precedence)
-        if scanner_name not in self.asharp_model.metadata.scanner_status:
-            self.asharp_model.metadata.scanner_status[scanner_name] = ScannerStatusInfo(
-                status=results.scanner_status,
+        status = results.status
+        if scanner_name not in self.asharp_model.scanner_results:
+            # Determine status based on actionable findings
+            if (
+                results.dependencies_satisfied
+                and not results.excluded
+                and actionable > 0
+            ):
+                status = ScannerStatus.FAILED
+            elif results.excluded:
+                status = ScannerStatus.SKIPPED
+            elif not results.dependencies_satisfied:
+                status = ScannerStatus.MISSING
+            else:
+                status = ScannerStatus.PASSED
+
+            self.asharp_model.scanner_results[scanner_name] = ScannerStatusInfo(
+                status=status,
                 dependencies_satisfied=results.dependencies_satisfied,
                 excluded=results.excluded,
+                severity_threshold=evaluation_threshold,
             )
+        if (
+            status != ScannerStatus.PASSED
+            and self.asharp_model.scanner_results[scanner_name].status
+            == ScannerStatus.PASSED
+        ):
+            self.asharp_model.scanner_results[scanner_name].status = status
+        if results.target_type == "source":
+            self.asharp_model.scanner_results[
+                scanner_name
+            ].source = ScannerTargetStatusInfo(
+                status=status,
+                dependencies_satisfied=results.dependencies_satisfied,
+                excluded=results.excluded,
+                severity_counts=ScannerSeverityCount(**results.severity_counts),
+                actionable_finding_count=actionable,
+                finding_count=results.finding_count,
+                exit_code=results.exit_code,
+                duration=results.duration,
+            )
+        else:
+            self.asharp_model.scanner_results[
+                scanner_name
+            ].converted = ScannerTargetStatusInfo(
+                status=status,
+                dependencies_satisfied=results.dependencies_satisfied,
+                excluded=results.excluded,
+                severity_counts=ScannerSeverityCount(**results.severity_counts),
+                actionable_finding_count=actionable,
+                finding_count=results.finding_count,
+                exit_code=results.exit_code,
+                duration=results.duration,
+            )
+        ASH_LOGGER.verbose(
+            self.asharp_model.scanner_results[scanner_name].model_dump_json(
+                exclude_unset=True, by_alias=True
+            )
+        )
 
         # Process the raw results based on type
         if isinstance(results.raw_results, SarifReport):

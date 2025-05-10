@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import logging
+from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.core.enums import ScannerToolType
@@ -16,7 +17,9 @@ from pathlib import Path
 
 
 class ScannerPluginConfigBase(PluginConfigBase):
-    pass
+    options: Annotated[ScannerOptionsBase, Field(description="Scanner options")] = (
+        ScannerOptionsBase()
+    )
 
 
 T = TypeVar("T", bound=ScannerPluginConfigBase)
@@ -221,6 +224,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             options: Optional scanner-specific options
         """
         self.end_time = datetime.now(timezone.utc)
+        if not self.start_time:
+            self.start_time = self.end_time
 
         # ec_color = "bold green" if self.exit_code == 0 else "bold red"
         self._plugin_log(

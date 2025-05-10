@@ -4,7 +4,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -172,7 +172,7 @@
           "$ref": "#/$defs/ReporterConfigSegment",
           "default": {
             "asff": {
-              "enabled": false,
+              "enabled": true,
               "extension": "asff",
               "name": "asff",
               "options": {
@@ -181,7 +181,7 @@
               }
             },
             "cloudwatch-logs": {
-              "enabled": false,
+              "enabled": true,
               "extension": "cwlog.json",
               "name": "cloudwatch-logs",
               "options": {
@@ -1009,7 +1009,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -1119,6 +1119,13 @@
       "title": "ConverterConfigSegment",
       "type": "object"
     },
+    "ConverterOptionsBase": {
+      "additionalProperties": true,
+      "description": "Base class for converter options.",
+      "properties": {},
+      "title": "ConverterOptionsBase",
+      "type": "object"
+    },
     "ConverterPluginConfigBase": {
       "additionalProperties": true,
       "properties": {
@@ -1137,11 +1144,9 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/ConverterOptionsBase",
+          "default": {},
+          "description": "Converter options"
         }
       },
       "title": "ConverterPluginConfigBase",
@@ -2047,7 +2052,7 @@
         "asff": {
           "$ref": "#/$defs/ASFFReporterConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "extension": "asff",
             "name": "asff",
             "options": {
@@ -2060,7 +2065,7 @@
         "cloudwatch-logs": {
           "$ref": "#/$defs/CloudWatchLogsReporterConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "extension": "cwlog.json",
             "name": "cloudwatch-logs",
             "options": {
@@ -2199,6 +2204,13 @@
       "title": "ReporterConfigSegment",
       "type": "object"
     },
+    "ReporterOptionsBase": {
+      "additionalProperties": true,
+      "description": "Base class for reporter options.",
+      "properties": {},
+      "title": "ReporterOptionsBase",
+      "type": "object"
+    },
     "ReporterPluginConfigBase": {
       "additionalProperties": true,
       "properties": {
@@ -2229,11 +2241,9 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/ReporterOptionsBase",
+          "default": {},
+          "description": "Reporter options"
         }
       },
       "title": "ReporterPluginConfigBase",

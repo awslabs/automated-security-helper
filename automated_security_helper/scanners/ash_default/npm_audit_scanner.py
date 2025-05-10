@@ -105,6 +105,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             ScannerError: If validation fails
         """
         found = find_executable(self.command)
+        if found:
+            self.tool_version = self._run_subprocess(
+                command=[self.command, "--version"],
+                stderr_preference="return",
+                stdout_preference="return",
+            ).get("stdout", "1.0.0")
         return found is not None
 
     def _process_config_options(self):
@@ -125,7 +131,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # Create the basic SARIF structure
         tool_component = ToolComponent(
             name="npm-audit",
-            version="1.0.0",
+            version=self.tool_version,
             informationUri="https://docs.npmjs.com/cli/v8/commands/npm-audit",
             rules=[],
         )
@@ -292,6 +298,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 level=20,
                 append_to_stream="stderr",  # This will add the message to self.errors
             )
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return True
 
         try:
@@ -301,12 +311,20 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 config=config,
             )
             if not validated:
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
                 return False
         except ScannerError as exc:
             raise exc
 
         if not self.dependencies_satisfied:
             # Logging of this has been done in the central self._pre_scan() method.
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return False
 
         try:
@@ -347,35 +365,21 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     level=logging.WARNING,
                     append_to_stream="stderr",
                 )
-                return
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
+                return True
 
             if not scannable:
-                self._plugin_log(f"No package.json files found in {target}")
-                # Return empty SARIF report
-                return SarifReport(
-                    version="2.1.0",
-                    runs=[
-                        Run(
-                            tool=Tool(
-                                driver=ToolComponent(
-                                    name="npm-audit",
-                                    version="1.0.0",
-                                    informationUri="https://docs.npmjs.com/cli/v8/commands/npm-audit",
-                                )
-                            ),
-                            results=[],
-                            invocations=[
-                                Invocation(
-                                    commandLine="npm audit --json",
-                                    executionSuccessful=True,
-                                    workingDirectory=ArtifactLocation(
-                                        uri=get_shortest_name(input=target)
-                                    ),
-                                )
-                            ],
-                        )
-                    ],
+                self._plugin_log(
+                    f"No package.json files found in {target}", level=logging.WARNING
                 )
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
+                return True
 
             # Run npm audit for each package.json file
             all_results = {}
@@ -462,8 +466,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             # Save the combined results
             if all_results:
-                with open(results_file, mode="w", encoding="utf-8") as f:
-                    json.dump(all_results, f, indent=2)
+                Path(results_file).parent.mkdir(exist_ok=True, parents=True)
+                Path(results_file).write_text(json.dumps(all_results, default=str))
 
             self._post_scan(
                 target=target,
@@ -515,3 +519,27 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         except Exception as e:
             # Check if there are useful error details
             raise ScannerError(f"NpmAudit scan failed: {str(e)}")
+
+
+if __name__ == "__main__":
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+
+    AshConfig.model_rebuild()
+    ASH_LOGGER.debug("Running NpmAuditScanner via __main__")
+    scanner = NpmAuditScanner(
+        context=PluginContext(
+            source_dir=Path.cwd(),
+            output_dir=Path.cwd().joinpath(".ash", "ash_output"),
+        )
+    )
+    report = scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    if report:
+        print(
+            report.model_dump_json(
+                indent=2,
+                by_alias=True,
+                exclude_unset=True,
+            )
+        )

@@ -29,12 +29,71 @@ if TYPE_CHECKING:
 __all__ = ["AshAggregatedResults"]
 
 
-class ScannerStatusInfo(BaseModel):
+class ScannerSeverityCount(BaseModel):
     """Information about scanner status."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+    )
+    critical: int = 0
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+    info: int = 0
+
+
+class SummaryStats(ScannerSeverityCount):
+    """Summary statistics for the final report"""
+
+    total: int = 0
+    actionable: int = 0
+    passed: int = 0
+    failed: int = 0
+    missing: int = 0
+    skipped: int = 0
+
+    def bump(self, key: str, amount: int = 1) -> int:
+        setattr(self, key, getattr(self, key) + amount)
+        return getattr(self, key)
+
+
+class ScannerTargetStatusInfo(BaseModel):
+    """Information about scanner status."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+    )
 
     status: ScannerStatus = ScannerStatus.PASSED
     dependencies_satisfied: bool = True
     excluded: bool = False
+    severity_counts: ScannerSeverityCount = ScannerSeverityCount()
+    actionable_finding_count: int | None = 0
+    finding_count: int | None = 0
+    exit_code: int | None = 0
+    duration: float | None = 0.0
+
+
+class ScannerStatusInfo(BaseModel):
+    """Information about scanner status."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+    )
+
+    severity_threshold: str | None = None
+    status: ScannerStatus | None = None
+    dependencies_satisfied: bool = True
+    excluded: bool = False
+
+    source: ScannerTargetStatusInfo = ScannerTargetStatusInfo()
+    converted: ScannerTargetStatusInfo = ScannerTargetStatusInfo()
 
 
 class ReportMetadata(BaseModel):
@@ -69,22 +128,9 @@ class ReportMetadata(BaseModel):
         str, Field(min_length=1, description="Description of the tool/scan")
     ] = None
     summary_stats: Annotated[
-        Dict[str, int],
+        SummaryStats,
         Field(description="Summary statistics (e.g., count by severity)"),
-    ] = {
-        "total": 0,
-        "critical": 0,
-        "high": 0,
-        "medium": 0,
-        "low": 0,
-        "info": 0,
-        "actionable": 0,
-        "passed": 0,
-        "failed": 0,
-        "missing": 0,
-        "skipped": 0,
-    }
-    scanner_status: Dict[str, ScannerStatusInfo] = Field(default_factory=dict)
+    ] = SummaryStats()
 
     @field_validator("project_name")
     @classmethod
@@ -123,7 +169,6 @@ class AshAggregatedResults(BaseModel):
         extra="ignore",
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
-        exclude={"_aggregator", "_trend_analyzer", "_scanners"},
     )
 
     name: str = Field(default="ASH Scan Report", description="Name of the report")
@@ -138,12 +183,14 @@ class AshAggregatedResults(BaseModel):
             tool_name="ASH",
             tool_version=get_ash_version(),
             description="Automated Security Helper Aggregated Report Post-processor",
+            scanner_status={},
         )
     )
     ash_config: Annotated[
         "AshConfig",
         Field(description="The full ASH configuration used during this scan."),
     ] = None
+    scanner_results: Dict[str, ScannerStatusInfo] = Field(default_factory=dict)
     sarif: Annotated[
         SarifReport | None,
         Field(description="The SARIF formatted vulnerability report"),
@@ -213,12 +260,18 @@ class AshAggregatedResults(BaseModel):
             "metadata": self.metadata.model_dump(
                 exclude_none=True,
                 exclude_unset=True,
+                by_alias=True,
             ),
             "ash_config": self.ash_config.model_dump(
                 exclude_none=True,
                 exclude_unset=True,
+                by_alias=True,
             ),
-            "scanners": reduced_reports,
+            "scanners": self.scanners.model_dump(
+                exclude_none=True,
+                exclude_unset=True,
+                by_alias=True,
+            ),
         }
 
     def to_flat_vulnerabilities(self) -> List[FlatVulnerability]:
@@ -435,7 +488,7 @@ class AshAggregatedResults(BaseModel):
                                 "syft",
                                 "npm-audit",
                             ]:
-                                actual_scanner = tag.capitalize()
+                                actual_scanner = tag
                                 break
 
                     # Create the flattened vulnerability
@@ -537,7 +590,8 @@ class AshAggregatedResults(BaseModel):
             )
             self.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(report, CycloneDXReport):
-            self.cyclonedx = report
+            # self.cyclonedx = report
+            pass
         elif isinstance(report, str):
             self.additional_reports[reporter] = report
         else:

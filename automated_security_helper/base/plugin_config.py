@@ -1,4 +1,4 @@
-from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.options import PluginOptionsBase
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Annotated
 
@@ -23,6 +23,6 @@ class PluginConfigBase(BaseModel):
     enabled: Annotated[bool, Field(description="Whether the component is enabled")] = (
         True
     )
-    options: Annotated[ScannerOptionsBase, Field(description="Scanner options")] = (
-        ScannerOptionsBase()
+    options: Annotated[PluginOptionsBase, Field(description="Scanner options")] = (
+        PluginOptionsBase()
     )

@@ -4,7 +4,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -1410,7 +1410,7 @@
           "$ref": "#/$defs/ReporterConfigSegment",
           "default": {
             "asff": {
-              "enabled": false,
+              "enabled": true,
               "extension": "asff",
               "name": "asff",
               "options": {
@@ -1419,7 +1419,7 @@
               }
             },
             "cloudwatch-logs": {
-              "enabled": false,
+              "enabled": true,
               "extension": "cwlog.json",
               "name": "cloudwatch-logs",
               "options": {
@@ -2773,7 +2773,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -4372,6 +4372,13 @@
       "title": "ConverterConfigSegment",
       "type": "object"
     },
+    "ConverterOptionsBase": {
+      "additionalProperties": true,
+      "description": "Base class for converter options.",
+      "properties": {},
+      "title": "ConverterOptionsBase",
+      "type": "object"
+    },
     "ConverterPluginConfigBase": {
       "additionalProperties": true,
       "properties": {
@@ -4390,11 +4397,9 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/ConverterOptionsBase",
+          "default": {},
+          "description": "Converter options"
         }
       },
       "title": "ConverterPluginConfigBase",
@@ -12831,17 +12836,8 @@
           "title": "Report Id",
           "type": "string"
         },
-        "scanner_status": {
-          "additionalProperties": {
-            "$ref": "#/$defs/ScannerStatusInfo"
-          },
-          "title": "Scanner Status",
-          "type": "object"
-        },
         "summary_stats": {
-          "additionalProperties": {
-            "type": "integer"
-          },
+          "$ref": "#/$defs/SummaryStats",
           "default": {
             "actionable": 0,
             "critical": 0,
@@ -12855,9 +12851,7 @@
             "skipped": 0,
             "total": 0
           },
-          "description": "Summary statistics (e.g., count by severity)",
-          "title": "Summary Stats",
-          "type": "object"
+          "description": "Summary statistics (e.g., count by severity)"
         },
         "tool_version": {
           "default": null,
@@ -12883,7 +12877,7 @@
         "asff": {
           "$ref": "#/$defs/ASFFReporterConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "extension": "asff",
             "name": "asff",
             "options": {
@@ -12896,7 +12890,7 @@
         "cloudwatch-logs": {
           "$ref": "#/$defs/CloudWatchLogsReporterConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "extension": "cwlog.json",
             "name": "cloudwatch-logs",
             "options": {
@@ -13035,6 +13029,13 @@
       "title": "ReporterConfigSegment",
       "type": "object"
     },
+    "ReporterOptionsBase": {
+      "additionalProperties": true,
+      "description": "Base class for reporter options.",
+      "properties": {},
+      "title": "ReporterOptionsBase",
+      "type": "object"
+    },
     "ReporterPluginConfigBase": {
       "additionalProperties": true,
       "properties": {
@@ -13065,11 +13066,9 @@
           "type": "string"
         },
         "options": {
-          "$ref": "#/$defs/ScannerOptionsBase",
-          "default": {
-            "severity_threshold": null
-          },
-          "description": "Scanner options"
+          "$ref": "#/$defs/ReporterOptionsBase",
+          "default": {},
+          "description": "Reporter options"
         }
       },
       "title": "ReporterPluginConfigBase",
@@ -15510,6 +15509,39 @@
       "title": "ScannerPluginConfigBase",
       "type": "object"
     },
+    "ScannerSeverityCount": {
+      "additionalProperties": true,
+      "description": "Information about scanner status.",
+      "properties": {
+        "critical": {
+          "default": 0,
+          "title": "Critical",
+          "type": "integer"
+        },
+        "high": {
+          "default": 0,
+          "title": "High",
+          "type": "integer"
+        },
+        "info": {
+          "default": 0,
+          "title": "Info",
+          "type": "integer"
+        },
+        "low": {
+          "default": 0,
+          "title": "Low",
+          "type": "integer"
+        },
+        "medium": {
+          "default": 0,
+          "title": "Medium",
+          "type": "integer"
+        }
+      },
+      "title": "ScannerSeverityCount",
+      "type": "object"
+    },
     "ScannerStatus": {
       "description": "Status of a scanner execution.",
       "enum": [
@@ -15522,8 +15554,28 @@
       "type": "string"
     },
     "ScannerStatusInfo": {
+      "additionalProperties": true,
       "description": "Information about scanner status.",
       "properties": {
+        "converted": {
+          "$ref": "#/$defs/ScannerTargetStatusInfo",
+          "default": {
+            "actionable_finding_count": 0,
+            "dependencies_satisfied": true,
+            "duration": 0.0,
+            "excluded": false,
+            "exit_code": 0,
+            "finding_count": 0,
+            "severity_counts": {
+              "critical": 0,
+              "high": 0,
+              "info": 0,
+              "low": 0,
+              "medium": 0
+            },
+            "status": "PASSED"
+          }
+        },
         "dependencies_satisfied": {
           "default": true,
           "title": "Dependencies Satisfied",
@@ -15534,12 +15586,130 @@
           "title": "Excluded",
           "type": "boolean"
         },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Severity Threshold"
+        },
+        "source": {
+          "$ref": "#/$defs/ScannerTargetStatusInfo",
+          "default": {
+            "actionable_finding_count": 0,
+            "dependencies_satisfied": true,
+            "duration": 0.0,
+            "excluded": false,
+            "exit_code": 0,
+            "finding_count": 0,
+            "severity_counts": {
+              "critical": 0,
+              "high": 0,
+              "info": 0,
+              "low": 0,
+              "medium": 0
+            },
+            "status": "PASSED"
+          }
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScannerStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ScannerStatusInfo",
+      "type": "object"
+    },
+    "ScannerTargetStatusInfo": {
+      "additionalProperties": true,
+      "description": "Information about scanner status.",
+      "properties": {
+        "actionable_finding_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 0,
+          "title": "Actionable Finding Count"
+        },
+        "dependencies_satisfied": {
+          "default": true,
+          "title": "Dependencies Satisfied",
+          "type": "boolean"
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 0.0,
+          "title": "Duration"
+        },
+        "excluded": {
+          "default": false,
+          "title": "Excluded",
+          "type": "boolean"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 0,
+          "title": "Exit Code"
+        },
+        "finding_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 0,
+          "title": "Finding Count"
+        },
+        "severity_counts": {
+          "$ref": "#/$defs/ScannerSeverityCount",
+          "default": {
+            "critical": 0,
+            "high": 0,
+            "info": 0,
+            "low": 0,
+            "medium": 0
+          }
+        },
         "status": {
           "$ref": "#/$defs/ScannerStatus",
           "default": "PASSED"
         }
       },
-      "title": "ScannerStatusInfo",
+      "title": "ScannerTargetStatusInfo",
       "type": "object"
     },
     "ScannerToolType": {
@@ -16774,6 +16944,69 @@
         }
       },
       "title": "Step",
+      "type": "object"
+    },
+    "SummaryStats": {
+      "additionalProperties": true,
+      "description": "Summary statistics for the final report",
+      "properties": {
+        "actionable": {
+          "default": 0,
+          "title": "Actionable",
+          "type": "integer"
+        },
+        "critical": {
+          "default": 0,
+          "title": "Critical",
+          "type": "integer"
+        },
+        "failed": {
+          "default": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "high": {
+          "default": 0,
+          "title": "High",
+          "type": "integer"
+        },
+        "info": {
+          "default": 0,
+          "title": "Info",
+          "type": "integer"
+        },
+        "low": {
+          "default": 0,
+          "title": "Low",
+          "type": "integer"
+        },
+        "medium": {
+          "default": 0,
+          "title": "Medium",
+          "type": "integer"
+        },
+        "missing": {
+          "default": 0,
+          "title": "Missing",
+          "type": "integer"
+        },
+        "passed": {
+          "default": 0,
+          "title": "Passed",
+          "type": "integer"
+        },
+        "skipped": {
+          "default": 0,
+          "title": "Skipped",
+          "type": "integer"
+        },
+        "total": {
+          "default": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "title": "SummaryStats",
       "type": "object"
     },
     "Suppression": {
@@ -20621,6 +20854,13 @@
         "version": "2.1.0"
       },
       "description": "The SARIF formatted vulnerability report"
+    },
+    "scanner_results": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ScannerStatusInfo"
+      },
+      "title": "Scanner Results",
+      "type": "object"
     }
   },
   "title": "AshAggregatedResults",

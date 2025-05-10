@@ -57,10 +57,7 @@ class ScanResultsContainer(BaseModel):
     scanner_severity_threshold: (
         Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None
     ) = None
-    status: Literal["passed", "failed", "warning"] = "passed"
-
-    # New properties for tracking scanner status
-    scanner_status: ScannerStatus = ScannerStatus.PASSED
+    status: ScannerStatus = ScannerStatus.PASSED
     dependencies_satisfied: bool = True
     excluded: bool = False
 

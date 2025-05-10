@@ -190,7 +190,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
-            return
+            return True
         else:
             joined_files = "\n- ".join(scannable)
             ASH_LOGGER.debug(

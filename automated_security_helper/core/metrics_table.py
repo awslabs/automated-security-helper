@@ -145,12 +145,34 @@ def generate_metrics_table(
             else scanner.__class__.__name__
         )
         # Initialize counters
-        critical = 0
-        high = 0
-        medium = 0
-        low = 0
-        info = 0
-        exit_code = 0
+        critical = (
+            asharp_model.scanner_results[scanner_name].source.severity_counts.critical
+            + asharp_model.scanner_results[
+                scanner_name
+            ].converted.severity_counts.critical
+        )
+        high = (
+            asharp_model.scanner_results[scanner_name].source.severity_counts.high
+            + asharp_model.scanner_results[scanner_name].converted.severity_counts.high
+        )
+        medium = (
+            asharp_model.scanner_results[scanner_name].source.severity_counts.medium
+            + asharp_model.scanner_results[
+                scanner_name
+            ].converted.severity_counts.medium
+        )
+        low = (
+            asharp_model.scanner_results[scanner_name].source.severity_counts.low
+            + asharp_model.scanner_results[scanner_name].converted.severity_counts.low
+        )
+        info = (
+            asharp_model.scanner_results[scanner_name].source.severity_counts.info
+            + asharp_model.scanner_results[scanner_name].converted.severity_counts.info
+        )
+        # exit_code = max(
+        #     asharp_model.scanner_results[scanner_name].source.exit_code,
+        #     asharp_model.scanner_results[scanner_name].converted.exit_code,
+        # )
 
         # Get scanner-specific configuration
         ASH_LOGGER.debug(f"Looking up config for scanner: {scanner_name}")
@@ -217,25 +239,25 @@ def generate_metrics_table(
                     f"Scanner {scanner_name} config options does not have severity_threshold attribute"
                 )
 
-        # Try to get results from additional_reports
-        if scanner_name in asharp_model.additional_reports:
-            scanner_results = asharp_model.additional_reports[scanner_name]
+        # # Try to get results from additional_reports
+        # if scanner_name in asharp_model.additional_reports:
+        #     scanner_results = asharp_model.additional_reports[scanner_name]
 
-            # Extract metrics from scanner results
-            for target_type, results in scanner_results.items():
-                if isinstance(results, dict):
-                    # Try to extract severity counts
-                    if "severity_counts" in results:
-                        severity_counts = results["severity_counts"]
-                        critical += severity_counts.get("critical", 0)
-                        high += severity_counts.get("high", 0)
-                        medium += severity_counts.get("medium", 0)
-                        low += severity_counts.get("low", 0)
-                        info += severity_counts.get("info", 0)
+        #     # Extract metrics from scanner results
+        #     for target_type, results in scanner_results.items():
+        #         if isinstance(results, dict):
+        #             # Try to extract severity counts
+        #             if "severity_counts" in results:
+        #                 severity_counts = results["severity_counts"]
+        #                 critical += severity_counts.get("critical", 0)
+        #                 high += severity_counts.get("high", 0)
+        #                 medium += severity_counts.get("medium", 0)
+        #                 low += severity_counts.get("low", 0)
+        #                 info += severity_counts.get("info", 0)
 
-                    # Try to extract exit code
-                    if "exit_code" in results:
-                        exit_code = max(exit_code, results["exit_code"])
+        #             # Try to extract exit code
+        #             if "exit_code" in results:
+        #                 exit_code = max(exit_code, results["exit_code"])
 
         # Use scanner-specific threshold for evaluation if available, otherwise use global
         evaluation_threshold = (
@@ -245,20 +267,19 @@ def generate_metrics_table(
             f"Scanner {scanner_name} using evaluation threshold: {evaluation_threshold} (scanner_threshold={scanner_threshold}, global_threshold={global_threshold})"
         )
         # Calculate total findings
-        total = critical + high + medium + low + info
+
+        # total = (
+        #     asharp_model.scanner_results[scanner_name].source.finding_count
+        #     + asharp_model.scanner_results[scanner_name].converted.finding_count
+        # )
 
         # Calculate actionable findings based on threshold
-        actionable = 0
-        if evaluation_threshold == "ALL":
-            actionable = total
-        elif evaluation_threshold == "LOW":
-            actionable = critical + high + medium + low
-        elif evaluation_threshold == "MEDIUM":
-            actionable = critical + high + medium
-        elif evaluation_threshold == "HIGH":
-            actionable = critical + high
-        elif evaluation_threshold == "CRITICAL":
-            actionable = critical
+        actionable = (
+            asharp_model.scanner_results[scanner_name].source.actionable_finding_count
+            + asharp_model.scanner_results[
+                scanner_name
+            ].converted.actionable_finding_count
+        )
 
         # Determine status based on dependencies, exclusion, and findings
         status = "[bold green]PASSED[/bold green]"
@@ -270,10 +291,10 @@ def generate_metrics_table(
 
         # First check if scanner status is in metadata (most accurate)
         if (
-            hasattr(asharp_model.metadata, "scanner_status")
-            and scanner_name in asharp_model.metadata.scanner_status
+            hasattr(asharp_model, "scanner_results")
+            and scanner_name in asharp_model.scanner_results
         ):
-            scanner_status_info = asharp_model.metadata.scanner_status[scanner_name]
+            scanner_status_info = asharp_model.scanner_results[scanner_name]
             ASH_LOGGER.debug(
                 f"Found scanner status in metadata for {scanner_name}: {scanner_status_info}"
             )
@@ -420,18 +441,20 @@ def generate_metrics_table(
             actionable_text = Text(str(actionable), style="green bold")
 
         # Extract duration from additional_reports if available
-        duration_seconds = None
-        if scanner_name in asharp_model.additional_reports:
-            for target_type, results in asharp_model.additional_reports[
-                scanner_name
-            ].items():
-                if "duration" in results and results["duration"] is not None:
-                    # If we have multiple target types, use the maximum duration
-                    if (
-                        duration_seconds is None
-                        or results["duration"] > duration_seconds
-                    ):
-                        duration_seconds = results["duration"]
+        duration_seconds = (
+            asharp_model.scanner_results[scanner_name].source.duration or 0
+        ) + (asharp_model.scanner_results[scanner_name].converted.duration or 0)
+        # if scanner_name in asharp_model.additional_reports:
+        #     for target_type, results in asharp_model.additional_reports[
+        #         scanner_name
+        #     ].items():
+        #         if "duration" in results and results["duration"] is not None:
+        #             # If we have multiple target types, use the maximum duration
+        #             if (
+        #                 duration_seconds is None
+        #                 or results["duration"] > duration_seconds
+        #             ):
+        #                 duration_seconds = results["duration"]
 
         # Format the duration
         formatted_duration = format_duration(duration_seconds)

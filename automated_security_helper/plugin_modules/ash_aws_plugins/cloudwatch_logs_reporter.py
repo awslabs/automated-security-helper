@@ -5,6 +5,7 @@ import json
 import logging
 from pydantic import Field
 import boto3
+from rich import print_json, print
 
 from typing import Annotated, Literal, TYPE_CHECKING
 
@@ -34,7 +35,7 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
 class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
     name: Literal["cloudwatch-logs"] = "cloudwatch-logs"
     extension: str = "cwlog.json"
-    enabled: bool = False
+    enabled: bool = True
     options: CloudWatchLogsReporterConfigOptions = CloudWatchLogsReporterConfigOptions()
 
 
@@ -68,8 +69,27 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
 
     def report(self, model: "AshAggregatedResults") -> str:
         """Publishes AshAggregatedResults as a CloudWatchLogs event"""
-        timestamp = int(datetime.now(timezone.utc).timestamp())
-        simple_dict = model.to_simple_dict()
+        timestamp = int(
+            (
+                datetime.now(timezone.utc)
+                - datetime(1970, 1, 1, 0, 0, 0, 0, timezone.utc)
+            ).total_seconds()
+            * 1000
+        )
+        output_dict = model.model_dump(
+            include=[
+                "name",
+                "description",
+                "metadata",
+                "scanner_results",
+                "ash_config",
+            ],
+            exclude_none=True,
+            exclude_unset=True,
+            by_alias=True,
+            mode="json",
+        )
+        output = json.dumps(output_dict, default=str)
         if isinstance(self.config, dict):
             self.config = CloudWatchLogsReporterConfig.model_validate(self.config)
         cwlogs_client = boto3.client("logs", region_name=self.config.options.aws_region)
@@ -85,20 +105,27 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
                 append_to_stream="stderr",
             )
 
-        output = json.dumps(simple_dict, default=str)
-        self._plugin_log(
-            f"Publishing results to CloudWatch Logs log group {self.config.options.log_group_name}@{self.config.options.aws_region}: {output}",
-            level=15,
-            append_to_stream="stdout",
+        log_event = {
+            "timestamp": timestamp,
+            "message": output,
+        }
+        print(
+            f"Publishing event to CloudWatch Logs log group {self.config.options.log_group_name}@{self.config.options.aws_region}",
+            # level=15,
+            # append_to_stream="stdout",
         )
-        resp = cwlogs_client.put_log_events(
-            logGroupName=self.config.options.log_group_name,
-            logStreamName=self.config.options.log_stream_name,
-            logEvents=[
-                {
-                    "timestamp": timestamp,
-                    "message": output,
-                }
-            ],
-        )
-        return json.dumps(resp, default=str)
+        print_json(output)
+        try:
+            resp = cwlogs_client.put_log_events(
+                logGroupName=self.config.options.log_group_name,
+                logStreamName=self.config.options.log_stream_name,
+                logEvents=[log_event],
+            )
+            return json.dumps({"message": output_dict, "response": resp}, default=str)
+        except Exception as e:
+            self._plugin_log(
+                f"Error when publishing results to CloudWatch Logs: {e}",
+                level=logging.WARNING,
+                append_to_stream="stderr",
+            )
+            return str(e)

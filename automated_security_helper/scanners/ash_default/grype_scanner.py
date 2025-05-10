@@ -175,6 +175,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 level=20,
                 append_to_stream="stderr",  # This will add the message to self.errors
             )
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return True
 
         try:
@@ -184,12 +188,20 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 config=config,
             )
             if not validated:
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
                 return False
         except ScannerError as exc:
             raise exc
 
         if not self.dependencies_satisfied:
             # Logging of this has been done in the central self._pre_scan() method.
+            self._post_scan(
+                target=target,
+                target_type=target_type,
+            )
             return False
 
         try:

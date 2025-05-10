@@ -257,27 +257,27 @@ class ScanExecutionEngine:
             return
 
         # Register custom scanners from build configuration
-        for scanner_config in self._context.config.build.custom_scanners:
-            try:
-                from automated_security_helper.scanners.ash_default.custom_scanner import (
-                    CustomScanner,
-                )
+        # for scanner_config in self._context.config.build.custom_scanners:
+        #     try:
+        #         from automated_security_helper.scanners.ash_default.custom_scanner import (
+        #             CustomScanner,
+        #         )
 
-                # Create and register the custom scanner
-                custom_scanner = CustomScanner(
-                    config=scanner_config, context=self._context
-                )
+        #         # Create and register the custom scanner
+        #         custom_scanner = CustomScanner(
+        #             config=scanner_config, context=self._context
+        #         )
 
-                # Register with plugin manager
-                ash_plugin_manager.register_plugin_module(
-                    "scanner",
-                    custom_scanner.__class__,
-                    f"automated_security_helper.scanners.custom.{scanner_config.name}",
-                )
+        #         # Register with plugin manager
+        #         ash_plugin_manager.register_plugin_module(
+        #             "scanner",
+        #             custom_scanner.__class__,
+        #             f"automated_security_helper.scanners.custom.{scanner_config.name}",
+        #         )
 
-                ASH_LOGGER.debug(f"Registered custom scanner: {scanner_config.name}")
-            except Exception as e:
-                ASH_LOGGER.error(f"Failed to register custom scanner: {e}")
+        #         ASH_LOGGER.debug(f"Registered custom scanner: {scanner_config.name}")
+        #     except Exception as e:
+        #         ASH_LOGGER.error(f"Failed to register custom scanner: {e}")
 
     def get_scanner(
         self, scanner_name: str, check_enabled: bool = True
@@ -422,6 +422,7 @@ class ScanExecutionEngine:
 
         try:
             # Execute each phase in order using the new phase classes
+            self._results = self._asharp_model
             for phase_name in ordered_phases:
                 ASH_LOGGER.info(f"\n----- Starting phase: {phase_name.upper()} -----")
 
@@ -434,6 +435,7 @@ class ScanExecutionEngine:
                         asharp_model=self._asharp_model,
                     )
                     convert_phase.execute(python_based_plugins_only=self._python_only)
+                    self._results = convert_phase.asharp_model
 
                 elif phase_name == "scan":
                     # Create and execute the Scan phase
@@ -458,6 +460,7 @@ class ScanExecutionEngine:
                         global_ignore_paths=self._global_ignore_paths,
                         python_based_plugins_only=self._python_only,  # Pass the python_based_plugins_only flag to the scan phase
                     )
+                    self._asharp_model = self._results
                     # Store the completed scanners for metrics display
                     self._completed_scanners = scan_phase._completed_scanners
 
@@ -478,6 +481,7 @@ class ScanExecutionEngine:
                         ),
                         python_based_plugins_only=self._python_only,
                     )
+                    self._asharp_model = report_phase.asharp_model
 
                 elif phase_name == "inspect":
                     # Create and execute the Inspect phase
@@ -488,6 +492,7 @@ class ScanExecutionEngine:
                         asharp_model=self._asharp_model,
                     )
                     inspect_phase.execute(python_based_plugins_only=self._python_only)
+                    self._asharp_model = inspect_phase.asharp_model
 
             # Return the results
             return self._results

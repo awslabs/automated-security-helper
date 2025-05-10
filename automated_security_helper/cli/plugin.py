@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, List
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -49,6 +49,13 @@ def list_plugins(
         bool,
         typer.Option(help="Whether to include the plugin config in the response table"),
     ] = False,
+    ash_plugin_modules: Annotated[
+        List[str],
+        typer.Option(
+            help="List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.",
+            envvar="ASH_PLUGIN_MODULES",
+        ),
+    ] = [],
     verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
@@ -83,10 +90,12 @@ def list_plugins(
 
     try:
         console = Console()
+        ash_config = resolve_config(config_path=config)
+        ash_config.ash_plugin_modules.extend(ash_plugin_modules)
         plugin_context = PluginContext(
             source_dir=Path.cwd(),
             output_dir=Path.cwd().joinpath(".ash", "ash_output"),
-            config=resolve_config(config_path=config),
+            config=ash_config,
         )
 
         # Load all plugins
