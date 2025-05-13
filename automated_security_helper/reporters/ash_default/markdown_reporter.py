@@ -50,6 +50,8 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
     def model_post_init(self, context):
         if self.config is None:
             self.config = MarkdownReporterConfig()
+        elif isinstance(self.config, dict):
+            self.config = MarkdownReporterConfig.model_validate(self.config)
         return super().model_post_init(context)
 
     def report(self, model: "AshAggregatedResults") -> str:
@@ -89,6 +91,8 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
         md_parts.append("")
 
         # Add summary section if enabled
+        if isinstance(self.config, dict):
+            self.config = MarkdownReporterConfig.model_validate(self.config)
         if self.config.options.include_summary:
             md_parts.append("## Summary\n")
 
