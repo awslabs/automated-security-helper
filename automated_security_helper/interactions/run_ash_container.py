@@ -355,6 +355,7 @@ def run_ash_container(
     # Set image name from environment or use default
     resolved_build_target = (
         "ci"
+        # Force CI if a custom containerfile was provided
         if (
             custom_containerfile is not None
             or os.environ.get(
@@ -400,7 +401,7 @@ def run_ash_container(
                 "--tag",
                 ash_base_image_name,
                 "--target",
-                build_target.value,
+                resolved_build_target,
                 "--file",
                 dockerfile_path.as_posix(),
                 "--build-arg",
