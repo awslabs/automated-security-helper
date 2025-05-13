@@ -38,6 +38,7 @@ class ScanPhase(EnginePhase):
 
     def _execute_phase(
         self,
+        aggregated_results: AshAggregatedResults,
         enabled_scanners: List[str] = None,
         excluded_scanners: List[str] = None,
         parallel: bool = True,
@@ -138,20 +139,14 @@ class ScanPhase(EnginePhase):
                             )
 
                             # Add to results
-                            self.asharp_model.additional_reports[display_name] = {
+                            aggregated_results.additional_reports[display_name] = {
                                 "source": results_container.model_dump()
                             }
 
                             # Add to completed scanners for metrics display
                             self._completed_scanners.append(plugin_instance)
 
-                            # Add to scanner status metadata
-                            if not hasattr(
-                                self.asharp_model.metadata, "scanner_status"
-                            ):
-                                self.asharp_model.scanner_results = {}
-
-                            self.asharp_model.scanner_results[display_name] = (
+                            aggregated_results.scanner_results[display_name] = (
                                 ScannerStatusInfo(
                                     status=ScannerStatus.SKIPPED,
                                     excluded=True,
@@ -178,20 +173,14 @@ class ScanPhase(EnginePhase):
                             )
 
                             # Add to results
-                            self.asharp_model.additional_reports[display_name] = {
+                            aggregated_results.additional_reports[display_name] = {
                                 "source": results_container.model_dump()
                             }
 
                             # Add to completed scanners for metrics display
                             self._completed_scanners.append(plugin_instance)
 
-                            # Add to scanner status metadata
-                            if not hasattr(
-                                self.asharp_model.metadata, "scanner_status"
-                            ):
-                                self.asharp_model.scanner_results = {}
-
-                            self.asharp_model.scanner_results[display_name] = (
+                            aggregated_results.scanner_results[display_name] = (
                                 ScannerStatusInfo(
                                     status=ScannerStatus.MISSING,
                                     dependencies_satisfied=False,
@@ -278,6 +267,7 @@ class ScanPhase(EnginePhase):
             )
 
             # Execute scanners based on mode
+            results = None
             if parallel:
                 # Update the main task to show we're executing scanners
                 self.progress_display.update_task(
@@ -287,7 +277,7 @@ class ScanPhase(EnginePhase):
                     description=f"Executing {len(enabled_scanner_names)} scanners in parallel...",
                 )
                 self.update_progress(40, "Executing scanners in parallel...")
-                self._execute_parallel()
+                results = self._execute_parallel(aggregated_results=aggregated_results)
             else:
                 # Update the main task to show we're executing scanners
                 self.progress_display.update_task(
@@ -297,7 +287,11 @@ class ScanPhase(EnginePhase):
                     description=f"Executing {len(enabled_scanner_names)} scanners sequentially...",
                 )
                 self.update_progress(40, "Executing scanners sequentially...")
-                self._execute_sequential()
+                results = self._execute_sequential(
+                    aggregated_results=aggregated_results
+                )
+            if isinstance(results, AshAggregatedResults):
+                aggregated_results = results
 
             # Update progress
             self.update_progress(90, "Finalizing scan results...")
@@ -315,7 +309,7 @@ class ScanPhase(EnginePhase):
                 ASH_LOGGER.debug(
                     f"Saving AshAggregatedResults to {self.plugin_context.output_dir}"
                 )
-                self.asharp_model.save_model(self.plugin_context.output_dir)
+                aggregated_results.save_model(self.plugin_context.output_dir)
 
             # Update progress to 100%
             self.update_progress(
@@ -335,7 +329,7 @@ class ScanPhase(EnginePhase):
                 "Complete", f"Executed {len(self._completed_scanners)} scanners"
             )
 
-            return self.asharp_model
+            return aggregated_results
 
         except Exception as e:
             # Update progress to show error
@@ -599,7 +593,7 @@ class ScanPhase(EnginePhase):
             )
             raise
 
-    def _execute_sequential(self) -> None:
+    def _execute_sequential(self, aggregated_results: AshAggregatedResults) -> None:
         """Execute scanners sequentially and update AshAggregatedResults."""
         # On MacOS, qsize() raises NotImplementedError, so we need to count items differently
         # First, get all items from the queue into a list
@@ -649,7 +643,11 @@ class ScanPhase(EnginePhase):
 
                 # Process each result
                 for results in results_list:
-                    self._process_results(results)
+                    processed = self._process_results(
+                        results=results, aggregated_results=aggregated_results
+                    )
+                    if isinstance(processed, AshAggregatedResults):
+                        aggregated_results = processed
 
                 # Update scanner task to 100%
                 self.progress_display.update_task(
@@ -678,7 +676,9 @@ class ScanPhase(EnginePhase):
             finally:
                 completed += 1
 
-    def _execute_parallel(self) -> None:
+        return aggregated_results
+
+    def _execute_parallel(self, aggregated_results: AshAggregatedResults) -> None:
         """Execute scanners in parallel and update AshAggregatedResults."""
         # Get all scanner tasks from the queue first to avoid qsize() which is not implemented on macOS
         scanner_tuples = []
@@ -753,7 +753,11 @@ class ScanPhase(EnginePhase):
 
                     # Process each result in the list
                     for results in results_list:
-                        self._process_results(results)
+                        processed = self._process_results(
+                            results=results, aggregated_results=aggregated_results
+                        )
+                        if isinstance(processed, AshAggregatedResults):
+                            aggregated_results = processed
 
                     # Update scanner task to show completion
                     scanner_name = future.scanner_info["name"]
@@ -807,8 +811,11 @@ class ScanPhase(EnginePhase):
                             int(progress_percent),
                             f"Completed {completed_count}/{len(futures)} scanner tasks (with errors)",
                         )
+        return aggregated_results
 
-    def _process_results(self, results: ScanResultsContainer) -> None:
+    def _process_results(
+        self, results: ScanResultsContainer, aggregated_results: AshAggregatedResults
+    ) -> AshAggregatedResults:
         """Process scanner results and update AshAggregatedResults.
 
         Args:
@@ -821,19 +828,19 @@ class ScanPhase(EnginePhase):
 
         # Store metrics in additional_reports for later use
         scanner_name = results.scanner_name
-        if scanner_name not in self.asharp_model.additional_reports:
-            self.asharp_model.additional_reports[scanner_name] = {}
+        if scanner_name not in aggregated_results.additional_reports:
+            aggregated_results.additional_reports[scanner_name] = {}
 
         # Determine which is set first:
         # 1. results.scanner_severity_threshold
-        # 2. self.asharp_model.ash_config.global_settings.severity_threshold
+        # 2. aggregated_results.ash_config.global_settings.severity_threshold
         # 3. ASH_DEFAULT_SEVERITY_LEVEL
         evaluation_threshold = (
             results.scanner_severity_threshold
             if results.scanner_severity_threshold is not None
             else (
-                self.asharp_model.ash_config.global_settings.severity_threshold
-                if self.asharp_model.ash_config.global_settings.severity_threshold
+                aggregated_results.ash_config.global_settings.severity_threshold
+                if aggregated_results.ash_config.global_settings.severity_threshold
                 is not None
                 else ASH_DEFAULT_SEVERITY_LEVEL
             )
@@ -846,10 +853,10 @@ class ScanPhase(EnginePhase):
             "low",
             "info",
         ]:
-            self.asharp_model.metadata.summary_stats.bump(
+            aggregated_results.metadata.summary_stats.bump(
                 sev, results.severity_counts[sev]
             )
-            self.asharp_model.metadata.summary_stats.bump(
+            aggregated_results.metadata.summary_stats.bump(
                 "total", results.severity_counts[sev]
             )
 
@@ -876,11 +883,11 @@ class ScanPhase(EnginePhase):
         elif evaluation_threshold == "CRITICAL":
             actionable = results.severity_counts["critical"]
 
-        self.asharp_model.metadata.summary_stats.bump("actionable", actionable)
+        aggregated_results.metadata.summary_stats.bump("actionable", actionable)
 
         # Only update if not already set (to maintain precedence)
         status = results.status
-        if scanner_name not in self.asharp_model.scanner_results:
+        if scanner_name not in aggregated_results.scanner_results:
             # Determine status based on actionable findings
             if (
                 results.dependencies_satisfied
@@ -895,7 +902,7 @@ class ScanPhase(EnginePhase):
             else:
                 status = ScannerStatus.PASSED
 
-            self.asharp_model.scanner_results[scanner_name] = ScannerStatusInfo(
+            aggregated_results.scanner_results[scanner_name] = ScannerStatusInfo(
                 status=status,
                 dependencies_satisfied=results.dependencies_satisfied,
                 excluded=results.excluded,
@@ -903,12 +910,12 @@ class ScanPhase(EnginePhase):
             )
         if (
             status != ScannerStatus.PASSED
-            and self.asharp_model.scanner_results[scanner_name].status
+            and aggregated_results.scanner_results[scanner_name].status
             == ScannerStatus.PASSED
         ):
-            self.asharp_model.scanner_results[scanner_name].status = status
+            aggregated_results.scanner_results[scanner_name].status = status
         if results.target_type == "source":
-            self.asharp_model.scanner_results[
+            aggregated_results.scanner_results[
                 scanner_name
             ].source = ScannerTargetStatusInfo(
                 status=status,
@@ -921,7 +928,7 @@ class ScanPhase(EnginePhase):
                 duration=results.duration,
             )
         else:
-            self.asharp_model.scanner_results[
+            aggregated_results.scanner_results[
                 scanner_name
             ].converted = ScannerTargetStatusInfo(
                 status=status,
@@ -934,7 +941,7 @@ class ScanPhase(EnginePhase):
                 duration=results.duration,
             )
         ASH_LOGGER.verbose(
-            self.asharp_model.scanner_results[scanner_name].model_dump_json(
+            aggregated_results.scanner_results[scanner_name].model_dump_json(
                 exclude_unset=True, by_alias=True
             )
         )
@@ -1018,12 +1025,14 @@ class ScanPhase(EnginePhase):
                 f"Attached scanner details for {results.scanner_name} v{scanner_version} with invocation details: {invocation_details}"
             )
 
-            self.asharp_model.sarif.merge_sarif_report(sanitized_sarif)
+            aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(results.raw_results, CycloneDXReport):
-            self.asharp_model.cyclonedx = results.raw_results
+            aggregated_results.cyclonedx = results.raw_results
         elif isinstance(results.raw_results, AshAggregatedResults):
-            self.asharp_model.merge_model(results.raw_results)
+            aggregated_results.merge_model(results.raw_results)
         else:
-            self.asharp_model.additional_reports[scanner_name][results.target_type][
+            aggregated_results.additional_reports[scanner_name][results.target_type][
                 "raw_results"
             ] = results.raw_results
+
+        return aggregated_results

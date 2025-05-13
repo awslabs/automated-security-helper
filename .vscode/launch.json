@@ -12,9 +12,7 @@
         "scan",
         "--verbose",
         "--no-progress",
-        "--",
-        "--scanners=\"npm-audit\"",
-        "--exclude-scanners=\"cdk-nag\""
+        "--scanners=npm-audit"
       ],
       "console": "integratedTerminal",
       "env": {

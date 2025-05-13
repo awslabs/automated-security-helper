@@ -4,6 +4,7 @@ from pathlib import Path
 import traceback
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.enums import ExecutionPhase
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -18,10 +19,11 @@ class ReportPhase(EnginePhase):
     def _execute_phase(
         self,
         report_dir: Path,
+        aggregated_results: AshAggregatedResults,
         cli_output_formats=None,
         python_based_plugins_only: bool = False,
         **kwargs,
-    ) -> None:
+    ) -> AshAggregatedResults:
         """Execute the Report phase.
 
         Args:
@@ -198,7 +200,7 @@ class ReportPhase(EnginePhase):
 
                     # Call report method directly
                     ASH_LOGGER.debug(f"Calling report() on {display_name}")
-                    report_result = plugin_instance.report(self.asharp_model)
+                    report_result = plugin_instance.report(aggregated_results)
 
                     if report_result:
                         ASH_LOGGER.debug(f"Reporter {display_name} returned a report")
@@ -280,4 +282,4 @@ class ReportPhase(EnginePhase):
         # Add summary row
         self.add_summary("Complete", f"Generated {len(results)} reports")
 
-        return None
+        return aggregated_results

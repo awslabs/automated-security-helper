@@ -96,6 +96,21 @@ class ScannerStatusInfo(BaseModel):
     converted: ScannerTargetStatusInfo = ScannerTargetStatusInfo()
 
 
+class ConverterStatusInfo(BaseModel):
+    """Information about converter status."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+    )
+
+    dependencies_satisfied: bool = True
+    excluded: bool = False
+
+    converted_paths: List[str] = []
+
+
 class ReportMetadata(BaseModel):
     """Metadata for security reports."""
 
@@ -191,6 +206,7 @@ class AshAggregatedResults(BaseModel):
         Field(description="The full ASH configuration used during this scan."),
     ] = None
     scanner_results: Dict[str, ScannerStatusInfo] = Field(default_factory=dict)
+    converter_results: Dict[str, ConverterStatusInfo] = Field(default_factory=dict)
     sarif: Annotated[
         SarifReport | None,
         Field(description="The SARIF formatted vulnerability report"),
@@ -238,6 +254,8 @@ class AshAggregatedResults(BaseModel):
 
     def model_post_init(self, context):
         """Initialize aggregator and trend analyzer with current findings."""
+        if self.scanner_results is None:
+            self.scanner_results = {}
         return super().model_post_init(context)
 
     def to_simple_dict(self) -> dict:
@@ -246,33 +264,21 @@ class AshAggregatedResults(BaseModel):
         Returns:
             dict: A simple dictionary representation of the AshAggregatedResults
         """
-        reduced_reports = {}
-        for key, value in self.additional_reports.items():
-            reduced_reports[key] = {}
-            if not isinstance(value, dict):
-                continue
-            for subkey, subvalue in value.items():
-                if subkey != "raw_results":
-                    reduced_reports[key][subkey] = subvalue
-        return {
+        simple_dict = {
             "name": self.name,
             "description": self.description,
-            "metadata": self.metadata.model_dump(
-                exclude_none=True,
-                exclude_unset=True,
-                by_alias=True,
-            ),
-            "ash_config": self.ash_config.model_dump(
-                exclude_none=True,
-                exclude_unset=True,
-                by_alias=True,
-            ),
-            "scanners": self.scanners.model_dump(
-                exclude_none=True,
-                exclude_unset=True,
-                by_alias=True,
-            ),
+            "metadata": self.metadata.model_dump(by_alias=True, exclude_unset=True),
+            "converter_results": {
+                k: v.model_dump(by_alias=True, exclude_unset=True)
+                for k, v in self.converter_results.items()
+            },
+            "scanner_results": {
+                k: v.model_dump(by_alias=True, exclude_unset=True)
+                for k, v in self.scanner_results.items()
+            },
+            "ash_config": self.ash_config.model_dump(by_alias=True, exclude_unset=True),
         }
+        return simple_dict
 
     def to_flat_vulnerabilities(self) -> List[FlatVulnerability]:
         """Convert the AshAggregatedResults to a list of flattened vulnerability objects.
