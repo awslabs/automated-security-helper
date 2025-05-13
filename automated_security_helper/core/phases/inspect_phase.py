@@ -1,6 +1,7 @@
 """Implementation of the Inspect phase."""
 
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -12,7 +13,11 @@ class InspectPhase(EnginePhase):
         """Return the name of this phase."""
         return "inspect"
 
-    def _execute_phase(self, python_based_plugins_only: bool = False, **kwargs) -> None:
+    def _execute_phase(
+        self,
+        aggregated_results: AshAggregatedResults,
+        **kwargs,
+    ) -> AshAggregatedResults:
         """Execute the Inspect phase.
 
         Args:
@@ -65,3 +70,4 @@ class InspectPhase(EnginePhase):
 
         # Complete progress
         self.update_progress(100, "Inspection phase complete")
+        return aggregated_results

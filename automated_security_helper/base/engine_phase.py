@@ -65,7 +65,12 @@ class EnginePhase(ABC):
         )
         return ash_plugin_manager.notify(event_type, **event_data)
 
-    def execute(self, python_based_plugins_only: bool = False, **kwargs) -> Any:
+    def execute(
+        self,
+        aggregated_results: AshAggregatedResults,
+        python_based_plugins_only: bool = False,
+        **kwargs,
+    ) -> AshAggregatedResults:
         """Execute the phase with observer pattern support.
 
         This implementation handles the common event notifications.
@@ -76,7 +81,7 @@ class EnginePhase(ABC):
             **kwargs: Additional arguments for the phase
 
         Returns:
-            Any: Phase-specific results
+            AshAggregatedResults: Phase-specific results
         """
         # Initialize progress
         self.initialize_progress()
@@ -91,8 +96,14 @@ class EnginePhase(ABC):
             f"EnginePhase.execute: Executing phase-specific logic for {self.phase_name}"
         )
         results = self._execute_phase(
-            python_based_plugins_only=python_based_plugins_only, **kwargs
+            aggregated_results=aggregated_results,
+            python_based_plugins_only=python_based_plugins_only,
+            **kwargs,
         )
+        if isinstance(results, AshAggregatedResults):
+            # Should update the instance then return it once done, so allow
+            # overriding if it was returned.
+            aggregated_results = results
 
         # Update summary statistics if the method exists
         if hasattr(self, "_update_summary_stats") and callable(
@@ -115,7 +126,12 @@ class EnginePhase(ABC):
         return results
 
     @abstractmethod
-    def _execute_phase(self, python_based_plugins_only: bool = False, **kwargs) -> Any:
+    def _execute_phase(
+        self,
+        aggregated_results: AshAggregatedResults,
+        python_based_plugins_only: bool = False,
+        **kwargs,
+    ) -> AshAggregatedResults:
         """Execute the phase-specific logic.
 
         Subclasses must implement this method instead of overriding execute().
@@ -125,7 +141,7 @@ class EnginePhase(ABC):
             **kwargs: Additional arguments for the phase
 
         Returns:
-            Any: Phase-specific results
+            AshAggregatedResults: Phase-specific results
         """
         pass
 

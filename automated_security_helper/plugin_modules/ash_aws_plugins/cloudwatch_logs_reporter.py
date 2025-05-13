@@ -76,19 +76,7 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             ).total_seconds()
             * 1000
         )
-        output_dict = model.model_dump(
-            include=[
-                "name",
-                "description",
-                "metadata",
-                "scanner_results",
-                "ash_config",
-            ],
-            exclude_none=True,
-            exclude_unset=True,
-            by_alias=True,
-            mode="json",
-        )
+        output_dict = model.to_simple_dict()
         output = json.dumps(output_dict, default=str)
         if isinstance(self.config, dict):
             self.config = CloudWatchLogsReporterConfig.model_validate(self.config)

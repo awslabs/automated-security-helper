@@ -1,10 +1,11 @@
 """Implementation of the Convert phase."""
 
-from pathlib import Path
-from typing import List
-
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.enums import ExecutionPhase
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ConverterStatusInfo,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -17,8 +18,11 @@ class ConvertPhase(EnginePhase):
         return "convert"
 
     def _execute_phase(
-        self, python_based_plugins_only: bool = False, **kwargs
-    ) -> List[Path]:
+        self,
+        aggregated_results: AshAggregatedResults,
+        python_based_plugins_only: bool = False,
+        **kwargs,
+    ) -> AshAggregatedResults:
         """Execute the Convert phase with observer pattern.
 
         Args:
@@ -141,6 +145,7 @@ class ConvertPhase(EnginePhase):
             f"Processing {len(enabled_converters)} enabled converter plugins"
         )
         for plugin_class in enabled_converters:
+            plugin_converted_paths = []
             try:
                 plugin_name = getattr(plugin_class, "__name__", "Unknown")
                 ASH_LOGGER.debug(f"Initializing converter: {plugin_name}")
@@ -197,6 +202,7 @@ class ConvertPhase(EnginePhase):
                         ASH_LOGGER.debug(
                             f"Converter {display_name} returned {len(convert_result)} paths"
                         )
+                        plugin_converted_paths.extend(convert_result)
                         converted_paths.extend(convert_result)
 
                         # Update converter task to 100%
@@ -210,6 +216,7 @@ class ConvertPhase(EnginePhase):
                         ASH_LOGGER.debug(
                             f"Converter {display_name} returned a single path: {convert_result}"
                         )
+                        plugin_converted_paths.append(convert_result)
                         converted_paths.append(convert_result)
 
                         # Update converter task to 100%
@@ -232,6 +239,14 @@ class ConvertPhase(EnginePhase):
                         completed=100,
                         description=f"[yellow]({display_name}) No files to convert",
                     )
+
+                aggregated_results.converter_results[display_name] = (
+                    ConverterStatusInfo(
+                        dependencies_satisfied=plugin_instance.dependencies_satisfied,
+                        excluded=not plugin_instance.config.enabled or False,
+                        converted_paths=plugin_converted_paths,
+                    )
+                )
 
                 # Increment completed count
                 completed += 1
@@ -285,4 +300,4 @@ class ConvertPhase(EnginePhase):
         # Add summary row
         self.add_summary("Complete", f"Converted {len(converted_paths)} paths")
 
-        return converted_paths
+        return aggregated_results

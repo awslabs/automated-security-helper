@@ -434,8 +434,10 @@ class ScanExecutionEngine:
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
-                    convert_phase.execute(python_based_plugins_only=self._python_only)
-                    self._results = convert_phase.asharp_model
+                    self._results = convert_phase.execute(
+                        aggregated_results=self._results,
+                        python_based_plugins_only=self._python_only,
+                    )
 
                 elif phase_name == "scan":
                     # Create and execute the Scan phase
@@ -446,13 +448,8 @@ class ScanExecutionEngine:
                         asharp_model=self._asharp_model,
                     )
 
-                    # If python_based_plugins_only is True, log that we're filtering non-Python scanners
-                    if self._python_only:
-                        ASH_LOGGER.info(
-                            "Python-only mode enabled: Filtering out non-Python scanners"
-                        )
-
                     self._results = scan_phase.execute(
+                        aggregated_results=self._results,
                         enabled_scanners=self._init_enabled_scanners,
                         excluded_scanners=self._init_excluded_scanners,
                         parallel=(self._strategy == ExecutionStrategy.PARALLEL),
@@ -460,9 +457,16 @@ class ScanExecutionEngine:
                         global_ignore_paths=self._global_ignore_paths,
                         python_based_plugins_only=self._python_only,  # Pass the python_based_plugins_only flag to the scan phase
                     )
-                    self._asharp_model = self._results
                     # Store the completed scanners for metrics display
                     self._completed_scanners = scan_phase._completed_scanners
+                    ASH_LOGGER.verbose(
+                        "self._results.scanner_results after scan_phase.execute(): ",
+                        self._results.scanner_results,
+                    )
+                    ASH_LOGGER.verbose(
+                        "self._asharp_model.scanner_results after scan_phase.execute(): ",
+                        self._asharp_model.scanner_results,
+                    )
 
                 elif phase_name == "report":
                     # Create and execute the Report phase
@@ -470,18 +474,35 @@ class ScanExecutionEngine:
                         plugins=ash_plugin_manager.plugin_modules(IReporter),
                         plugin_context=self._context,
                         progress_display=self.progress_display,
-                        asharp_model=self._asharp_model,
+                        asharp_model=self._results,
                     )
-                    report_phase.execute(
+                    ASH_LOGGER.verbose(
+                        "self._results.scanner_results before report_phase.execute(): ",
+                        self._results.scanner_results,
+                    )
+                    ASH_LOGGER.verbose(
+                        "self._asharp_model.scanner_results before report_phase.execute(): ",
+                        self._asharp_model.scanner_results,
+                    )
+                    self._results = report_phase.execute(
                         report_dir=self._context.output_dir.joinpath("reports"),
                         cli_output_formats=(
                             self._context.config.output_formats
                             if hasattr(self._context.config, "output_formats")
                             else None
                         ),
+                        aggregated_results=self._results,
                         python_based_plugins_only=self._python_only,
                     )
-                    self._asharp_model = report_phase.asharp_model
+                    self._asharp_model = self._results
+                    ASH_LOGGER.verbose(
+                        "self._results.scanner_results after report_phase.execute(): ",
+                        self._results.scanner_results,
+                    )
+                    ASH_LOGGER.verbose(
+                        "self._asharp_model.scanner_results after report_phase.execute(): ",
+                        self._asharp_model.scanner_results,
+                    )
 
                 elif phase_name == "inspect":
                     # Create and execute the Inspect phase
@@ -491,8 +512,11 @@ class ScanExecutionEngine:
                         progress_display=self.progress_display,
                         asharp_model=self._asharp_model,
                     )
-                    inspect_phase.execute(python_based_plugins_only=self._python_only)
-                    self._asharp_model = inspect_phase.asharp_model
+                    self._results = inspect_phase.execute(
+                        aggregated_results=self._results,
+                        python_based_plugins_only=self._python_only,
+                    )
+                    self._asharp_model = self._results
 
             # Return the results
             return self._results

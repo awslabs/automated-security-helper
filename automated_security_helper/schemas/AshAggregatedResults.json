@@ -4405,6 +4405,32 @@
       "title": "ConverterPluginConfigBase",
       "type": "object"
     },
+    "ConverterStatusInfo": {
+      "additionalProperties": true,
+      "description": "Information about converter status.",
+      "properties": {
+        "converted_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Converted Paths",
+          "type": "array"
+        },
+        "dependencies_satisfied": {
+          "default": true,
+          "title": "Dependencies Satisfied",
+          "type": "boolean"
+        },
+        "excluded": {
+          "default": false,
+          "title": "Excluded",
+          "type": "boolean"
+        }
+      },
+      "title": "ConverterStatusInfo",
+      "type": "object"
+    },
     "Copyright": {
       "additionalProperties": false,
       "properties": {
@@ -20716,6 +20742,13 @@
       "$ref": "#/$defs/AshConfig",
       "default": null,
       "description": "The full ASH configuration used during this scan."
+    },
+    "converter_results": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ConverterStatusInfo"
+      },
+      "title": "Converter Results",
+      "type": "object"
     },
     "cyclonedx": {
       "anyOf": [
