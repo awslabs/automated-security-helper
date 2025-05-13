@@ -244,7 +244,7 @@ def run_ash_container(
     run: bool = True,
     force: bool = False,
     oci_runner: str = None,
-    build_target: BuildTarget = BuildTarget.NON_ROOT,
+    build_target: BuildTarget | None = None,
     offline_semgrep_rulesets: str = "p/ci",
     container_uid: str | None = None,
     container_gid: str | None = None,
@@ -353,15 +353,29 @@ def run_ash_container(
         )
 
     # Set image name from environment or use default
-    ash_base_image_tag = (
+    resolved_build_target = (
         "ci"
-        if custom_containerfile is not None
-        else build_target.value
-        if hasattr(build_target, "value")
-        else str(build_target)
+        if (
+            custom_containerfile is not None
+            or os.environ.get(
+                "CI",
+                os.environ.get(
+                    "IsCI",
+                    os.environ.get("ISCI", os.environ.get("CODEBUILD_BUILD_ID", None)),
+                ),
+            )
+            is not None
+        )
+        else (
+            build_target.value
+            if hasattr(build_target, "value") and build_target is not None
+            else str(build_target)
+            if build_target is not None
+            else "non-root"
+        )
     )
     ash_base_image_name = os.environ.get(
-        "ASH_IMAGE_NAME", f"automated-security-helper:{ash_base_image_tag}"
+        "ASH_IMAGE_NAME", f"automated-security-helper:{resolved_build_target}"
     )
 
     # Build the image if the --build flag is set

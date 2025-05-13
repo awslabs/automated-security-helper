@@ -227,13 +227,13 @@ def run_ash_scan_cli_command(
     #     ),
     # ] = None,
     build_target: Annotated[
-        BuildTarget,
+        BuildTarget | None,
         typer.Option(
             "--build-target",
             help="Specify the target stage of the ASH image to build",
             case_sensitive=False,
         ),
-    ] = BuildTarget.NON_ROOT.value,
+    ] = None,
     container_uid: Annotated[
         Optional[str],
         typer.Option(

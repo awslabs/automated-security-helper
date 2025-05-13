@@ -76,7 +76,7 @@ def run_ash_scan(
     run: bool = True,
     force: bool = False,
     oci_runner: str = None,
-    build_target: BuildTarget = BuildTarget.NON_ROOT,
+    build_target: BuildTarget | None = None,
     offline_semgrep_rulesets: str = "p/ci",
     container_uid: str | None = None,
     container_gid: str | None = None,
