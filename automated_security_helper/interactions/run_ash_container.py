@@ -4,7 +4,9 @@
 import json
 import os
 import shlex
-from subprocess import CalledProcessError  # nosec B404 - Using the exception class to evaluate subprocess invocations
+from subprocess import (
+    CalledProcessError,
+)  # nosec B404 - Using the exception class to evaluate subprocess invocations
 import sys
 import time
 from datetime import datetime
@@ -351,7 +353,13 @@ def run_ash_container(
         )
 
     # Set image name from environment or use default
-    ash_base_image_tag = build_target.value if custom_containerfile is None else "ci"
+    ash_base_image_tag = (
+        "ci"
+        if custom_containerfile is not None
+        else build_target.value
+        if hasattr(build_target, "value")
+        else str(build_target)
+    )
     ash_base_image_name = os.environ.get(
         "ASH_IMAGE_NAME", f"automated-security-helper:{ash_base_image_tag}"
     )
