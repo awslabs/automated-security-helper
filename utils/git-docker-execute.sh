@@ -49,7 +49,12 @@ if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
 fi
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
-REPORT_PATH="${_ASH_OUTPUT_DIR}/work/git_report_result.txt"
+SCANNER_DIR="${_ASH_OUTPUT_DIR}/scanners"
+RESULTS_DIR="${SCANNER_DIR}/results"
+
+mkdir -p "${RESULTS_DIR}"
+
+REPORT_PATH="${RESULTS_DIR}/git_report_result.txt"
 rm ${REPORT_PATH} 2> /dev/null
 touch ${REPORT_PATH}
 
@@ -60,7 +65,12 @@ echo ">>>>>> begin tree result >>>>>>" >> "${REPORT_PATH}"
 if [ "$_ASH_IS_GIT_REPOSITORY" -eq 1 ]; then
 echo "Git repository detected. Ensure your .gitignore configuration excludes all the files that you intend to ignore." >> "${REPORT_PATH}"
 fi;
-tree ${_TREE_FLAGS} "${_ASH_SOURCE_DIR}" >> "${REPORT_PATH}" 2>&1
+
+if [ -d "${SCANNER_DIR}/git" ]; then
+  rm -rf "${SCANNER_DIR}/git"
+fi
+mkdir -p "${SCANNER_DIR}/git"
+tree ${_TREE_FLAGS} "${_ASH_SOURCE_DIR}" >> "${REPORT_PATH}" 2>&1 > "${SCANNER_DIR}/git/tree.txt"
 echo "<<<<<< end tree ${_TREE_FLAGS} result <<<<<<" >> "${REPORT_PATH}"
 
 #
@@ -80,16 +90,16 @@ else
   #
   # Configure the repo to check for AWS secrets
   #
-  git secrets --register-aws >>"${REPORT_PATH}" 2>&1
+  git secrets --register-aws >>"${REPORT_PATH}" 2>&1 >> "${SCANNER_DIR}/git/git_secrets_aws.txt"
 
   #
   # List the Git secrets configuration
   #
   echo "git config --local --get-regexp \"^secrets\\..*\$\" output:" >>"${REPORT_PATH}" 2>&1
-  git config --local --get-regexp "^secrets\..*$" >>"${REPORT_PATH}" 2>&1
+  git config --local --get-regexp "^secrets\..*$" >>"${REPORT_PATH}" 2>&1 >> "${SCANNER_DIR}/git/git_secrets.txt"
 
   echo ">>>>>> begin git secrets --scan result >>>>>>" >> "${REPORT_PATH}"
-  git secrets --scan >> "${REPORT_PATH}" 2>&1
+  git secrets --scan >> "${REPORT_PATH}" 2>&1 >> "${SCANNER_DIR}/git/git_secrets.txt"
   GRC=$?
   RC=$(bumprc $RC $GRC)
   echo "<<<<<< end git secrets --scan result <<<<<<" >> "${REPORT_PATH}"

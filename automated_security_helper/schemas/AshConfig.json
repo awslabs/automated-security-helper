@@ -1,0 +1,3187 @@
+{
+  "$defs": {
+    "ASFFReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "asff",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "asff",
+          "default": "asff",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ASFFReporterConfigOptions",
+          "default": {
+            "aws_account_id": null,
+            "aws_region": null
+          }
+        }
+      },
+      "title": "ASFFReporterConfig",
+      "type": "object"
+    },
+    "ASFFReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "aws_account_id": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aws Account Id"
+        },
+        "aws_region": {
+          "anyOf": [
+            {
+              "pattern": "(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\\d{1}",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aws Region"
+        }
+      },
+      "title": "ASFFReporterConfigOptions",
+      "type": "object"
+    },
+    "ArchiveConverterConfig": {
+      "additionalProperties": true,
+      "description": "Archive (ZIP/TAR/GZIP/etc) converter configuration.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "archive",
+          "default": "archive",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ArchiveConverterConfigOptions",
+          "default": {},
+          "description": "Configure Archive converter"
+        }
+      },
+      "title": "ArchiveConverterConfig",
+      "type": "object"
+    },
+    "ArchiveConverterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "ArchiveConverterConfigOptions",
+      "type": "object"
+    },
+    "AshConfig": {
+      "additionalProperties": true,
+      "description": "Main configuration model for Automated Security Helper.",
+      "properties": {
+        "ash_plugin_modules": {
+          "default": [],
+          "description": "List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ash Plugin Modules",
+          "type": "array"
+        },
+        "build": {
+          "$ref": "#/$defs/BuildConfig",
+          "description": "Build-time configuration settings"
+        },
+        "converters": {
+          "$ref": "#/$defs/ConverterConfigSegment",
+          "default": {
+            "archive": {
+              "enabled": true,
+              "name": "archive",
+              "options": {}
+            },
+            "jupyter": {
+              "enabled": true,
+              "name": "jupyter",
+              "options": {}
+            }
+          },
+          "description": "Converter configurations by name."
+        },
+        "external_reports_to_include": {
+          "default": [],
+          "description": "List of external reports to include in the final report. These can be SARIF, CycloneDX, or CDK synth paths that have produced NagReport CSVs or JSON files.",
+          "items": {
+            "type": "string"
+          },
+          "title": "External Reports To Include",
+          "type": "array"
+        },
+        "fail_on_findings": {
+          "default": true,
+          "description": "Whether to exit with non-zero code if findings are detected",
+          "title": "Fail On Findings",
+          "type": "boolean"
+        },
+        "global_settings": {
+          "$ref": "#/$defs/AshConfigGlobalSettingsSection",
+          "default": {
+            "ignore_paths": [],
+            "severity_threshold": "MEDIUM"
+          },
+          "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
+        },
+        "max_concurrent_scanners": {
+          "default": 4,
+          "description": "Maximum number of scanners to run concurrently",
+          "minimum": 1,
+          "title": "Max Concurrent Scanners",
+          "type": "integer"
+        },
+        "no_cleanup": {
+          "default": false,
+          "description": "Whether to keep the work directory after scanning",
+          "title": "No Cleanup",
+          "type": "boolean"
+        },
+        "project_name": {
+          "default": "ash-target",
+          "description": "Name of the project being scanned",
+          "title": "Project Name",
+          "type": "string"
+        },
+        "reporters": {
+          "$ref": "#/$defs/ReporterConfigSegment",
+          "default": {
+            "asff": {
+              "enabled": true,
+              "extension": "asff",
+              "name": "asff",
+              "options": {
+                "aws_account_id": null,
+                "aws_region": null
+              }
+            },
+            "cloudwatch-logs": {
+              "enabled": true,
+              "extension": "cwlog.json",
+              "name": "cloudwatch-logs",
+              "options": {
+                "aws_account_id": null,
+                "aws_region": null,
+                "log_group_name": null,
+                "log_stream_name": "ASHScanResults"
+              }
+            },
+            "csv": {
+              "enabled": true,
+              "extension": "csv",
+              "name": "csv",
+              "options": {}
+            },
+            "cyclonedx": {
+              "enabled": true,
+              "extension": "cdx.json",
+              "name": "cyclonedx",
+              "options": {}
+            },
+            "flat-json": {
+              "enabled": true,
+              "extension": "flat.json",
+              "name": "flat-json",
+              "options": {}
+            },
+            "html": {
+              "enabled": true,
+              "extension": "html",
+              "name": "html",
+              "options": {}
+            },
+            "junitxml": {
+              "enabled": true,
+              "extension": "junit.xml",
+              "name": "junitxml",
+              "options": {}
+            },
+            "markdown": {
+              "enabled": true,
+              "extension": "summary.md",
+              "name": "markdown",
+              "options": {
+                "include_detailed_findings": true,
+                "include_findings_table": false,
+                "include_summary": true,
+                "max_detailed_findings": 20,
+                "top_hotspots_limit": 10,
+                "use_collapsible_details": true
+              }
+            },
+            "ocsf": {
+              "enabled": true,
+              "extension": "ocsf.json",
+              "name": "ocsf",
+              "options": {}
+            },
+            "sarif": {
+              "enabled": true,
+              "extension": "sarif",
+              "name": "sarif",
+              "options": {}
+            },
+            "spdx": {
+              "enabled": false,
+              "extension": "spdx.json",
+              "name": "spdx",
+              "options": {}
+            },
+            "text": {
+              "enabled": true,
+              "extension": "summary.txt",
+              "name": "text",
+              "options": {
+                "include_detailed_findings": false,
+                "include_findings_table": false,
+                "include_summary": true,
+                "max_detailed_findings": 20,
+                "top_hotspots_limit": 20
+              }
+            },
+            "yaml": {
+              "enabled": false,
+              "extension": "yaml",
+              "name": "yaml",
+              "options": {}
+            }
+          },
+          "description": "Reporter configurations by name."
+        },
+        "scanners": {
+          "$ref": "#/$defs/ScannerConfigSegment",
+          "default": {
+            "bandit": {
+              "enabled": true,
+              "name": "bandit",
+              "options": {
+                "additional_formats": [],
+                "confidence_level": "all",
+                "config_file": null,
+                "excluded_paths": [],
+                "ignore_nosec": false,
+                "severity_threshold": null
+              }
+            },
+            "cdk-nag": {
+              "enabled": true,
+              "name": "cdk-nag",
+              "options": {
+                "nag_packs": {
+                  "AwsSolutionsChecks": true,
+                  "HIPAASecurityChecks": false,
+                  "NIST80053R4Checks": false,
+                  "NIST80053R5Checks": false,
+                  "PCIDSS321Checks": false
+                },
+                "severity_threshold": null
+              }
+            },
+            "cfn-nag": {
+              "enabled": true,
+              "name": "cfn-nag",
+              "options": {
+                "severity_threshold": null
+              }
+            },
+            "checkov": {
+              "enabled": true,
+              "name": "checkov",
+              "options": {
+                "additional_formats": [
+                  "cyclonedx_json"
+                ],
+                "config_file": null,
+                "frameworks": [
+                  "all"
+                ],
+                "offline": false,
+                "severity_threshold": null,
+                "skip_frameworks": [],
+                "skip_path": []
+              }
+            },
+            "detect-secrets": {
+              "enabled": true,
+              "name": "detect-secrets",
+              "options": {
+                "baseline_file": null,
+                "scan_settings": {
+                  "filters_used": [],
+                  "generated_at": null,
+                  "plugins_used": [],
+                  "results": {},
+                  "version": null
+                },
+                "severity_threshold": null
+              }
+            },
+            "grype": {
+              "enabled": true,
+              "name": "grype",
+              "options": {
+                "config_file": null,
+                "offline": false,
+                "severity_threshold": null
+              }
+            },
+            "npm-audit": {
+              "enabled": true,
+              "name": "npm-audit",
+              "options": {
+                "offline": false,
+                "severity_threshold": null
+              }
+            },
+            "opengrep": {
+              "enabled": false,
+              "name": "opengrep",
+              "options": {
+                "config": "auto",
+                "exclude": [
+                  "*-converted.py",
+                  "*_report_result.txt"
+                ],
+                "exclude_rule": [],
+                "metrics": "auto",
+                "offline": false,
+                "patterns": [],
+                "severity": [],
+                "severity_threshold": null,
+                "version": "v1.1.5"
+              }
+            },
+            "semgrep": {
+              "enabled": true,
+              "name": "semgrep",
+              "options": {
+                "config": "auto",
+                "exclude": [
+                  "*-converted.py",
+                  "*_report_result.txt"
+                ],
+                "exclude_rule": [],
+                "metrics": "auto",
+                "offline": false,
+                "severity": [],
+                "severity_threshold": null
+              }
+            },
+            "syft": {
+              "enabled": true,
+              "name": "syft",
+              "options": {
+                "additional_outputs": [
+                  "syft-table"
+                ],
+                "config_file": null,
+                "exclude": [],
+                "severity_threshold": null
+              }
+            }
+          },
+          "description": "Scanner configurations by name."
+        }
+      },
+      "title": "AshConfig",
+      "type": "object"
+    },
+    "AshConfigGlobalSettingsSection": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore_paths": {
+          "default": [],
+          "description": "Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'.",
+          "items": {
+            "$ref": "#/$defs/IgnorePathWithReason"
+          },
+          "title": "Ignore Paths",
+          "type": "array"
+        },
+        "severity_threshold": {
+          "default": "MEDIUM",
+          "description": "Global minimum severity level to consider findings as failures across all scanners",
+          "enum": [
+            "ALL",
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ],
+          "title": "Severity Threshold",
+          "type": "string"
+        }
+      },
+      "title": "AshConfigGlobalSettingsSection",
+      "type": "object"
+    },
+    "BanditScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "bandit",
+          "default": "bandit",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/BanditScannerConfigOptions",
+          "default": {
+            "additional_formats": [],
+            "confidence_level": "all",
+            "config_file": null,
+            "excluded_paths": [],
+            "ignore_nosec": false,
+            "severity_threshold": null
+          },
+          "description": "Configure Bandit scanner"
+        }
+      },
+      "title": "BanditScannerConfig",
+      "type": "object"
+    },
+    "BanditScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "additional_formats": {
+          "default": [],
+          "description": "List of additional formats to output",
+          "items": {
+            "enum": [
+              "csv",
+              "custom",
+              "html",
+              "json",
+              "sarif",
+              "txt",
+              "xml",
+              "yaml"
+            ],
+            "type": "string"
+          },
+          "title": "Additional Formats",
+          "type": "array"
+        },
+        "confidence_level": {
+          "default": "all",
+          "description": "Confidence level for Bandit findings",
+          "enum": [
+            "all",
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Confidence Level",
+          "type": "string"
+        },
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to Bandit configuration file, relative to current source directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`, and `bandit.toml` in the root of the source directory if this is left empty.",
+          "title": "Config File"
+        },
+        "excluded_paths": {
+          "default": [],
+          "description": "List of excluded paths and their corresponding reason to exclude from scanning",
+          "items": {
+            "$ref": "#/$defs/IgnorePathWithReason"
+          },
+          "title": "Excluded Paths",
+          "type": "array"
+        },
+        "ignore_nosec": {
+          "default": false,
+          "description": "If True, do not skip lines with # nosec comments. Defaults to False.",
+          "title": "Ignore Nosec",
+          "type": "boolean"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "BanditScannerConfigOptions",
+      "type": "object"
+    },
+    "BuildConfig": {
+      "additionalProperties": false,
+      "description": "Configuration model for build-time settings.",
+      "properties": {
+        "build_mode": {
+          "default": "OFFLINE",
+          "description": "Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning.",
+          "enum": [
+            "ONLINE",
+            "OFFLINE"
+          ],
+          "title": "Build Mode",
+          "type": "string"
+        },
+        "custom_scanners": {
+          "default": [],
+          "description": "Scanner configurations by type",
+          "items": {
+            "$ref": "#/$defs/ScannerPluginBase"
+          },
+          "title": "Custom Scanners",
+          "type": "array"
+        },
+        "tool_install_scripts": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Map of tool names to their installation scripts",
+          "title": "Tool Install Scripts",
+          "type": "object"
+        }
+      },
+      "title": "BuildConfig",
+      "type": "object"
+    },
+    "CSVReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "csv",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "csv",
+          "default": "csv",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CSVReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "CSVReporterConfig",
+      "type": "object"
+    },
+    "CSVReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "CSVReporterConfigOptions",
+      "type": "object"
+    },
+    "CdkNagPacks": {
+      "additionalProperties": true,
+      "properties": {
+        "AwsSolutionsChecks": {
+          "default": true,
+          "description": "Runs the AwsSolutionsChecks NagPack included with CDK Nag.",
+          "title": "Awssolutionschecks",
+          "type": "boolean"
+        },
+        "HIPAASecurityChecks": {
+          "default": false,
+          "description": "Runs the HIPAASecurityChecks NagPack included with CDK Nag.",
+          "title": "Hipaasecuritychecks",
+          "type": "boolean"
+        },
+        "NIST80053R4Checks": {
+          "default": false,
+          "description": "Runs the NIST80053R4Checks NagPack included with CDK Nag.",
+          "title": "Nist80053R4Checks",
+          "type": "boolean"
+        },
+        "NIST80053R5Checks": {
+          "default": false,
+          "description": "Runs the NIST80053R5Checks NagPack included with CDK Nag.",
+          "title": "Nist80053R5Checks",
+          "type": "boolean"
+        },
+        "PCIDSS321Checks": {
+          "default": false,
+          "description": "Runs the PCIDSS321Checks NagPack included with CDK Nag.",
+          "title": "Pcidss321Checks",
+          "type": "boolean"
+        }
+      },
+      "title": "CdkNagPacks",
+      "type": "object"
+    },
+    "CdkNagScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "cdk-nag",
+          "default": "cdk-nag",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CdkNagScannerConfigOptions",
+          "default": {
+            "nag_packs": {
+              "AwsSolutionsChecks": true,
+              "HIPAASecurityChecks": false,
+              "NIST80053R4Checks": false,
+              "NIST80053R5Checks": false,
+              "PCIDSS321Checks": false
+            },
+            "severity_threshold": null
+          },
+          "description": "Configure Bandit scanner"
+        }
+      },
+      "title": "CdkNagScannerConfig",
+      "type": "object"
+    },
+    "CdkNagScannerConfigOptions": {
+      "additionalProperties": true,
+      "description": "CDK Nag IAC SAST scanner options.",
+      "properties": {
+        "nag_packs": {
+          "$ref": "#/$defs/CdkNagPacks",
+          "default": {
+            "AwsSolutionsChecks": true,
+            "HIPAASecurityChecks": false,
+            "NIST80053R4Checks": false,
+            "NIST80053R5Checks": false,
+            "PCIDSS321Checks": false
+          },
+          "description": "CDK Nag packs to enable"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "CdkNagScannerConfigOptions",
+      "type": "object"
+    },
+    "CfnNagScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "cfn-nag",
+          "default": "cfn-nag",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CfnNagScannerConfigOptions",
+          "default": {
+            "severity_threshold": null
+          },
+          "description": "Configure CFN Nag scanner"
+        }
+      },
+      "title": "CfnNagScannerConfig",
+      "type": "object"
+    },
+    "CfnNagScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "CfnNagScannerConfigOptions",
+      "type": "object"
+    },
+    "CheckovScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "checkov",
+          "default": "checkov",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CheckovScannerConfigOptions",
+          "default": {
+            "additional_formats": [
+              "cyclonedx_json"
+            ],
+            "config_file": null,
+            "frameworks": [
+              "all"
+            ],
+            "offline": false,
+            "severity_threshold": null,
+            "skip_frameworks": [],
+            "skip_path": []
+          },
+          "description": "Configure Checkov scanner"
+        }
+      },
+      "title": "CheckovScannerConfig",
+      "type": "object"
+    },
+    "CheckovScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "additional_formats": {
+          "default": [
+            "cyclonedx_json"
+          ],
+          "description": "List of additional formats to output. Defaults to including CycloneDX JSON",
+          "items": {
+            "enum": [
+              "cli",
+              "csv",
+              "cyclonedx",
+              "cyclonedx_json",
+              "json",
+              "junitxml",
+              "github_failed_only",
+              "gitlab_sast",
+              "sarif",
+              "spdx"
+            ],
+            "type": "string"
+          },
+          "title": "Additional Formats",
+          "type": "array"
+        },
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
+          "title": "Config File"
+        },
+        "frameworks": {
+          "default": [
+            "all"
+          ],
+          "description": "Specific frameworks to include with Checkov. Defaults to `all`.",
+          "items": {
+            "enum": [
+              "all",
+              "ansible",
+              "argo_workflows",
+              "arm",
+              "azure_pipelines",
+              "bicep",
+              "bitbucket_pipelines",
+              "cdk",
+              "circleci_pipelines",
+              "cloudformation",
+              "dockerfile",
+              "github_configuration",
+              "github_actions",
+              "gitlab_configuration",
+              "gitlab_ci",
+              "bitbucket_configuration",
+              "helm",
+              "json",
+              "yaml",
+              "kubernetes",
+              "kustomize",
+              "openapi",
+              "sca_package",
+              "sca_image",
+              "secrets",
+              "serverless",
+              "terraform",
+              "terraform_json",
+              "terraform_plan",
+              "sast",
+              "sast_python",
+              "sast_java",
+              "sast_javascript",
+              "sast_typescript",
+              "sast_golang",
+              "3d_policy"
+            ],
+            "type": "string"
+          },
+          "title": "Frameworks",
+          "type": "array"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, disabling policy downloads",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        },
+        "skip_frameworks": {
+          "default": [],
+          "description": "Specific frameworks to exclude with Checkov. Defaults to none.",
+          "items": {
+            "enum": [
+              "all",
+              "ansible",
+              "argo_workflows",
+              "arm",
+              "azure_pipelines",
+              "bicep",
+              "bitbucket_pipelines",
+              "cdk",
+              "circleci_pipelines",
+              "cloudformation",
+              "dockerfile",
+              "github_configuration",
+              "github_actions",
+              "gitlab_configuration",
+              "gitlab_ci",
+              "bitbucket_configuration",
+              "helm",
+              "json",
+              "yaml",
+              "kubernetes",
+              "kustomize",
+              "openapi",
+              "sca_package",
+              "sca_image",
+              "secrets",
+              "serverless",
+              "terraform",
+              "terraform_json",
+              "terraform_plan",
+              "sast",
+              "sast_python",
+              "sast_java",
+              "sast_javascript",
+              "sast_typescript",
+              "sast_golang",
+              "3d_policy"
+            ],
+            "type": "string"
+          },
+          "title": "Skip Frameworks",
+          "type": "array"
+        },
+        "skip_path": {
+          "default": [],
+          "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
+          "items": {
+            "$ref": "#/$defs/IgnorePathWithReason"
+          },
+          "title": "Skip Path",
+          "type": "array"
+        }
+      },
+      "title": "CheckovScannerConfigOptions",
+      "type": "object"
+    },
+    "CloudWatchLogsReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "cwlog.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "cloudwatch-logs",
+          "default": "cloudwatch-logs",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CloudWatchLogsReporterConfigOptions",
+          "default": {
+            "aws_account_id": null,
+            "aws_region": null,
+            "log_group_name": null,
+            "log_stream_name": "ASHScanResults"
+          }
+        }
+      },
+      "title": "CloudWatchLogsReporterConfig",
+      "type": "object"
+    },
+    "CloudWatchLogsReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "aws_account_id": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aws Account Id"
+        },
+        "aws_region": {
+          "anyOf": [
+            {
+              "pattern": "(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\\d{1}",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aws Region"
+        },
+        "log_group_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Log Group Name"
+        },
+        "log_stream_name": {
+          "default": "ASHScanResults",
+          "title": "Log Stream Name",
+          "type": "string"
+        }
+      },
+      "title": "CloudWatchLogsReporterConfigOptions",
+      "type": "object"
+    },
+    "ConverterConfigSegment": {
+      "additionalProperties": {
+        "anyOf": [
+          {},
+          {
+            "$ref": "#/$defs/ConverterPluginConfigBase"
+          }
+        ]
+      },
+      "properties": {
+        "archive": {
+          "$ref": "#/$defs/ArchiveConverterConfig",
+          "default": {
+            "enabled": true,
+            "name": "archive",
+            "options": {}
+          },
+          "description": "Configure the options for the ArchiveConverter"
+        },
+        "jupyter": {
+          "$ref": "#/$defs/JupyterConverterConfig",
+          "default": {
+            "enabled": true,
+            "name": "jupyter",
+            "options": {}
+          },
+          "description": "Configure the options for the JupyterConverter"
+        }
+      },
+      "title": "ConverterConfigSegment",
+      "type": "object"
+    },
+    "ConverterOptionsBase": {
+      "additionalProperties": true,
+      "description": "Base class for converter options.",
+      "properties": {},
+      "title": "ConverterOptionsBase",
+      "type": "object"
+    },
+    "ConverterPluginConfigBase": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "default": null,
+          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z][\\w-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ConverterOptionsBase",
+          "default": {},
+          "description": "Converter options"
+        }
+      },
+      "title": "ConverterPluginConfigBase",
+      "type": "object"
+    },
+    "CustomCommand": {
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "shell": {
+          "default": false,
+          "title": "Shell",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "args"
+      ],
+      "title": "CustomCommand",
+      "type": "object"
+    },
+    "CycloneDXReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "cdx.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "cyclonedx",
+          "default": "cyclonedx",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CycloneDXReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "CycloneDXReporterConfig",
+      "type": "object"
+    },
+    "CycloneDXReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "CycloneDXReporterConfigOptions",
+      "type": "object"
+    },
+    "DetectSecretsScanSettings": {
+      "additionalProperties": true,
+      "properties": {
+        "filters_used": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DetectSecretsScanSettingsFiltersUsed"
+          },
+          "title": "Filters Used",
+          "type": "array"
+        },
+        "generated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generated At"
+        },
+        "plugins_used": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DetectSecretsScanSettingsPluginsUsed"
+          },
+          "title": "Plugins Used",
+          "type": "array"
+        },
+        "results": {
+          "$ref": "#/$defs/DetectSecretsScanSettingsResults",
+          "default": {}
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "title": "DetectSecretsScanSettings",
+      "type": "object"
+    },
+    "DetectSecretsScanSettingsFiltersUsed": {
+      "additionalProperties": true,
+      "properties": {
+        "keyword_exclude": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keyword Exclude"
+        },
+        "min_level": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Level"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        }
+      },
+      "title": "DetectSecretsScanSettingsFiltersUsed",
+      "type": "object"
+    },
+    "DetectSecretsScanSettingsPluginsUsed": {
+      "additionalProperties": true,
+      "properties": {
+        "keyword_exclude": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keyword Exclude"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        }
+      },
+      "title": "DetectSecretsScanSettingsPluginsUsed",
+      "type": "object"
+    },
+    "DetectSecretsScanSettingsResults": {
+      "additionalProperties": {
+        "items": {},
+        "type": "array"
+      },
+      "properties": {},
+      "title": "DetectSecretsScanSettingsResults",
+      "type": "object"
+    },
+    "DetectSecretsScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "detect-secrets",
+          "default": "detect-secrets",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
+          "default": {
+            "baseline_file": null,
+            "scan_settings": {
+              "filters_used": [],
+              "generated_at": null,
+              "plugins_used": [],
+              "results": {},
+              "version": null
+            },
+            "severity_threshold": null
+          },
+          "description": "Configure detect-secrets scanner"
+        }
+      },
+      "title": "DetectSecretsScannerConfig",
+      "type": "object"
+    },
+    "DetectSecretsScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "baseline_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
+          "title": "Baseline File"
+        },
+        "scan_settings": {
+          "$ref": "#/$defs/DetectSecretsScanSettings",
+          "default": {
+            "filters_used": [],
+            "generated_at": null,
+            "plugins_used": [],
+            "results": {},
+            "version": null
+          },
+          "description": "Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "DetectSecretsScannerConfigOptions",
+      "type": "object"
+    },
+    "FlatJSONReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "flat.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "flat-json",
+          "default": "flat-json",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/FlatJSONReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "FlatJSONReporterConfig",
+      "type": "object"
+    },
+    "FlatJSONReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "FlatJSONReporterConfigOptions",
+      "type": "object"
+    },
+    "GrypeScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "grype",
+          "default": "grype",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/GrypeScannerConfigOptions",
+          "default": {
+            "config_file": null,
+            "offline": false,
+            "severity_threshold": null
+          },
+          "description": "Configure Grype scanner"
+        }
+      },
+      "title": "GrypeScannerConfig",
+      "type": "object"
+    },
+    "GrypeScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to Grype configuration file, relative to current source directory. Defaults to searching for `.grype.yaml` and `.grype.yml` in the root of the source directory.",
+          "title": "Config File"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, disabling database updates and validation",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "GrypeScannerConfigOptions",
+      "type": "object"
+    },
+    "HTMLReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "html",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "html",
+          "default": "html",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/HTMLReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "HTMLReporterConfig",
+      "type": "object"
+    },
+    "HTMLReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "HTMLReporterConfigOptions",
+      "type": "object"
+    },
+    "IgnorePathWithReason": {
+      "description": "Represents a path exclusion entry.",
+      "properties": {
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "IgnorePathWithReason",
+      "type": "object"
+    },
+    "JUnitXMLReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "junit.xml",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "junitxml",
+          "default": "junitxml",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/JUnitXMLReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "JUnitXMLReporterConfig",
+      "type": "object"
+    },
+    "JUnitXMLReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "JUnitXMLReporterConfigOptions",
+      "type": "object"
+    },
+    "JupyterConverterConfig": {
+      "additionalProperties": true,
+      "description": "Jupyter Notebook (.ipynb) to Python converter configuration.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "jupyter",
+          "default": "jupyter",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/JupyterConverterConfigOptions",
+          "default": {},
+          "description": "Configure Jupyter Notebook converter"
+        }
+      },
+      "title": "JupyterConverterConfig",
+      "type": "object"
+    },
+    "JupyterConverterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "JupyterConverterConfigOptions",
+      "type": "object"
+    },
+    "MarkdownReporterConfig": {
+      "additionalProperties": true,
+      "description": "Configuration for the Markdown reporter.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "summary.md",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "markdown",
+          "default": "markdown",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/MarkdownReporterConfigOptions",
+          "default": {
+            "include_detailed_findings": true,
+            "include_findings_table": false,
+            "include_summary": true,
+            "max_detailed_findings": 20,
+            "top_hotspots_limit": 10,
+            "use_collapsible_details": true
+          }
+        }
+      },
+      "title": "MarkdownReporterConfig",
+      "type": "object"
+    },
+    "MarkdownReporterConfigOptions": {
+      "additionalProperties": true,
+      "description": "Configuration options for the Markdown reporter.",
+      "properties": {
+        "include_detailed_findings": {
+          "default": true,
+          "title": "Include Detailed Findings",
+          "type": "boolean"
+        },
+        "include_findings_table": {
+          "default": false,
+          "title": "Include Findings Table",
+          "type": "boolean"
+        },
+        "include_summary": {
+          "default": true,
+          "title": "Include Summary",
+          "type": "boolean"
+        },
+        "max_detailed_findings": {
+          "default": 20,
+          "title": "Max Detailed Findings",
+          "type": "integer"
+        },
+        "top_hotspots_limit": {
+          "default": 10,
+          "title": "Top Hotspots Limit",
+          "type": "integer"
+        },
+        "use_collapsible_details": {
+          "default": true,
+          "title": "Use Collapsible Details",
+          "type": "boolean"
+        }
+      },
+      "title": "MarkdownReporterConfigOptions",
+      "type": "object"
+    },
+    "NpmAuditScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "npm-audit",
+          "default": "npm-audit",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/NpmAuditScannerConfigOptions",
+          "default": {
+            "offline": false,
+            "severity_threshold": null
+          },
+          "description": "Configure NpmAudit scanner"
+        }
+      },
+      "title": "NpmAuditScannerConfig",
+      "type": "object"
+    },
+    "NpmAuditScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, using locally cached data",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "NpmAuditScannerConfigOptions",
+      "type": "object"
+    },
+    "OCSFReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "ocsf.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "ocsf",
+          "default": "ocsf",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/OCSFReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "OCSFReporterConfig",
+      "type": "object"
+    },
+    "OCSFReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "OCSFReporterConfigOptions",
+      "type": "object"
+    },
+    "OpengrepScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "opengrep",
+          "default": "opengrep",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/OpengrepScannerConfigOptions",
+          "default": {
+            "config": "auto",
+            "exclude": [
+              "*-converted.py",
+              "*_report_result.txt"
+            ],
+            "exclude_rule": [],
+            "metrics": "auto",
+            "offline": false,
+            "patterns": [],
+            "severity": [],
+            "severity_threshold": null,
+            "version": "v1.1.5"
+          },
+          "description": "Configure Opengrep scanner"
+        }
+      },
+      "title": "OpengrepScannerConfig",
+      "type": "object"
+    },
+    "OpengrepScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config": {
+          "default": "auto",
+          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+          "title": "Config",
+          "type": "string"
+        },
+        "exclude": {
+          "default": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "description": "Skip any file or directory whose path matches the pattern.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude",
+          "type": "array"
+        },
+        "exclude_rule": {
+          "default": [],
+          "description": "Skip any rule with the given id.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Rule",
+          "type": "array"
+        },
+        "metrics": {
+          "default": "auto",
+          "description": "Configures how usage metrics are sent to the Opengrep server.",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "title": "Metrics",
+          "type": "string"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, using locally cached rules.",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "patterns": {
+          "default": [],
+          "description": "Patterns to search for with OpenGrep.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Patterns",
+          "type": "array"
+        },
+        "severity": {
+          "default": [],
+          "description": "Report findings only from rules matching the supplied severity level.",
+          "items": {
+            "enum": [
+              "INFO",
+              "WARNING",
+              "ERROR"
+            ],
+            "type": "string"
+          },
+          "title": "Severity",
+          "type": "array"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        },
+        "version": {
+          "default": "v1.1.5",
+          "description": "Version of OpenGrep to use.",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "title": "OpengrepScannerConfigOptions",
+      "type": "object"
+    },
+    "PackageManager": {
+      "enum": [
+        "apt",
+        "pip",
+        "npm",
+        "brew",
+        "yum",
+        "choco",
+        "custom",
+        "url"
+      ],
+      "title": "PackageManager",
+      "type": "string"
+    },
+    "PluginContext": {
+      "additionalProperties": true,
+      "description": "Context container for plugins to ensure consistent path information.",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/AshConfig",
+          "default": null,
+          "description": "ASH configuration"
+        },
+        "output_dir": {
+          "description": "Primary output directory for all ASH results",
+          "format": "path",
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "source_dir": {
+          "description": "Source directory to scan",
+          "format": "path",
+          "title": "Source Dir",
+          "type": "string"
+        },
+        "work_dir": {
+          "default": null,
+          "description": "Working directory for temporary files",
+          "format": "path",
+          "title": "Work Dir",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_dir",
+        "output_dir"
+      ],
+      "title": "PluginContext",
+      "type": "object"
+    },
+    "PluginDependency": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "package_manager": {
+          "$ref": "#/$defs/PackageManager",
+          "default": "apt"
+        },
+        "version": {
+          "default": "latest",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PluginDependency",
+      "type": "object"
+    },
+    "ReporterConfigSegment": {
+      "additionalProperties": {
+        "anyOf": [
+          {},
+          {
+            "$ref": "#/$defs/ReporterPluginConfigBase"
+          }
+        ]
+      },
+      "properties": {
+        "asff": {
+          "$ref": "#/$defs/ASFFReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "asff",
+            "name": "asff",
+            "options": {
+              "aws_account_id": null,
+              "aws_region": null
+            }
+          },
+          "description": "Configure the options for the ASFF reporter"
+        },
+        "cloudwatch-logs": {
+          "$ref": "#/$defs/CloudWatchLogsReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "cwlog.json",
+            "name": "cloudwatch-logs",
+            "options": {
+              "aws_account_id": null,
+              "aws_region": null,
+              "log_group_name": null,
+              "log_stream_name": "ASHScanResults"
+            }
+          },
+          "description": "Configure the options for the CloudWatchLogs reporter"
+        },
+        "csv": {
+          "$ref": "#/$defs/CSVReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "csv",
+            "name": "csv",
+            "options": {}
+          },
+          "description": "Configure the options for the CSV reporter"
+        },
+        "cyclonedx": {
+          "$ref": "#/$defs/CycloneDXReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "cdx.json",
+            "name": "cyclonedx",
+            "options": {}
+          },
+          "description": "Configure the options for the CycloneDX reporter"
+        },
+        "flat-json": {
+          "$ref": "#/$defs/FlatJSONReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "flat.json",
+            "name": "flat-json",
+            "options": {}
+          },
+          "description": "Configure the options for the Flat JSON reporter"
+        },
+        "html": {
+          "$ref": "#/$defs/HTMLReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "html",
+            "name": "html",
+            "options": {}
+          },
+          "description": "Configure the options for the HTML reporter"
+        },
+        "junitxml": {
+          "$ref": "#/$defs/JUnitXMLReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "junit.xml",
+            "name": "junitxml",
+            "options": {}
+          },
+          "description": "Configure the options for the JUnit XML reporter"
+        },
+        "markdown": {
+          "$ref": "#/$defs/MarkdownReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "summary.md",
+            "name": "markdown",
+            "options": {
+              "include_detailed_findings": true,
+              "include_findings_table": false,
+              "include_summary": true,
+              "max_detailed_findings": 20,
+              "top_hotspots_limit": 10,
+              "use_collapsible_details": true
+            }
+          },
+          "description": "Configure the options for the Markdown reporter"
+        },
+        "ocsf": {
+          "$ref": "#/$defs/OCSFReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "ocsf.json",
+            "name": "ocsf",
+            "options": {}
+          },
+          "description": "Configure the options for the OCSF reporter"
+        },
+        "sarif": {
+          "$ref": "#/$defs/SARIFReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "sarif",
+            "name": "sarif",
+            "options": {}
+          },
+          "description": "Configure the options for the SARIF reporter"
+        },
+        "spdx": {
+          "$ref": "#/$defs/SPDXReporterConfig",
+          "default": {
+            "enabled": false,
+            "extension": "spdx.json",
+            "name": "spdx",
+            "options": {}
+          },
+          "description": "Configure the options for the SPDX reporter"
+        },
+        "text": {
+          "$ref": "#/$defs/TextReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "summary.txt",
+            "name": "text",
+            "options": {
+              "include_detailed_findings": false,
+              "include_findings_table": false,
+              "include_summary": true,
+              "max_detailed_findings": 20,
+              "top_hotspots_limit": 20
+            }
+          },
+          "description": "Configure the options for the Text reporter"
+        },
+        "yaml": {
+          "$ref": "#/$defs/YAMLReporterConfig",
+          "default": {
+            "enabled": false,
+            "extension": "yaml",
+            "name": "yaml",
+            "options": {}
+          },
+          "description": "Configure the options for the YAML reporter"
+        }
+      },
+      "title": "ReporterConfigSegment",
+      "type": "object"
+    },
+    "ReporterOptionsBase": {
+      "additionalProperties": true,
+      "description": "Base class for reporter options.",
+      "properties": {},
+      "title": "ReporterOptionsBase",
+      "type": "object"
+    },
+    "ReporterPluginConfigBase": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extension"
+        },
+        "name": {
+          "default": null,
+          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z][\\w-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ReporterOptionsBase",
+          "default": {},
+          "description": "Reporter options"
+        }
+      },
+      "title": "ReporterPluginConfigBase",
+      "type": "object"
+    },
+    "SARIFReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "sarif",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "sarif",
+          "default": "sarif",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/SARIFReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "SARIFReporterConfig",
+      "type": "object"
+    },
+    "SARIFReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "SARIFReporterConfigOptions",
+      "type": "object"
+    },
+    "SPDXReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "spdx.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "spdx",
+          "default": "spdx",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/SPDXReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "SPDXReporterConfig",
+      "type": "object"
+    },
+    "SPDXReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "SPDXReporterConfigOptions",
+      "type": "object"
+    },
+    "ScannerConfigSegment": {
+      "additionalProperties": {
+        "anyOf": [
+          {},
+          {
+            "$ref": "#/$defs/ScannerPluginConfigBase"
+          }
+        ]
+      },
+      "properties": {
+        "bandit": {
+          "$ref": "#/$defs/BanditScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "bandit",
+            "options": {
+              "additional_formats": [],
+              "confidence_level": "all",
+              "config_file": null,
+              "excluded_paths": [],
+              "ignore_nosec": false,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for Bandit"
+        },
+        "cdk-nag": {
+          "$ref": "#/$defs/CdkNagScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "cdk-nag",
+            "options": {
+              "nag_packs": {
+                "AwsSolutionsChecks": true,
+                "HIPAASecurityChecks": false,
+                "NIST80053R4Checks": false,
+                "NIST80053R5Checks": false,
+                "PCIDSS321Checks": false
+              },
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for CdkNag"
+        },
+        "cfn-nag": {
+          "$ref": "#/$defs/CfnNagScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "cfn-nag",
+            "options": {
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for CfnNag"
+        },
+        "checkov": {
+          "$ref": "#/$defs/CheckovScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "checkov",
+            "options": {
+              "additional_formats": [
+                "cyclonedx_json"
+              ],
+              "config_file": null,
+              "frameworks": [
+                "all"
+              ],
+              "offline": false,
+              "severity_threshold": null,
+              "skip_frameworks": [],
+              "skip_path": []
+            }
+          },
+          "description": "Configure the options for Checkov"
+        },
+        "detect-secrets": {
+          "$ref": "#/$defs/DetectSecretsScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "detect-secrets",
+            "options": {
+              "baseline_file": null,
+              "scan_settings": {
+                "filters_used": [],
+                "generated_at": null,
+                "plugins_used": [],
+                "results": {},
+                "version": null
+              },
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for DetectSecrets"
+        },
+        "grype": {
+          "$ref": "#/$defs/GrypeScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "grype",
+            "options": {
+              "config_file": null,
+              "offline": false,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for Grype"
+        },
+        "npm-audit": {
+          "$ref": "#/$defs/NpmAuditScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "npm-audit",
+            "options": {
+              "offline": false,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for NpmAudit"
+        },
+        "opengrep": {
+          "$ref": "#/$defs/OpengrepScannerConfig",
+          "default": {
+            "enabled": false,
+            "name": "opengrep",
+            "options": {
+              "config": "auto",
+              "exclude": [
+                "*-converted.py",
+                "*_report_result.txt"
+              ],
+              "exclude_rule": [],
+              "metrics": "auto",
+              "offline": false,
+              "patterns": [],
+              "severity": [],
+              "severity_threshold": null,
+              "version": "v1.1.5"
+            }
+          },
+          "description": "Configure the options for Opengrep"
+        },
+        "semgrep": {
+          "$ref": "#/$defs/SemgrepScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "semgrep",
+            "options": {
+              "config": "auto",
+              "exclude": [
+                "*-converted.py",
+                "*_report_result.txt"
+              ],
+              "exclude_rule": [],
+              "metrics": "auto",
+              "offline": false,
+              "severity": [],
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for Semgrep"
+        },
+        "syft": {
+          "$ref": "#/$defs/SyftScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "syft",
+            "options": {
+              "additional_outputs": [
+                "syft-table"
+              ],
+              "config_file": null,
+              "exclude": [],
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for Syft"
+        }
+      },
+      "title": "ScannerConfigSegment",
+      "type": "object"
+    },
+    "ScannerOptionsBase": {
+      "additionalProperties": true,
+      "description": "Base class for scanner options.",
+      "properties": {
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "ScannerOptionsBase",
+      "type": "object"
+    },
+    "ScannerPluginBase": {
+      "additionalProperties": true,
+      "description": "Base class for all scanner plugins.\n\nPlugin implementations",
+      "properties": {
+        "args": {
+          "$ref": "#/$defs/ToolArgs",
+          "default": {
+            "extra_args": [],
+            "format_arg": null,
+            "format_arg_value": null,
+            "output_arg": null,
+            "scan_path_arg": null
+          },
+          "description": "Specialized arguments to pass to the scanner command. Includes an `extra_args` field which accepts a dictionary of arbitrary arguments to pass to the scanner. These are not configurable at scan time."
+        },
+        "command": {
+          "default": null,
+          "description": "The command to invoke the scanner, typically the binary or path to a script",
+          "title": "Command",
+          "type": "string"
+        },
+        "config": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScannerPluginConfigBase"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Config"
+        },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "custom_install_commands": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/$defs/CustomCommand"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Custom installation commands by platform and architecture",
+          "title": "Custom Install Commands",
+          "type": "object"
+        },
+        "dependencies": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/$defs/PluginDependency"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Dependencies by platform and architecture",
+          "title": "Dependencies",
+          "type": "object"
+        },
+        "dependencies_satisfied": {
+          "default": false,
+          "title": "Dependencies Satisfied",
+          "type": "boolean"
+        },
+        "end_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Time"
+        },
+        "errors": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "exit_code": {
+          "default": 0,
+          "title": "Exit Code",
+          "type": "integer"
+        },
+        "output": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Output",
+          "type": "array"
+        },
+        "results_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Results Dir"
+        },
+        "results_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The path to the results file, if any. This is set by the scanner plugin after the scan is complete.",
+          "title": "Results File"
+        },
+        "start_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Time"
+        },
+        "subcommands": {
+          "default": [],
+          "description": "Subcommands to include when invoking the scanner, e.g. ['scan'] is needed as the subcommand for 'semgrep' as Semgrep supports multiple subcommands, but we are specifically interested in running a scan.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Subcommands",
+          "type": "array"
+        },
+        "tool_description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Description"
+        },
+        "tool_type": {
+          "$ref": "#/$defs/ScannerToolType",
+          "default": "UNKNOWN"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Version"
+        }
+      },
+      "title": "ScannerPluginBase",
+      "type": "object"
+    },
+    "ScannerPluginConfigBase": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the component is enabled",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "default": null,
+          "description": "Name of the component using letters, numbers, underscores and hyphens. Must begin with a letter.",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z][\\w-]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ScannerOptionsBase",
+          "default": {
+            "severity_threshold": null
+          },
+          "description": "Scanner options"
+        }
+      },
+      "title": "ScannerPluginConfigBase",
+      "type": "object"
+    },
+    "ScannerToolType": {
+      "description": "Type of scanner tool.",
+      "enum": [
+        "SAST",
+        "DAST",
+        "SCA",
+        "IAC",
+        "SECRETS",
+        "CONTAINER",
+        "SBOM",
+        "CUSTOM",
+        "UNKNOWN"
+      ],
+      "title": "ScannerToolType",
+      "type": "string"
+    },
+    "SemgrepScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "semgrep",
+          "default": "semgrep",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/SemgrepScannerConfigOptions",
+          "default": {
+            "config": "auto",
+            "exclude": [
+              "*-converted.py",
+              "*_report_result.txt"
+            ],
+            "exclude_rule": [],
+            "metrics": "auto",
+            "offline": false,
+            "severity": [],
+            "severity_threshold": null
+          },
+          "description": "Configure Semgrep scanner"
+        }
+      },
+      "title": "SemgrepScannerConfig",
+      "type": "object"
+    },
+    "SemgrepScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config": {
+          "default": "auto",
+          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+          "title": "Config",
+          "type": "string"
+        },
+        "exclude": {
+          "default": [
+            "*-converted.py",
+            "*_report_result.txt"
+          ],
+          "description": "Skip any file or directory whose path matches the pattern.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude",
+          "type": "array"
+        },
+        "exclude_rule": {
+          "default": [],
+          "description": "Skip any rule with the given id.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude Rule",
+          "type": "array"
+        },
+        "metrics": {
+          "default": "auto",
+          "description": "Configures how usage metrics are sent to the Semgrep server.",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "title": "Metrics",
+          "type": "string"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode, using locally cached rules.",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "severity": {
+          "default": [],
+          "description": "Report findings only from rules matching the supplied severity level.",
+          "items": {
+            "enum": [
+              "INFO",
+              "WARNING",
+              "ERROR"
+            ],
+            "type": "string"
+          },
+          "title": "Severity",
+          "type": "array"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "SemgrepScannerConfigOptions",
+      "type": "object"
+    },
+    "SyftScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "syft",
+          "default": "syft",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/SyftScannerConfigOptions",
+          "default": {
+            "additional_outputs": [
+              "syft-table"
+            ],
+            "config_file": null,
+            "exclude": [],
+            "severity_threshold": null
+          },
+          "description": "Configure Syft scanner"
+        }
+      },
+      "title": "SyftScannerConfig",
+      "type": "object"
+    },
+    "SyftScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "additional_outputs": {
+          "default": [
+            "syft-table"
+          ],
+          "description": "List of additional formats to output. Defaults to syft-table.",
+          "items": {
+            "enum": [
+              "cyclonedx-json",
+              "cyclonedx-xml",
+              "github-json",
+              "spdx-json",
+              "spdx-tag-value",
+              "syft-json",
+              "syft-table",
+              "syft-text"
+            ],
+            "type": "string"
+          },
+          "title": "Additional Outputs",
+          "type": "array"
+        },
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to Syft configuration file, relative to current source directory. Defaults to searching for `.syft.yaml` and `.syft.yml` in the root of the source directory.",
+          "title": "Config File"
+        },
+        "exclude": {
+          "default": [],
+          "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
+          "items": {
+            "$ref": "#/$defs/IgnorePathWithReason"
+          },
+          "title": "Exclude",
+          "type": "array"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "SyftScannerConfigOptions",
+      "type": "object"
+    },
+    "TextReporterConfig": {
+      "additionalProperties": true,
+      "description": "Configuration for the Text reporter.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "summary.txt",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "text",
+          "default": "text",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/TextReporterConfigOptions",
+          "default": {
+            "include_detailed_findings": false,
+            "include_findings_table": false,
+            "include_summary": true,
+            "max_detailed_findings": 20,
+            "top_hotspots_limit": 20
+          }
+        }
+      },
+      "title": "TextReporterConfig",
+      "type": "object"
+    },
+    "TextReporterConfigOptions": {
+      "additionalProperties": true,
+      "description": "Configuration options for the Text reporter.",
+      "properties": {
+        "include_detailed_findings": {
+          "default": false,
+          "title": "Include Detailed Findings",
+          "type": "boolean"
+        },
+        "include_findings_table": {
+          "default": false,
+          "title": "Include Findings Table",
+          "type": "boolean"
+        },
+        "include_summary": {
+          "default": true,
+          "title": "Include Summary",
+          "type": "boolean"
+        },
+        "max_detailed_findings": {
+          "default": 20,
+          "title": "Max Detailed Findings",
+          "type": "integer"
+        },
+        "top_hotspots_limit": {
+          "default": 20,
+          "title": "Top Hotspots Limit",
+          "type": "integer"
+        }
+      },
+      "title": "TextReporterConfigOptions",
+      "type": "object"
+    },
+    "ToolArgs": {
+      "additionalProperties": true,
+      "description": "Base class for tool argument dictionaries.",
+      "properties": {
+        "extra_args": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ToolExtraArg"
+          },
+          "title": "Extra Args",
+          "type": "array"
+        },
+        "format_arg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Format Arg"
+        },
+        "format_arg_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Format Arg Value"
+        },
+        "output_arg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Arg"
+        },
+        "scan_path_arg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scan Path Arg"
+        }
+      },
+      "title": "ToolArgs",
+      "type": "object"
+    },
+    "ToolExtraArg": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "title": "ToolExtraArg",
+      "type": "object"
+    },
+    "YAMLReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "yaml",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "yaml",
+          "default": "yaml",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/YAMLReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "YAMLReporterConfig",
+      "type": "object"
+    },
+    "YAMLReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "YAMLReporterConfigOptions",
+      "type": "object"
+    }
+  },
+  "$ref": "#/$defs/AshConfig"
+}

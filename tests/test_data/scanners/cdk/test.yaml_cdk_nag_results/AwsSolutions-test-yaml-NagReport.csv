@@ -1,0 +1,5 @@
+Rule ID,Resource ID,Compliance,Exception Reason,Rule Level,Rule Info
+"AwsSolutions-S1","test-yaml/--src--test.yaml/S3Bucket3","Non-Compliant","N/A","Error","The S3 Bucket has server access logs disabled."
+"AwsSolutions-S2","test-yaml/--src--test.yaml/S3Bucket3","Compliant","N/A","Error","The S3 Bucket does not have public access restricted and blocked."
+"AwsSolutions-S5","test-yaml/--src--test.yaml/S3Bucket3","Compliant","N/A","Error","The S3 static website bucket either has an open world bucket policy or does not use a CloudFront Origin Access Identity (OAI) in the bucket policy for limited getObject and/or putObject permissions."
+"AwsSolutions-S10","test-yaml/--src--test.yaml/S3Bucket3","Non-Compliant","N/A","Error","The S3 Bucket or bucket policy does not require requests to use SSL."

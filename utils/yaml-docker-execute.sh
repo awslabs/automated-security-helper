@@ -44,7 +44,12 @@ cd "${_ASH_SOURCE_DIR}"
 debug_echo "[yaml] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: ${_ASH_SOURCE_DIR} :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
-REPORT_PATH="${_ASH_OUTPUT_DIR}/work/yaml_report_result.txt"
+SCANNER_DIR="${_ASH_OUTPUT_DIR}/scanners"
+RESULTS_DIR="${SCANNER_DIR}/results"
+
+mkdir -p "${RESULTS_DIR}"
+
+REPORT_PATH="${RESULTS_DIR}/yaml_report_result.txt"
 rm ${REPORT_PATH} 2> /dev/null
 touch ${REPORT_PATH}
 
@@ -71,8 +76,10 @@ if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   debug_echo "[yaml] Output format is not 'text', setting output format options to JSON to enable easy translation into desired output format"
   CHECKOV_ARGS="${CHECKOV_ARGS} --output=json"
   CFNNAG_ARGS="--output-format json ${CFNNAG_ARGS}"
+  TEEFILEEXT="json"
 else
   CFNNAG_ARGS="--output-format txt ${CFNNAG_ARGS}"
+  TEEFILEEXT="txt"
 fi
 
 if [[ $OFFLINE == "YES" ]]; then
@@ -92,7 +99,7 @@ do
   #
   # find only files that appear to contain CloudFormation templates
   #
-  cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' . --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output} --exclude=ash) 2>/dev/null))
+  cfn_files=($(readlink -f $(grep -lri 'AWSTemplateFormatVersion' . --exclude-dir={cdk.out,utils,.aws-sam,ash_cf2cdk_output,ash_output} --exclude=ash) 2>/dev/null))
 
   #
   # For checkov scanning, add in files that are GitLab CI files or container build files
@@ -100,6 +107,7 @@ do
   checkov_files=($(readlink -f $(find . \( -iname ".gitlab-ci.yml" \
                                           -or -iname "*Dockerfile*" \
                                           -or -iname "*.tf" \
+                                          -or -iname "aggregated_results.txt.json" \
                                           -or -iname "*.tf.json" \) \
                                         -not -path "./.git/*" \
                                         -not -path "./.github/*" \
@@ -114,16 +122,23 @@ do
     ##Vendor Issue: https://github.com/bridgecrewio/checkov/issues/5627
     export CHECKOV_RENDER_MAX_LEN=0
 
+    if [ -d "${SCANNER_DIR}/checkov" ]; then
+      rm -rf "${SCANNER_DIR}/checkov"
+    fi
+    mkdir -p "${SCANNER_DIR}/checkov"
+
     for file in "${checkov_files[@]}"; do
       #echo $cfn_files
       file1=`basename $file`
+      ## Get clean relative file name so it remains unique
+      cleanfile=$(echo $file | sed 's/\//./g;s/^\.//g')
       echo ">>>>>> begin checkov result for ${file1} >>>>>>" >> ${REPORT_PATH}
       #
       # Run the checkov scan on the file
       #
       checkov_call="checkov ${CHECKOV_ARGS} -f '${file}'"
       debug_echo "[yaml] Running checkov ${checkov_call}"
-      eval $checkov_call >> ${REPORT_PATH} 2>&1
+      eval $checkov_call >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/checkov/${cleanfile}.${TEEFILEEXT}"
       CHRC=$?
       echo "<<<<<< end checkov result for ${file1} <<<<<<" >> ${REPORT_PATH}
       RC=$(bumprc $RC $CHRC)
@@ -135,16 +150,25 @@ do
   if [ "${#cfn_files[@]}" -gt 0 ]; then
     echo "found ${#cfn_files[@]} files to scan.  Starting cfn_nag scans ..." >> ${REPORT_PATH}
 
+    if [ -d "${SCANNER_DIR}/cfn_nag" ]; then
+      rm -rf "${SCANNER_DIR}/cfn_nag"
+    fi
+    mkdir -p "${SCANNER_DIR}/cfn_nag"
+
     for file in "${cfn_files[@]}"; do
       file1=`basename $file`
-      echo ">>>>>> begin cfn_nag_scan result for ${file1} >>>>>>" >> ${REPORT_PATH}
-      #
-      # Run the cfn_nag scan on the file
-      #
-      cfn_nag_scan ${CFNNAG_ARGS} --input-path "${file}" >> ${REPORT_PATH} 2>&1
-      CNRC=$?
-      echo "<<<<<< end cfn_nag_scan result for ${file1} <<<<<<" >> ${REPORT_PATH}
-      RC=$(bumprc $RC $CNRC)
+      ## Get clean relative file name so it remains unique
+      cleanfile=$(echo $file | sed 's/\//./g;s/^\.//g')
+      if [[ "${file1}" != "aggregated_results.txt.json" ]]; then
+        echo ">>>>>> begin cfn_nag_scan result for ${file1} >>>>>>" >> ${REPORT_PATH}
+        #
+        # Run the cfn_nag scan on the file
+        #
+        eval "cfn_nag_scan ${CFNNAG_ARGS} --input-path \"${file}\"" >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/cfn_nag/${cleanfile}.txt"
+        CNRC=$?
+        echo "<<<<<< end cfn_nag_scan result for ${file1} <<<<<<" >> ${REPORT_PATH}
+        RC=$(bumprc $RC $CNRC)
+      fi
     done
   else
     echo "found ${#cfn_files[@]} files to scan.  Skipping cfn_nag scans." >> ${REPORT_PATH}

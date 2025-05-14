@@ -260,7 +260,7 @@ OPTIONS:
 
 - Q: How to run `ash` in an environment without internet connectivity/with an airgap?
 
-  A: From your environment which does have internet connectivity, build the ASH image using `--offline` and `--offline-semgrep-rulesets` to specify what resources to package into the image.  Environment variable `$ASH_IMAGE_NAME` controls the name of the image.  After building, push to your container repository of choice which will be available within the airgapped environment.  When you go to execute ASH in your offline environment, passing `--no-build` to `ash` alongside `--offline` and `--offline-semgrep-rulesets` will use your offline image and skip the build.  Specify `$ASH_IMAGE_NAME` to override ASH's container image to the previously-built image available within your airgapped environment. 
+  A: From your environment which does have internet connectivity, build the ASH image using `--offline` and `--offline-semgrep-rulesets` to specify what resources to package into the image.  Environment variable `$ASH_IMAGE_NAME` controls the name of the image.  After building, push to your container repository of choice which will be available within the airgapped environment.  When you go to execute ASH in your offline environment, passing `--no-build` to `ash` alongside `--offline` and `--offline-semgrep-rulesets` will use your offline image and skip the build.  Specify `$ASH_IMAGE_NAME` to override ASH's container image to the previously-built image available within your airgapped environment.
 
 ## Feedback
 

@@ -1,0 +1,212 @@
+{
+  "artifactRelationships": [],
+  "artifacts": [],
+  "descriptor": {
+    "configuration": {
+      "catalogers": {
+        "requested": {
+          "default": [
+            "directory",
+            "file"
+          ]
+        },
+        "used": [
+          "alpm-db-cataloger",
+          "apk-db-cataloger",
+          "binary-classifier-cataloger",
+          "cargo-auditable-binary-cataloger",
+          "cocoapods-cataloger",
+          "conan-cataloger",
+          "dart-pubspec-lock-cataloger",
+          "deb-archive-cataloger",
+          "dotnet-deps-binary-cataloger",
+          "dotnet-packages-lock-cataloger",
+          "dpkg-db-cataloger",
+          "elf-binary-package-cataloger",
+          "elixir-mix-lock-cataloger",
+          "erlang-otp-application-cataloger",
+          "erlang-rebar-lock-cataloger",
+          "file-content-cataloger",
+          "file-digest-cataloger",
+          "file-executable-cataloger",
+          "file-metadata-cataloger",
+          "github-action-workflow-usage-cataloger",
+          "github-actions-usage-cataloger",
+          "go-module-binary-cataloger",
+          "go-module-file-cataloger",
+          "graalvm-native-image-cataloger",
+          "haskell-cataloger",
+          "java-archive-cataloger",
+          "java-gradle-lockfile-cataloger",
+          "java-jvm-cataloger",
+          "java-pom-cataloger",
+          "javascript-lock-cataloger",
+          "linux-kernel-cataloger",
+          "lua-rock-cataloger",
+          "nix-store-cataloger",
+          "opam-cataloger",
+          "php-composer-lock-cataloger",
+          "php-pecl-serialized-cataloger",
+          "portage-cataloger",
+          "python-installed-package-cataloger",
+          "python-package-cataloger",
+          "rpm-archive-cataloger",
+          "rpm-db-cataloger",
+          "ruby-gemfile-cataloger",
+          "ruby-gemspec-cataloger",
+          "rust-cargo-lock-cataloger",
+          "swift-package-manager-cataloger",
+          "swipl-pack-cataloger",
+          "terraform-lock-cataloger",
+          "wordpress-plugins-cataloger"
+        ]
+      },
+      "data-generation": {
+        "generate-cpes": true
+      },
+      "files": {
+        "content": {
+          "globs": null,
+          "skip-files-above-size": 0
+        },
+        "hashers": [
+          "sha-1",
+          "sha-256"
+        ],
+        "selection": "owned-by-package"
+      },
+      "licenses": {
+        "coverage": 75,
+        "include-unknown-license-content": false
+      },
+      "packages": {
+        "binary": [
+          "python-binary",
+          "python-binary-lib",
+          "pypy-binary-lib",
+          "go-binary",
+          "julia-binary",
+          "helm",
+          "redis-binary",
+          "java-binary-openjdk",
+          "java-binary-ibm",
+          "java-binary-oracle",
+          "java-binary-graalvm",
+          "java-binary-jdk",
+          "nodejs-binary",
+          "go-binary-hint",
+          "busybox-binary",
+          "util-linux-binary",
+          "haproxy-binary",
+          "perl-binary",
+          "php-cli-binary",
+          "php-fpm-binary",
+          "php-apache-binary",
+          "php-composer-binary",
+          "httpd-binary",
+          "memcached-binary",
+          "traefik-binary",
+          "arangodb-binary",
+          "postgresql-binary",
+          "mysql-binary",
+          "mysql-binary",
+          "mysql-binary",
+          "xtrabackup-binary",
+          "mariadb-binary",
+          "rust-standard-library-linux",
+          "rust-standard-library-macos",
+          "ruby-binary",
+          "erlang-binary",
+          "erlang-alpine-binary",
+          "erlang-library",
+          "swipl-binary",
+          "dart-binary",
+          "haskell-ghc-binary",
+          "haskell-cabal-binary",
+          "haskell-stack-binary",
+          "consul-binary",
+          "nginx-binary",
+          "bash-binary",
+          "openssl-binary",
+          "gcc-binary",
+          "fluent-bit-binary",
+          "wordpress-cli-binary",
+          "curl-binary",
+          "lighttpd-binary",
+          "proftpd-binary",
+          "zstd-binary",
+          "xz-binary",
+          "gzip-binary",
+          "sqlcipher-binary",
+          "jq-binary"
+        ],
+        "dotnet": {
+          "dep-packages-must-claim-dll": true,
+          "dep-packages-must-have-dll": false,
+          "relax-dll-claims-when-bundling-detected": true
+        },
+        "golang": {
+          "local-mod-cache-dir": "/home/ash-user/go/pkg/mod",
+          "local-vendor-dir": "",
+          "main-module-version": {
+            "from-build-settings": true,
+            "from-contents": true,
+            "from-ld-flags": true
+          },
+          "proxies": [
+            "https://proxy.golang.org",
+            "direct"
+          ],
+          "search-local-mod-cache-licenses": false,
+          "search-local-vendor-licenses": false,
+          "search-remote-licenses": false
+        },
+        "java-archive": {
+          "include-indexed-archives": true,
+          "include-unindexed-archives": false,
+          "maven-base-url": "https://repo1.maven.org/maven2",
+          "maven-localrepository-dir": "/home/ash-user/.m2/repository",
+          "max-parent-recursive-depth": 0,
+          "resolve-transitive-dependencies": false,
+          "use-maven-localrepository": false,
+          "use-network": false
+        },
+        "javascript": {
+          "include-dev-dependencies": false,
+          "npm-base-url": "https://registry.npmjs.org",
+          "search-remote-licenses": false
+        },
+        "linux-kernel": {
+          "catalog-modules": true
+        },
+        "python": {
+          "guess-unpinned-requirements": false
+        }
+      },
+      "relationships": {
+        "exclude-binary-packages-with-file-ownership-overlap": true,
+        "package-file-ownership": true,
+        "package-file-ownership-overlap": true
+      },
+      "search": {
+        "scope": "squashed"
+      }
+    },
+    "name": "syft",
+    "version": "1.22.0"
+  },
+  "distro": {},
+  "schema": {
+    "url": "https://raw.githubusercontent.com/anchore/syft/main/schema/json/schema-16.0.24.json",
+    "version": "16.0.24"
+  },
+  "source": {
+    "id": "4c871ffeacfa73d9b7f0e2ca4317d561c70e538bf0b9ae2c34646ebaeca229ae",
+    "metadata": {
+      "path": "/src/ash_output/work"
+    },
+    "name": "/src/ash_output/work",
+    "type": "directory",
+    "version": ""
+  }
+}

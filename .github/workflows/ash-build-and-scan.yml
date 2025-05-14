@@ -2,34 +2,37 @@ name: ASH - Core Pipeline
 on:
   push:
     branches:
-      - '*'
+      - "*"
     tags:
-      - '*'
+      - "*"
   pull_request:
     branches:
-      - '*'
-permissions:
-  actions: read
-  checks: write
-  contents: write
-  id-token: write
-  security-events: write
-  pull-requests: write
+      - "*"
+  workflow_dispatch: {}
 env:
   PYTHON_VERSION: "3.12"
+  COLUMNS: 160
 jobs:
   build:
-    strategy:
-      matrix:
-        runner:
-          # - macos-14 # Docker support on this runner is not working yet, still no options for ARM in hosted :-(
-          - ubuntu-latest
-    name: ASH Build & Scan - ${{ matrix.runner }}
-    runs-on: ${{ matrix.runner }}
+    # strategy:
+    #   matrix:
+    #     runner:
+    #       # - macos-14 # Docker support on this runner is not working yet, still no options for ARM in hosted :-(
+    #       - ubuntu-latest
+    name: ASH - Build & Scan
+    runs-on: ubuntu-latest
     env:
       IMG_NAME: ${{ github.repository }}
-      ARCH: ${{ matrix.runner == 'ubuntu-latest' && 'amd64' || 'arm64' }}
-      SUMMARY_FILE: 'ASH Scan Result Summary - ${{ matrix.runner }}.md'
+      ARCH: ubuntu-latest
+      SUMMARY_FILE: "ASH Scan Results Summary.md"
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      id-token: write
+      security-events: write
+      pull-requests: write
+      statuses: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,153 +49,131 @@ jobs:
         with:
           platforms: "linux/${{ env.ARCH }}"
 
-      # - name: Set container metadata
-      #   id: metadata
-      #   uses: docker/metadata-action@v5
-      #   with:
-      #     images: ${{ env.IMG_NAME }}
-      #     tags: |
-      #       type=raw,value=latest
-      #       type=raw,value=${{ env.ARCH }}
-      #       type=raw,value={{sha}},enable=${{ github.ref_type != 'tag' }}
-
-      # - name: Build image
-      #   uses: docker/build-push-action@v5
-      #   with:
-      #     context: '.'
-      #     push: false
-      #     tags: ${{ steps.metadata.outputs.tags }}
-      #     labels: ${{ steps.metadata.outputs.labels }}
-
       - name: Run ASH against itself
         id: ash
         run: |-
-          # Disable exit on error
-          set +e
+          ./ash \
+            --build-target ci \
+            --source-dir $(pwd) \
+            --output-dir .ash/ash_output \
+            --inspect \
+            --no-fail-on-findings \
+            --verbose
 
-          # Run ASH against itself
-          ./ash --source-dir $(pwd) --output-dir ash_output --container-uid 1001 --container-gid 123 --debug | \
-              tee ash_stdout.txt
+      - name: Update step summary
+        if: success() || failure() # always run even if the previous step fails
+        continue-on-error: false
+        run: |-
+          # Add the Markdown summary to the step summary
+          cat .ash/ash_output/reports/ash.summary.md >> "${GITHUB_STEP_SUMMARY}"
+          tree .ash/ash_output
 
-          # cat the output contents to build the summary markdown
-          # strip out the color codes from the output
-          ASH_STDOUT=$(cat ash_stdout.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-          ASH_AGG_RESULTS=$(cat ash_output/aggregated_results.txt | sed 's/\x1b\[[0-9;]*[mGKHF]//g')
-
-          # Write the summary markdown to a file
-          cat << EOF | tee "${{ env.SUMMARY_FILE }}" | tee -a "${GITHUB_STEP_SUMMARY}"
-          ## ASH Scan Output - ${{ env.ARCH }} - ${{ matrix.runner }}
-
-          \`\`\`bash
-          $ cat ash_stdout.txt
-
-          ${ASH_STDOUT}
-          \`\`\`
-
-          <details>
-            <summary>Show aggregated_results.txt</summary>
-
-            \`\`\`bash
-            ${ASH_AGG_RESULTS}
-            \`\`\`
-          </details>
-          EOF
-
-          # Write the summary markdown to the GITHUB_OUTPUT
-          {
-            echo 'ASH_OUTPUT<<EOF'
-            cat "${{ env.SUMMARY_FILE }}"
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
-
-          # Exit with the highest return code from ASH
-          set -e
-          typeset -i ASH_EXIT_CODE
-          # ASH_EXIT_CODE=`sed -nE "s/.*Highest return code is ([0-9]+)/\1/p" ash_stdout.txt`
-          ASH_EXIT_CODE=`perl -ne 'print "$1\n" if /Highest return code is ([[:digit:]]+)/' ash_stdout.txt`
-          echo "Highest return code found is '$ASH_EXIT_CODE'"
-          if [ $ASH_EXIT_CODE -eq 0 ]; then
-            echo "ASH scan succeeded"
-            exit 0
-          else
-            echo "ASH scan failed"
-            exit $ASH_EXIT_CODE
-          fi
-
-      - name: Post ASH output as PR comment
+      - name: Post ASH MarkdownReporter output as PR comment
         uses: mshick/add-pr-comment@v2
         # This does not work for fork runs without setting up a proxy
         # Info: https://github.com/mshick/add-pr-comment#proxy-for-fork-based-prshttps://github.com/mshick/add-pr-comment#proxy-for-fork-based-prs
-        if: github.repository_owner == 'awslabs'
+        if: github.repository_owner == 'awslabs' && (success() || failure()) # always run even if the previous step fails
         continue-on-error: true
         with:
-          message: |
-            ${{ steps.ash.outputs.ASH_OUTPUT }}
+          message-path: .ash/ash_output/reports/ash.summary.md
 
-      - name: Collect summary
+      - name: Collect .ash/ash_output artifact
         uses: actions/upload-artifact@v4
-        if: always()
+        if: success() || failure() # always run even if the previous step fails
         continue-on-error: true
-        with:
-          name: Summary
-          path: "${{ env.SUMMARY_FILE }}"
-
-      - name: Collect ash_stdout
-        uses: actions/upload-artifact@v4
-        if: always()
-        continue-on-error: true
-        with:
-          name: ash_stdout
-          path: ash_stdout.txt
-          if-no-files-found: error
-
-      - name: Collect ash_output artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        continue-on-error: false
         with:
           name: ash_output
-          path: ash_output
+          path: .ash/ash_output
           if-no-files-found: error
+
+      - name: Publish JUnit Test Report
+        uses: mikepenz/action-junit-report@v5
+        if: success() || failure() # always run even if the previous step fails
+        continue-on-error: true
+        with:
+          report_paths: "**/ash.junit.xml"
+          include_passed: true
+          update_check: true
+          check_name: ASH Scan JUnit Test Report
+
+      - name: Upload ASH SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        if: success() || failure() # always run even if the previous step fails
+        continue-on-error: false
+        with:
+          sarif_file: .ash/ash_output/reports/ash.sarif
+          wait-for-processing: true
+          category: ash
+
+  # Unit tests have been moved to a separate workflow file: unit-tests.yml
+  # This allows for better parallelization and matrix testing across platforms
 
   build-docs:
     name: Build documentation
     needs: []
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+          cache: "poetry"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: poetry install
 
       - name: Build documentation
-        run: mkdocs build --clean
+        run: poetry run mkdocs build --clean
 
   deploy-docs:
     name: Deploy documentation
     needs: []
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+          cache: "poetry"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: poetry install
 
       - name: Deploy documentation
-        run: mkdocs gh-deploy --clean --force
+        run: poetry run mkdocs gh-deploy --clean --force

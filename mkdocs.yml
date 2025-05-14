@@ -4,7 +4,7 @@ site_url: 'https://awslabs.github.io/automated-security-helper'
 repo_name: 'awslabs/automated-security-helper'
 repo_url: 'https://github.com/awslabs/automated-security-helper'
 edit_uri: 'edit/main/site/content'
-copyright: '&copy; 2024, Amazon Web Services, Inc. or its affiliates. All rights reserved.'
+copyright: '&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved.'
 docs_dir: 'docs/content'
 site_dir: 'public'
 # use_directory_urls: true
@@ -14,6 +14,9 @@ nav:
   - Documentation:
     - Getting started:
       - Prerequisites: docs/prerequisites.md
+    - Development:
+      - API: docs/development/api/README.md
+      - Customization: docs/development/customization/workflow.md
     - Support Matrix: docs/support.md
   - Tutorials:
     - Running ASH locally: tutorials/running-ash-locally.md
@@ -59,15 +62,21 @@ theme:
 markdown_extensions:
   - admonition
   - pymdownx.emoji:
-      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_index: !!python/name:pymdownx.emoji.twemoji
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 
 plugins:
     - search
     - awesome-pages
+    - autorefs
+    - mkdocstrings

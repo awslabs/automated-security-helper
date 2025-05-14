@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=../automated_security_helper/schemas/AshConfig.json
+project_name: automated-security-helper
+fail_on_findings: true
+global_settings:
+  severity_threshold: MEDIUM
+build:
+  build_mode: ONLINE
+  custom_scanners: []
+reporters:
+  asff:
+    enabled: false
+  csv:
+    enabled: true
+  cyclonedx:
+    enabled: true
+  flat-json:
+    enabled: true
+  html:
+    enabled: true
+  junitxml:
+    enabled: true
+  ocsf:
+    enabled: true
+  sarif:
+    enabled: true
+  text:
+    enabled: true
+  spdx:
+    enabled: false
+  yaml:
+    enabled: false
+scanners:
+  bandit:
+    enabled: true
+    options:
+      confidence_level: all
+      ignore_nosec: false
+      config_file: .ash/bandit.yaml
+  cdk-nag:
+    enabled: true
+    options:
+      nag_packs:
+        AwsSolutionsChecks: true
+        HIPAASecurityChecks: true
+        NIST80053R4Checks: true
+        NIST80053R5Checks: true
+        PCIDSS321Checks: true
+  cfn-nag:
+    enabled: true
+  checkov:
+    enabled: true
+    options:
+      frameworks:
+        - all
+      additional_formats:
+        - cyclonedx_json
+      skip_path: []
+      config_file: .ash/.checkov.yaml
+  detect-secrets:
+    enabled: true
+  npm-audit:
+    enabled: true
+  grype:
+    enabled: true
+    options:
+      config_file: .ash/.grype.yaml
+  opengrep:
+    enabled: false
+  semgrep:
+    enabled: true
+  syft:
+    enabled: true

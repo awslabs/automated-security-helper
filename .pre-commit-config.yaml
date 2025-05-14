@@ -1,0 +1,66 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  - repo: local
+    hooks:
+      - id: generate-schemas
+        name: Generate ASH JSON schemas
+        entry: poetry run generate-ash-schemas
+        language: system
+        verbose: true
+        pass_filenames: false
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: pretty-format-json
+        args:
+          - "--autofix"
+          - "--indent=2"
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version.
+    rev: v0.11.8
+    hooks:
+      # Run the linter.
+      - id: ruff
+        args: [--fix]
+      # Run the formatter.
+      - id: ruff-format
+
+  # Local ASH development hooks to help validate ASH is running as expected with
+  # local versions
+  - repo: local
+    hooks:
+      - id: ash
+        name: (manual) ASH dev manual scan
+        description: Runs various code scanners from Python directly
+        entry: poetry run ash --mode=precommit
+        pass_filenames: false
+        verbose: true
+        language: system
+        args:
+          # - --exclude-scanners=cdk-nag
+          - --no-fail-on-findings
+          - --output-dir=.ash/ash_output_precommit_local
+          - --no-cleanup
+  - repo: https://github.com/awslabs/automated-security-helper
+    rev: e665c9d7dc6eaa7527f8d55d2b7725302341e114 # pragma: allowlist secret
+    hooks:
+      - id: ash-simple-scan
+        args:
+          ## REQUIRED ARGS
+          # N/A - ASH pre-commit hooks include `--mode=precommit` by default.
+          # The only ARGS needed are custom args past what is available by default.
+
+          ## EXTRA ARGS (these are specific to this repo's usage of the hook and are not required)
+          # Default behavior is to fail if any actionable findings are found.
+          # We are working through resolution right now while still needing
+          # to run this hook, so we are disabling the '--fail-on-findings' default
+          # behavior temporarily to allow the hook to not be blocking while
+          # still providing necessary visibility into findings state.
+          - --no-fail-on-findings
+          # Default output-dir is `.ash/ash_output`, customize if preferred.
+          # This is to allow the pre-commit runs of ASH to not collide with the
+          # manual runs so results are retained independently.
+          - --output-dir=.ash/ash_output_precommit
+        stages:
+          - pre-commit
