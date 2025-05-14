@@ -36,6 +36,7 @@ def init(
         str,
         typer.Argument(
             help=f"The name of the config file to initialize. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
+            envvar="ASH_CONFIG",
         ),
     ] = ".ash/.ash.yaml",
     force: Annotated[
@@ -60,6 +61,15 @@ def init(
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
+    config_path_path.parent.mkdir(exist_ok=True, parents=True)
+    if config_path_path.parent.name == ".ash":
+        ash_gitignore_path = config_path_path.parent.joinpath(".gitignore")
+        if not ash_gitignore_path.exists():
+            ash_gitignore_path.write_text(
+                "# ASH default output directory (and variants)"
+            )
+            ash_gitignore_path.write_text("ash_output*")
+            ash_gitignore_path.write_text("")
     typer.secho(f"Saving ASH config to path: {config_path_path.absolute()}")
     config = AshConfig(
         project_name=config_path_path.absolute().parent.name,
