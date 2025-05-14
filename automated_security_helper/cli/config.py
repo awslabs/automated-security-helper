@@ -66,10 +66,8 @@ def init(
         ash_gitignore_path = config_path_path.parent.joinpath(".gitignore")
         if not ash_gitignore_path.exists():
             ash_gitignore_path.write_text(
-                "# ASH default output directory (and variants)"
+                "# ASH default output directory (and variants)\nash_output*\n"
             )
-            ash_gitignore_path.write_text("ash_output*")
-            ash_gitignore_path.write_text("")
     typer.secho(f"Saving ASH config to path: {config_path_path.absolute()}")
     config = AshConfig(
         project_name=config_path_path.absolute().parent.name,

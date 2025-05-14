@@ -565,7 +565,7 @@
       "description": "Configuration model for build-time settings.",
       "properties": {
         "build_mode": {
-          "default": "OFFLINE",
+          "default": "ONLINE",
           "description": "Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning.",
           "enum": [
             "ONLINE",

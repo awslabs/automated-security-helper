@@ -110,7 +110,7 @@ class BuildConfig(BaseModel):
         Field(
             description="Build mode for the container image build. If enabled, also enables offline mode during the scan phase without any explicit directive when scanning."
         ),
-    ] = "OFFLINE"
+    ] = "ONLINE"
     tool_install_scripts: Annotated[
         Dict[str, List[str]],
         Field(description="Map of tool names to their installation scripts"),
