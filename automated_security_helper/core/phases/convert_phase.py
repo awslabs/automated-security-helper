@@ -1,5 +1,6 @@
 """Implementation of the Convert phase."""
 
+from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import (
@@ -195,37 +196,33 @@ class ConvertPhase(EnginePhase):
                 # Call convert method directly - converters should handle finding their own targets
                 ASH_LOGGER.debug(f"Calling convert() on {display_name}")
                 # Pass the source directory as the target
-                convert_result = plugin_instance.convert()
+                convert_result_initial = plugin_instance.convert()
+                # Ensure all convert_result are strings in case some are Paths
+                convert_result = []
+                if convert_result_initial is not None:
+                    convert_result = [
+                        Path(item).as_posix()
+                        for item in (
+                            convert_result_initial
+                            if isinstance(convert_result_initial, list)
+                            else [convert_result_initial]
+                        )
+                    ]
 
-                if convert_result:
-                    if isinstance(convert_result, list):
-                        ASH_LOGGER.debug(
-                            f"Converter {display_name} returned {len(convert_result)} paths"
-                        )
-                        plugin_converted_paths.extend(convert_result)
-                        converted_paths.extend(convert_result)
+                if isinstance(convert_result, list) and len(convert_result) > 0:
+                    ASH_LOGGER.debug(
+                        f"Converter {display_name} returned {len(convert_result)} paths"
+                    )
+                    plugin_converted_paths.extend(convert_result)
+                    converted_paths.extend(convert_result)
 
-                        # Update converter task to 100%
-                        self.progress_display.update_task(
-                            phase=ExecutionPhase.CONVERT,
-                            task_id=converter_task,
-                            completed=100,
-                            description=f"[green]({display_name}) Converted {len(convert_result)} files",
-                        )
-                    else:
-                        ASH_LOGGER.debug(
-                            f"Converter {display_name} returned a single path: {convert_result}"
-                        )
-                        plugin_converted_paths.append(convert_result)
-                        converted_paths.append(convert_result)
-
-                        # Update converter task to 100%
-                        self.progress_display.update_task(
-                            phase=ExecutionPhase.CONVERT,
-                            task_id=converter_task,
-                            completed=100,
-                            description=f"[green]({display_name}) Converted 1 file",
-                        )
+                    # Update converter task to 100%
+                    self.progress_display.update_task(
+                        phase=ExecutionPhase.CONVERT,
+                        task_id=converter_task,
+                        completed=100,
+                        description=f"[green]({display_name}) Converted {len(convert_result)} files",
+                    )
                 else:
                     ASH_LOGGER.debug(
                         f"Converter {display_name} returned None or empty result"
