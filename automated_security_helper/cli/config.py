@@ -81,7 +81,6 @@ def init(
             config.model_dump(
                 by_alias=True,
                 exclude_defaults=False,
-                exclude_unset=True,
                 exclude_none=True,
             ),
             sort_keys=False,
