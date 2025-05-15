@@ -76,6 +76,7 @@ markdown_extensions:
           format: !!python/name:pymdownx.superfences.fence_code_format
 
 plugins:
+    - privacy
     - search
     - awesome-pages
     - autorefs

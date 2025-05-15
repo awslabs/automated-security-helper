@@ -287,6 +287,30 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        tool_component = ToolComponent(
+            name="npm-audit",
+            version=self.tool_version,
+            informationUri="https://docs.npmjs.com/cli/v8/commands/npm-audit",
+            rules=[],
+        )
+        sarif_report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=tool_component),
+                    results=[],
+                    invocations=[
+                        Invocation(
+                            commandLine="npm audit --json",
+                            executionSuccessful=True,
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target)
+                            ),
+                        )
+                    ],
+                )
+            ],
+        )
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -302,7 +326,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
-            return True
+            return sarif_report
 
         try:
             validated = self._pre_scan(
@@ -369,17 +393,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     target=target,
                     target_type=target_type,
                 )
-                return True
-
-            if not scannable:
-                self._plugin_log(
-                    f"No package.json files found in {target}", level=logging.WARNING
-                )
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return True
+                return sarif_report
 
             # Run npm audit for each package.json file
             all_results = {}

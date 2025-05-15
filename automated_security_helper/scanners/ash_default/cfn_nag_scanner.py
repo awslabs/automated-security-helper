@@ -22,6 +22,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
     PropertyBag,
+    Run,
     SarifReport,
     Tool,
     ToolComponent,
@@ -162,6 +163,30 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        tool_component = ToolComponent(
+            name="cfn_nag",
+            semanticVersion=self.tool_version,
+            version=self.tool_version,
+            informationUri="https://github.com/stelligent/cfn_nag",
+        )
+        sarif_report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=tool_component),
+                    results=[],
+                    invocations=[
+                        Invocation(
+                            commandLine=self.command,
+                            executionSuccessful=True,
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target)
+                            ),
+                        )
+                    ],
+                )
+            ],
+        )
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -177,7 +202,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
-            return True
+            return sarif_report
 
         try:
             validated = self._pre_scan(
@@ -243,7 +268,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     target=target,
                     target_type=target_type,
                 )
-                return True
+                return sarif_report
 
             # Process each template file
             failed_files = []

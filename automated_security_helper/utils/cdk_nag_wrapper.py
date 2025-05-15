@@ -60,6 +60,7 @@ def run_cdk_nag_against_cfn_template(
 ) -> CdkNagWrapperResponse | None:
     results: Dict[str, List[dict]] = {}
 
+    os.environ["NODE_NO_WARNINGS"] = "1"
     os.environ["JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION"] = "1"
     os.environ["JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION"] = "1"
     import cdk_nag

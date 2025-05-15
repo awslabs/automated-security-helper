@@ -127,6 +127,32 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         Raises:
             ScannerError: If scanning fails
         """
+        tool_component = ToolComponent(
+            name="ash-cdk-nag-wrapper",
+            fullName="awslabs/automated-security-helper",
+            organization="Amazon Web Services",
+            version=get_ash_version(),
+            informationUri=ASH_DOCS_URL,
+            downloadUri=ASH_REPO_URL,
+        )
+        sarif_report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=tool_component),
+                    results=[],
+                    invocations=[
+                        Invocation(
+                            commandLine="npm audit --json",
+                            executionSuccessful=True,
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target)
+                            ),
+                        )
+                    ],
+                )
+            ],
+        )
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -138,7 +164,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 level=20,
                 append_to_stream="stderr",  # This will add the message to self.errors
             )
-            return True
+            return sarif_report
 
         try:
             validated = self._pre_scan(
@@ -190,7 +216,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
-            return True
+            return sarif_report
         else:
             joined_files = "\n- ".join(scannable)
             ASH_LOGGER.debug(

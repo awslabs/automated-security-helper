@@ -184,6 +184,29 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        tool_component = ToolComponent(
+            name="detect-secrets",
+            version=self.tool_version,
+            informationUri="https://github.com/yelp/detect-secrets",
+        )
+        sarif_report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=tool_component),
+                    results=[],
+                    invocations=[
+                        Invocation(
+                            commandLine=self.command,
+                            executionSuccessful=True,
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target)
+                            ),
+                        )
+                    ],
+                )
+            ],
+        )
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -199,7 +222,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
-            return True
+            return sarif_report
 
         try:
             validated = self._pre_scan(
@@ -262,6 +285,19 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     "ash_aggregated_results.json",
                 ]
             ]
+            if len(scannable) == 0:
+                message = f"There were no scannable files found in target '{target}'"
+                self._plugin_log(
+                    message,
+                    target_type=target_type,
+                    level=20,
+                    append_to_stream="stderr",  # This will add the message to self.errors
+                )
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
+                return sarif_report
 
             self._plugin_log(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets",

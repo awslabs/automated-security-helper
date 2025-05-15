@@ -1,6 +1,5 @@
 """Tests for the detect-secrets scanner implementation."""
 
-from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -104,19 +103,6 @@ def test_detect_secrets_scanner_scan(
     assert finding.kind == Kind.fail
     assert "detect-secrets" in finding.properties.tags
     assert "secret" in finding.properties.tags
-
-
-def test_bandit_scanner_scan_nonexistent_path(detect_secrets_scanner):
-    """Test BanditScanner scan method with error."""
-    # Try to scan a non-existent directory
-    nonexistent_path = Path("nonexistent")
-    resp = detect_secrets_scanner.scan(nonexistent_path, target_type="source")
-    assert resp is not None
-    assert resp is True
-    assert (
-        "(detect-secrets) Target directory nonexistent is empty or doesn't exist. Skipping scan."
-        in detect_secrets_scanner.errors
-    )
 
 
 @pytest.mark.skip(
