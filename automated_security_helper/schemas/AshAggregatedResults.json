@@ -1332,7 +1332,6 @@
       "type": "object"
     },
     "AshConfig": {
-      "additionalProperties": true,
       "description": "Main configuration model for Automated Security Helper.",
       "properties": {
         "ash_plugin_modules": {
@@ -1345,7 +1344,15 @@
           "type": "array"
         },
         "build": {
-          "$ref": "#/$defs/BuildConfig",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BuildConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "Build-time configuration settings"
         },
         "converters": {
@@ -1366,7 +1373,7 @@
         },
         "external_reports_to_include": {
           "default": [],
-          "description": "List of external reports to include in the final report. These can be SARIF, CycloneDX, or CDK synth paths that have produced NagReport CSVs or JSON files.",
+          "description": "List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools.",
           "items": {
             "type": "string"
           },
@@ -1387,21 +1394,8 @@
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
         },
-        "max_concurrent_scanners": {
-          "default": 4,
-          "description": "Maximum number of scanners to run concurrently",
-          "minimum": 1,
-          "title": "Max Concurrent Scanners",
-          "type": "integer"
-        },
-        "no_cleanup": {
-          "default": false,
-          "description": "Whether to keep the work directory after scanning",
-          "title": "No Cleanup",
-          "type": "boolean"
-        },
         "project_name": {
-          "default": "ash-target",
+          "default": "ash-scan",
           "description": "Name of the project being scanned",
           "title": "Project Name",
           "type": "string"

@@ -287,7 +287,7 @@ class AshConfig(BaseModel):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
-        extra="allow",
+        extra="ignore",
     )
 
     # Project information
@@ -296,13 +296,41 @@ class AshConfig(BaseModel):
         Field(
             description="Name of the project being scanned",
         ),
-    ] = os.environ.get("ASH_PROJECT_NAME", "ash-target")
+    ] = os.environ.get("ASH_PROJECT_NAME", "ash-scan")
+
+    global_settings: Annotated[
+        AshConfigGlobalSettingsSection,
+        Field(
+            description="Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
+        ),
+    ] = AshConfigGlobalSettingsSection()
+
+    fail_on_findings: Annotated[
+        bool,
+        Field(
+            description="Whether to exit with non-zero code if findings are detected"
+        ),
+    ] = True
+
+    ash_plugin_modules: Annotated[
+        List[str],
+        Field(
+            description="List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.",
+        ),
+    ] = []
+
+    external_reports_to_include: Annotated[
+        List[str],
+        Field(
+            description="List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools.",
+        ),
+    ] = []
 
     # Build configuration - use a default instance instead of calling the constructor
     build: Annotated[
-        BuildConfig,
+        BuildConfig | None,
         Field(description="Build-time configuration settings"),
-    ] = Field(default_factory=BuildConfig)
+    ] = None
 
     # output_formats: Annotated[
     #     List[
@@ -349,44 +377,6 @@ class AshConfig(BaseModel):
         ReporterConfigSegment,
         Field(description="Reporter configurations by name."),
     ] = ReporterConfigSegment()
-
-    # General scan settings
-    fail_on_findings: Annotated[
-        bool,
-        Field(
-            description="Whether to exit with non-zero code if findings are detected"
-        ),
-    ] = True
-
-    # Legacy global settings (deprecated)
-    global_settings: Annotated[
-        AshConfigGlobalSettingsSection,
-        Field(
-            description="Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
-        ),
-    ] = AshConfigGlobalSettingsSection()
-
-    external_reports_to_include: Annotated[
-        List[str],
-        Field(
-            description="List of external reports to include in the final report. These can be SARIF, CycloneDX, or CDK synth paths that have produced NagReport CSVs or JSON files.",
-        ),
-    ] = []
-
-    ash_plugin_modules: Annotated[
-        List[str],
-        Field(
-            description="List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.",
-        ),
-    ] = []
-
-    max_concurrent_scanners: Annotated[
-        int, Field(description="Maximum number of scanners to run concurrently", ge=1)
-    ] = 4
-
-    no_cleanup: Annotated[
-        bool, Field(description="Whether to keep the work directory after scanning")
-    ] = False
 
     @classmethod
     def from_file(cls, config_path: Path) -> "AshConfig":
