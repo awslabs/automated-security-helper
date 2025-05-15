@@ -122,13 +122,12 @@ def run_ash_scan_cli_command(
             help="Enable inspection of SARIF fields after running. This adds the inspect phase to the execution.",
         ),
     ] = False,
-    existing_results: Annotated[
-        str,
+    use_existing: Annotated[
+        bool,
         typer.Option(
-            "--existing-results",
-            help="Path to an existing ash_aggregated_results.json file. If provided, the scan phase will be skipped and reports will be generated from this file.",
+            help="Use an existing ash_aggregated_results.json file in the output-dir. If True, the scan phase will be skipped and reports will be generated from this file.",
         ),
-    ] = None,
+    ] = False,
     version: Annotated[
         bool,
         typer.Option(
@@ -289,6 +288,16 @@ def run_ash_scan_cli_command(
         print(
             "[green]-------------- Running ASH in pre-commit mode with minimal output --------------[/green]"
         )
+
+    existing_results = None
+    if use_existing:
+        poss_existing_results = Path(output_dir).joinpath("ash_aggregated_results.json")
+        if poss_existing_results.exists():
+            existing_results = poss_existing_results.as_posix()
+        else:
+            raise ValueError(
+                f"{poss_existing_results.name} not found in output directory at {poss_existing_results.as_posix()}"
+            )
 
     # Call run_ash_scan with all parameters
     run_ash_scan(

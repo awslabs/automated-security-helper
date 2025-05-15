@@ -85,6 +85,7 @@ class ReportContentEmitter:
             scanner = vuln.scanner or "Unknown"
             if scanner not in scanner_findings:
                 scanner_findings[scanner] = {
+                    "SUPPRESSED": 0,
                     "CRITICAL": 0,
                     "HIGH": 0,
                     "MEDIUM": 0,
@@ -92,9 +93,32 @@ class ReportContentEmitter:
                     "INFO": 0,
                 }
 
-            severity = vuln.severity or "UNKNOWN"
-            if severity in scanner_findings[scanner]:
-                scanner_findings[scanner][severity] += 1
+            # Check if finding is suppressed
+            is_suppressed = False
+            if hasattr(vuln, "raw_data") and vuln.raw_data:
+                try:
+                    raw_data = json.loads(vuln.raw_data)
+                    if "suppressions" in raw_data and raw_data["suppressions"]:
+                        is_suppressed = True
+                        scanner_findings[scanner]["SUPPRESSED"] += 1
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Only count in severity bucket if not suppressed
+            if not is_suppressed:
+                severity = vuln.severity or "UNKNOWN"
+                if severity in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
+                    scanner_findings[scanner][severity] += 1
+                else:
+                    # Map non-standard severity levels
+                    if severity in ["ERROR", "SEVERE"]:
+                        scanner_findings[scanner]["CRITICAL"] += 1
+                    elif severity in ["WARNING", "WARN"]:
+                        scanner_findings[scanner]["MEDIUM"] += 1
+                    elif severity in ["NOTE", "NOTICE"]:
+                        scanner_findings[scanner]["LOW"] += 1
+                    else:
+                        scanner_findings[scanner]["INFO"] += 1
 
         # Get all scanners
         all_scanners = set()
@@ -156,6 +180,7 @@ class ReportContentEmitter:
             severity_counts = scanner_findings.get(
                 scanner_name,
                 {
+                    "SUPPRESSED": 0,
                     "CRITICAL": 0,
                     "HIGH": 0,
                     "MEDIUM": 0,
@@ -165,6 +190,7 @@ class ReportContentEmitter:
             )
 
             # Calculate total findings
+            suppressed = severity_counts.get("SUPPRESSED", 0)
             critical = severity_counts.get("CRITICAL", 0)
             high = severity_counts.get("HIGH", 0)
             medium = severity_counts.get("MEDIUM", 0)
@@ -213,6 +239,7 @@ class ReportContentEmitter:
             results.append(
                 {
                     "scanner_name": scanner_name,
+                    "suppressed": suppressed,
                     "critical": critical,
                     "high": high,
                     "medium": medium,
@@ -234,7 +261,10 @@ class ReportContentEmitter:
         return results
 
     def calculate_actionable_count(self, critical, high, medium, low, info, threshold):
-        """Calculate the number of actionable findings based on the threshold."""
+        """Calculate the number of actionable findings based on the threshold.
+
+        Note: Suppressed findings are not included in actionable count calculations.
+        """
         if threshold == "ALL":
             return critical + high + medium + low + info
         elif threshold == "LOW":

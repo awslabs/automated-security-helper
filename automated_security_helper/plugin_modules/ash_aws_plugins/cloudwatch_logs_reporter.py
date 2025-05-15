@@ -5,9 +5,10 @@ import json
 import logging
 from pydantic import Field
 import boto3
-from rich import print_json, print
 
 from typing import Annotated, Literal, TYPE_CHECKING
+
+from automated_security_helper.utils.log import ASH_LOGGER
 
 
 if TYPE_CHECKING:
@@ -97,12 +98,10 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             "timestamp": timestamp,
             "message": output,
         }
-        print(
+        ASH_LOGGER.verbose(
             f"Publishing event to CloudWatch Logs log group {self.config.options.log_group_name}@{self.config.options.aws_region}",
-            # level=15,
-            # append_to_stream="stdout",
         )
-        print_json(output)
+        ASH_LOGGER.verbose(output)
         try:
             resp = cwlogs_client.put_log_events(
                 logGroupName=self.config.options.log_group_name,

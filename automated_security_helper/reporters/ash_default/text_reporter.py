@@ -98,7 +98,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 "The table below shows findings by scanner, with status based on severity thresholds and dependencies:"
             )
             text_parts.append(
-                "- Severity levels: Critical (C), High (H), Medium (M), Low (L), Info (I)"
+                "- Severity levels: Suppressed (S), Critical (C), High (H), Medium (M), Low (L), Info (I)"
             )
             text_parts.append(
                 "- Duration (Time): Time taken by the scanner to complete its execution"
@@ -132,6 +132,9 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             text_parts.append(
                 "- Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
             )
+            text_parts.append(
+                "- Note: Suppressed findings are counted separately and do not contribute to actionable findings"
+            )
             text_parts.append("")
 
             # Format scanner results as a text table
@@ -139,10 +142,10 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
             # Create header row with proper spacing
             text_parts.append(
-                f"{'Scanner':<20} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Actionable':>10} {'Result':<8} {'Threshold':<15}"
+                f"{'Scanner':<20} {'Supp':>8} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Actionable':>10} {'Result':<8} {'Threshold':<15}"
             )
             text_parts.append(
-                f"{'-' * 20} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 8} {'-' * 15}"
+                f"{'-' * 20} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 8} {'-' * 15}"
             )
 
             # Add scanner result rows
@@ -157,6 +160,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
                 text_parts.append(
                     f"{result['scanner_name']:<20} "
+                    f"{result['suppressed']:>8} "
                     f"{result['critical']:>8} "
                     f"{result['high']:>8} "
                     f"{result['medium']:>8} "

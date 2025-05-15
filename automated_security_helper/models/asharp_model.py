@@ -37,6 +37,9 @@ class ScannerSeverityCount(BaseModel):
         extra="allow",
         arbitrary_types_allowed=True,
     )
+    suppressed: int = (
+        0  # Suppressed findings take precedence over other severity levels
+    )
     critical: int = 0
     high: int = 0
     medium: int = 0
@@ -53,6 +56,7 @@ class SummaryStats(ScannerSeverityCount):
     failed: int = 0
     missing: int = 0
     skipped: int = 0
+    suppressed: int = 0  # Add suppressed count to summary stats
 
     def bump(self, key: str, amount: int = 1) -> int:
         setattr(self, key, getattr(self, key) + amount)
@@ -72,8 +76,9 @@ class ScannerTargetStatusInfo(BaseModel):
     dependencies_satisfied: bool = True
     excluded: bool = False
     severity_counts: ScannerSeverityCount = ScannerSeverityCount()
-    actionable_finding_count: int | None = 0
     finding_count: int | None = 0
+    actionable_finding_count: int | None = 0
+    suppressed_finding_count: int | None = 0
     exit_code: int | None = 0
     duration: float | None = 0.0
 
@@ -416,6 +421,20 @@ class AshAggregatedResults(BaseModel):
                     if result.properties:
                         properties = result.properties.model_dump(exclude_none=True)
 
+                    # Check if finding is suppressed
+                    is_suppressed = False
+                    supp_kind = None
+                    supp_reas = None
+                    if (
+                        hasattr(result, "suppressions")
+                        and result.suppressions
+                        and len(result.suppressions) > 0
+                    ):
+                        is_suppressed = True
+                        supp = result.suppressions[0]
+                        supp_kind = supp.kind or None
+                        supp_reas = supp.justification or None
+
                     # Extract code snippet if available and not already extracted
                     if code_snippet is None:
                         if result.properties and hasattr(result.properties, "snippet"):
@@ -503,6 +522,9 @@ class AshAggregatedResults(BaseModel):
                         title=result.ruleId or "Unknown Issue",
                         description=description,
                         severity=severity,
+                        is_suppressed=is_suppressed,
+                        suppression_kind=supp_kind,
+                        suppression_justification=supp_reas,
                         scanner=actual_scanner,
                         scanner_type=tool_type,
                         rule_id=result.ruleId,

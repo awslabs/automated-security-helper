@@ -57,7 +57,14 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
         writer = csv.writer(output)
 
         # Get flattened vulnerabilities
-        flat_vulns = model.to_flat_vulnerabilities()
+        flat_vulns = [
+            item.model_dump(
+                exclude_defaults=False,
+                exclude_none=False,
+                exclude_unset=False,
+            )
+            for item in model.to_flat_vulnerabilities()
+        ]
 
         if not flat_vulns:
             # If no vulnerabilities, return a header-only CSV
@@ -76,6 +83,9 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
                     "CVE ID",
                     "CWE ID",
                     "Fix Available",
+                    "Is Suppressed",
+                    "Suppression Kind",
+                    "Suppression Justification",
                     "Detected At",
                     "Tags",
                     "Properties",
@@ -85,7 +95,7 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
             return output.getvalue()
 
         # Get all field names from the first vulnerability
-        fields = list(flat_vulns[0].__class__.model_fields.keys())
+        fields = list(flat_vulns[0].keys())
 
         # Write header row
         writer.writerow(fields)
@@ -94,7 +104,7 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
         for vuln in flat_vulns:
             row = []
             for field in fields:
-                value = getattr(vuln, field)
+                value = vuln[field]
                 row.append(value if value is not None else "")
             writer.writerow(row)
 

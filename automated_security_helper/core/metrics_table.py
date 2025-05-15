@@ -83,6 +83,7 @@ def generate_metrics_table(
 
     # Add columns with responsive headers
     table.add_column("Scanner", style="cyan")
+    table.add_column("S" if use_short_headers else "Suppressed", style="white")
     table.add_column("C" if use_short_headers else "Critical", style="red")
     table.add_column("H" if use_short_headers else "High", style="red")
     table.add_column("M" if use_short_headers else "Medium", style="yellow")
@@ -145,6 +146,12 @@ def generate_metrics_table(
             else scanner.__class__.__name__
         )
         # Initialize counters
+        suppressed = (
+            asharp_model.scanner_results[scanner_name].source.severity_counts.suppressed
+            + asharp_model.scanner_results[
+                scanner_name
+            ].converted.severity_counts.suppressed
+        )
         critical = (
             asharp_model.scanner_results[scanner_name].source.severity_counts.critical
             + asharp_model.scanner_results[
@@ -462,6 +469,7 @@ def generate_metrics_table(
         # Add row to table
         table.add_row(
             scanner_name,
+            str(suppressed),
             str(critical),
             str(high),
             str(medium),
@@ -511,7 +519,7 @@ def display_metrics_table(
         # Create a help panel with instructions
         help_text = (
             "How to read this table:\n"
-            "- [bold]*Severity levels*[/bold]: Critical (C), High (H), Medium (M), Low (L), Info (I)\n"
+            "- [bold]*Severity levels*[/bold]: Suppressed (S), Critical (C), High (H), Medium (M), Low (L), Info (I)\n"
             "- [bold]*Duration (Time)*[/bold]: Time taken by the scanner to complete its execution\n"
             "- [bold]*Actionable (Action)*[/bold]: Number of findings at or above the threshold severity level\n"
             "- [bold]*Result*[/bold]: \n"
@@ -520,7 +528,8 @@ def display_metrics_table(
             "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
             "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
             "- [bold]*Threshold (Thresh)*[/bold]: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
-            "- [bold]*Example*[/bold]: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure"
+            "- [bold]*Example*[/bold]: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure\n"
+            "- [bold]*Note*[/bold]: Suppressed findings are counted separately and do not contribute to actionable findings"
         )
         help_panel = Panel(
             help_text,

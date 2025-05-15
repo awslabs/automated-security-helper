@@ -12869,6 +12869,7 @@
             "missing": 0,
             "passed": 0,
             "skipped": 0,
+            "suppressed": 0,
             "total": 0
           },
           "description": "Summary statistics (e.g., count by severity)"
@@ -15557,6 +15558,11 @@
           "default": 0,
           "title": "Medium",
           "type": "integer"
+        },
+        "suppressed": {
+          "default": 0,
+          "title": "Suppressed",
+          "type": "integer"
         }
       },
       "title": "ScannerSeverityCount",
@@ -15591,9 +15597,11 @@
               "high": 0,
               "info": 0,
               "low": 0,
-              "medium": 0
+              "medium": 0,
+              "suppressed": 0
             },
-            "status": "PASSED"
+            "status": "PASSED",
+            "suppressed_finding_count": 0
           }
         },
         "dependencies_satisfied": {
@@ -15632,9 +15640,11 @@
               "high": 0,
               "info": 0,
               "low": 0,
-              "medium": 0
+              "medium": 0,
+              "suppressed": 0
             },
-            "status": "PASSED"
+            "status": "PASSED",
+            "suppressed_finding_count": 0
           }
         },
         "status": {
@@ -15721,12 +15731,25 @@
             "high": 0,
             "info": 0,
             "low": 0,
-            "medium": 0
+            "medium": 0,
+            "suppressed": 0
           }
         },
         "status": {
           "$ref": "#/$defs/ScannerStatus",
           "default": "PASSED"
+        },
+        "suppressed_finding_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 0,
+          "title": "Suppressed Finding Count"
         }
       },
       "title": "ScannerTargetStatusInfo",
@@ -17018,6 +17041,11 @@
         "skipped": {
           "default": 0,
           "title": "Skipped",
+          "type": "integer"
+        },
+        "suppressed": {
+          "default": 0,
+          "title": "Suppressed",
           "type": "integer"
         },
         "total": {

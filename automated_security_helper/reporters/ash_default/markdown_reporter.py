@@ -102,7 +102,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 "The table below shows findings by scanner, with status based on severity thresholds and dependencies:\n"
             )
             md_parts.append(
-                "- **Severity levels**: Critical (C), High (H), Medium (M), Low (L), Info (I)"
+                "- **Severity levels**: Suppressed (S), Critical (C), High (H), Medium (M), Low (L), Info (I)"
             )
             md_parts.append(
                 "- **Duration (Time)**: Time taken by the scanner to complete its execution"
@@ -132,14 +132,14 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 "    - `global` (global_settings section in the ASH_CONFIG used)"
             )
             md_parts.append(
-                "- **Example**: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure\n"
+                "- **Note**: Suppressed findings are counted separately and do not contribute to actionable findings\n"
             )
 
             md_parts.append(
-                "| Scanner | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |"
+                "| Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |"
             )
             md_parts.append(
-                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"
             )
 
             # Add scanner result rows
@@ -164,7 +164,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 
                 md_parts.append(
-                    f"| {result['scanner_name']} | {result['critical']} | {result['high']} | "
+                    f"| {result['scanner_name']} | {result['suppressed']} | {result['critical']} | {result['high']} | "
                     f"{result['medium']} | {result['low']} | {result['info']} | {result['actionable']} | "
                     f"{status_text} | {threshold_text} |"
                 )

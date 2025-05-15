@@ -350,7 +350,14 @@ class ScanPhase(EnginePhase):
         Returns:
             Tuple[Dict[str, int], int]: Severity counts and total finding count
         """
-        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        severity_counts = {
+            "suppressed": 0,
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+        }
         total_findings = 0
 
         if hasattr(sarif_report, "runs") and sarif_report.runs:
@@ -359,7 +366,13 @@ class ScanPhase(EnginePhase):
                     for result in run.results:
                         total_findings += 1
                         # Map SARIF level to our severity levels
-                        if hasattr(result, "level"):
+                        if (
+                            hasattr(result, "suppressions")
+                            and result.suppressions
+                            and len(result.suppressions) > 0
+                        ):
+                            severity_counts["suppressed"] += 1
+                        elif hasattr(result, "level"):
                             if result.level == "error":
                                 severity_counts["high"] += 1
                             elif result.level == "warning":
@@ -847,6 +860,7 @@ class ScanPhase(EnginePhase):
         )
 
         for sev in [
+            "suppressed",
             "critical",
             "high",
             "medium",
@@ -854,10 +868,10 @@ class ScanPhase(EnginePhase):
             "info",
         ]:
             aggregated_results.metadata.summary_stats.bump(
-                sev, results.severity_counts[sev]
+                sev, results.severity_counts.get(sev, 0)
             )
             aggregated_results.metadata.summary_stats.bump(
-                "total", results.severity_counts[sev]
+                "total", results.severity_counts.get(sev, 0)
             )
 
         actionable = 0
@@ -914,32 +928,21 @@ class ScanPhase(EnginePhase):
             == ScannerStatus.PASSED
         ):
             aggregated_results.scanner_results[scanner_name].status = status
+        res = ScannerTargetStatusInfo(
+            status=status,
+            dependencies_satisfied=results.dependencies_satisfied,
+            excluded=results.excluded,
+            severity_counts=ScannerSeverityCount(**results.severity_counts),
+            finding_count=results.finding_count,
+            actionable_finding_count=actionable,
+            suppressed_finding_count=results.severity_counts.get("suppressed", 0),
+            exit_code=results.exit_code,
+            duration=results.duration,
+        )
         if results.target_type == "source":
-            aggregated_results.scanner_results[
-                scanner_name
-            ].source = ScannerTargetStatusInfo(
-                status=status,
-                dependencies_satisfied=results.dependencies_satisfied,
-                excluded=results.excluded,
-                severity_counts=ScannerSeverityCount(**results.severity_counts),
-                actionable_finding_count=actionable,
-                finding_count=results.finding_count,
-                exit_code=results.exit_code,
-                duration=results.duration,
-            )
+            aggregated_results.scanner_results[scanner_name].source = res
         else:
-            aggregated_results.scanner_results[
-                scanner_name
-            ].converted = ScannerTargetStatusInfo(
-                status=status,
-                dependencies_satisfied=results.dependencies_satisfied,
-                excluded=results.excluded,
-                severity_counts=ScannerSeverityCount(**results.severity_counts),
-                actionable_finding_count=actionable,
-                finding_count=results.finding_count,
-                exit_code=results.exit_code,
-                duration=results.duration,
-            )
+            aggregated_results.scanner_results[scanner_name].converted = res
         ASH_LOGGER.verbose(
             aggregated_results.scanner_results[scanner_name].model_dump_json(
                 exclude_unset=True, by_alias=True
@@ -961,6 +964,54 @@ class ScanPhase(EnginePhase):
                 sanitized_sarif,
                 self.plugin_context.config.global_settings.ignore_paths or [],
             )
+
+            # Count suppressed findings after suppressions have been applied
+            # and adjust severity counts to avoid double-counting
+            suppressed_count = max(
+                0,
+                aggregated_results.scanner_results[
+                    scanner_name
+                ].source.severity_counts.suppressed
+                + aggregated_results.scanner_results[
+                    scanner_name
+                ].converted.severity_counts.suppressed,
+            )
+            # if sanitized_sarif and sanitized_sarif.runs:
+            #     for run in sanitized_sarif.runs:
+            #         if run.results:
+            #             for result in run.results:
+            #                 if result.suppressions and len(result.suppressions) > 0:
+            #                     suppressed_count += 1
+            #                     # Determine the original severity level to decrement it
+            #                     if result.level:
+            #                         level = str(result.level).lower()
+            #                         if level == "error":
+            #                             # Decrement critical count to avoid double counting
+            #                             aggregated_results.scanner_results[scanner_name].source.severity_counts.critical = max(
+            #                                 0, aggregated_results.scanner_results[scanner_name].source.severity_counts.critical - 1
+            #                             )
+            #                         elif level == "warning":
+            #                             # Decrement high/medium count to avoid double counting
+            #                             aggregated_results.scanner_results[scanner_name].source.severity_counts.medium = max(
+            #                                 0, aggregated_results.scanner_results[scanner_name].source.severity_counts.medium - 1
+            #                             )
+            #                         elif level == "note":
+            #                             # Decrement low count to avoid double counting
+            #                             aggregated_results.scanner_results[scanner_name].source.severity_counts.low = max(
+            #                                 0, aggregated_results.scanner_results[scanner_name].source.severity_counts.low - 1
+            #                             )
+            #                         elif level == "none":
+            #                             # Decrement info count to avoid double counting
+            #                             aggregated_results.scanner_results[scanner_name].source.severity_counts.info = max(
+            #                                 0, aggregated_results.scanner_results[scanner_name].source.severity_counts.info - 1
+            #                             )
+
+            # Update the suppressed count in the scanner results
+            if suppressed_count > 0:
+                ASH_LOGGER.debug(
+                    f"Found {suppressed_count} suppressed findings for scanner {scanner_name}"
+                )
+                # aggregated_results.scanner_results[scanner_name].source.severity_counts.suppressed += suppressed_count
 
             # Attach scanner details to the SARIF report
             scanner_version = None
