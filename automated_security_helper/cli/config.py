@@ -69,13 +69,21 @@ def init(
                 "# ASH default output directory (and variants)\nash_output*\n"
             )
     typer.secho(f"Saving ASH config to path: {config_path_path.absolute()}")
+    project_name = config_path_path.absolute().parent.name
+    if project_name == ".ash":
+        project_name = config_path_path.absolute().parent.parent.name
     config = AshConfig(
-        project_name=config_path_path.absolute().parent.name,
+        project_name=project_name,
     )
     config_strings = [
-        "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/src/automated_security_helper/schemas/AshConfig.json",
+        "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json",
         yaml.dump(
-            config.model_dump(by_alias=True, exclude_defaults=False),
+            config.model_dump(
+                by_alias=True,
+                exclude_defaults=False,
+                exclude_unset=True,
+                exclude_none=True,
+            ),
             sort_keys=False,
             indent=2,
         ),
