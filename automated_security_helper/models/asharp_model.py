@@ -614,7 +614,7 @@ class AshAggregatedResults(BaseModel):
         """
         if isinstance(report, SarifReport):
             sanitized_sarif = apply_suppressions_to_sarif(
-                report, self.ash_config.global_ignore_paths or []
+                report, self.ash_config.global_settings.ignore_paths or []
             )
             self.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(report, CycloneDXReport):

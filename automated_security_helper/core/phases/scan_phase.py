@@ -961,8 +961,10 @@ class ScanPhase(EnginePhase):
                 f"Ignoring paths: {self.plugin_context.config.global_settings.ignore_paths}"
             )
             sanitized_sarif = apply_suppressions_to_sarif(
-                sanitized_sarif,
-                self.plugin_context.config.global_settings.ignore_paths or [],
+                sarif_report=sanitized_sarif,
+                plugin_context=self.plugin_context,
+                ignore_paths=self.plugin_context.config.global_settings.ignore_paths
+                or [],
             )
 
             # Count suppressed findings after suppressions have been applied
