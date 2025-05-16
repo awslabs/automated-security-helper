@@ -260,6 +260,7 @@ def apply_suppressions_to_sarif(
 
         updated_results = []
         for result in run.results:
+            is_in_ignorable_path = False
             # Check if result location matches any ignore path
             if result.locations:
                 for location in result.locations:
@@ -275,6 +276,7 @@ def apply_suppressions_to_sarif(
                                 ASH_LOGGER.verbose(
                                     f"Excluding result, location is in scanners path and should not have been included: {uri}"
                                 )
+                                is_in_ignorable_path = True
                                 continue
                             for ignore_path in ignore_paths:
                                 # Check if the URI matches the ignore path pattern
@@ -306,6 +308,7 @@ def apply_suppressions_to_sarif(
                                 #     )
 
             # Add the result to the updated results list
-            updated_results.append(result)
+            if not is_in_ignorable_path:
+                updated_results.append(result)
         sarif_report.runs[0].results = updated_results
     return sarif_report
