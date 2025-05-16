@@ -245,12 +245,7 @@ def apply_suppressions_to_sarif(
         The modified SARIF report with suppressions applied
     """
     ignore_paths = plugin_context.config.global_settings.ignore_paths or []
-    if (
-        not sarif_report
-        or not sarif_report.runs
-        or not ignore_paths
-        or len(ignore_paths) == 0
-    ):
+    if not sarif_report or not sarif_report.runs:
         return sarif_report
     for run in sarif_report.runs:
         if not run.results:
@@ -286,7 +281,7 @@ def apply_suppressions_to_sarif(
                                 #     flags=re.IGNORECASE,
                                 # ):
                                 ASH_LOGGER.verbose(
-                                    f"Excluding result, location is in output path and NOT in the work directory and should not have been included: {uri}"
+                                    f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'"
                                 )
                                 is_in_ignorable_path = True
                                 continue
