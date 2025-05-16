@@ -271,7 +271,9 @@ def apply_suppressions_to_sarif(
                         uri = location.physicalLocation.root.artifactLocation.uri
                         if uri:
                             if re.match(
-                                pattern=r"scanners[\/\\]+[\w-]+[\/\\]+(source|converted)[\/\\]+"
+                                pattern=r"scanners[\/\\]+[\w-]+[\/\\]+(source|converted)[\/\\]+",
+                                string=uri,
+                                flags=re.IGNORECASE,
                             ):
                                 ASH_LOGGER.verbose(
                                     f"Excluding result, location is in scanners path and should not have been included: {uri}"
