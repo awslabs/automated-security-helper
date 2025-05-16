@@ -269,19 +269,22 @@ class AshAggregatedResults(BaseModel):
         Returns:
             dict: A simple dictionary representation of the AshAggregatedResults
         """
+        conf = self.ash_config.model_dump(by_alias=True, exclude_unset=True)
+        if len(conf.keys()) == 0:
+            conf = get_default_config()
         simple_dict = {
             "name": self.name,
             "description": self.description,
             "metadata": self.metadata.model_dump(by_alias=True, exclude_unset=True),
             "converter_results": {
                 k: v.model_dump(by_alias=True, exclude_unset=True)
-                for k, v in self.converter_results.items()
+                for k, v in sorted(self.converter_results.items())
             },
             "scanner_results": {
                 k: v.model_dump(by_alias=True, exclude_unset=True)
-                for k, v in self.scanner_results.items()
+                for k, v in sorted(self.scanner_results.items())
             },
-            "ash_config": self.ash_config.model_dump(by_alias=True, exclude_unset=True),
+            "ash_config": conf,
         }
         return simple_dict
 
