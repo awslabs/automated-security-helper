@@ -14,7 +14,9 @@ class CloudFormationResource(BaseModel):
     )
 
     Type: Annotated[str, Field(pattern=r"^([a-zA-Z0-9:]+)$")]
-    Properties: Dict[str, Any]
+    Properties: Annotated[Optional[Dict[str, Any]], Field(description="Optional")] = (
+        None
+    )
 
 
 class CloudFormationTemplateModel(BaseModel):
