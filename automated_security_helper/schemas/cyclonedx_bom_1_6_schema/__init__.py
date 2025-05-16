@@ -205,8 +205,9 @@ class HashContent(RootModel):
         ...,
         description="The value of the hash.",
         examples=[
+            # pragma: allowlist nextline secret - Not actually a secret
             "3942447fac867ae5cdb3229b658f4d48"
-        ],  # pragma: allowlist secret - Not actually a secret
+        ],
         title="Hash Value",
         pattern=r"^([a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64}|[a-fA-F0-9]{96}|[a-fA-F0-9]{128})$",
     )
@@ -4593,7 +4594,9 @@ class Component(BaseModel):
         None,
         description="Asserts the identity of the component using the OmniBOR Artifact ID. The OmniBOR, if specified, must be valid and conform to the specification defined at: [https://www.iana.org/assignments/uri-schemes/prov/gitoid](https://www.iana.org/assignments/uri-schemes/prov/gitoid). Refer to `@.evidence.identity` to optionally provide evidence that substantiates the assertion of the component's identity.",
         examples=[
+            # pragma: allowlist secret - Not actually a secret
             "gitoid:blob:sha1:a94a8fe5ccb19ba61c4c0873d391e987982fbbd3",
+            # pragma: allowlist secret - Not actually a secret
             "gitoid:blob:sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
         ],
         title="OmniBOR Artifact Identifier (gitoid)",
@@ -4601,6 +4604,7 @@ class Component(BaseModel):
     swhid: Optional[List[str]] = Field(
         None,
         description="Asserts the identity of the component using the Software Heritage persistent identifier (SWHID). The SWHID, if specified, must be valid and conform to the specification defined at: [https://docs.softwareheritage.org/devel/swh-model/persistent-identifiers.html](https://docs.softwareheritage.org/devel/swh-model/persistent-identifiers.html). Refer to `@.evidence.identity` to optionally provide evidence that substantiates the assertion of the component's identity.",
+        # pragma: allowlist secret - Not actually a secret
         examples=["swh:1:cnt:94a9ed024d3859793618152ea559a168bbcbb5e2"],
         title="Software Heritage Identifier",
     )
