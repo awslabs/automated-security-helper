@@ -47,7 +47,7 @@ aws-cdk-lib = "^2.188.0"
 bandit = {extras = ["baseline", "sarif", "toml"], version = "^1.8.3"}
 cdk-nag = "^2.35.64"
 cfn-flip = "^1.3.0"
-checkov = "^3.2.395"
+checkov = "^3.2.424"
 constructs = "^10.4.2"
 defusedxml = "^0.7.1"
 junitparser = "^3.2.0"

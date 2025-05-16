@@ -1064,14 +1064,14 @@ files = [
 
 [[package]]
 name = "checkov"
-version = "3.2.416"
+version = "3.2.424"
 description = "Infrastructure as code static analysis"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "checkov-3.2.416-py3-none-any.whl", hash = "sha256:7fd69b3748ef93419d46442698f141299c43a7549de87160387b0962ef889bbc"},
-    {file = "checkov-3.2.416.tar.gz", hash = "sha256:161706455d9135f065e16ff37d0649f401b70e8c01e74baed87eb825f53ffc2f"},
+    {file = "checkov-3.2.424-py3-none-any.whl", hash = "sha256:3cad72fb3e7e505db5883a071dd774ea956830adc78951faf47ff179970c2b63"},
+    {file = "checkov-3.2.424.tar.gz", hash = "sha256:c06b055b8eef3fe37199c6a220acab2d19b69a298dd978c84759d9456b392325"},
 ]
 
 [package.dependencies]
@@ -1101,7 +1101,6 @@ jsonschema = ">=4.17.0,<5.0.0"
 junit-xml = ">=1.9,<2.0"
 license-expression = ">=30.1.0,<31.0.0"
 networkx = "<2.7"
-openai = "<1.0.0"
 packageurl-python = ">=0.11.1,<0.14.0"
 packaging = ">=23.0,<24.0"
 prettytable = ">=3.6.0,<4.0.0"
@@ -3988,29 +3987,6 @@ files = [
     {file = "numpy-2.2.5-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:d2e3bdadaba0e040d1e7ab39db73e0afe2c74ae277f5614dad53eadbecbbb169"},
     {file = "numpy-2.2.5.tar.gz", hash = "sha256:a9c0d994680cd991b1cb772e8b297340085466a6fe964bc9d4e80f5e2f43c291"},
 ]
-
-[[package]]
-name = "openai"
-version = "0.28.1"
-description = "Python client library for the OpenAI API"
-optional = false
-python-versions = ">=3.7.1"
-groups = ["main"]
-files = [
-    {file = "openai-0.28.1-py3-none-any.whl", hash = "sha256:d18690f9e3d31eedb66b57b88c2165d760b24ea0a01f150dd3f068155088ce68"},
-    {file = "openai-0.28.1.tar.gz", hash = "sha256:4be1dad329a65b4ce1a660fe6d5431b438f429b5855c883435f0f7fcb6d2dcc8"},
-]
-
-[package.dependencies]
-aiohttp = "*"
-requests = ">=2.20"
-tqdm = "*"
-
-[package.extras]
-datalib = ["numpy", "openpyxl (>=3.0.7)", "pandas (>=1.2.3)", "pandas-stubs (>=1.1.0.11)"]
-dev = ["black (>=21.6b0,<22.0)", "pytest (==6.*)", "pytest-asyncio", "pytest-mock"]
-embeddings = ["matplotlib", "numpy", "openpyxl (>=3.0.7)", "pandas (>=1.2.3)", "pandas-stubs (>=1.1.0.11)", "plotly", "scikit-learn (>=1.0.2)", "scipy", "tenacity (>=8.0.1)"]
-wandb = ["numpy", "openpyxl (>=3.0.7)", "pandas (>=1.2.3)", "pandas-stubs (>=1.1.0.11)", "wandb"]
 
 [[package]]
 name = "opentelemetry-api"
@@ -8033,4 +8009,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "ac3d47d653d6feb8737889e4b21dd3f3b38a21ab96ec9af9c3dffed89a06a9ff"
+content-hash = "116ec5527c95ee2a196e6e62980455b7f87f3d50bcdaf5c4dfdfe1e39ea7dd11"

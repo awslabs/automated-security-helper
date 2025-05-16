@@ -53,12 +53,8 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         )
 
         report = JUnitXml(name="ASH Scan Report")
-        ash_config = model.ash_config
 
         test_suite_dict = {}
-        test_suite_dict["ash"] = TestSuite(
-            name="ASH Scan - " + ash_config.project_name,
-        )
 
         # Process SARIF report @ model.sarif
         if model.sarif is not None:
@@ -79,15 +75,11 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     test_case.result = [
                         Skipped(
                             message=suppression.justification,
-                            type_="error"
-                            if result.level == "error" or result.kind == "fail"
-                            else "warning"
-                            if result.level == "warning"
-                            else "info",
+                            type_="suppression",
                         )
                         for suppression in result.suppressions
                     ]
-                if result.level == "error" or result.kind == "fail":
+                elif result.level == "error" or result.kind == "fail":
                     test_case.result = [
                         Error(message=result.message.root.text, type_="error")
                     ]
@@ -110,7 +102,20 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
                 # Create test suite for this finding type
                 actual_scanner = "ash"
-                if result.properties and hasattr(result.properties, "scanner_details"):
+                if "scanner_name" in result.properties.__pydantic_extra__:
+                    actual_scanner = result.properties.__pydantic_extra__[
+                        "scanner_name"
+                    ]
+                elif result.properties and result.properties.tags:
+                    for tag in result.properties.tags:
+                        if tag.startswith("tool_name::"):
+                            actual_scanner = tag.split("::")[1]
+                            break
+                if (
+                    actual_scanner == "ash"
+                    and result.properties
+                    and hasattr(result.properties, "scanner_details")
+                ):
                     if hasattr(result.properties.scanner_details, "tool_name"):
                         actual_scanner = result.properties.scanner_details.tool_name
                 if actual_scanner not in test_suite_dict:
