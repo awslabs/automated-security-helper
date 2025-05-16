@@ -79,6 +79,7 @@ def sanitize_sarif_paths(
     clean_runs = []
     for run in sarif_report.runs:
         if not run.results:
+            clean_runs.append(run)
             continue
         clean_results = []
         for result in run.results:

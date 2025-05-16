@@ -2408,6 +2408,9 @@ class SarifReport(BaseModel):
         include_driver: bool = True,
         include_rules: bool = True,
     ):
+        if sarif_report.runs is None or len(sarif_report.runs) == 0:
+            return
+
         report_run = sarif_report.runs[0]
         report_tool = report_run.tool
         report_invocations = report_run.invocations
