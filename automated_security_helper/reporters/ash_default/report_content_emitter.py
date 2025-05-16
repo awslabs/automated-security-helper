@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from typing import Dict, List, Any, TYPE_CHECKING
 
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
@@ -296,9 +297,11 @@ class ReportContentEmitter:
             {"location": location, "count": count} for location, count in top_hotspots
         ]
 
-    def is_finding_actionable(self, vuln) -> bool:
+    def is_finding_actionable(self, vuln: FlatVulnerability) -> bool:
         """Determine if a finding is actionable based on severity threshold."""
         # Get scanner-specific threshold if available
+        if vuln.is_suppressed:
+            return False
         scanner_name = vuln.scanner or "Unknown"
         scanner_config_entry = self.ash_conf.get_plugin_config(
             plugin_type="scanner",

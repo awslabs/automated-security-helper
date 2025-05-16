@@ -76,10 +76,11 @@ def sanitize_sarif_paths(
 
     ASH_LOGGER.debug(f"Sanitizing SARIF paths relative to: {source_dir_str}")
 
+    clean_runs = []
     for run in sarif_report.runs:
         if not run.results:
             continue
-
+        clean_results = []
         for result in run.results:
             # Process locations
             if result.locations:
@@ -110,6 +111,11 @@ def sanitize_sarif_paths(
                 uri = result.analysisTarget.uri
                 uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
                 result.analysisTarget.uri = uri
+            clean_results.append(result)
+
+        run.results = clean_results
+        clean_runs.append(run)
+    sarif_report.runs = clean_runs
 
     return sarif_report
 

@@ -224,7 +224,6 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             )
 
             grype_results = {}
-            Path(results_file).parent.mkdir(exist_ok=True, parents=True)
             with open(results_file, mode="r", encoding="utf-8") as f:
                 grype_results = json.load(f)
             try:
@@ -246,6 +245,50 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                         ),
                     )
                 ]
+
+                clean_runs = []
+                for run in sarif_report.runs:
+                    if not run.results:
+                        continue
+                    clean_results = []
+                    for result in run.results:
+                        # Process locations
+                        if result.locations:
+                            for location in result.locations:
+                                if (
+                                    location.physicalLocation
+                                    and location.physicalLocation.root.artifactLocation
+                                ):
+                                    uri = location.physicalLocation.root.artifactLocation.uri
+                                    if uri:
+                                        uri = uri.lstrip("/")
+                                        location.physicalLocation.root.artifactLocation.uri = uri
+
+                        # Process related locations if present
+                        if (
+                            hasattr(result, "relatedLocations")
+                            and result.relatedLocations
+                        ):
+                            for related in result.relatedLocations:
+                                if (
+                                    related.physicalLocation
+                                    and related.physicalLocation.root.artifactLocation
+                                ):
+                                    uri = related.physicalLocation.root.artifactLocation.uri
+                                    if uri:
+                                        uri = uri.lstrip("/")
+                                        related.physicalLocation.root.artifactLocation.uri = uri
+
+                        # Process analysis target if present
+                        if result.analysisTarget and result.analysisTarget.uri:
+                            uri = result.analysisTarget.uri
+                            uri = uri.lstrip("/")
+                            result.analysisTarget.uri = uri
+                        clean_results.append(result)
+
+                    run.results = clean_results
+                    clean_runs.append(run)
+                sarif_report.runs = clean_runs
             except Exception as e:
                 ASH_LOGGER.warning(
                     f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}"
