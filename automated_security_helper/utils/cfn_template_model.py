@@ -3,7 +3,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 
-from typing import Annotated, Dict, Literal, Optional
+from typing import Annotated, Dict
 
 
 class CloudFormationResource(BaseModel):
@@ -23,7 +23,6 @@ class CloudFormationTemplateModel(BaseModel):
         validate_default=True,
     )
 
-    AWSTemplateFormatVersion: Optional[Literal["2010-09-09"] | None] = None
     Resources: Dict[str, CloudFormationResource]
 
 
