@@ -272,27 +272,32 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
             # Process each template file
             failed_files = []
-            sarif_tool = Tool(
-                driver=ToolComponent(
-                    name="cfn-nag",
-                    fullName="stelligent/cfn_nag",
-                    version=self.tool_version,
-                    informationUri="https://github.com/stelligent/cfn_nag",
-                    rules=[],
-                )
-            )
+            sarif_tool = Tool(driver=tool_component)
             sarif_output_file = target_results_dir.joinpath("cfn_nag.sarif")
             sarif_output_file.parent.mkdir(exist_ok=True, parents=True)
             for cfn_file in scannable:
                 try:
+                    self._plugin_log(
+                        f"Checking if file is CloudFormation: {cfn_file}",
+                        level=logging.DEBUG,
+                    )
                     cfn_model = get_model_from_template(template_path=Path(cfn_file))
+                    if cfn_model:
+                        self._plugin_log(
+                            f"File *is* CloudFormation: {cfn_file}",
+                            level=logging.DEBUG,
+                        )
                 except Exception as e:
-                    ASH_LOGGER.trace(
-                        f"Not a CloudFormation file: {cfn_file}. Exception: {e}"
+                    self._plugin_log(
+                        f"Not a CloudFormation file: {cfn_file}. Exception: {e}",
+                        level=5,
                     )
                     continue
                 if cfn_model is None:
-                    ASH_LOGGER.trace(f"Not a CloudFormation file: {cfn_file}")
+                    self._plugin_log(
+                        f"Not a CloudFormation file: {cfn_file}",
+                        level=5,
+                    )
                     continue
                 normalized_filename = get_normalized_filename(str_to_normalize=cfn_file)
                 results_file_dir = target_results_dir.joinpath(normalized_filename)
