@@ -1,4 +1,5 @@
-name: ASH - Scan Validation  #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
+#checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
+name: ASH - Scan Validation
 
 on:
   push:

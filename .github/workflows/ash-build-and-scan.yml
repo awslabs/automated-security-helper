@@ -1,3 +1,4 @@
+#checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
 name: ASH - Core Pipeline
 on:
   push:
@@ -26,6 +27,7 @@ jobs:
       ARCH: ubuntu-latest
       SUMMARY_FILE: "ASH Scan Results Summary.md"
     permissions:
+      #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       actions: read
       checks: write
       contents: read
@@ -113,6 +115,7 @@ jobs:
     needs: []
     runs-on: ubuntu-latest
     permissions:
+      #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       contents: read
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
 
@@ -148,6 +151,7 @@ jobs:
     needs: []
     runs-on: ubuntu-latest
     permissions:
+      #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       contents: write
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 

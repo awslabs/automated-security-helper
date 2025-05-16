@@ -1,3 +1,4 @@
+#checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
 name: ASH - Matrix Unit Tests
 
 on:
@@ -16,7 +17,8 @@ jobs:
   unit-test:
     name: Unit Test Python
     runs-on: ${{ matrix.runner }}
-    permissions:  #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
+    permissions:
+      #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       actions: read
       checks: write
       pull-requests: write
