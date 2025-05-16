@@ -279,23 +279,33 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 try:
                     self._plugin_log(
                         f"Checking if file is CloudFormation: {cfn_file}",
+                        target_type=target_type,
                         level=logging.DEBUG,
                     )
                     cfn_model = get_model_from_template(template_path=Path(cfn_file))
                     if cfn_model:
                         self._plugin_log(
                             f"File *is* CloudFormation: {cfn_file}",
+                            target_type=target_type,
+                            level=logging.DEBUG,
+                        )
+                    else:
+                        self._plugin_log(
+                            f"cfn_model is falsey, but no error was thrown: {cfn_file}",
+                            target_type=target_type,
                             level=logging.DEBUG,
                         )
                 except Exception as e:
                     self._plugin_log(
                         f"Not a CloudFormation file: {cfn_file}. Exception: {e}",
+                        target_type=target_type,
                         level=5,
                     )
                     continue
                 if cfn_model is None:
                     self._plugin_log(
                         f"Not a CloudFormation file: {cfn_file}",
+                        target_type=target_type,
                         level=5,
                     )
                     continue
