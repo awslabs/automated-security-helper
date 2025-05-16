@@ -206,7 +206,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     self.args.extra_args.extend(extra_arg_list)
                     break
 
-        for item in ['--exclude="*venv/*"', '--exclude=".venv/*"']:
+        for item in ['--exclude="/venv/"', '--exclude="/.venv/"']:
             self.args.extra_args.append(ToolExtraArg(key=item, value=None))
         self.args.extra_args.append(
             ToolExtraArg(
