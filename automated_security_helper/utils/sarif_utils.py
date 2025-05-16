@@ -2,15 +2,13 @@
 
 import os
 from pathlib import Path
-from typing import List
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.schemas.sarif_schema_model import (
-    Kind,
-    Level,
     SarifReport,
     ToolComponent,
     PropertyBag,
 )
-from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.schemas.sarif_schema_model import (
     Suppression,
@@ -234,7 +232,7 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
 
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
-    ignore_paths: List[IgnorePathWithReason] = [],
+    plugin_context: PluginContext,
 ) -> SarifReport:
     """
     Apply suppressions to a SARIF report based on global ignore paths.
@@ -246,6 +244,7 @@ def apply_suppressions_to_sarif(
     Returns:
         The modified SARIF report with suppressions applied
     """
+    ignore_paths = plugin_context.config.global_settings.ignore_paths or []
     if (
         not sarif_report
         or not sarif_report.runs
@@ -263,22 +262,31 @@ def apply_suppressions_to_sarif(
             # Check if result location matches any ignore path
             if result.locations:
                 for location in result.locations:
+                    if is_in_ignorable_path:
+                        continue
                     if (
                         location.physicalLocation
                         and location.physicalLocation.root.artifactLocation
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
                         if uri:
-                            if path_matches_pattern(
-                                uri, "**/scanners/*/source"
-                            ) or path_matches_pattern(uri, "**/scanners/*/converted"):
+                            if Path(uri).resolve().is_relative_to(
+                                plugin_context.output_dir.resolve()
+                            ) and not Path(uri).resolve().is_relative_to(
+                                plugin_context.output_dir.joinpath(
+                                    ASH_WORK_DIR_NAME
+                                ).resolve()
+                            ):
+                                # if path_matches_pattern(
+                                #     uri, "**/scanners/*/source"
+                                # ) or path_matches_pattern(uri, "**/scanners/*/converted"):
                                 # if re.match(
                                 #     pattern=r"scanners[\/\\]+[\w-]+[\/\\]+(source|converted)[\/\\]+",
                                 #     string=uri,
                                 #     flags=re.IGNORECASE,
                                 # ):
                                 ASH_LOGGER.verbose(
-                                    f"Excluding result, location is in scanners path and should not have been included: {uri}"
+                                    f"Excluding result, location is in output path and NOT in the work directory and should not have been included: {uri}"
                                 )
                                 is_in_ignorable_path = True
                                 continue
@@ -303,8 +311,8 @@ def apply_suppressions_to_sarif(
                                         ASH_LOGGER.trace(
                                             f"Multiple suppressions found for rule '{result.ruleId}' on location '{uri}'. Only the first suppression will be applied."
                                         )
-                                    result.level = Level.none
-                                    result.kind = Kind.informational
+                                    # result.level = Level.none
+                                    # result.kind = Kind.informational
                                     break  # No need to check other ignore paths
                                 # else:
                                 #     ASH_LOGGER.verbose(

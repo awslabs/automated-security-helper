@@ -9,9 +9,7 @@
     },
     {
       "args": [
-        "--verbose",
-        "--no-progress",
-        "--scanners=syft"
+        "--verbose"
       ],
       "console": "integratedTerminal",
       "env": {

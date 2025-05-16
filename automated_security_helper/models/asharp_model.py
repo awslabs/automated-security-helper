@@ -21,7 +21,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -608,25 +607,6 @@ class AshAggregatedResults(BaseModel):
         if isinstance(json_data, str):
             return cls.model_validate_json(json_data)
         return cls.model_validate(json_data)
-
-    def add_report(self, reporter: str, report: SarifReport | CycloneDXReport | str):
-        """Add a report to the model.
-
-        Args:
-            report: The report to add. Can be a SarifReport, CycloneDXReport, or a JSON string.
-        """
-        if isinstance(report, SarifReport):
-            sanitized_sarif = apply_suppressions_to_sarif(
-                report, self.ash_config.global_settings.ignore_paths or []
-            )
-            self.sarif.merge_sarif_report(sanitized_sarif)
-        elif isinstance(report, CycloneDXReport):
-            # self.cyclonedx = report
-            pass
-        elif isinstance(report, str):
-            self.additional_reports[reporter] = report
-        else:
-            raise ValueError("Invalid report type")
 
     def save_model(self, output_dir: Path) -> None:
         """Save AshAggregatedResults as JSON alongside aggregated results."""
