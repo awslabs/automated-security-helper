@@ -281,7 +281,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     rules=[],
                 )
             )
-            sarif_report = None
             sarif_output_file = target_results_dir.joinpath("cfn_nag.sarif")
             sarif_output_file.parent.mkdir(exist_ok=True, parents=True)
             for cfn_file in scannable:
