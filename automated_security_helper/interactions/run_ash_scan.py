@@ -385,12 +385,6 @@ def run_ash_scan(
             if Phases.inspect in phases or inspect:
                 phases_to_run.append("inspect")
 
-                # If inspect is enabled via command line, update the config
-                if inspect and orchestrator.config:
-                    if not hasattr(orchestrator.config, "inspect"):
-                        setattr(orchestrator.config, "inspect", {})
-                    orchestrator.config.inspect["enabled"] = True
-
             # Default to all phases if none specified
             if not phases_to_run:
                 phases_to_run = ["convert", "scan", "report"]
