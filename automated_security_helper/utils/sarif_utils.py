@@ -2,8 +2,8 @@
 
 import os
 from pathlib import Path
+import re
 from typing import List
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.schemas.sarif_schema_model import (
     Kind,
     Level,
@@ -235,7 +235,6 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
 
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
-    plugin_context: PluginContext,
     ignore_paths: List[IgnorePathWithReason] = [],
 ) -> SarifReport:
     """
@@ -255,7 +254,6 @@ def apply_suppressions_to_sarif(
         or len(ignore_paths) == 0
     ):
         return sarif_report
-    scanners_path = plugin_context.output_dir.joinpath("scanners")
     for run in sarif_report.runs:
         if not run.results:
             continue
@@ -271,7 +269,9 @@ def apply_suppressions_to_sarif(
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
                         if uri:
-                            if Path(uri).relative_to(scanners_path):
+                            if re.match(
+                                pattern=r"scanners[\/\\]+[\w-]+[\/\\]+(source|converted)[\/\\]+"
+                            ):
                                 ASH_LOGGER.verbose(
                                     f"Excluding result, location is in scanners path and should not have been included: {uri}"
                                 )

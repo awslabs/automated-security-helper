@@ -962,7 +962,6 @@ class ScanPhase(EnginePhase):
             )
             sanitized_sarif = apply_suppressions_to_sarif(
                 sarif_report=sanitized_sarif,
-                plugin_context=self.plugin_context,
                 ignore_paths=self.plugin_context.config.global_settings.ignore_paths
                 or [],
             )
