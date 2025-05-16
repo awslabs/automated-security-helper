@@ -115,13 +115,6 @@ def build_ash_image_cli_command(
         ),
     ] = [],
     # General Options
-    config: Annotated[
-        str,
-        typer.Option(
-            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
-            envvar="ASH_CONFIG",
-        ),
-    ] = None,
     offline: Annotated[
         bool,
         typer.Option(
@@ -136,8 +129,21 @@ def build_ash_image_cli_command(
             help="Set the log level.",
         ),
     ] = AshLogLevel.INFO,
-    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
-    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+    config: Annotated[
+        str,
+        typer.Option(
+            "--config",
+            "-c",
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
+            envvar="ASH_CONFIG",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+    ] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ):
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "image"]:

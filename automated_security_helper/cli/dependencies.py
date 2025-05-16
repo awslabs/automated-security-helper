@@ -17,7 +17,11 @@ from rich.panel import Panel
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
-from automated_security_helper.core.constants import ASH_BIN_PATH, ASH_WORK_DIR_NAME
+from automated_security_helper.core.constants import (
+    ASH_BIN_PATH,
+    ASH_CONFIG_FILE_NAMES,
+    ASH_WORK_DIR_NAME,
+)
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.utils.log import get_logger
 
@@ -77,8 +81,21 @@ def install_dependencies(
         "-t",
         help="Plugin types to install dependencies for",
     ),
-    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
-    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+    config: Annotated[
+        str,
+        typer.Option(
+            "--config",
+            "-c",
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
+            envvar="ASH_CONFIG",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+    ] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ) -> int:
     """Install dependencies for ASH plugins.

@@ -88,6 +88,8 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
         text_parts.append("")
 
         # Add summary section if enabled
+        if isinstance(self.config, dict):
+            self.config = TextReporterConfig.model_validate(self.config)
         if self.config.options.include_summary:
             text_parts.append("SUMMARY")
             text_parts.append("-------")
@@ -142,10 +144,10 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
             # Create header row with proper spacing
             text_parts.append(
-                f"{'Scanner':<20} {'Supp':>8} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Actionable':>10} {'Result':<8} {'Threshold':<15}"
+                f"{'Scanner':<18} {'Suppressed':>10} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Actionable':>10} {'Result':<8} {'Threshold':<15}"
             )
             text_parts.append(
-                f"{'-' * 20} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 8} {'-' * 15}"
+                f"{'-' * 18} {'-' * 10} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 8} {'-' * 15}"
             )
 
             # Add scanner result rows

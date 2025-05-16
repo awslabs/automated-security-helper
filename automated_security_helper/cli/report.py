@@ -3,13 +3,14 @@
 
 import logging
 from pathlib import Path
-from typing import Annotated, List, Optional
+from typing import Annotated, List
 import typer
 from rich import print, print_json
 from rich.markdown import Markdown
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.enums import AshLogLevel, ReportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
@@ -44,14 +45,6 @@ def report_command(
             envvar="ASH_OUTPUT_DIR",
         ),
     ] = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
-    config: Annotated[
-        Optional[Path],
-        typer.Option(
-            "--config",
-            "-c",
-            help="Path to ASH configuration file.",
-        ),
-    ] = None,
     log_level: Annotated[
         AshLogLevel,
         typer.Option(
@@ -59,8 +52,21 @@ def report_command(
             help="Set the log level.",
         ),
     ] = AshLogLevel.INFO,
-    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
-    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+    config: Annotated[
+        str,
+        typer.Option(
+            "--config",
+            "-c",
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
+            envvar="ASH_CONFIG",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+    ] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ):
     """Generate a report from ASH scan results using the specified reporter plugin."""

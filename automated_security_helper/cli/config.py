@@ -8,6 +8,8 @@ import sys
 from typing import Annotated
 import yaml
 import typer
+from rich import print
+from rich.syntax import Syntax
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
@@ -32,62 +34,69 @@ class IndentableYamlDumper(yaml.Dumper):
 
 @config_app.command()
 def init(
-    config_path: Annotated[
+    config: Annotated[
         str,
-        typer.Argument(
-            help=f"The name of the config file to initialize. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
+        typer.Option(
+            "--config",
+            "-c",
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
             envvar="ASH_CONFIG",
         ),
     ] = ".ash/.ash.yaml",
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+    ] = False,
+    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
     force: Annotated[
         bool,
         typer.Option(
             help="Overwrite the config file if it already exists at the target path.",
         ),
     ] = False,
-    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
-    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
-    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ):
     get_logger(
         level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
         show_progress=False,
         use_color=color,
     )
-    config_path_path = Path(config_path)
-    if config_path_path.absolute().exists() and not force:
+    config_path = Path(config)
+    if config_path.absolute().exists() and not force:
         typer.secho(
-            f"Config file already exists at {config_path_path.absolute()}. Include --force to overwrite.",
+            f"Config file already exists at {config_path.absolute()}. Include --force to overwrite.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
-    config_path_path.parent.mkdir(exist_ok=True, parents=True)
-    if config_path_path.parent.name == ".ash":
-        ash_gitignore_path = config_path_path.parent.joinpath(".gitignore")
+    config_path.parent.mkdir(exist_ok=True, parents=True)
+    if config_path.parent.name == ".ash":
+        ash_gitignore_path = config_path.parent.joinpath(".gitignore")
         if not ash_gitignore_path.exists():
             ash_gitignore_path.write_text(
                 "# ASH default output directory (and variants)\nash_output*\n"
             )
-    typer.secho(f"Saving ASH config to path: {config_path_path.absolute()}")
-    project_name = config_path_path.absolute().parent.name
+    typer.secho(f"Saving ASH config to path: {config_path.absolute()}")
+    project_name = config_path.absolute().parent.name
     if project_name == ".ash":
-        project_name = config_path_path.absolute().parent.parent.name
-    config = AshConfig(
+        project_name = config_path.absolute().parent.parent.name
+    ash_config = AshConfig(
         project_name=project_name,
     )
     config_strings = [
         "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json",
         yaml.dump(
-            config.model_dump(
+            ash_config.model_dump(
                 by_alias=True,
                 exclude_defaults=False,
-                exclude_none=True,
+                exclude_none=False,
             ),
+            Dumper=IndentableYamlDumper,
+            default_flow_style=False,
             sort_keys=False,
-            indent=2,
         ),
     ]
-    config_path_path.write_text("\n".join(config_strings))
+    config_path.write_text("\n".join(config_strings))
 
 
 @config_app.command()
@@ -111,17 +120,22 @@ def get(
         typer.secho(f"Config file does not exist at {config_path}", fg=typer.colors.RED)
         raise typer.Exit(1)
     config = resolve_config(config_path)
-    typer.secho(
-        yaml.dump(
-            config.model_dump(
-                by_alias=True,
-                exclude_defaults=False,
-                exclude_none=False,
+    print(
+        Syntax(
+            code=yaml.dump(
+                config.model_dump(
+                    by_alias=True,
+                    exclude_defaults=False,
+                    exclude_none=False,
+                ),
+                Dumper=IndentableYamlDumper,
+                default_flow_style=False,
+                sort_keys=False,
             ),
-            Dumper=IndentableYamlDumper,
-            default_flow_style=False,
-            sort_keys=False,
-        ),
+            lexer="yaml",
+            theme="lightbulb",
+            background_color=None,
+        )
     )
 
 

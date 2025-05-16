@@ -55,13 +55,6 @@ def run_ash_scan_cli_command(
             envvar="ASH_EXCLUDED_SCANNERS",
         ),
     ] = [],
-    config: Annotated[
-        str,
-        typer.Option(
-            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
-            envvar="ASH_CONFIG",
-        ),
-    ] = None,
     ash_plugin_modules: Annotated[
         List[str],
         typer.Option(
@@ -96,7 +89,10 @@ def run_ash_scan_cli_command(
         List[ExportFormat],
         typer.Option(
             "--output-formats",
-            "-o",
+            "--output-format",
+            "--formats",
+            "--format",
+            "-f",
             help="The output formats to use",
         ),
     ] = [],
@@ -131,7 +127,6 @@ def run_ash_scan_cli_command(
     version: Annotated[
         bool,
         typer.Option(
-            "-v",
             "--version",
             help="Prints version number",
         ),
@@ -163,8 +158,21 @@ def run_ash_scan_cli_command(
             help="Set the log level.",
         ),
     ] = AshLogLevel.INFO,
-    verbose: Annotated[bool, typer.Option(help="Enable verbose logging")] = False,
-    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+    config: Annotated[
+        str,
+        typer.Option(
+            "--config",
+            "-c",
+            help=f"The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_FILE_NAMES}. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH.",
+            envvar="ASH_CONFIG",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+    ] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
     fail_on_findings: Annotated[
         bool | None,
@@ -193,7 +201,6 @@ def run_ash_scan_cli_command(
         bool,
         typer.Option(
             "--force",
-            "-f",
             help="Force rebuild of the ASH container image",
         ),
     ] = False,
@@ -203,7 +210,7 @@ def run_ash_scan_cli_command(
             "--oci-runner",
             "--oci",
             "--runner",
-            "-r",
+            "-o",
             help="Use the specified OCI runner instead of docker to run the containerized tools",
             envvar="OCI_RUNNER",
         ),
@@ -308,7 +315,7 @@ def run_ash_scan_cli_command(
         strategy=strategy,
         scanners=scanners,
         exclude_scanners=exclude_scanners,
-        progress=not precommit_mode and progress,
+        progress=not precommit_mode and not verbose and progress,
         output_formats=output_formats,
         cleanup=cleanup,
         phases=phases,
