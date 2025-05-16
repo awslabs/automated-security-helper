@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import json
 import logging
+import os
 from pydantic import Field
 import boto3
 
@@ -28,8 +29,8 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
         Field(
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}"
         ),
-    ] = None
-    log_group_name: str | None = None
+    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None))
+    log_group_name: str | None = os.environ.get("ASH_LOG_GROUP_NAME", None)
     log_stream_name: str = "ASHScanResults"
 
 

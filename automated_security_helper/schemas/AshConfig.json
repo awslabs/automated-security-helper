@@ -180,7 +180,7 @@
               "name": "cloudwatch-logs",
               "options": {
                 "aws_account_id": null,
-                "aws_region": null,
+                "aws_region": "us-west-2",
                 "log_group_name": null,
                 "log_stream_name": "ASHScanResults"
               }
@@ -1022,7 +1022,7 @@
           "$ref": "#/$defs/CloudWatchLogsReporterConfigOptions",
           "default": {
             "aws_account_id": null,
-            "aws_region": null,
+            "aws_region": "us-west-2",
             "log_group_name": null,
             "log_stream_name": "ASHScanResults"
           }
@@ -1057,7 +1057,7 @@
               "type": "null"
             }
           ],
-          "default": null,
+          "default": "us-west-2",
           "title": "Aws Region"
         },
         "log_group_name": {
@@ -2064,7 +2064,7 @@
             "name": "cloudwatch-logs",
             "options": {
               "aws_account_id": null,
-              "aws_region": null,
+              "aws_region": "us-west-2",
               "log_group_name": null,
               "log_stream_name": "ASHScanResults"
             }
