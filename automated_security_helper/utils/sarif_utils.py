@@ -2,7 +2,6 @@
 
 import os
 from pathlib import Path
-import re
 from typing import List
 from automated_security_helper.schemas.sarif_schema_model import (
     Kind,
@@ -270,11 +269,14 @@ def apply_suppressions_to_sarif(
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
                         if uri:
-                            if re.match(
-                                pattern=r"scanners[\/\\]+[\w-]+[\/\\]+(source|converted)[\/\\]+",
-                                string=uri,
-                                flags=re.IGNORECASE,
-                            ):
+                            if path_matches_pattern(
+                                uri, "**/scanners/*/source"
+                            ) or path_matches_pattern(uri, "**/scanners/*/converted"):
+                                # if re.match(
+                                #     pattern=r"scanners[\/\\]+[\w-]+[\/\\]+(source|converted)[\/\\]+",
+                                #     string=uri,
+                                #     flags=re.IGNORECASE,
+                                # ):
                                 ASH_LOGGER.verbose(
                                     f"Excluding result, location is in scanners path and should not have been included: {uri}"
                                 )
