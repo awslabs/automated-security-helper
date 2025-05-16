@@ -3,7 +3,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 
-from typing import Annotated, Any, Dict, Literal, Optional
+from typing import Annotated, Dict, Literal, Optional
 
 
 class CloudFormationResource(BaseModel):
@@ -14,9 +14,6 @@ class CloudFormationResource(BaseModel):
     )
 
     Type: Annotated[str, Field(pattern=r"^([a-zA-Z0-9:]+)$")]
-    Properties: Annotated[Optional[Dict[str, Any]], Field(description="Optional")] = (
-        None
-    )
 
 
 class CloudFormationTemplateModel(BaseModel):
