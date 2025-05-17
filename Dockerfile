@@ -126,12 +126,16 @@ RUN npm install -g npm pnpm yarn
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR}
+ENV PATH="/usr/local/bin:$PATH"
 
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | \
     sh -s -- -b /usr/local/bin
+RUN syft --version
+
 
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | \
     sh -s -- -b /usr/local/bin
+RUN grype --version
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         grype db update && \

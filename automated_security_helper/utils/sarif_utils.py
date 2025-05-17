@@ -221,20 +221,27 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
 
     # Normalize paths for comparison
     path = path.replace("\\", "/")
-    pattern = pattern.replace("\\", "/") + "/**/*.*"
+    pattern = pattern.replace("\\", "/")
+    patterns = [
+        pattern + "/**/*.*",
+        pattern + "/*.*",
+        pattern,
+    ]
 
-    # Check for exact match
-    if path == pattern:
-        return True
-    elif path in pattern:
-        return True
+    for pat in patterns:
+        # Check for exact match
+        if path == pat:
+            return True
+        elif path in pat:
+            return True
+        elif fnmatch.fnmatch(path, pat):
+            return True
 
-    # Check for directory match (e.g., "dir/" should match "dir/file.txt")
-    if pattern.endswith("/") and path.startswith(pattern):
-        return True
+        # Check for directory match (e.g., "dir/" should match "dir/file.txt")
+        if pat.endswith("/") and path.startswith(pat):
+            return True
 
-    # Use fnmatch for glob-style pattern matching
-    return fnmatch.fnmatch(path, pattern)
+    return False
 
 
 def apply_suppressions_to_sarif(

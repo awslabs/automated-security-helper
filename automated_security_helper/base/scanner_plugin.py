@@ -321,3 +321,62 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             ScannerError: if scanning failed for any reason
         """
         pass
+
+    def safe_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] = [],
+        config: T | ScannerPluginConfigBase = None,
+        *args,
+        **kwargs,
+    ) -> Any | SarifReport | CycloneDXReport:
+        """
+        Safely execute scanner against a target with comprehensive error handling.
+
+        This is a wrapper around the scan method that catches exceptions and returns
+        a structured error response instead of propagating exceptions.
+
+        Args:
+            target: Target to scan
+            target_type: Type of target (source or converted)
+            global_ignore_paths: List of paths to ignore globally
+            config: Scanner configuration
+            *args: Variable length argument list
+            **kwargs: Arbitrary keyword arguments
+
+        Returns:
+            Dict containing scan results or error information
+        """
+        try:
+            return self.scan(
+                target=target,
+                target_type=target_type,
+                global_ignore_paths=global_ignore_paths,
+                config=config,
+                *args,
+                **kwargs,
+            )
+        except Exception as e:
+            # Include stack trace for debugging
+            import traceback
+
+            stack_trace = traceback.format_exc()
+
+            error_msg = f"{self.__class__.__name__} scanner failed: {str(e)}"
+            ASH_LOGGER.error(error_msg)
+            ASH_LOGGER.debug(f"Stack trace for scanner failure:\n{stack_trace}")
+
+            # Add error to scanner's error list
+            self.errors.append(error_msg)
+
+            # Return structured error response
+            return {
+                "scanner": self.__class__.__name__,
+                "error": str(e),
+                "status": "failed",
+                "findings": [],
+                "errors": [error_msg, *self.errors],
+                "output": self.output,
+                "stack_trace": stack_trace,
+            }

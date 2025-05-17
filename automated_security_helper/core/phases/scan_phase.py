@@ -459,6 +459,14 @@ class ScanPhase(EnginePhase):
                     else:
                         ASH_LOGGER.warning(f"{scanner_config.name} is not enabled!")
                 except Exception as e:
+                    # Include stack trace for debugging
+                    import traceback
+
+                    stack_trace = traceback.format_exc()
+                    ASH_LOGGER.debug(
+                        f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+                    )
+
                     err_str = f"Failed to execute {scanner_config.name or scanner_plugin.__class__.__name__} scanner on {target_type}: {e}"
                     ASH_LOGGER.error(err_str)
                     raw_results = {
@@ -467,7 +475,27 @@ class ScanPhase(EnginePhase):
                             *scanner_plugin.errors,
                         ],
                         "output": scanner_plugin.output,
+                        "status": "failed",
+                        "exception": str(e),
+                        "stack_trace": stack_trace,
                     }
+
+                    # Notify about the error through the event system if available
+                    try:
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
+
+                        self.plugin_context.notify(
+                            AshEventType.ERROR,
+                            message=err_str,
+                            scanner=scanner_name,
+                            exception=e,
+                        )
+                    except Exception as event_error:
+                        ASH_LOGGER.error(
+                            f"Failed to notify error event: {str(event_error)}"
+                        )
                 finally:
                     ASH_LOGGER.trace(
                         f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}"
@@ -476,6 +504,8 @@ class ScanPhase(EnginePhase):
                         raw_results = {
                             "errors": scanner_plugin.errors or [],
                             "output": scanner_plugin.output or [],
+                            "status": "failed",
+                            "exception": "Scanner returned None",
                         }
                     elif not raw_results:
                         ASH_LOGGER.debug(
@@ -647,32 +677,73 @@ class ScanPhase(EnginePhase):
                 # Log progress
                 ASH_LOGGER.info(f"Running scanner: {scanner_name}")
 
-                results_list = self._execute_scanner(
+                # Use the safe wrapper to execute the scanner
+                results_list = self._safe_execute_scanner(
                     scanner_name=scanner_name,
                     scanner_plugin=scanner_plugin,
                     scan_targets=scan_targets,
                 )
 
-                # Process each result
-                for results in results_list:
+                if results_list is None:
+                    # Handle case where scanner completely failed and returned None
+                    ASH_LOGGER.error(f"Scanner {scanner_name} returned None results")
+
+                    # Create a failure container
+                    failure_container = ScanResultsContainer(
+                        scanner_name=scanner_name,
+                        status=ScannerStatus.FAILED,
+                        raw_results={
+                            "errors": [
+                                f"Scanner {scanner_name} failed with no results"
+                            ],
+                            "status": "failed",
+                            "exception": "Scanner returned None results",
+                        },
+                    )
+
+                    # Process the failure container
                     processed = self._process_results(
-                        results=results, aggregated_results=aggregated_results
+                        results=failure_container, aggregated_results=aggregated_results
                     )
                     if isinstance(processed, AshAggregatedResults):
                         aggregated_results = processed
 
-                # Update scanner task to 100%
-                self.progress_display.update_task(
-                    phase=ExecutionPhase.SCAN,
-                    task_id=scanner_task,
-                    completed=100,
-                    description=f"[green]({scanner_name}) Completed scan",
-                )
+                    # Update task to show failure
+                    self.progress_display.update_task(
+                        phase=ExecutionPhase.SCAN,
+                        task_id=scanner_task,
+                        completed=100,
+                        description=f"[red]({scanner_name}) Failed: returned None results",
+                    )
+                else:
+                    # Process each result
+                    for results in results_list:
+                        processed = self._process_results(
+                            results=results, aggregated_results=aggregated_results
+                        )
+                        if isinstance(processed, AshAggregatedResults):
+                            aggregated_results = processed
 
-                # Log completion
-                ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
+                    # Update scanner task to 100%
+                    self.progress_display.update_task(
+                        phase=ExecutionPhase.SCAN,
+                        task_id=scanner_task,
+                        completed=100,
+                        description=f"[green]({scanner_name}) Completed scan",
+                    )
+
+                    # Log completion
+                    ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
 
             except Exception as e:
+                # Include stack trace for debugging
+                import traceback
+
+                stack_trace = traceback.format_exc()
+                ASH_LOGGER.debug(
+                    f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+                )
+
                 # Update scanner task to show error
                 self.progress_display.update_task(
                     phase=ExecutionPhase.SCAN,
@@ -684,7 +755,30 @@ class ScanPhase(EnginePhase):
                 # Log error but continue with other scanners
                 ASH_LOGGER.error(f"Scanner failed: {scanner_name} - {str(e)}")
 
-                # Don't re-raise the exception so we can continue with other scanners
+                # Create a failure container
+                failure_container = ScanResultsContainer(
+                    scanner_name=scanner_name,
+                    status=ScannerStatus.FAILED,
+                    raw_results={
+                        "errors": [f"Scanner {scanner_name} failed: {str(e)}"],
+                        "status": "failed",
+                        "exception": str(e),
+                        "stack_trace": stack_trace,
+                    },
+                )
+
+                # Process the failure container
+                try:
+                    processed = self._process_results(
+                        results=failure_container, aggregated_results=aggregated_results
+                    )
+                    if isinstance(processed, AshAggregatedResults):
+                        aggregated_results = processed
+                except Exception as process_error:
+                    ASH_LOGGER.error(
+                        f"Failed to process error results for {scanner_name}: {str(process_error)}"
+                    )
+
             finally:
                 completed += 1
 
@@ -736,7 +830,7 @@ class ScanPhase(EnginePhase):
                     f"Submitting {scanner_name} to thread pool to scan targets"
                 )
                 future = executor.submit(
-                    self._execute_scanner,
+                    self._safe_execute_scanner,  # Use our safe wrapper instead of direct call
                     scanner_name,
                     scanner_plugin,
                     scan_targets,
@@ -758,50 +852,84 @@ class ScanPhase(EnginePhase):
             # Wait for all futures to complete and handle any exceptions
             completed_count = 0
             for future in as_completed(futures):
-                try:
-                    ASH_LOGGER.debug("Getting results from completed future")
-                    results_list = future.result()
-                    ASH_LOGGER.debug("Got results from completed future, processing")
+                scanner_name = future.scanner_info["name"]
+                task_key = future.scanner_info["task_key"]
+                task_id = scanner_tasks.get(task_key)
 
-                    # Process each result in the list
-                    for results in results_list:
+                try:
+                    ASH_LOGGER.debug(
+                        f"Getting results from completed future for {scanner_name}"
+                    )
+                    results_list = future.result()
+
+                    if results_list is None:
+                        # Handle case where scanner completely failed and returned None
+                        ASH_LOGGER.error(
+                            f"Scanner {scanner_name} returned None results"
+                        )
+
+                        # Create a failure container
+                        failure_container = ScanResultsContainer(
+                            scanner_name=scanner_name,
+                            status=ScannerStatus.FAILED,
+                            raw_results={
+                                "errors": [
+                                    f"Scanner {scanner_name} failed with no results"
+                                ],
+                                "status": "failed",
+                                "exception": "Scanner returned None results",
+                            },
+                        )
+
+                        # Process the failure container
                         processed = self._process_results(
-                            results=results, aggregated_results=aggregated_results
+                            results=failure_container,
+                            aggregated_results=aggregated_results,
                         )
                         if isinstance(processed, AshAggregatedResults):
                             aggregated_results = processed
 
-                    # Update scanner task to show completion
-                    scanner_name = future.scanner_info["name"]
-                    task_key = future.scanner_info["task_key"]
-                    task_id = scanner_tasks.get(task_key)
+                        # Update task to show failure
+                        if task_id is not None:
+                            self.progress_display.update_task(
+                                phase=ExecutionPhase.SCAN,
+                                task_id=task_id,
+                                completed=100,
+                                description=f"[red]({scanner_name}) Failed: returned None results",
+                            )
+                    else:
+                        ASH_LOGGER.debug(f"Got results from {scanner_name}, processing")
 
-                    if task_id is not None:
-                        self.progress_display.update_task(
-                            phase=ExecutionPhase.SCAN,
-                            task_id=task_id,
-                            completed=100,
-                            description=f"[green]({scanner_name}) Completed scan",
-                        )
+                        # Process each result in the list
+                        for results in results_list:
+                            processed = self._process_results(
+                                results=results, aggregated_results=aggregated_results
+                            )
+                            if isinstance(processed, AshAggregatedResults):
+                                aggregated_results = processed
 
-                    # Log completion
-                    ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
+                        # Update scanner task to show completion
+                        if task_id is not None:
+                            self.progress_display.update_task(
+                                phase=ExecutionPhase.SCAN,
+                                task_id=task_id,
+                                completed=100,
+                                description=f"[green]({scanner_name}) Completed scan",
+                            )
 
-                    # Update main scan task progress
-                    completed_count += 1
-                    if len(futures) > 0:  # Avoid division by zero
-                        progress_percent = 50 + (completed_count / len(futures) * 40)
-                        self.update_progress(
-                            int(progress_percent),
-                            f"Completed {completed_count}/{len(futures)} scanner tasks",
-                        )
+                        # Log completion
+                        ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
 
                 except Exception as e:
-                    # Update scanner task to show error
-                    scanner_name = future.scanner_info["name"]
-                    task_key = future.scanner_info["task_key"]
-                    task_id = scanner_tasks.get(task_key)
+                    # Include stack trace for debugging
+                    import traceback
 
+                    stack_trace = traceback.format_exc()
+                    ASH_LOGGER.debug(
+                        f"Stack trace for scanner {scanner_name} thread failure:\n{stack_trace}"
+                    )
+
+                    # Update scanner task to show error
                     if task_id is not None:
                         self.progress_display.update_task(
                             phase=ExecutionPhase.SCAN,
@@ -812,16 +940,44 @@ class ScanPhase(EnginePhase):
 
                     # Log error but continue with other scanners
                     ASH_LOGGER.error(
-                        f"Scanner execution failed: {scanner_name} - {str(e)}"
+                        f"Scanner execution failed in thread pool: {scanner_name} - {str(e)}"
                     )
 
-                    # Still count this as completed for progress tracking
+                    # Create a failure container
+                    failure_container = ScanResultsContainer(
+                        scanner_name=scanner_name,
+                        status=ScannerStatus.FAILED,
+                        raw_results={
+                            "errors": [
+                                f"Scanner {scanner_name} failed in thread pool: {str(e)}"
+                            ],
+                            "status": "failed",
+                            "exception": str(e),
+                            "stack_trace": stack_trace,
+                        },
+                    )
+
+                    # Process the failure container
+                    try:
+                        processed = self._process_results(
+                            results=failure_container,
+                            aggregated_results=aggregated_results,
+                        )
+                        if isinstance(processed, AshAggregatedResults):
+                            aggregated_results = processed
+                    except Exception as process_error:
+                        ASH_LOGGER.error(
+                            f"Failed to process error results for {scanner_name}: {str(process_error)}"
+                        )
+
+                finally:
+                    # Always count as completed for progress tracking
                     completed_count += 1
                     if len(futures) > 0:  # Avoid division by zero
                         progress_percent = 50 + (completed_count / len(futures) * 40)
                         self.update_progress(
                             int(progress_percent),
-                            f"Completed {completed_count}/{len(futures)} scanner tasks (with errors)",
+                            f"Completed {completed_count}/{len(futures)} scanner tasks",
                         )
         return aggregated_results
 
@@ -1071,7 +1227,7 @@ class ScanPhase(EnginePhase):
             )
 
             # Log the scanner details for debugging
-            ASH_LOGGER.debug(
+            ASH_LOGGER.trace(
                 f"Attached scanner details for {results.scanner_name} v{scanner_version} with invocation details: {invocation_details}"
             )
 
@@ -1086,3 +1242,64 @@ class ScanPhase(EnginePhase):
             ] = results.raw_results
 
         return aggregated_results
+
+    def _safe_execute_scanner(
+        self,
+        scanner_name: str,
+        scanner_plugin: ScannerPluginBase,
+        scan_targets: List[Dict[str, Any]],
+    ) -> List[ScanResultsContainer]:
+        """
+        Safely execute a scanner with comprehensive error handling.
+        This wrapper ensures that scanner failures are properly captured and don't crash the thread pool.
+
+        Args:
+            scanner_name: Name of the scanner
+            scanner_plugin: Scanner plugin instance
+            scan_targets: List of targets to scan, each with path and type
+
+        Returns:
+            List[ScanResultsContainer]: List of scan results containers, or empty list on failure
+        """
+        try:
+            # Call the actual scanner execution method
+            return self._execute_scanner(scanner_name, scanner_plugin, scan_targets)
+        except Exception as e:
+            # Capture any unexpected exceptions that might occur
+            import traceback
+
+            stack_trace = traceback.format_exc()
+
+            error_msg = f"Unexpected error in scanner {scanner_name}: {str(e)}"
+            ASH_LOGGER.error(error_msg)
+            ASH_LOGGER.debug(
+                f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+            )
+
+            # Create a failure container to report the error
+            failure_container = ScanResultsContainer(
+                scanner_name=scanner_name,
+                status=ScannerStatus.FAILED,
+                raw_results={
+                    "errors": [error_msg],
+                    "status": "failed",
+                    "exception": str(e),
+                    "stack_trace": stack_trace,
+                },
+            )
+
+            # Try to notify about the error through the event system
+            try:
+                from automated_security_helper.plugins.events import AshEventType
+
+                self.plugin_context.notify(
+                    AshEventType.ERROR,
+                    message=error_msg,
+                    scanner=scanner_name,
+                    exception=e,
+                )
+            except Exception as event_error:
+                ASH_LOGGER.error(f"Failed to notify error event: {str(event_error)}")
+
+            # Return a list with the failure container
+            return [failure_container]

@@ -23,9 +23,14 @@ def find_executable(command: str) -> Optional[str]:
         found = shutil.which(command)
         if found:
             return found
-        poss = ASH_BIN_PATH.joinpath(command)
-        if poss.exists():
-            return poss.as_posix()
+        possibles = [
+            ASH_BIN_PATH.joinpath(command),
+            Path("/usr/local/bin").joinpath(command),
+        ]
+        for poss in possibles:
+            if poss.exists():
+                return poss.as_posix()
+
         return None
     except Exception as e:
         ASH_LOGGER.error(e)
