@@ -388,14 +388,14 @@ tests-mypy = ["mypy (>=1.11.1) ; platform_python_implementation == \"CPython\" a
 
 [[package]]
 name = "aws-cdk-asset-awscli-v1"
-version = "2.2.235"
+version = "2.2.236"
 description = "A library that contains the AWS CLI for use in Lambda Layers"
 optional = false
 python-versions = "~=3.9"
 groups = ["main"]
 files = [
-    {file = "aws_cdk_asset_awscli_v1-2.2.235-py3-none-any.whl", hash = "sha256:701a47a97419b917ce73cf9c922a26c2895943b4b18b191e1285572b8584ae1e"},
-    {file = "aws_cdk_asset_awscli_v1-2.2.235.tar.gz", hash = "sha256:0a2023f9d32158ae86d43dfeac2ba7679e8a050cb99b7565b26192e60e57a91c"},
+    {file = "aws_cdk_asset_awscli_v1-2.2.236-py3-none-any.whl", hash = "sha256:c14e64538af61d99cf37e01e65f8ba549949536052fe5a5fc8b56eaf1a0c714e"},
+    {file = "aws_cdk_asset_awscli_v1-2.2.236.tar.gz", hash = "sha256:5e1c907cfc81f09c2af229ac2af3e9cbbbe8c476a50481b4097d6aa7d3e5330d"},
 ]
 
 [package.dependencies]
@@ -439,22 +439,22 @@ typeguard = ">=2.13.3,<4.3.0"
 
 [[package]]
 name = "aws-cdk-lib"
-version = "2.195.0"
+version = "2.196.0"
 description = "Version 2 of the AWS Cloud Development Kit library"
 optional = false
 python-versions = "~=3.9"
 groups = ["main"]
 files = [
-    {file = "aws_cdk_lib-2.195.0-py3-none-any.whl", hash = "sha256:9087fca8dbe5cf256cdcbf00f0c6e452ceeb66452aea5878728633a379e7aa56"},
-    {file = "aws_cdk_lib-2.195.0.tar.gz", hash = "sha256:6617bc60dc1e37826f16d8932df73e6a062922cef12bf11e9f12becbdda73f33"},
+    {file = "aws_cdk_lib-2.196.0-py3-none-any.whl", hash = "sha256:8327a594cd5f29a4ee161f44d24ad7a13aaa325f662c837c6c8b4749de0a670d"},
+    {file = "aws_cdk_lib-2.196.0.tar.gz", hash = "sha256:9e950946c7d55d387850eb5858e35b7735c376151431fcb9c6042481ec16882d"},
 ]
 
 [package.dependencies]
-"aws-cdk.asset-awscli-v1" = ">=2.2.229,<3.0.0"
+"aws-cdk.asset-awscli-v1" = "2.2.236"
 "aws-cdk.asset-node-proxy-agent-v6" = ">=2.1.0,<3.0.0"
 "aws-cdk.cloud-assembly-schema" = ">=41.2.0,<42.0.0"
 constructs = ">=10.0.0,<11.0.0"
-jsii = ">=1.110.0,<2.0.0"
+jsii = ">=1.112.0,<2.0.0"
 publication = ">=0.0.3"
 typeguard = ">=2.13.3,<4.3.0"
 
@@ -506,13 +506,9 @@ files = [
 
 [package.dependencies]
 colorama = {version = ">=0.3.9", markers = "platform_system == \"Windows\""}
-GitPython = {version = ">=3.1.30", optional = true, markers = "extra == \"baseline\""}
-jschema-to-python = {version = ">=1.2.3", optional = true, markers = "extra == \"sarif\""}
 PyYAML = ">=5.3.1"
 rich = "*"
-sarif-om = {version = ">=1.0.4", optional = true, markers = "extra == \"sarif\""}
 stevedore = ">=1.20.0"
-tomli = {version = ">=1.1.0", optional = true, markers = "python_version < \"3.11\" and extra == \"toml\""}
 
 [package.extras]
 baseline = ["GitPython (>=3.1.30)"]
@@ -834,14 +830,14 @@ ujson = ["ujson (>=5.7.0)"]
 
 [[package]]
 name = "cdk-nag"
-version = "2.35.93"
+version = "2.35.100"
 description = "Check CDK v2 applications for best practices using a combination on available rule packs."
 optional = false
 python-versions = "~=3.9"
 groups = ["main"]
 files = [
-    {file = "cdk_nag-2.35.93-py3-none-any.whl", hash = "sha256:c6b8f5304e449413219376124c873be7b441107999f34361248991e19e2aae52"},
-    {file = "cdk_nag-2.35.93.tar.gz", hash = "sha256:a78886beb673e54b6c9a948fd1d99ddc9279f3ad47326b29552c2f9f1259c9f2"},
+    {file = "cdk_nag-2.35.100-py3-none-any.whl", hash = "sha256:4a7f8e4d1f06520f8f82a5c511bab5e4a0fb4a40e365d0f9fa640726d7eea204"},
+    {file = "cdk_nag-2.35.100.tar.gz", hash = "sha256:f8aada3365a27cc16be21d6947f41a1c2fad11dfb9d674bd918ef2fddc8075f2"},
 ]
 
 [package.dependencies]
@@ -2480,23 +2476,6 @@ files = [
 ]
 
 [[package]]
-name = "jschema-to-python"
-version = "1.2.3"
-description = "Generate source code for Python classes from a JSON schema."
-optional = false
-python-versions = ">= 2.7"
-groups = ["main"]
-files = [
-    {file = "jschema_to_python-1.2.3-py3-none-any.whl", hash = "sha256:8a703ca7604d42d74b2815eecf99a33359a8dccbb80806cce386d5e2dd992b05"},
-    {file = "jschema_to_python-1.2.3.tar.gz", hash = "sha256:76ff14fe5d304708ccad1284e4b11f96a658949a31ee7faed9e0995279549b91"},
-]
-
-[package.dependencies]
-attrs = "*"
-jsonpickle = "*"
-pbr = "*"
-
-[[package]]
 name = "jsii"
 version = "1.112.0"
 description = "Python client for jsii runtime"
@@ -2547,25 +2526,6 @@ files = [
 
 [package.dependencies]
 ply = "*"
-
-[[package]]
-name = "jsonpickle"
-version = "4.0.5"
-description = "jsonpickle encodes/decodes any Python object to/from JSON"
-optional = false
-python-versions = ">=3.8"
-groups = ["main"]
-files = [
-    {file = "jsonpickle-4.0.5-py3-none-any.whl", hash = "sha256:b4ac7d0a75ddcdfd93445737f1d36ff28768690d43e54bf5d0ddb1d915e580df"},
-    {file = "jsonpickle-4.0.5.tar.gz", hash = "sha256:f299818b39367c361b3f26bdba827d4249ab5d383cd93144d0f94b5417aacb35"},
-]
-
-[package.extras]
-cov = ["pytest-cov"]
-dev = ["black", "pyupgrade"]
-docs = ["furo", "rst.linker (>=1.9)", "sphinx (>=3.5)"]
-packaging = ["build", "setuptools (>=61.2)", "setuptools-scm[toml] (>=6.0)", "twine"]
-testing = ["PyYAML", "atheris (>=2.3.0,<2.4.0) ; python_version < \"3.12\"", "bson", "ecdsa", "feedparser", "gmpy2", "numpy", "pandas", "pymongo", "pytest (>=6.0,!=8.1.*)", "pytest-benchmark", "pytest-benchmark[histogram]", "pytest-checkdocs (>=1.2.3)", "pytest-enabler (>=1.0.1)", "pytest-ruff (>=0.2.1)", "scikit-learn", "scipy (>=1.9.3) ; python_version > \"3.10\"", "scipy ; python_version <= \"3.10\"", "simplejson", "sqlalchemy", "ujson"]
 
 [[package]]
 name = "jsonpointer"
@@ -5977,22 +5937,6 @@ botocore = ">=1.33.2,<2.0a.0"
 crt = ["botocore[crt] (>=1.33.2,<2.0a.0)"]
 
 [[package]]
-name = "sarif-om"
-version = "1.0.4"
-description = "Classes implementing the SARIF 2.1.0 object model."
-optional = false
-python-versions = ">= 2.7"
-groups = ["main"]
-files = [
-    {file = "sarif_om-1.0.4-py3-none-any.whl", hash = "sha256:539ef47a662329b1c8502388ad92457425e95dc0aaaf995fe46f4984c4771911"},
-    {file = "sarif_om-1.0.4.tar.gz", hash = "sha256:cd5f416b3083e00d402a92e449a7ff67af46f11241073eea0461802a3b5aef98"},
-]
-
-[package.dependencies]
-attrs = "*"
-pbr = "*"
-
-[[package]]
 name = "sarif-tools"
 version = "3.0.4"
 description = "SARIF tools"
@@ -6044,24 +5988,24 @@ doc = ["Sphinx", "sphinx-rtd-theme"]
 
 [[package]]
 name = "semgrep"
-version = "1.121.0"
+version = "1.122.0"
 description = "Lightweight static analysis for many languages. Find bug variants with patterns that look like source code."
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "semgrep-1.121.0-cp39.cp310.cp311.py39.py310.py311-none-macosx_10_14_x86_64.whl", hash = "sha256:0ece86f06b049242c9ada1f5e5413abcc0a23c218b3e31f459635403d30d1b44"},
-    {file = "semgrep-1.121.0-cp39.cp310.cp311.py39.py310.py311-none-macosx_11_0_arm64.whl", hash = "sha256:e427dd2e2432263b7a243f14738e6879bfe08bb086932b37230e86cd67de0398"},
-    {file = "semgrep-1.121.0-cp39.cp310.cp311.py39.py310.py311-none-musllinux_1_0_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5ed5d1490c38f58f683fd10c5ee16515336424c7e70d158a7e6e3821b2b30485"},
-    {file = "semgrep-1.121.0-cp39.cp310.cp311.py39.py310.py311-none-musllinux_1_0_x86_64.manylinux2014_x86_64.whl", hash = "sha256:09cad989bf1897b1c1bf94360fbc3aa53825b4c687d38678d43eeda66ad99eb9"},
-    {file = "semgrep-1.121.0-cp39.cp310.cp311.py39.py310.py311-none-win_amd64.whl", hash = "sha256:dc697f87f98ae3538018cc57058054705385351655150360f89b3f1c0da2e5d9"},
-    {file = "semgrep-1.121.0.tar.gz", hash = "sha256:3211f673024835e7dfdc32e1e83a5dc4ccf295daa489191f0b2fa02ac8e10723"},
+    {file = "semgrep-1.122.0-cp39.cp310.cp311.py39.py310.py311-none-macosx_10_14_x86_64.whl", hash = "sha256:8d1eda7c9fdb7bda9885a5d846752046cd5056b37ee5e4c92b47030428ecc308"},
+    {file = "semgrep-1.122.0-cp39.cp310.cp311.py39.py310.py311-none-macosx_11_0_arm64.whl", hash = "sha256:4b4467a6b40743ea2d2bd798ca5a7750aa4337d3fd3ab7ac03a275f272f52f49"},
+    {file = "semgrep-1.122.0-cp39.cp310.cp311.py39.py310.py311-none-musllinux_1_0_aarch64.manylinux2014_aarch64.whl", hash = "sha256:349246654c2b4435299661a83921de51dc5bd2effd047048792e8243ddad6088"},
+    {file = "semgrep-1.122.0-cp39.cp310.cp311.py39.py310.py311-none-musllinux_1_0_x86_64.manylinux2014_x86_64.whl", hash = "sha256:42fe84f4fbd60a6338437328af933405d9b4e2b8e12bc7a4aceea8d22650311e"},
+    {file = "semgrep-1.122.0-cp39.cp310.cp311.py39.py310.py311-none-win_amd64.whl", hash = "sha256:8ebe5fa37acc4d7f857443825f6673482588190d42da98682f30ae3931d1d5e9"},
+    {file = "semgrep-1.122.0.tar.gz", hash = "sha256:c38b184332761345eef1e0800ab6fb4e682a0ea283060173850e3769979eb5c8"},
 ]
 
 [package.dependencies]
 attrs = ">=21.3"
 boltons = ">=21.0,<22.0"
-click = ">=8.1,<9.0"
+click = ">=8.1.8,<8.2.0"
 click-option-group = ">=0.5,<1.0"
 colorama = ">=0.4.0,<0.5.0"
 defusedxml = ">=0.7.1,<0.8.0"
@@ -6826,18 +6770,18 @@ test = ["mypy ; platform_python_implementation != \"PyPy\"", "pytest", "typing-e
 
 [[package]]
 name = "typer"
-version = "0.15.3"
+version = "0.15.4"
 description = "Typer, build great CLIs. Easy to code. Based on Python type hints."
 optional = false
 python-versions = ">=3.7"
 groups = ["main", "dev"]
 files = [
-    {file = "typer-0.15.3-py3-none-any.whl", hash = "sha256:c86a65ad77ca531f03de08d1b9cb67cd09ad02ddddf4b34745b5008f43b239bd"},
-    {file = "typer-0.15.3.tar.gz", hash = "sha256:818873625d0569653438316567861899f7e9972f2e6e0c16dab608345ced713c"},
+    {file = "typer-0.15.4-py3-none-any.whl", hash = "sha256:eb0651654dcdea706780c466cf06d8f174405a659ffff8f163cfbfee98c0e173"},
+    {file = "typer-0.15.4.tar.gz", hash = "sha256:89507b104f9b6a0730354f27c39fae5b63ccd0c95b1ce1f1a6ba0cfd329997c3"},
 ]
 
 [package.dependencies]
-click = ">=8.0.0"
+click = ">=8.0.0,<8.2"
 rich = ">=10.11.0"
 shellingham = ">=1.3.0"
 typing-extensions = ">=3.7.4.3"
@@ -8009,4 +7953,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "116ec5527c95ee2a196e6e62980455b7f87f3d50bcdaf5c4dfdfe1e39ea7dd11"
+content-hash = "925e2da1feeeecbf7f1f0c652124178cfdca02c33f7943728771c17084cec195"

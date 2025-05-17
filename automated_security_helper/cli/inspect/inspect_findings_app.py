@@ -243,8 +243,8 @@ class FindingsExplorerApp(App):
                 finding["file"] or "N/A",
                 str(finding.get("line", "N/A")),
                 (
-                    finding["message"][:50] + "..."
-                    if len(finding["message"]) > 50
+                    finding["message"][:80] + "..."
+                    if len(finding["message"]) > 80
                     else finding["message"]
                 ),
                 key=i,  # Use index as row key
