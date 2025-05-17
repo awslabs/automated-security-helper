@@ -87,8 +87,8 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     test_case.result = [
                         Error(message=result.message.root.text, type_="warning")
                     ]
-                elif result.kind not in ["notApplicable", "informational"]:
-                    test_case.result = [Skipped(message=result.message.root.text)]
+                # elif result.kind not in ["notApplicable", "informational"]:
+                #     pass
 
                 # Add additional metadata in system-out
                 metadata = []

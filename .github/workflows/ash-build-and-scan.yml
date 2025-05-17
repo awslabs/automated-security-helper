@@ -97,6 +97,7 @@ jobs:
           include_passed: true
           update_check: true
           check_name: ASH Scan JUnit Test Report
+          summary: Skipped means passing, suppressed, or ignored findings that are considered non-actionable.
 
       - name: Upload ASH SARIF file
         uses: github/codeql-action/upload-sarif@v3
