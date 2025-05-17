@@ -194,6 +194,12 @@ RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
 #
+# Explicit Semgrep install to resolve underlying dependency
+# resolution issues when running inside the container
+#
+RUN python3 -m pip install semgrep --force
+
+#
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
 #
 ENV ASH_IN_CONTAINER="YES"
