@@ -19,6 +19,7 @@ def load_internal_plugins():
 
     for module_name in internal_modules:
         try:
+            # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
             module = importlib.import_module(module_name)
             ASH_LOGGER.debug(f"Loaded internal plugin module: {module_name}")
 
@@ -59,7 +60,7 @@ def load_additional_plugin_modules(plugin_modules: List[str] = []) -> dict:
     for module_path in unique:
         try:
             ASH_LOGGER.info(f"Importing additional plugin module: {module_path}")
-            importlib.import_module(module_path)
+            # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
             module = importlib.import_module(module_path)
             # The import itself should trigger plugin registration
             # via the AshPlugin metaclass

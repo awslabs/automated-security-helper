@@ -16,6 +16,7 @@ def discover_plugins(plugin_modules: List[str] = ["ash_plugins"]):
         for namespace in plugin_modules:
             if name.startswith(namespace) and ispkg:
                 try:
+                    # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
                     module = importlib.import_module(name)
                     # The import itself should trigger plugin registration
                     # via the AshPlugin metaclass

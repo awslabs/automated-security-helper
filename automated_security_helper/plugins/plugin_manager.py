@@ -209,6 +209,7 @@ class AshPluginManager(BaseModel):
             for name, registration in self.plugin_library.converters.items():
                 if registration.enabled:
                     try:
+                        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
                         module = importlib.import_module(
                             registration.plugin_module_path
                         )
@@ -232,6 +233,7 @@ class AshPluginManager(BaseModel):
             for name, registration in self.plugin_library.scanners.items():
                 if registration.enabled:
                     try:
+                        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
                         module = importlib.import_module(
                             registration.plugin_module_path
                         )
@@ -255,6 +257,7 @@ class AshPluginManager(BaseModel):
             for name, registration in self.plugin_library.reporters.items():
                 if registration.enabled:
                     try:
+                        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
                         module = importlib.import_module(
                             registration.plugin_module_path
                         )

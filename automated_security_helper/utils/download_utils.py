@@ -38,6 +38,7 @@ def download_file(url: str, destination: Path, rename_to: Optional[str] = None) 
 
     with tempfile.NamedTemporaryFile(delete=False) as temp_file:
         ASH_LOGGER.info(f"Downloading {url} to {temp_file.name}")
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         with urllib.request.urlopen(url) as response:  # nosec B310 - This url is evaluated for https scheme a few lines above
             shutil.copyfileobj(response, temp_file)
 
