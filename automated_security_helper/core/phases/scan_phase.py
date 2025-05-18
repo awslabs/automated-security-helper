@@ -486,7 +486,7 @@ class ScanPhase(EnginePhase):
                             AshEventType,
                         )
 
-                        self.plugin_context.notify(
+                        self.notify_event(
                             AshEventType.ERROR,
                             message=err_str,
                             scanner=scanner_name,
@@ -1292,7 +1292,7 @@ class ScanPhase(EnginePhase):
             try:
                 from automated_security_helper.plugins.events import AshEventType
 
-                self.plugin_context.notify(
+                self.notify_event(
                     AshEventType.ERROR,
                     message=error_msg,
                     scanner=scanner_name,

@@ -108,11 +108,45 @@ def test_process_config_options_exclusions(test_plugin_context):
     assert any("--exclude=" in arg and "tests/*" in arg for arg in exclusion_args)
 
 
-def test_bandit_scanner_scan(test_bandit_scanner, test_source_dir):
+def test_bandit_scanner_scan(test_bandit_scanner, test_source_dir, monkeypatch):
     """Test BanditScanner scan method."""
     # Create a test Python file with a known vulnerability
     test_file = test_source_dir.joinpath("test_file.py")
     test_file.write_text("import pickle\npickle.loads(b'test')")  # Known security issue
+
+    # Import json here for use in the mock function
+    import json
+    from pathlib import Path
+
+    # Create a mock function that properly handles the self parameter
+    def mock_run_subprocess(*args, **kwargs):
+        # Extract the results_dir from kwargs
+        results_dir = kwargs.get("results_dir")
+        if not results_dir:
+            # If not in kwargs, try to get it from args (position 2)
+            if len(args) > 2:
+                results_dir = args[2]
+
+        # Create the results directory
+        Path(results_dir).mkdir(parents=True, exist_ok=True)
+
+        # Create a minimal valid SARIF file
+        sarif_file = Path(results_dir).joinpath("bandit.sarif")
+        minimal_sarif = {
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+                {"tool": {"driver": {"name": "Bandit", "rules": []}}, "results": []}
+            ],
+        }
+
+        with open(sarif_file, "w") as f:
+            json.dump(minimal_sarif, f)
+
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    # Apply the monkeypatch
+    monkeypatch.setattr(test_bandit_scanner, "_run_subprocess", mock_run_subprocess)
 
     # Run the scan
     results = test_bandit_scanner.scan(test_source_dir, target_type="source")
