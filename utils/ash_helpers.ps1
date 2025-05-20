@@ -284,7 +284,7 @@ function Invoke-ASH {
                         "--tag", $AshImageName
                         "--target", $BuildTarget
                         "--file", "`"$dockerfilePath`""
-                        "--build-arg", "OFFLINE=$($Offline -eq $true ? 'YES' : 'NO')"
+                        "--build-arg", "OFFLINE=$(if ($Offline) {'YES'} else {'NO'})"
                         "--build-arg", "OFFLINE_SEMGREP_RULESETS=`"$OfflineSemgrepRulesets`""
                         "--build-arg", "BUILD_DATE=$(Get-Date -UFormat %s)"
                     )
