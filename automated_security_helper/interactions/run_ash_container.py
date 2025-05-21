@@ -604,8 +604,10 @@ def run_ash_container(
             ash_args.append("--cleanup")
         if inspect:
             ash_args.append("--inspect")
-        if fail_on_findings is not None:
-            ash_args.append(f"--fail-on-findings={str(fail_on_findings).lower()}")
+        if fail_on_findings:
+            ash_args.append("--fail-on-findings")
+        elif fail_on_findings is not None:
+            ash_args.append("--no-fail-on-findings")
 
         # Add phases if specified
         if phases:
