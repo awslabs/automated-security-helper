@@ -52,7 +52,6 @@ on:
 
 jobs:
   ash:
-    name: ASH - Build & Scan
     runs-on: ubuntu-latest
     env:
       COLUMNS: 140
