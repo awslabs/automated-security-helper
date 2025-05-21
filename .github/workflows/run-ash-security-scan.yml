@@ -77,6 +77,13 @@ jobs:
           uvx --from git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }} \
           ash --source-dir . --output-dir ${{ inputs.output-dir }} ${{ inputs.ash-args }} --build-target ci ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}} --mode ${{ inputs.ash-mode }} ${{ inputs.verbose && '--verbose' }}
 
+      - name: Show ASH Summary Report
+        if: success() || failure()
+        shell: bash
+        run: |-
+          uvx --from git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }} \
+          ash --output-dir ${{ inputs.output-dir }} report
+
       - name: Update step summary
         if: success() || failure()
         shell: bash
