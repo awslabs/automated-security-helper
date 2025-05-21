@@ -1,0 +1,86 @@
+#checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
+name: Docs Build & Deploy
+on:
+  push:
+    branches:
+      - "*"
+    tags:
+      - "*"
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch: {}
+env:
+  PYTHON_VERSION: "3.12"
+jobs:
+  build-docs:
+    name: Build documentation
+    needs: []
+    runs-on: ubuntu-latest
+    permissions:
+      #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
+      contents: read
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "poetry"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Build documentation
+        run: poetry run mkdocs build --clean
+
+  deploy-docs:
+    name: Deploy documentation
+    needs: []
+    runs-on: ubuntu-latest
+    permissions:
+      #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
+      contents: write
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "poetry"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Deploy documentation
+        run: poetry run mkdocs gh-deploy --clean --force
