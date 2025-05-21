@@ -59,18 +59,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
-          cache: "pip"
-
-      - name: Install ASH via Pip
-        shell: bash
-        run: |
-          pip install --upgrade pip
-          pip install uv
-          pip install
 
       - name: Run ASH
         id: ash
