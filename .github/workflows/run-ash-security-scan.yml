@@ -69,12 +69,14 @@ jobs:
         shell: bash
         run: |
           pip install --upgrade pip
-          pip install git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }}
+          pip install uv
+          pip install
 
       - name: Run ASH
         id: ash
         shell: bash
         run: |-
+          alias ash="uvx git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }}"
           ash \
             --source-dir . \
             --output-dir ${{ inputs.output-dir }} \
