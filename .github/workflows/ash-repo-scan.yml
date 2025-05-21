@@ -24,7 +24,7 @@ jobs:
       statuses: write
     uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3/feat/add-gh-action
     with:
-      ash-version: ${{ github.sha }}
+      ash-version: ${{ github.head_ref || github.ref_name }}
       fail-on-findings: false
       post-pr-comment: true
       repository-owner: ${{ github.repository_owner }}
