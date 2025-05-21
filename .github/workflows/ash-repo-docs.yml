@@ -1,5 +1,5 @@
 #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
-name: ASH - Core Pipeline
+name: Docs Build & Deploy
 on:
   push:
     branches:
@@ -13,26 +13,6 @@ on:
 env:
   PYTHON_VERSION: "3.12"
 jobs:
-  build:
-    name: ASH - Run Security Scan
-    permissions:
-      #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
-      contents: read
-      checks: write
-      security-events: write
-      pull-requests: write
-      statuses: write
-    uses: ./.github/workflows/run-ash-security-scan.yml
-    with:
-      ash-version: ${{ github.ref }}
-      fail-on-findings: false
-      post-pr-comment: true
-      repository-owner: ${{ github.repository_owner }}
-      verbose: true
-      python-version: '3.12'
-      ash-mode: container
-      ash-args: '--inspect'
-
   build-docs:
     name: Build documentation
     needs: []
