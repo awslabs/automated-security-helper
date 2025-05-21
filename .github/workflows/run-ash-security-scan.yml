@@ -52,6 +52,7 @@ on:
 
 jobs:
   ash:
+    name: SAST, SCA, and IaC Scan
     runs-on: ubuntu-latest
     env:
       COLUMNS: 140

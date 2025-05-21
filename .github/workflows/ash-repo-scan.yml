@@ -14,7 +14,7 @@ env:
   PYTHON_VERSION: "3.12"
 jobs:
   ash:
-    name: Run ASH Security Scan
+    name: Run ASH
     permissions:
       #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       contents: read
