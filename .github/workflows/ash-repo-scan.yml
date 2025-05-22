@@ -3,9 +3,7 @@ name: Run ASH
 on:
   push:
     branches:
-      - "*"
-    tags:
-      - "*"
+      - "!main"
   pull_request:
     branches:
       - "*"
@@ -20,13 +18,18 @@ jobs:
       checks: write # Required for writing CI check runs
       pull-requests: write # Required for writing comments with scan results to pull requests
       security-events: write # Required for collection of SARIF code scanning results for GitHub Advanced Security checks
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@beta
+    # uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@beta
+    uses: ./.github/workflows/run-ash-security-scan.yml
     with:
       ash-version: ${{ github.head_ref || github.ref_name }}
-      fail-on-findings: false
-      post-pr-comment: true
       repository-owner: ${{ github.repository_owner }}
+      ash-args: '--inspect'
+      fail-on-findings: false
+      collect-junit-xml-report: true
+      collect-sarif-report: true
+      post-pr-comment: true
       verbose: true
       python-version: '3.12'
       ash-mode: container
-      ash-args: '--inspect'
+      output-dir: '.ash/ash_output'
+      config: '.ash/.ash.yaml'
