@@ -19,12 +19,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
-      actions: read
-      checks: write
-      pull-requests: write
       contents: read
-      id-token: write
-      security-events: read
+      pull-requests: write
+      checks: write
       statuses: write
 
     strategy:

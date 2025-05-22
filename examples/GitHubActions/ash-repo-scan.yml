@@ -1,4 +1,3 @@
-#checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
 name: Run ASH
 on:
   push:
@@ -12,24 +11,17 @@ env:
   PYTHON_VERSION: "3.12"
 jobs:
   ash:
-    # uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@beta
-    uses: ./.github/workflows/run-ash-security-scan.yml
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@beta
     permissions:
-      #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       contents: read # Required to read the repository contents in order to scan them with ASH
       checks: write # Required for writing CI check runs
       pull-requests: write # Required for writing comments with scan results to pull requests
       security-events: write # Required for collection of SARIF code scanning results for GitHub Advanced Security checks
     with:
-      ash-version: ${{ github.head_ref || github.ref_name }}
-      repository-owner: ${{ github.repository_owner }}
-      ash-args: '--inspect'
-      fail-on-findings: false
+      ash-version: beta
+      fail-on-findings: true
       collect-junit-xml-report: true
       collect-sarif-report: true
       post-pr-comment: true
       verbose: true
-      python-version: '3.12'
-      ash-mode: container
       output-dir: '.ash/ash_output'
-      config: '.ash/.ash.yaml'

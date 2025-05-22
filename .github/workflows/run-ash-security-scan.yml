@@ -1,11 +1,13 @@
 name: "ASH Security Scan"
-description: "Runs ASH aggregated security scan on a repository"
+description: |-
+  Runs ASH aggregated security scan on a repository and generates various industry
+  standard report formats such as SARIF, OCSF, CycloneDX, JUnitXML, HTML, Markdown
 
 on:
   workflow_call:
     inputs:
       ash-version:
-        description: "ASH version to use"
+        description: "ASH tag or branch to use. Defaults to 'beta' until ASHv3 is released."
         required: false
         default: "beta"
         type: string
@@ -14,8 +16,8 @@ on:
         required: false
         default: "container"
         type: string
-      ash-args:
-        description: "Additional arguments to pass to ASH"
+      config:
+        description: "Path to the ASH config file, if any"
         required: false
         default: ""
         type: string
@@ -31,6 +33,21 @@ on:
         type: boolean
       verbose:
         description: "Enable verbose output"
+        required: false
+        default: true
+        type: boolean
+      ash-args:
+        description: "Additional arguments to pass to ASH"
+        required: false
+        default: ""
+        type: string
+      collect-sarif-report:
+        description: "Whether to collect the ash.sarif report using github/codeql-action/upload-sarif for GitHub Advanced Security Code Scanning results"
+        required: false
+        default: true
+        type: boolean
+      collect-junit-xml-report:
+        description: "Whether to collect the ash.junit.xml report using the mikepenz/action-junit-report@v5 GitHub Action"
         required: false
         default: true
         type: boolean
@@ -110,7 +127,7 @@ jobs:
 
       - name: Publish JUnit Test Report
         uses: mikepenz/action-junit-report@v5
-        if: success() || failure()
+        if: inputs.collect-junit-xml-report && (success() || failure())
         continue-on-error: true
         with:
           report_paths: "**/ash.junit.xml"
@@ -121,7 +138,7 @@ jobs:
 
       - name: Upload ASH SARIF file
         uses: github/codeql-action/upload-sarif@v3
-        if: success() || failure()
+        if: inputs.collect-sarif-report && (success() || failure())
         continue-on-error: false
         with:
           sarif_file: ${{ inputs.output-dir }}/reports/ash.sarif
