@@ -1,68 +1,5 @@
 {
   "$defs": {
-    "ASFFReporterConfig": {
-      "additionalProperties": true,
-      "properties": {
-        "enabled": {
-          "default": true,
-          "title": "Enabled",
-          "type": "boolean"
-        },
-        "extension": {
-          "default": "asff",
-          "title": "Extension",
-          "type": "string"
-        },
-        "name": {
-          "const": "asff",
-          "default": "asff",
-          "title": "Name",
-          "type": "string"
-        },
-        "options": {
-          "$ref": "#/$defs/ASFFReporterConfigOptions",
-          "default": {
-            "aws_account_id": null,
-            "aws_region": null
-          }
-        }
-      },
-      "title": "ASFFReporterConfig",
-      "type": "object"
-    },
-    "ASFFReporterConfigOptions": {
-      "additionalProperties": true,
-      "properties": {
-        "aws_account_id": {
-          "anyOf": [
-            {
-              "pattern": "^\\d{12}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Aws Account Id"
-        },
-        "aws_region": {
-          "anyOf": [
-            {
-              "pattern": "(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\\d{1}",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Aws Region"
-        }
-      },
-      "title": "ASFFReporterConfigOptions",
-      "type": "object"
-    },
     "ArchiveConverterConfig": {
       "additionalProperties": true,
       "description": "Archive (ZIP/TAR/GZIP/etc) converter configuration.",
@@ -165,26 +102,6 @@
         "reporters": {
           "$ref": "#/$defs/ReporterConfigSegment",
           "default": {
-            "asff": {
-              "enabled": true,
-              "extension": "asff",
-              "name": "asff",
-              "options": {
-                "aws_account_id": null,
-                "aws_region": null
-              }
-            },
-            "cloudwatch-logs": {
-              "enabled": true,
-              "extension": "cwlog.json",
-              "name": "cloudwatch-logs",
-              "options": {
-                "aws_account_id": null,
-                "aws_region": "us-west-2",
-                "log_group_name": null,
-                "log_stream_name": "ASHScanResults"
-              }
-            },
             "csv": {
               "enabled": true,
               "extension": "csv",
@@ -997,88 +914,6 @@
         }
       },
       "title": "CheckovScannerConfigOptions",
-      "type": "object"
-    },
-    "CloudWatchLogsReporterConfig": {
-      "additionalProperties": true,
-      "properties": {
-        "enabled": {
-          "default": true,
-          "title": "Enabled",
-          "type": "boolean"
-        },
-        "extension": {
-          "default": "cwlog.json",
-          "title": "Extension",
-          "type": "string"
-        },
-        "name": {
-          "const": "cloudwatch-logs",
-          "default": "cloudwatch-logs",
-          "title": "Name",
-          "type": "string"
-        },
-        "options": {
-          "$ref": "#/$defs/CloudWatchLogsReporterConfigOptions",
-          "default": {
-            "aws_account_id": null,
-            "aws_region": "us-west-2",
-            "log_group_name": null,
-            "log_stream_name": "ASHScanResults"
-          }
-        }
-      },
-      "title": "CloudWatchLogsReporterConfig",
-      "type": "object"
-    },
-    "CloudWatchLogsReporterConfigOptions": {
-      "additionalProperties": true,
-      "properties": {
-        "aws_account_id": {
-          "anyOf": [
-            {
-              "pattern": "^\\d{12}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Aws Account Id"
-        },
-        "aws_region": {
-          "anyOf": [
-            {
-              "pattern": "(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\\d{1}",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": "us-west-2",
-          "title": "Aws Region"
-        },
-        "log_group_name": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Log Group Name"
-        },
-        "log_stream_name": {
-          "default": "ASHScanResults",
-          "title": "Log Stream Name",
-          "type": "string"
-        }
-      },
-      "title": "CloudWatchLogsReporterConfigOptions",
       "type": "object"
     },
     "ConverterConfigSegment": {
@@ -2043,34 +1878,6 @@
         ]
       },
       "properties": {
-        "asff": {
-          "$ref": "#/$defs/ASFFReporterConfig",
-          "default": {
-            "enabled": true,
-            "extension": "asff",
-            "name": "asff",
-            "options": {
-              "aws_account_id": null,
-              "aws_region": null
-            }
-          },
-          "description": "Configure the options for the ASFF reporter"
-        },
-        "cloudwatch-logs": {
-          "$ref": "#/$defs/CloudWatchLogsReporterConfig",
-          "default": {
-            "enabled": true,
-            "extension": "cwlog.json",
-            "name": "cloudwatch-logs",
-            "options": {
-              "aws_account_id": null,
-              "aws_region": "us-west-2",
-              "log_group_name": null,
-              "log_stream_name": "ASHScanResults"
-            }
-          },
-          "description": "Configure the options for the CloudWatchLogs reporter"
-        },
         "csv": {
           "$ref": "#/$defs/CSVReporterConfig",
           "default": {

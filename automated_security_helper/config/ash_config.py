@@ -27,12 +27,6 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.plugin_modules.ash_aws_plugins.asff_reporter import (
-    ASFFReporterConfig,
-)
-from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
-    CloudWatchLogsReporterConfig,
-)
 from automated_security_helper.reporters.ash_default.csv_reporter import (
     CSVReporterConfig,
 )
@@ -200,17 +194,6 @@ class ReporterConfigSegment(BaseModel):
 
     __pydantic_extra__: Dict[str, Any | ReporterPluginConfigBase] = {}
 
-    asff: Annotated[
-        ASFFReporterConfig,
-        Field(description="Configure the options for the ASFF reporter"),
-    ] = ASFFReporterConfig()
-    cloudwatch_logs: Annotated[
-        CloudWatchLogsReporterConfig,
-        Field(
-            description="Configure the options for the CloudWatchLogs reporter",
-            alias="cloudwatch-logs",
-        ),
-    ] = CloudWatchLogsReporterConfig()
     csv: Annotated[
         CSVReporterConfig,
         Field(description="Configure the options for the CSV reporter"),
@@ -331,37 +314,6 @@ class AshConfig(BaseModel):
         BuildConfig | None,
         Field(description="Build-time configuration settings"),
     ] = None
-
-    # output_formats: Annotated[
-    #     List[
-    #         Literal[
-    #             "asff",
-    #             "csv",
-    #             "cyclonedx",
-    #             "html",
-    #             "json",
-    #             "junitxml",
-    #             "ocsf",
-    #             "sarif",
-    #             "spdx",
-    #             "text",
-    #             "yaml",
-    #         ] | str
-    #     ],
-    #     Field(description="Format for scanner results output"),
-    # ] = [
-    #     "asff",
-    #     "csv",
-    #     "cyclonedx",
-    #     "html",
-    #     "json",
-    #     "junitxml",
-    #     "ocsf",
-    #     "sarif",
-    #     "spdx",
-    #     "text",
-    #     "yaml",
-    # ]
 
     converters: Annotated[
         ConverterConfigSegment,
