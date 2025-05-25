@@ -1,6 +1,8 @@
 """Utility functions for working with SARIF reports."""
 
 import os
+import random
+import uuid
 from pathlib import Path
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -14,6 +16,29 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Suppression,
     Kind1,
 )
+
+
+def get_finding_id(
+    rule_id: str,
+    file: str | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
+) -> str:
+    seed = "::".join(
+        [
+            item
+            for item in [
+                rule_id,
+                file,
+                str(start_line),
+                str(end_line),
+            ]
+            if item
+        ]
+    )
+    rd = random.Random()
+    rd.seed(seed)
+    return str(uuid.UUID(int=rd.getrandbits(128), version=4))
 
 
 def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:

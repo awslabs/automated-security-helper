@@ -5,6 +5,7 @@ utils/cfn-to-cdk/cdk.out/
 utils/cfn-to-cdk/cfn_to_cdk/cfn_to_cdk_stack.py
 ash_output*
 *.bak
+*.bak.*
 src/automated_security_helper/models/*generated*
 !tests/test_data/aggregated_results.txt
 refactoring/

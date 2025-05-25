@@ -33,6 +33,9 @@ from automated_security_helper.reporters.ash_default.csv_reporter import (
 from automated_security_helper.reporters.ash_default.cyclonedx_reporter import (
     CycloneDXReporterConfig,
 )
+from automated_security_helper.reporters.ash_default.gitlab_sast_reporter import (
+    GitLabSASTReporterConfig,
+)
 from automated_security_helper.reporters.ash_default.html_reporter import (
     HTMLReporterConfig,
 )
@@ -214,6 +217,13 @@ class ReporterConfigSegment(BaseModel):
             alias="flat-json",
         ),
     ] = FlatJSONReporterConfig()
+    gitlab_sast: Annotated[
+        GitLabSASTReporterConfig,
+        Field(
+            description="Configure the options for the GitLab SAST reporter",
+            alias="gitlab-sast",
+        ),
+    ] = GitLabSASTReporterConfig()
     junitxml: Annotated[
         JUnitXMLReporterConfig,
         Field(description="Configure the options for the JUnit XML reporter"),

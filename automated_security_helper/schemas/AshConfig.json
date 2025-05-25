@@ -120,6 +120,12 @@
               "name": "flat-json",
               "options": {}
             },
+            "gitlab-sast": {
+              "enabled": true,
+              "extension": "gl-sast-report.json",
+              "name": "gitlab-sast",
+              "options": {}
+            },
             "html": {
               "enabled": true,
               "extension": "html",
@@ -1302,6 +1308,39 @@
       "title": "FlatJSONReporterConfigOptions",
       "type": "object"
     },
+    "GitLabSASTReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "gl-sast-report.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "gitlab-sast",
+          "default": "gitlab-sast",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/GitLabSASTReporterConfigOptions",
+          "default": {}
+        }
+      },
+      "title": "GitLabSASTReporterConfig",
+      "type": "object"
+    },
+    "GitLabSASTReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "GitLabSASTReporterConfigOptions",
+      "type": "object"
+    },
     "GrypeScannerConfig": {
       "additionalProperties": true,
       "properties": {
@@ -1907,6 +1946,16 @@
             "options": {}
           },
           "description": "Configure the options for the Flat JSON reporter"
+        },
+        "gitlab-sast": {
+          "$ref": "#/$defs/GitLabSASTReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "gl-sast-report.json",
+            "name": "gitlab-sast",
+            "options": {}
+          },
+          "description": "Configure the options for the GitLab SAST reporter"
         },
         "html": {
           "$ref": "#/$defs/HTMLReporterConfig",
