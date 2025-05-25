@@ -3,6 +3,7 @@
 
 from typing import Literal, TYPE_CHECKING
 
+from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.schemas.sarif_schema_model import ReportingDescriptor
 from automated_security_helper.utils.sarif_utils import get_finding_id
 
@@ -42,7 +43,8 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
 
     def report(self, model: "AshAggregatedResults") -> str:
         # Get current timestamp in milliseconds since epoch
-        report_time_iso = model.metadata.generated_at
+        report_time_iso = model.metadata.generated_at.rstrip("+00:00")
+        ASH_LOGGER.debug(f"Report time: {report_time_iso}")
 
         try:
             gl_sast
@@ -54,40 +56,39 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
 
             # Extract vulnerabilities from SARIF report
             vulnerabilities = []
-            highest_severity_id = gl_sast.Severity.Info  # Default to INFO
 
             if model.sarif and model.sarif.runs and model.sarif.runs[0].results:
+                ASH_LOGGER.trace("Creating rule dict")
                 rule_dict = {
                     rule.id: rule
                     for rule in (model.sarif.runs[0].tool.driver.rules or [])
                 }
+                ASH_LOGGER.trace("Rule dict created, looping through run results")
                 for result in model.sarif.runs[0].results:
+                    ASH_LOGGER.trace(f"Processing result: {result.ruleId}")
                     severity_id = gl_sast.Severity.Low  # Default to LOW
                     result_rule: ReportingDescriptor | None = rule_dict.get(
                         result.ruleId, None
                     )
+                    ASH_LOGGER.trace(f"Result rule: {result_rule}")
+
                     if result.suppressions and len(result.suppressions) > 0:
-                        severity_id = gl_sast.Severity.Info  # INFORMATIONAL
+                        severity_id = gl_sast.Severity.Info
                     elif result.level:
                         level_str = str(result.level).lower()
                         if level_str == "error":
                             severity_id = gl_sast.Severity.High  # HIGH
-                            if severity_id > highest_severity_id:
-                                highest_severity_id = severity_id
                         elif level_str == "warning":
                             severity_id = gl_sast.Severity.Medium  # MEDIUM
-                            if severity_id > highest_severity_id:
-                                highest_severity_id = severity_id
                         elif level_str == "note":
                             severity_id = gl_sast.Severity.Low  # LOW
-                            if severity_id > highest_severity_id:
-                                highest_severity_id = severity_id
                         elif level_str == "none":
-                            severity_id = gl_sast.Severity.Info  # INFORMATIONAL
-                            if severity_id > highest_severity_id:
-                                highest_severity_id = severity_id
+                            severity_id = gl_sast.Severity.Info
+
+                    ASH_LOGGER.trace(f"Severity: {severity_id.value}")
 
                     # Add location information if available
+                    ASH_LOGGER.trace("Adding location information")
                     result_location: gl_sast.Location = gl_sast.Location()
                     if result.locations and len(result.locations) > 0:
                         for location in result.locations:
@@ -107,6 +108,9 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                                             result_location.end_line = (
                                                 loc.root.region.endLine
                                             )
+                    ASH_LOGGER.trace(
+                        f"Location information added: {result_location.model_dump_json()}"
+                    )
 
                     # Create vulnerability object with required fields
                     scanner_name = None
@@ -117,8 +121,14 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                     ):
                         if hasattr(result.properties.scanner_details, "tool_name"):
                             scanner_name = result.properties.scanner_details.tool_name
-
-                    finding_id = get_finding_id(result=result)
+                    ASH_LOGGER.trace(f"Scanner name: {scanner_name}")
+                    finding_id = get_finding_id(
+                        rule_id=result.ruleId,
+                        file=result_location.file,
+                        start_line=result_location.start_line,
+                        end_line=result_location.end_line,
+                    )
+                    ASH_LOGGER.trace(f"Finding ID: {finding_id}")
                     vuln = gl_sast.Vulnerability(
                         id=finding_id,
                         name=result.ruleId,
@@ -158,16 +168,16 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                             if result.properties
                             else {}
                         ),
-                        links=[
-                            gl_sast.Link(
-                                name="",
-                                url=(
-                                    str(result_rule.helpUri)
-                                    if result_rule and result_rule.helpUri
-                                    else None
-                                ),
-                            )
-                        ],
+                        links=(
+                            [
+                                gl_sast.Link(
+                                    name="",
+                                    url=(str(result_rule.helpUri)),
+                                )
+                            ]
+                            if result_rule and result_rule.helpUri
+                            else None
+                        ),
                     )
 
                     vulnerabilities.append(vuln)
@@ -179,11 +189,19 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                         id="automated-security-helper",
                         name="Automated Security Helper",
                         version=get_ash_version(),
+                        vendor=gl_sast.Vendor(
+                            name="Amazon Web Services",
+                        ),
+                        url=ASH_REPO_URL,
                     ),
                     scanner=gl_sast.Scanner(
                         id="automated-security-helper",
                         name="Automated Security Helper",
                         version=get_ash_version(),
+                        vendor=gl_sast.Vendor(
+                            name="Amazon Web Services",
+                        ),
+                        url=ASH_REPO_URL,
                     ),
                     start_time=report_time_iso,
                     end_time=report_time_iso,

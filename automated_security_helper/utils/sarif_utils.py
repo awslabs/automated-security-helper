@@ -7,7 +7,6 @@ from pathlib import Path
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.schemas.sarif_schema_model import (
-    Result,
     SarifReport,
     ToolComponent,
     PropertyBag,
@@ -19,26 +18,20 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 
 
-def get_finding_id(result: Result) -> str:
-    location_vals = (
-        [
-            result.locations[0].physicalLocation.root.artifactLocation.uri,
-            result.locations[0].physicalLocation.root.region.startLine,
-            result.locations[0].physicalLocation.root.region.endLine,
-        ]
-        if (
-            result.locations
-            and result.locations[0].physicalLocation
-            and result.locations[0].physicalLocation.root
-        )
-        else []
-    )
+def get_finding_id(
+    rule_id: str,
+    file: str | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
+) -> str:
     seed = "::".join(
         [
             item
             for item in [
-                result.ruleId,
-                *location_vals,
+                rule_id,
+                file,
+                str(start_line),
+                str(end_line),
             ]
             if item
         ]
