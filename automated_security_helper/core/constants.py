@@ -12,7 +12,7 @@ ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
 ASH_REPO_LATEST_REVISION = (
     ASH_INSTALLED_REVISION_PATH.read_text().strip()
     if ASH_INSTALLED_REVISION_PATH.exists()
-    else "beta"
+    else "v3.0.0-beta-20250526151056"
 )
 
 ASH_WORK_DIR_NAME = "converted"
