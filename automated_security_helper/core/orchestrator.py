@@ -171,7 +171,13 @@ class ASHScanOrchestrator(BaseModel):
                 ]
             ]:
                 ASH_LOGGER.debug(f"Removing old file: {old_file}")
-                old_file.unlink()
+                try:
+                    old_file.unlink()
+                except PermissionError as e:
+                    ASH_LOGGER.debug(
+                        f"Permission denied when trying to remove {old_file}: {str(e)}"
+                    )
+                    continue
             exec_engine_params = {}
         else:
             asharp_model = AshAggregatedResults.model_validate_json(
