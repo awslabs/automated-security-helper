@@ -9,7 +9,7 @@ on:
       ash-version:
         description: "ASH tag or branch to use. Defaults to a beta release until ASHv3 is released."
         required: false
-        default: "v3.0.0-beta-20250526151056"
+        default: "v3.0.0-beta"
         type: string
       ash-mode:
         description: 'Mode to run ASH in. Defaults to "container". Use "local" to run in direct Python only. Be aware that running in local mode will not include any scanners that are not installed as Python dependencies of ASH itself.'
