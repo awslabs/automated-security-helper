@@ -35,6 +35,7 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class CdkNagPacks(BaseModel):
@@ -107,7 +108,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         """
         # CDK Nag scanner is built into this Python module, if the Python import got
         # this far then we know we're in a valid runtime for this scanner.
-        return True
+        found = find_executable("node")
+        return found is not None
 
     def scan(
         self,

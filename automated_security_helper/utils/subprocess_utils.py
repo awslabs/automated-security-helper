@@ -1,6 +1,7 @@
 """Centralized subprocess execution utilities for ASH."""
 
 import logging
+import platform
 import shutil
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
 from pathlib import Path
@@ -19,21 +20,38 @@ def find_executable(command: str) -> Optional[str]:
     Returns:
         The full path to the executable, or None if not found
     """
-    try:
-        found = shutil.which(command)
-        if found:
-            return found
-        possibles = [
-            ASH_BIN_PATH.joinpath(command),
-            Path("/usr/local/bin").joinpath(command),
-        ]
-        for poss in possibles:
-            if poss.exists():
-                return poss.as_posix()
+    commands = list(
+        set(
+            [
+                command,
+                f"{command}.exe" if platform.system().lower() == "windows" else command,
+            ]
+        )
+    )
+    for cmd in commands:
+        try:
+            found = shutil.which(cmd)
+            if found:
+                return found
+            possibles = [
+                item
+                for item in [
+                    ASH_BIN_PATH.joinpath(cmd),
+                    (
+                        Path("/usr/local/bin").joinpath(cmd)
+                        if platform.system().lower() != "windows"
+                        else None
+                    ),
+                ]
+                if item is not None
+            ]
+            for poss in possibles:
+                ASH_LOGGER.debug(f"Checking for executable: {poss}")
+                if poss.exists():
+                    return poss.as_posix()
+        except Exception as e:
+            ASH_LOGGER.error(e)
 
-        return None
-    except Exception as e:
-        ASH_LOGGER.error(e)
         return None
 
 

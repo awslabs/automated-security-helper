@@ -276,7 +276,7 @@
               }
             },
             "opengrep": {
-              "enabled": false,
+              "enabled": true,
               "name": "opengrep",
               "options": {
                 "config": "auto",
@@ -294,7 +294,7 @@
               }
             },
             "semgrep": {
-              "enabled": true,
+              "enabled": false,
               "name": "semgrep",
               "options": {
                 "config": "auto",
@@ -1703,7 +1703,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -2288,7 +2288,7 @@
         "opengrep": {
           "$ref": "#/$defs/OpengrepScannerConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "name": "opengrep",
             "options": {
               "config": "auto",
@@ -2310,7 +2310,7 @@
         "semgrep": {
           "$ref": "#/$defs/SemgrepScannerConfig",
           "default": {
-            "enabled": true,
+            "enabled": false,
             "name": "semgrep",
             "options": {
               "config": "auto",
@@ -2617,7 +2617,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": true,
+          "default": false,
           "title": "Enabled",
           "type": "boolean"
         },

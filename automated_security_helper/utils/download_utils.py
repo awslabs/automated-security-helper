@@ -118,7 +118,9 @@ def create_url_download_command(
     """
     # Use the provided destination or get the current ASH_BIN_PATH
     if destination is None:
-        destination = str(ASH_BIN_PATH)
+        destination = str(ASH_BIN_PATH).replace(
+            "\\", "/"
+        )  # Ensure forward slashes for cross-platform compatibility
 
     if not Path(destination).exists():
         ASH_LOGGER.verbose(f"Creating ASH bin path directory @ {destination}")
@@ -129,7 +131,7 @@ def create_url_download_command(
             sys.executable,
             "-c",
             f"from pathlib import Path; from automated_security_helper.utils.download_utils import install_binary_from_url; "
-            f"install_binary_from_url('{url}', Path('{destination}'), '{rename_to}')",
+            rf"install_binary_from_url('{url}', Path('{destination}'), '{rename_to}')",
         ],
         shell=False,
     )

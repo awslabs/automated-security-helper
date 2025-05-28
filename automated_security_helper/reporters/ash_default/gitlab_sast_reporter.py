@@ -43,7 +43,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
 
     def report(self, model: "AshAggregatedResults") -> str:
         # Get current timestamp in milliseconds since epoch
-        report_time_iso = model.metadata.generated_at.rstrip("+00:00")
+        report_time_iso = model.metadata.generated_at.split("+")[0]
         ASH_LOGGER.debug(f"Report time: {report_time_iso}")
 
         try:

@@ -63,7 +63,14 @@ def run_cdk_nag_against_cfn_template(
     os.environ["NODE_NO_WARNINGS"] = "1"
     os.environ["JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION"] = "1"
     os.environ["JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION"] = "1"
-    import cdk_nag
+    try:
+        import cdk_nag
+    except FileNotFoundError:
+        ASH_LOGGER.warning(
+            "NodeJS is missing and CDK Nag depends on it due to transitive dependencies. "
+            "Please install NodeJS and try running your ASH scan again for CDK NagPack coverage on CloudFormation templates. "
+        )
+        return None
     from aws_cdk import (
         App,
         Aspects,
