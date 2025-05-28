@@ -100,21 +100,21 @@ jobs:
         shell: bash
         run: |-
           uvx --from $ASH_UVX_SOURCE \
-          ash scan --source-dir . --output-dir $ASH_OUTPUT_DIR --config $ASH_CONFIG --mode $ASH_MODE --build-target ci $ASH_ARGS
+          ash scan --source-dir . --output-dir "$ASH_OUTPUT_DIR" --config $ASH_CONFIG --mode $ASH_MODE --build-target ci $ASH_ARGS
 
       - name: Show ASH Summary Report
         if: success() || failure()
         shell: bash
         run: |-
           uvx --from $ASH_UVX_SOURCE \
-          ash report --output-dir $ASH_OUTPUT_DIR
+          ash --output-dir "$ASH_OUTPUT_DIR" report
 
       - name: Update step summary
         if: success() || failure()
         shell: bash
         run: |-
-          cat $ASH_OUTPUT_DIR/reports/ash.summary.md >> "${GITHUB_STEP_SUMMARY}"
-          tree $ASH_OUTPUT_DIR
+          cat "$ASH_OUTPUT_DIR/reports/ash.summary.md ">> "${GITHUB_STEP_SUMMARY}"
+          tree "$ASH_OUTPUT_DIR"
 
       - name: Post ASH MarkdownReporter output as PR comment
         uses: mshick/add-pr-comment@v2
