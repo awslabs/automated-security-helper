@@ -9,6 +9,7 @@ from automated_security_helper.scanners.ash_default import (
     DetectSecretsScanner,
     GrypeScanner,
     SyftScanner,
+    OpengrepScanner,
 )
 from automated_security_helper.scanners.ash_default.npm_audit_scanner import (
     NpmAuditScanner,
@@ -26,6 +27,7 @@ ASH_SCANNERS = [
     DetectSecretsScanner,
     GrypeScanner,
     NpmAuditScanner,
+    OpengrepScanner,
     SemgrepScanner,
     SyftScanner,
 ]

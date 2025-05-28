@@ -16,7 +16,24 @@
         "PATH": "${workspaceFolder}/.venv/bin:/opt/homebrew/bin:~/.local/share/mise/installs/node/20.19.0/bin:${env.PATH}"
       },
       "name": "ASH: Test CLI",
-      "program": "${workspaceFolder}/.venv/bin/ash",
+      "program": "./automated_security_helper/cli/main.py",
+      "request": "launch",
+      "type": "debugpy"
+    },
+    {
+      "args": [
+        "dependencies",
+        "install",
+        "--verbose",
+        "--config",
+        "${workspaceFolder}/.ash/.ash.yaml"
+      ],
+      "console": "integratedTerminal",
+      "env": {
+        "PATH": "${workspaceFolder}/.venv/bin:/opt/homebrew/bin:~/.local/share/mise/installs/node/20.19.0/bin:${env.PATH}"
+      },
+      "name": "ASH: Test Dependencies Install",
+      "program": "./automated_security_helper/cli/main.py",
       "request": "launch",
       "type": "debugpy"
     },

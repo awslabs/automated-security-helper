@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import platform
 from typing import Annotated, List, Literal
 
 from pydantic import Field, model_validator
@@ -19,6 +20,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
@@ -94,14 +96,14 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["opengrep"] = "opengrep"
-    enabled: bool = False
+    # Enabled by default on Windows as Semgrep does not support Windows directly
+    enabled: bool = platform.system().lower() == "windows"
     options: Annotated[
         OpengrepScannerConfigOptions, Field(description="Configure Opengrep scanner")
     ] = OpengrepScannerConfigOptions()
 
 
-### Currently troubleshooting this plugin - @scrthq - 2025-05-07
-# @ash_scanner_plugin
+@ash_scanner_plugin
 class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
     """OpengrepScanner implements code scanning using Opengrep."""
 

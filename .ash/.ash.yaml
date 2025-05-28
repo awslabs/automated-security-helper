@@ -86,7 +86,7 @@ scanners:
     options:
       config_file: .ash/.grype.yaml
   opengrep:
-    enabled: false
+    enabled: true
   semgrep:
     enabled: true
   syft:

@@ -90,7 +90,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "CfnNagScanner":
-        """Set up custom installation commands for opengrep."""
+        """Set up custom installation commands for CFN Nag."""
         # Get version and linux_type from config
         # Linux
         if "linux" not in self.custom_install_commands:

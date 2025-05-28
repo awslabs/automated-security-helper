@@ -67,6 +67,13 @@ on:
         default: "3.12"
         type: string
 
+env:
+  ASH_UVX_SOURCE: git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }}
+  ASH_OUTPUT_DIR: ${{ inputs.output-dir }}
+  ASH_CONFIG: ${{ inputs.config }}
+  ASH_MODE: ${{ inputs.ash-mode }}
+  ASH_ARGS: "${{ inputs.ash-args }} ${{ inputs.verbose && '--verbose' }} ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}}"
+
 jobs:
   ash:
     name: SAST, SCA, and IaC Scan
@@ -92,22 +99,22 @@ jobs:
         id: ash
         shell: bash
         run: |-
-          uvx --from git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }} \
-          ash --source-dir . --output-dir ${{ inputs.output-dir }} ${{ inputs.ash-args }} --build-target ci ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}} --mode ${{ inputs.ash-mode }} ${{ inputs.verbose && '--verbose' }}
+          uvx --from $ASH_UVX_SOURCE \
+          ash scan --source-dir . --output-dir $ASH_OUTPUT_DIR --config $ASH_CONFIG --mode $ASH_MODE --build-target ci $ASH_ARGS
 
       - name: Show ASH Summary Report
         if: success() || failure()
         shell: bash
         run: |-
-          uvx --from git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }} \
-          ash --output-dir ${{ inputs.output-dir }} report
+          uvx --from $ASH_UVX_SOURCE \
+          ash report --output-dir $ASH_OUTPUT_DIR
 
       - name: Update step summary
         if: success() || failure()
         shell: bash
         run: |-
-          cat ${{ inputs.output-dir }}/reports/ash.summary.md >> "${GITHUB_STEP_SUMMARY}"
-          tree ${{ inputs.output-dir }}
+          cat $ASH_OUTPUT_DIR/reports/ash.summary.md >> "${GITHUB_STEP_SUMMARY}"
+          tree $ASH_OUTPUT_DIR
 
       - name: Post ASH MarkdownReporter output as PR comment
         uses: mshick/add-pr-comment@v2

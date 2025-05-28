@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import platform
 from typing import Annotated, List, Literal
 
 from pydantic import Field
@@ -77,8 +78,8 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
 
 class SemgrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["semgrep"] = "semgrep"
-    # Prefer Opengrep by default, but allow users to enable Semgrep if preferred.
-    enabled: bool = True
+    # Semgrep does not support Windows at all
+    enabled: bool = platform.system().lower() != "windows"
     options: Annotated[
         SemgrepScannerConfigOptions, Field(description="Configure Semgrep scanner")
     ] = SemgrepScannerConfigOptions()

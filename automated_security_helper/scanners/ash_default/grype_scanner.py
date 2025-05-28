@@ -79,7 +79,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "GrypeScanner":
-        """Set up custom installation commands for opengrep."""
+        """Set up custom installation commands for Grype."""
         # Get version and linux_type from config
         # Linux
         if "linux" not in self.custom_install_commands:
