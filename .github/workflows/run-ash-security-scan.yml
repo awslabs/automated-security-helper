@@ -71,7 +71,7 @@ env:
   ASH_UVX_SOURCE: git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }}
   ASH_OUTPUT_DIR: ${{ inputs.output-dir }}
   ASH_CONFIG: ${{ inputs.config }}
-  ASH_ARGS: --source-dir . --output-dir "${{ inputs.output-dir }}" --build-target ci --mode ${{ inputs.ash-mode }} ${{ inputs.verbose && '--verbose' }} ${{ inputs.fail-on-findings && '--fail-on-findings' || '--no-fail-on-findings'}} ${{ inputs.ash-args }}
+  ASH_ARGS:
 
 jobs:
   ash:
@@ -98,8 +98,12 @@ jobs:
         id: ash
         shell: bash
         run: |-
-          echo "RUNNING: ash scan ${ASH_ARGS}"
-          eval "uvx --from $ASH_UVX_SOURCE ash scan ${ASH_ARGS}"
+          uvx --from $ASH_UVX_SOURCE \
+          ash scan \
+            --source-dir . \
+            --output-dir "${{ inputs.output-dir }}" \
+            --build-target ci \
+            --mode ${{ inputs.ash-mode }} ${{ inputs.verbose && '--verbose' }} ${{ inputs.fail-on-findings && '--fail-on-findings' || '--no-fail-on-findings'}} ${{ inputs.ash-args }}
 
       - name: Show ASH Summary Report
         if: success() || failure()
