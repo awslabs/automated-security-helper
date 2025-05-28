@@ -26,7 +26,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 CheckFrameworks = Literal[
@@ -163,8 +162,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         """
         # Checkov is a dependency this Python module, if the Python import got
         # this far then we know we're in a valid runtime for this scanner.
-        found = find_executable(self.command)
-        return found is not None
+        # found = find_executable(self.command)
+        # return found is not None
+        return self.tool_version is not None and str(self.tool_version).strip() != ""
 
     def _process_config_options(self):
         # Checkov config path
