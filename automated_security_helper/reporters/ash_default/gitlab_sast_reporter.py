@@ -47,7 +47,6 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         ASH_LOGGER.debug(f"Report time: {report_time_iso}")
 
         try:
-            gl_sast
             gl_status = (
                 gl_sast.Status.success
                 if model.metadata.summary_stats.actionable == 0

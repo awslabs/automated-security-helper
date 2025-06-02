@@ -1,0 +1,37 @@
+version: 0.2
+
+env:
+  variables:
+    ASH_REPO_BRANCH: v3.0.0-beta
+    ASH_MODE: container
+    ASH_REPO_CLONE_URL: https://github.com/awslabs/automated-security-helper.git
+    COLUMNS: '140'
+  exported-variables:
+    - ASH_MODE
+    - ASH_REPO_CLONE_URL
+    - ASH_REPO_BRANCH
+    - COLUMNS
+
+phases:
+  pre_build:
+    commands:
+      - echo "Installing ash"
+      - pip install git+${ASH_REPO_CLONE_URL}@${ASH_REPO_BRANCH}
+  build:
+    commands:
+      - ash --mode container --no-progress
+
+  post_build:
+    commands:
+      - ash report
+
+artifacts:
+  files:
+    - '**/ash_output/**'
+  name: ash-output-$(date +%Y-%m-%d)
+
+reports:
+  junit-security-findings:
+    file-format: JUNITXML
+    files:
+      - '**/reports/*.junit.xml'

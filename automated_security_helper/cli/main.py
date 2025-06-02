@@ -10,6 +10,7 @@ from automated_security_helper.cli.inspect import inspect_app
 from automated_security_helper.cli.plugin import plugin_app
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.cli.report import report_command
+from automated_security_helper.cli.ui.start_ash_ui import start_ash_ui_cli_command
 
 
 app = typer.Typer(
@@ -37,6 +38,11 @@ app.command(
 Any additional arguments passed will be forwarded to ASH inside the container image when starting the scan.
 """,
 )(build_ash_image_cli_command)
+
+app.command(
+    name="ui",
+    help="Starts the ASH UI Streamlit app on a local port",
+)(start_ash_ui_cli_command)
 
 app.command(name="report")(report_command)
 

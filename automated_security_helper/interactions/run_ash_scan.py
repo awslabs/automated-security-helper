@@ -221,6 +221,8 @@ def run_ash_scan(
 
     else:
         # Local mode - use the orchestrator directly
+        starting_dir = Path.cwd()
+        os.chdir(source_dir)
         try:
             # Create orchestrator instance
             source_dir = Path(source_dir)
@@ -431,6 +433,9 @@ def run_ash_scan(
                 f"[bold red]ERROR (1) Exiting due to exception during ASH scan: {e}[/bold red]",
             )
             raise sys.exit(1) from None
+        finally:
+            # Return to the starting directory
+            os.chdir(starting_dir)
 
     # Check if we should fail on findings
     final_fail_on_findings = (

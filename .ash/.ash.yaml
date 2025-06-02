@@ -41,6 +41,15 @@ reporters:
     enabled: true
   junitxml:
     enabled: true
+  markdown:
+    enabled: true
+    options:
+      include_detailed_findings: true
+      include_findings_table: false
+      include_summary: true
+      max_detailed_findings: 20
+      top_hotspots_limit: 10
+      use_collapsible_details: true
   ocsf:
     enabled: true
   sarif:

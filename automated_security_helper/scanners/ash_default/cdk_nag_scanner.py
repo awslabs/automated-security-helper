@@ -261,8 +261,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     )
                     sarif_results.extend(findings)
             except Exception as e:
-                if "could not determine a constructor for the tag" not in str(e):
-                    ASH_LOGGER.warning(f"Error scanning {cfn_file}: {e}")
+                ASH_LOGGER.trace(f"Error scanning {cfn_file}: {e}")
                 failed_files.append((cfn_file, str(e)))
 
         self._post_scan(

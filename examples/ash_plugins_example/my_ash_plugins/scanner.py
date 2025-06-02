@@ -4,7 +4,7 @@
 """Example scanner plugin for ASH."""
 
 from pathlib import Path
-from typing import Annotated, List, Literal, Any
+from typing import Annotated, Literal, Any
 
 from pydantic import Field
 
@@ -13,9 +13,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -41,9 +39,6 @@ class ExampleScanner(ScannerPluginBase[ExampleScannerConfig]):
     def model_post_init(self, context):
         if self.config is None:
             self.config = ExampleScannerConfig()
-        self.context.work_dir = self.context.output_dir.joinpath(
-            ASH_WORK_DIR_NAME
-        ).joinpath(self.config.name)
         return super().model_post_init(context)
 
     def validate(self) -> bool:
@@ -59,7 +54,6 @@ class ExampleScanner(ScannerPluginBase[ExampleScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
         config: Any = None,
         *args,
         **kwargs,
