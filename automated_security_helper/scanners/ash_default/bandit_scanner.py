@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Annotated, List, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
@@ -70,14 +70,6 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         ],
         Field(description="List of additional formats to output"),
     ] = []
-
-    @field_validator("config_file")
-    def validate_config_file(cls, v):
-        if v is not None:
-            if not Path(v).exists():
-                raise ValueError(f"Config file {v} does not exist")
-            return Path(v)
-        return v
 
 
 class BanditScannerConfig(ScannerPluginConfigBase):

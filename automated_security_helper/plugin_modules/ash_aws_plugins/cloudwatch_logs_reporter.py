@@ -23,7 +23,6 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
-    aws_account_id: Annotated[str | None, Field(pattern=r"^\d{12}$")] = None
     aws_region: Annotated[
         str | None,
         Field(
@@ -43,7 +42,7 @@ class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
-    """Formats results as Amazon Security Finding Format (ASFF)."""
+    """Formats results and publishes to CloudWatch Logs."""
 
     def model_post_init(self, context):
         if self.config is None:
@@ -51,10 +50,13 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         return super().model_post_init(context)
 
     def validate(self) -> bool:
-        """Validate reporter configuration and requirements.
-
-        Defaults to returning True as most reporter plugins are entirely Python based."""
+        """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
+        if (
+            self.config.options.aws_region is None
+            or self.config.options.log_group_name is None
+        ):
+            return self.dependencies_satisfied
         try:
             sts_client = boto3.client("sts", region=self.config.options.aws_region)
             caller_id = sts_client.get_caller_identity()
