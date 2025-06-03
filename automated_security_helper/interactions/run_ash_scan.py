@@ -47,6 +47,7 @@ def run_ash_scan(
     source_dir: str = Path.cwd().as_posix(),
     output_dir: str = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
     config: str = None,
+    config_overrides: List[str] = None,
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
     scanners: List[str] = [],
@@ -170,6 +171,7 @@ def run_ash_scan(
             container_uid=container_uid,
             container_gid=container_gid,
             config=config,
+            config_overrides=config_overrides,
             strategy=strategy,
             scanners=scanners,
             exclude_scanners=exclude_scanners,
@@ -321,6 +323,9 @@ def run_ash_scan(
             else:
                 logger.info(f"Using config file specified at: {config}")
 
+            if config_overrides:
+                logger.info(f"Applying {len(config_overrides)} configuration overrides")
+
             final_scanners = scanners or []
             if mode == RunMode.precommit:
                 fast_scanners = [
@@ -342,6 +347,7 @@ def run_ash_scan(
                 enabled_scanners=final_scanners,
                 excluded_scanners=final_excluded_scanners,
                 config_path=config,
+                config_overrides=config_overrides,
                 verbose=verbose or debug,
                 debug=debug,
                 strategy=(

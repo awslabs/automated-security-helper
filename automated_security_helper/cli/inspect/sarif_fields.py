@@ -7,7 +7,7 @@ import glob
 import json
 import os
 from pathlib import Path
-from typing import Annotated, Optional, Dict, Any
+from typing import Annotated, Dict, Any
 
 from automated_security_helper.utils.meta_analysis.generate_field_mapping_html_report import (
     generate_html_report,
@@ -136,18 +136,22 @@ def analyze_sarif_fields(
             help="Directory to write output files",
         ),
     ] = None,
-    aggregated_sarif: Annotated[
-        Optional[str],
-        typer.Option(
-            help="Path to aggregated SARIF report for validation",
-        ),
-    ] = None,
-    flat_reports_dir: Annotated[
-        Optional[str],
-        typer.Option(
-            help="Directory containing flat report formats (CSV, JSON) for field mapping analysis",
-        ),
-    ] = None,
+    # config: Annotated[
+    #     Optional[str],
+    #     typer.Option(
+    #         "--config",
+    #         "-c",
+    #         help="The path to the configuration file",
+    #         envvar="ASH_CONFIG",
+    #     ),
+    # ] = None,
+    # config_overrides: Annotated[
+    #     List[str],
+    #     typer.Option(
+    #         "--config-overrides",
+    #         help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
+    #     ),
+    # ] = [],
 ):
     """
     Analyze SARIF fields across different scanners to understand their schema.

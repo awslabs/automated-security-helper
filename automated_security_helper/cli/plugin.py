@@ -58,6 +58,13 @@ def list_plugins(
             envvar="ASH_CONFIG",
         ),
     ] = None,
+    config_overrides: Annotated[
+        List[str],
+        typer.Option(
+            "--config-overrides",
+            help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
     ] = False,
@@ -96,7 +103,9 @@ def list_plugins(
 
     try:
         console = Console()
-        ash_config = resolve_config(config_path=config)
+        ash_config = resolve_config(
+            config_path=config, config_overrides=config_overrides
+        )
         ash_config.ash_plugin_modules.extend(ash_plugin_modules)
         plugin_context = PluginContext(
             source_dir=Path.cwd(),

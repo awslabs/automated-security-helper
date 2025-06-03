@@ -218,6 +218,7 @@ def run_ash_container(
     output_dir: str = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
     log_level: AshLogLevel = AshLogLevel.INFO,
     config: str = None,
+    config_overrides: List[str] = None,
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
     scanners: List[str] = [],
@@ -638,6 +639,11 @@ def run_ash_container(
         # Add config if specified
         if config:
             ash_args.extend(["--config", config])
+
+        # Add config overrides if specified
+        if config_overrides:
+            for override in config_overrides:
+                ash_args.extend(["--config-overrides", override])
 
         # Add existing results if specified
         if existing_results:
