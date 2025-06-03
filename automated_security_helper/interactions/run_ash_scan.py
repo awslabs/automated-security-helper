@@ -104,20 +104,24 @@ def run_ash_scan(
     final_log_level = (
         AshLogLevel.VERBOSE
         if verbose
-        else AshLogLevel.DEBUG
-        if debug
-        else AshLogLevel.ERROR
-        if (
-            quiet
-            or simple
-            or log_level
-            in [
-                AshLogLevel.QUIET,
-                AshLogLevel.ERROR,
-                AshLogLevel.SIMPLE,
-            ]
+        else (
+            AshLogLevel.DEBUG
+            if debug
+            else (
+                AshLogLevel.ERROR
+                if (
+                    quiet
+                    or simple
+                    or log_level
+                    in [
+                        AshLogLevel.QUIET,
+                        AshLogLevel.ERROR,
+                        AshLogLevel.SIMPLE,
+                    ]
+                )
+                else log_level
+            )
         )
-        else log_level
     )
     final_logging_log_level = logging._nameToLevel.get(
         final_log_level.value, logging.INFO
@@ -348,19 +352,21 @@ def run_ash_scan(
                 no_cleanup=not cleanup,
                 output_formats=output_formats,
                 show_progress=progress
-                and not quiet  # Don't show progress in quiet mode
-                and not simple  # Don't show progress in simple mode
-                and (
-                    os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-                    not in [
-                        "YES",
-                        "1",
-                        "TRUE",
-                    ]  # Running inside the container is not guaranteed to produce the live progress outputs correctly
-                    or os.environ.get("CI", None)
-                    is not None  # Neither is running in a CI pipeline
-                ),
-                simple_mode=simple,  # Pass the simple mode flag to the orchestrator
+                and final_log_level
+                not in [
+                    AshLogLevel.QUIET,
+                    AshLogLevel.SIMPLE,
+                    AshLogLevel.VERBOSE,
+                    AshLogLevel.DEBUG,
+                ]
+                and os.environ.get("CI", None) is not None
+                and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+                not in [
+                    "YES",
+                    "1",
+                    "TRUE",
+                ],
+                simple_mode=simple,
                 color_system="auto" if color else None,
                 offline=(
                     offline
