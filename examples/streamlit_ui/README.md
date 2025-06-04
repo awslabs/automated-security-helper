@@ -29,24 +29,25 @@ pip install streamlit
 
 ## Usage
 
-Run the Streamlit app...
+### Start the Streamlit app...
 
-### ...direct from GitHub
+#### ...directly from GitHub...
 
 ```bash
 streamlit run https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/examples/streamlit_ui/ash_ui.py
 ```
 
-...or clone and run from local...
+#### ...or clone and run from local
 
 ```bash
 git clone https://github.com/awslabs/automated-security-helper.git --branch beta
 streamlit run ./automated-security-helper/examples/streamlit_ui/ash_ui.py
 ```
 
-###
-
 ### Running Scans
+
+> Note: If you already have a scan completed and you'd like to interact with the results
+> you can skip directly to the Results and Analysis tabs
 
 1. Navigate to the "Run Scan" tab
 2. Configure your scan options
