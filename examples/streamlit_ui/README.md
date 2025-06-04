@@ -1,19 +1,19 @@
-# ASH Streamlit UI Example
+# ASH Streamlit UI
 
-This example demonstrates how to use Streamlit to create a web-based user interface for the Automated Security Helper (ASH).
+This is a Streamlit-based UI for the Automated Security Helper (ASH). It provides a graphical interface for running ASH scans, viewing results, and analyzing findings with Amazon Bedrock.
 
 ## Features
 
-- Run ASH scans with a user-friendly interface
-- Configure all ASH scan parameters through the UI
-- View and filter scan results
-- Display summary reports
+- Run ASH scans with configurable options
+- View scan results and filter findings
+- Analyze security findings with Amazon Bedrock AI
+- Get AI-powered recommendations for fixing security issues
 
-## Requirements
+## Prerequisites
 
-- Python 3.8+
-- Streamlit
-- ASH v3.0.0-beta or later
+- Python 3.10 or later
+- ASH v3 installed
+- AWS credentials configured (for Amazon Bedrock integration)
 
 ## Installation
 
@@ -23,39 +23,49 @@ This example demonstrates how to use Streamlit to create a web-based user interf
 pip install -r requirements.txt
 ```
 
+2. Make sure you have ASH installed:
+
+```bash
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+```
+
 ## Usage
 
-1. Run the Streamlit application:
+Run the Streamlit app:
 
 ```bash
 streamlit run ash_ui.py
 ```
 
-2. Open your web browser and navigate to the URL displayed in the terminal (typically http://localhost:8501)
+### Running Scans
 
-3. Use the interface to configure and run ASH scans
+1. Navigate to the "Run Scan" tab
+2. Configure your scan options
+3. Click "Run ASH Scan"
 
-## Configuration
+### Viewing Results
 
-The UI provides access to all ASH scan configuration options, including:
+1. Navigate to the "View Results" tab
+2. Select a results file (default is `.ash/ash_output/ash_aggregated_results.json`)
+3. Filter findings by severity or scanner
+4. Click on a finding to view details
 
-- Source and output directories
-- Scanner selection
-- Execution options
-- Output formats
-- Logging options
-- Container options
+### AI Analysis
 
-## Viewing Results
+1. Navigate to the "AI Analysis" tab
+2. Select your AWS region and Bedrock model
+3. Click "Connect to Bedrock"
+4. Select a finding from the "View Results" tab
+5. Click "Analyze with Bedrock" to get AI-powered analysis and recommendations
 
-The "View Results" tab allows you to:
+## AWS Credentials
 
-- Load and view scan results
-- Filter findings by severity and scanner
-- View detailed information about each finding
-- Access summary reports
+To use the Amazon Bedrock integration, you need to have AWS credentials configured with permissions to access Amazon Bedrock. You can configure credentials using:
 
-## Notes
+- AWS CLI: `aws configure`
+- Environment variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
+- AWS credentials file: `~/.aws/credentials`
 
-- This UI is intended for local development and testing purposes
-- For production use, consider implementing authentication and access controls
+## License
+
+This project is licensed under the Apache 2.0 License - see the LICENSE file for details.

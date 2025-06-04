@@ -4,6 +4,11 @@
 import streamlit as st
 from pathlib import Path
 import pandas as pd
+import json
+import os
+import boto3
+import configparser
+from typing import Dict, List, Optional, Any
 
 from automated_security_helper.core.enums import (
     AshLogLevel,
@@ -16,11 +21,334 @@ from automated_security_helper.core.enums import (
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 from automated_security_helper.utils.get_ash_version import get_ash_version
 
+# Initialize session state variables for global configuration
+if "source_dir" not in st.session_state:
+    st.session_state.source_dir = Path.cwd().as_posix()
+if "output_dir" not in st.session_state:
+    st.session_state.output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
+if "results_file" not in st.session_state:
+    st.session_state.results_file = (
+        Path(st.session_state.output_dir)
+        .joinpath("ash_aggregated_results.json")
+        .as_posix()
+    )
+
+# Import the Bedrock helper from relative
+
+
+class BedrockHelper:
+    """Helper class for interacting with Amazon Bedrock"""
+
+    def __init__(self, region: str = "us-east-1", profile: Optional[str] = None):
+        """Initialize the Bedrock helper
+
+        Args:
+            region: AWS region where Bedrock is available
+            profile: AWS profile name to use (optional)
+        """
+        self.region = region
+        self.profile = profile
+        self.session = boto3.Session(profile_name=profile, region_name=region)
+        self.bedrock_runtime = self.session.client("bedrock-runtime")
+        self.bedrock = self.session.client("bedrock")
+        self.available_models = []
+
+    def get_available_models(self) -> List[Dict[str, Any]]:
+        """Get available foundation models in the current region
+
+        Returns:
+            List of available models with their details, including inference profile ARNs for models
+            that only support inference profiles
+        """
+        try:
+            final_model_list = []
+            inference_profiles = self.bedrock.list_inference_profiles()
+            model_profile_map = {}
+            for profile in inference_profiles.get("inferenceProfileSummaries", []):
+                for model in [
+                    item
+                    for item in profile.get("models", [])
+                    if item.get("modelArn", None) is not None
+                ]:
+                    model_profile_map[model["modelArn"]] = profile
+            print("Fetching available foundation models...")
+            # Get foundation models
+            response = self.bedrock.list_foundation_models()
+            active_models = [
+                item
+                for item in response.get("modelSummaries", [])
+                if item.get("modelLifecycle", {}).get("status", "NA") == "ACTIVE"
+                and "TEXT" in item.get("inputModalities", [])
+                and "TEXT" in item.get("outputModalities", [])
+            ]
+            print(f"Found {len(active_models)} active foundation models")
+            for model in active_models:
+                if "ON_DEMAND" in model.get("inferenceTypesSupported", []):
+                    final_model_list.append(
+                        {
+                            "modelId": model.get("modelId", "unknown"),
+                            "modelName": model.get("modelName", "unknown"),
+                            "modelArn": model.get("modelArn", "unknown"),
+                            "providerName": model.get("providerName", "unknown"),
+                            "inferenceType": "ON_DEMAND",
+                        }
+                    )
+                if "INFERENCE_PROFILE" in model.get("inferenceTypesSupported", []):
+                    if model.get("modelArn", "unknown") not in model_profile_map:
+                        # Unable to find the inference profile ID!
+                        continue
+                    final_model_list.append(
+                        {
+                            "modelId": model_profile_map[
+                                model.get("modelArn", "unknown")
+                            ]["inferenceProfileId"],
+                            "modelName": model.get("modelName", "unknown"),
+                            "modelArn": model.get("modelArn", "unknown"),
+                            "providerName": model.get("providerName", "unknown"),
+                            "inferenceType": "INFERENCE_PROFILE",
+                        }
+                    )
+
+            self.available_models = final_model_list
+            return self.available_models
+        except Exception as e:
+            print(f"Error getting available models: {str(e)}")
+            return []
+        except Exception as e:
+            print(f"Error getting available models: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_available_profiles() -> List[str]:
+        """Get available AWS profiles from credentials file
+
+        Returns:
+            List of profile names
+        """
+        profiles = ["default"]
+        try:
+            # Check for credentials file
+            credentials_path = os.path.expanduser("~/.aws/credentials")
+            if os.path.exists(credentials_path):
+                config = configparser.ConfigParser()
+                config.read(credentials_path)
+                profiles = config.sections()
+                if "default" not in profiles:
+                    profiles.insert(0, "default")
+
+            # Check for config file
+            config_path = os.path.expanduser("~/.aws/config")
+            if os.path.exists(config_path):
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                for section in config.sections():
+                    if section.startswith("profile "):
+                        profile_name = section[8:]  # Remove "profile " prefix
+                        if profile_name not in profiles:
+                            profiles.append(profile_name)
+        except Exception as e:
+            print(f"Error reading AWS profiles: {str(e)}")
+
+        return profiles
+
+    def analyze_finding(
+        self,
+        finding: Dict[str, Any],
+        file_content: Optional[str] = None,
+        model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0",
+    ) -> Dict[str, str]:
+        """Analyze a security finding and recommend fixes
+
+        Args:
+            finding: The finding data
+            file_content: Optional content of the file with the finding
+            model_id: The Bedrock model ID or inference profile ARN to use
+
+        Returns:
+            Dictionary with analysis and recommendation
+        """
+        # Build the user message content
+        user_message_content = f"""I'm analyzing a security finding from the Automated Security Helper (ASH) tool.
+Please provide a detailed analysis of this finding and recommend specific fixes.
+
+FINDING DETAILS:
+- Title: {finding.get("title", "Unknown")}
+- Severity: {finding.get("severity", "Unknown")}
+- Scanner: {finding.get("scanner", "Unknown")}
+- File: {finding.get("file_path", "Unknown")}
+- Line: {finding.get("line", "Unknown")}
+- Description: {finding.get("description", "Unknown")}
+- CWE: {finding.get("cwe", "Unknown")}
+"""
+
+        if file_content:
+            user_message_content += f"""
+FILE CONTENT:
+```
+{file_content}
+```
+"""
+
+        user_message_content += """
+Please provide:
+1. A brief explanation of why this is a security concern
+2. The potential impact if exploited
+3. Specific code changes to fix the issue (with before/after examples)
+4. Additional security best practices related to this finding
+
+Format your response in markdown.
+"""
+
+        try:
+            # Log the request
+            print(f"Generating message with model {model_id}")
+            print(f"Model ID type: {type(model_id)}")
+
+            # Use the converse API for all text models (not just Claude)
+            # The converse API is the recommended approach for all text generation models
+            print(f"Using converse API for model: {model_id}")
+
+            # Create messages array for the conversation - content must be a list of message parts
+            messages = [{"role": "user", "content": [{"text": user_message_content}]}]
+
+            # System prompt must also be a list of message parts
+            system = [
+                {
+                    "text": "You are a security expert specializing in code security analysis. Your task is to analyze security findings from the Automated Security Helper (ASH) tool and provide detailed, actionable recommendations to fix the issues. Focus on practical solutions and best practices."
+                }
+            ]
+
+            # Inference parameters
+            temperature = 0.5
+
+            # Base inference config
+            inference_config = {"temperature": temperature}
+
+            # Additional model fields - customize based on model type
+            additional_model_fields = {}
+
+            # Add model-specific parameters
+            if "claude" in model_id.lower():
+                # Claude models support top_k
+                additional_model_fields["top_k"] = 200
+            # Add other model-specific parameters as needed
+            # elif "nova" in model_id.lower():
+            #    additional_model_fields["specific_nova_param"] = value
+
+            try:
+                print(f"Sending converse request to model: {model_id}")
+
+                # Prepare the converse API call
+                converse_args = {
+                    "modelId": model_id,
+                    "messages": messages,
+                    "system": system,
+                    "inferenceConfig": inference_config,
+                }
+
+                # Only add additionalModelRequestFields if we have any
+                if additional_model_fields:
+                    converse_args["additionalModelRequestFields"] = (
+                        additional_model_fields
+                    )
+
+                # Use the converse API
+                response = self.bedrock_runtime.converse(**converse_args)
+                print("Converse request successful")
+
+                # Extract the response content
+                if (
+                    response
+                    and "output" in response
+                    and "message" in response["output"]
+                ):
+                    message = response["output"]["message"]
+                    if "content" in message:
+                        content_list = message["content"]
+                        # Combine all text parts
+                        full_text = ""
+                        for content_item in content_list:
+                            if "text" in content_item:
+                                full_text += content_item["text"]
+                        return {"analysis": full_text}
+
+                print(f"Response structure: {response.keys() if response else 'None'}")
+                return {
+                    "analysis": "No content found in the response. Raw response: "
+                    + str(response)
+                }
+            except Exception as e:
+                print(f"Error in converse API: {str(e)}")
+                return {"analysis": f"Error using converse API: {str(e)}"}
+
+        except Exception as e:
+            import traceback
+
+            error_details = traceback.format_exc()
+            return {
+                "analysis": f"Error invoking Bedrock model: {str(e)}\n\nDetails: {error_details}"
+            }
+
+    def get_file_content(self, file_path: str, source_dir: str) -> Optional[str]:
+        """Get the content of a file
+
+        Args:
+            file_path: Path to the file
+            source_dir: Source directory
+
+        Returns:
+            File content or None if file not found
+        """
+        try:
+            # Handle both absolute and relative paths
+            if Path(file_path).is_absolute():
+                full_path = Path(file_path)
+            else:
+                full_path = Path(source_dir) / file_path
+
+            print(f"Attempting to read file: {full_path}")
+
+            if full_path.exists():
+                with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                    print(
+                        f"Successfully read file: {full_path}, content length: {len(content)}"
+                    )
+                    return content
+            else:
+                print(f"File not found: {full_path}")
+
+                # Try alternative paths if the direct path doesn't work
+                alt_paths = [
+                    Path(source_dir)
+                    / Path(file_path).name,  # Just the filename in source dir
+                    Path(file_path.lstrip("/")),  # Remove leading slash
+                ]
+
+                for alt_path in alt_paths:
+                    print(f"Trying alternative path: {alt_path}")
+                    if alt_path.exists():
+                        with open(
+                            alt_path, "r", encoding="utf-8", errors="replace"
+                        ) as f:
+                            content = f.read()
+                            print(
+                                f"Successfully read file from alternative path: {alt_path}"
+                            )
+                            return content
+
+            return None
+        except Exception as e:
+            print(f"Error reading file {file_path}: {str(e)}")
+            return None
+
+
 # Set page configuration
 st.set_page_config(
     page_title="Automated Security Helper",
     page_icon="🔒",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 # App title and description
@@ -34,8 +362,32 @@ st.write(
 # Version information
 st.sidebar.info(f"ASH Version: {get_ash_version()}")
 
+# Global configuration in sidebar
+st.sidebar.header("Global Configuration")
+st.session_state.source_dir = st.sidebar.text_input(
+    "Source Directory",
+    value=st.session_state.source_dir,
+    help="The source directory to scan",
+)
+st.session_state.output_dir = st.sidebar.text_input(
+    "Output Directory",
+    value=st.session_state.output_dir,
+    help="The directory to output results to",
+)
+st.session_state.results_file = st.sidebar.text_input(
+    "Results File",
+    value=Path(st.session_state.output_dir)
+    .joinpath("ash_aggregated_results.json")
+    .as_posix(),
+    help="Path to the ASH results file",
+)
+
+# Initialize Bedrock helper in session state if not already present
+if "bedrock_helper" not in st.session_state:
+    st.session_state.bedrock_helper = None
+
 # Create tabs for different sections
-tab1, tab2 = st.tabs(["Run Scan", "View Results"])
+tab1, tab2, tab3 = st.tabs(["Run Scan", "View Results", "AI Analysis"])
 
 with tab1:
     # Main visible section - Source directory and Run button in the same row
@@ -43,23 +395,35 @@ with tab1:
 
     # Create two columns - one for the source directory input and one for the run button
     col1, col2 = st.columns([1, 1])
-    # Default values for hidden options
-    default_output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
-    output_dir = default_output_dir
+    # Default values from session state
+    source_dir = st.session_state.source_dir
+    output_dir = st.session_state.output_dir
 
     with col1:
+        # Use session state values as defaults
         source_dir = st.text_input(
             "Source Directory",
-            value=Path.cwd().as_posix(),
+            value=st.session_state.source_dir,
             help="The source directory to scan",
+            key="tab1_source_dir",
         )
+        # Update session state when changed
+        if source_dir != st.session_state.source_dir:
+            st.session_state.source_dir = source_dir
 
     with col2:
         output_dir = st.text_input(
             "Output Directory",
-            value=default_output_dir,
+            value=st.session_state.output_dir,
             help="The directory to output results to",
+            key="tab1_output_dir",
         )
+        # Update session state when changed
+        if output_dir != st.session_state.output_dir:
+            st.session_state.output_dir = output_dir
+            st.session_state.results_file = (
+                Path(output_dir).joinpath("ash_aggregated_results.json").as_posix()
+            )
 
     # All configuration options in collapsible sections
     with st.expander("Additional Scan Options", expanded=False):
@@ -439,13 +803,14 @@ with tab2:
     # Allow user to select results file
     results_file = st.text_input(
         "Results File Path",
-        value=(
-            str(Path(output_dir) / "ash_aggregated_results.json")
-            if "output_dir" in locals()
-            else ""
-        ),
+        value=st.session_state.results_file,
         help="Path to the ASH results file",
+        key="tab2_results_file",
     )
+
+    # Update session state when changed
+    if results_file != st.session_state.results_file:
+        st.session_state.results_file = results_file
 
     if results_file and Path(results_file).exists():
         try:
@@ -562,6 +927,16 @@ with tab2:
                         )
                         if 0 <= finding_index < len(flat_vulns):
                             st.json(flat_vulns[finding_index].dict())
+
+                            # Store the selected finding in session state for AI analysis
+                            st.session_state.selected_finding = flat_vulns[
+                                finding_index
+                            ]
+                            st.session_state.source_dir = (
+                                results.metadata.source_dir
+                                if hasattr(results.metadata, "source_dir")
+                                else ""
+                            )
                 else:
                     st.success("No findings detected!")
             else:
@@ -582,6 +957,392 @@ with tab2:
             st.code(traceback.format_exc())
     else:
         st.info("No results file selected or file does not exist")
+
+# AI Analysis tab
+with tab3:
+    st.header("AI Analysis with Amazon Bedrock")
+
+    # Initialize session state variables if they don't exist
+    if "findings_loaded_in_ai_tab" not in st.session_state:
+        st.session_state.findings_loaded_in_ai_tab = False
+    if "ai_tab_findings" not in st.session_state:
+        st.session_state.ai_tab_findings = []
+    if "current_finding_index" not in st.session_state:
+        st.session_state.current_finding_index = 0
+    if "show_actionable_only" not in st.session_state:
+        st.session_state.show_unsuppressed_only = True
+
+    # Create two columns for AWS connection and findings loading
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Get available AWS profiles
+        available_profiles = BedrockHelper.get_available_profiles()
+
+        # AWS Profile selection
+        aws_profile = st.selectbox(
+            "AWS Profile",
+            options=available_profiles,
+            index=0,
+            help="Select the AWS profile to use for Bedrock access",
+        )
+
+        # AWS Region selection
+        aws_region = st.selectbox(
+            "AWS Region",
+            options=[
+                "us-east-1",
+                "us-west-2",
+                "eu-central-1",
+                "ap-southeast-1",
+                "ap-northeast-1",
+                "eu-west-1",
+            ],
+            index=0,
+            help="Select the AWS region where Amazon Bedrock is available",
+        )
+
+        # Initialize Bedrock connection
+        if st.button("Connect to Bedrock"):
+            try:
+                # Create Bedrock helper with region and profile
+                with st.spinner("Connecting to Amazon Bedrock..."):
+                    st.session_state.bedrock_helper = BedrockHelper(
+                        region=aws_region,
+                        profile=aws_profile if aws_profile != "default" else None,
+                    )
+
+                    # Get available models
+                    st.session_state.available_models = (
+                        st.session_state.bedrock_helper.get_available_models()
+                    )
+
+                    if st.session_state.available_models:
+                        profile_msg = (
+                            f" using profile '{aws_profile}'"
+                            if aws_profile != "default"
+                            else ""
+                        )
+                        st.success(
+                            f"Connected to Amazon Bedrock in {aws_region}{profile_msg}"
+                        )
+                        st.session_state.connected = True
+                    else:
+                        st.warning(
+                            f"Connected to AWS, but no Bedrock models are available in {aws_region} or with your current permissions"
+                        )
+                        st.session_state.connected = False
+            except Exception as e:
+                st.error(f"Failed to connect to Amazon Bedrock: {str(e)}")
+                st.error("Make sure you have valid AWS credentials configured")
+                st.session_state.connected = False
+
+    with col2:
+        # Allow user to select results file
+        results_file = st.text_input(
+            "Results File Path",
+            value=st.session_state.results_file,
+            help="Path to the ASH results file",
+            key="ai_tab_results_file",
+        )
+
+        # Update session state when changed
+        if results_file != st.session_state.results_file:
+            st.session_state.results_file = results_file
+
+        # Load findings button
+        if st.button("Load Findings"):
+            if results_file and Path(results_file).exists():
+                try:
+                    import json
+                    from automated_security_helper.config.ash_config import AshConfig
+                    from automated_security_helper.models.asharp_model import (
+                        AshAggregatedResults,
+                    )
+
+                    AshConfig.model_rebuild()
+                    AshAggregatedResults.model_rebuild()
+
+                    # Load results using the Pydantic model
+                    with open(results_file, "r") as f:
+                        results_data = json.load(f)
+                    results = AshAggregatedResults.model_validate(results_data)
+
+                    # Get flat vulnerabilities
+                    flat_vulns = results.to_flat_vulnerabilities()
+
+                    if flat_vulns:
+                        st.session_state.ai_tab_findings = flat_vulns
+                        st.session_state.findings_loaded_in_ai_tab = True
+                        st.session_state.current_finding_index = 0
+                        st.session_state.source_dir = (
+                            results.metadata.source_dir
+                            if hasattr(results.metadata, "source_dir")
+                            else st.session_state.source_dir
+                        )
+                        st.success(f"Loaded {len(flat_vulns)} findings")
+                    else:
+                        st.warning("No findings found in the results file")
+                        st.session_state.findings_loaded_in_ai_tab = False
+                except Exception as e:
+                    st.error(f"Error loading results: {str(e)}")
+                    st.session_state.findings_loaded_in_ai_tab = False
+            else:
+                st.error("Results file does not exist or path is invalid")
+
+    # Display findings selection and navigation if findings are loaded
+    if st.session_state.findings_loaded_in_ai_tab and st.session_state.ai_tab_findings:
+        st.subheader("Finding Selection")
+
+        # Filter for actionable findings (HIGH, CRITICAL, MEDIUM severity)
+        show_unsuppressed_only = st.checkbox(
+            "Show unsuppressed findings only",
+            value=st.session_state.show_unsuppressed_only,
+        )
+        st.session_state.show_unsuppressed_only = show_unsuppressed_only
+
+        if show_unsuppressed_only:
+            filtered_findings = [
+                f for f in st.session_state.ai_tab_findings if not f.is_suppressed
+            ]
+            displayed_findings = filtered_findings
+        else:
+            displayed_findings = st.session_state.ai_tab_findings
+
+        if not displayed_findings:
+            st.warning("No findings match the current filter")
+        else:
+            # Create a list of finding titles with severity for the dropdown
+            finding_options = [
+                f"{i + 1}. [{f.severity}] {f.title} ({f.scanner})"
+                for i, f in enumerate(displayed_findings)
+            ]
+
+            # Finding selection dropdown
+            selected_finding_idx = st.selectbox(
+                "Select Finding",
+                options=range(len(finding_options)),
+                format_func=lambda i: finding_options[i],
+                index=min(
+                    st.session_state.current_finding_index, len(displayed_findings) - 1
+                ),
+                help="Select a finding to analyze",
+            )
+
+            st.session_state.current_finding_index = selected_finding_idx
+
+            # Navigation buttons
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col1:
+                if st.button("Previous Finding", disabled=selected_finding_idx == 0):
+                    st.session_state.current_finding_index = max(
+                        0, selected_finding_idx - 1
+                    )
+                    st.rerun()
+
+            with col3:
+                if st.button(
+                    "Next Finding",
+                    disabled=selected_finding_idx == len(displayed_findings) - 1,
+                ):
+                    st.session_state.current_finding_index = min(
+                        len(displayed_findings) - 1, selected_finding_idx + 1
+                    )
+                    st.rerun()
+
+            # Get the selected finding
+            finding = displayed_findings[selected_finding_idx]
+            source_dir = st.session_state.source_dir
+
+            # Display finding details
+            st.subheader(f"Analysis for Finding: {finding.title}")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"**Severity:** {finding.severity}")
+                st.markdown(f"**Scanner:** {finding.scanner}")
+            with col2:
+                st.markdown(f"**File:** {finding.file_path}")
+
+                # Handle different line number attributes
+                if hasattr(finding, "line_start") and hasattr(finding, "line_end"):
+                    st.markdown(f"**Lines:** {finding.line_start}-{finding.line_end}")
+                elif hasattr(finding, "line"):
+                    st.markdown(f"**Line:** {finding.line}")
+                else:
+                    st.markdown("**Line:** N/A")
+
+            st.markdown(f"**Description:** {finding.description}")
+
+            # Get file content if available
+            file_content = None
+            if finding.file_path and st.session_state.source_dir:
+                st.write(
+                    f"Looking for file in source directory: {st.session_state.source_dir}"
+                )
+                file_content = (
+                    st.session_state.bedrock_helper.get_file_content(
+                        finding.file_path, st.session_state.source_dir
+                    )
+                    if st.session_state.bedrock_helper
+                    else None
+                )
+
+                if file_content:
+                    with st.expander("View File Content"):
+                        st.code(file_content)
+                else:
+                    st.warning(f"Could not find file: {finding.file_path}")
+                    # Add a manual file content input option
+                    manual_file_content = st.text_area(
+                        "Enter file content manually",
+                        height=200,
+                        help="If the file couldn't be found automatically, you can paste its content here",
+                    )
+                    if manual_file_content:
+                        file_content = manual_file_content
+
+        # Model selection (only show after successful connection)
+        if (
+            "connected" in st.session_state
+            and st.session_state.connected
+            and "available_models" in st.session_state
+        ):
+            # Create a list of model options with appropriate display names
+            model_options = []
+            model_ids = {}
+            vendor_models = {}
+
+            for model in st.session_state.available_models:
+                model_id = model["modelId"]
+                model_name = model["modelName"]
+                model_provider = model["providerName"]
+                inference_type = model["inferenceType"]
+                display_name = f"{model_provider} {model_name} ({model_id})"
+                model_ids[display_name] = model_id
+                if model_provider not in vendor_models:
+                    vendor_models[model_provider] = []
+                vendor_models[model_provider].append(display_name)
+                model_options.append(display_name)
+
+            if model_options:
+                # Default to Claude if available, otherwise use first model
+                default_index = 0
+                for i, model_name in enumerate(model_options):
+                    if "nova-lite" in model_name.lower():
+                        default_index = i
+                        break
+                    elif "claude-3-7-sonnet" in model_name.lower():
+                        default_index = i
+                        break
+
+                form = st.form(key="model_selection_form", border=False)
+                col1, col2 = form.columns([1, 2])
+                with col1:
+                    form.subheader("Bedrock Model Selection")
+                    selected_vendor = form.selectbox(
+                        "Vendor",
+                        options=["*", *sorted(set(vendor_models.keys()))],
+                        index=0,
+                        help="Select the vendor of the model to use for analysis",
+                    )
+                with col2:
+                    filtered_models = []
+                    for vendor, model in vendor_models.items():
+                        if vendor == selected_vendor or selected_vendor == "*":
+                            filtered_models.extend(model)
+                    selected_model_display = form.selectbox(
+                        "Bedrock Model",
+                        options=filtered_models,
+                        index=(
+                            min(default_index, len(filtered_models) - 1)
+                            if filtered_models
+                            else 0
+                        ),
+                        help="Select the Amazon Bedrock model to use for analysis",
+                    )
+                    # Get the actual model ID or inference profile ARN to use
+                    if selected_model_display in sorted(set(model_ids)):
+                        model_id = model_ids[selected_model_display]
+                        st.session_state.selected_model = model_id
+
+                        # Show info about inference profile if applicable
+                        if "Inference Profile" in selected_model_display:
+                            st.info(
+                                f"Using inference profile for {selected_model_display.split(' (')[0]}"
+                            )
+                            st.write(f"Inference Profile ARN: {model_id}")
+                            st.info(
+                                f"Using inference profile for {selected_model_display.split(' (')[0]}"
+                            )
+                    else:
+                        st.session_state.selected_model = selected_model_display
+
+                form_submit_button = form.form_submit_button(
+                    "Analyze with Bedrock", type="primary"
+                )
+                # Analyze with Bedrock
+                if (
+                    st.session_state.bedrock_helper
+                    and "selected_model" in st.session_state
+                    and st.session_state.selected_model
+                ):
+                    if form_submit_button:
+                        with st.spinner("Analyzing finding with Amazon Bedrock..."):
+                            try:
+                                # Convert finding to dict for analysis
+                                finding_dict = finding.model_dump(
+                                    by_alias=True, exclude_unset=True, exclude_none=True
+                                )
+
+                                # Get analysis from Bedrock with progress indicator
+                                with st.status(
+                                    "Amazon Bedrock is analyzing your finding...",
+                                    expanded=True,
+                                ) as status:
+                                    st.write(
+                                        f"Sending request to Bedrock using {st.session_state.selected_model}..."
+                                    )
+                                    analysis = (
+                                        st.session_state.bedrock_helper.analyze_finding(
+                                            finding_dict,
+                                            file_content,
+                                            model_id=st.session_state.selected_model,
+                                        )
+                                    )
+                                    status.update(
+                                        label="Analysis complete!",
+                                        state="complete",
+                                        expanded=False,
+                                    )
+
+                                # Store analysis in session state
+                                st.session_state.current_analysis = analysis
+
+                                # Display analysis
+                                st.markdown("## AI Analysis")
+                                st.markdown(analysis["analysis"])
+
+                            except Exception as e:
+                                st.error(f"Error analyzing finding: {str(e)}")
+                else:
+                    st.info(
+                        "Please connect to Amazon Bedrock and select a model to analyze findings"
+                    )
+
+            else:
+                st.warning(
+                    "No suitable text models available in this region with your current permissions"
+                )
+                st.session_state.selected_model = None
+
+    else:
+        if not st.session_state.findings_loaded_in_ai_tab:
+            st.info("Please load findings from a results file")
+        elif not st.session_state.ai_tab_findings:
+            st.info(
+                "No findings available. Please run a scan or select a different results file."
+            )
 
 # Add footer with links
 st.markdown("---")
