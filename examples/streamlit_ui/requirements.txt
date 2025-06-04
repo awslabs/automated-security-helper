@@ -1,2 +1,0 @@
-streamlit>=1.24.0
-git+https://github.com/awslabs/automated-security-helper@v3.0.0-beta

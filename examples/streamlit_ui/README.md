@@ -17,25 +17,34 @@ This is a Streamlit-based UI for the Automated Security Helper (ASH). It provide
 
 ## Installation
 
-1. Install the required dependencies:
+Install the required dependencies:
 
 ```bash
-pip install -r requirements.txt
-```
-
-2. Make sure you have ASH installed:
-
-```bash
+# ASH
 pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+
+# Streamlit
+pip install streamlit
 ```
 
 ## Usage
 
-Run the Streamlit app:
+Run the Streamlit app...
+
+### ...direct from GitHub
 
 ```bash
-streamlit run ash_ui.py
+streamlit run https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/examples/streamlit_ui/ash_ui.py
 ```
+
+...or clone and run from local...
+
+```bash
+git clone https://github.com/awslabs/automated-security-helper.git --branch beta
+streamlit run ./automated-security-helper/examples/streamlit_ui/ash_ui.py
+```
+
+###
 
 ### Running Scans
 
