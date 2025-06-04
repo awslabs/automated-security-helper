@@ -61,6 +61,13 @@ def report_command(
             envvar="ASH_CONFIG",
         ),
     ] = None,
+    config_overrides: Annotated[
+        List[str],
+        typer.Option(
+            "--config-overrides",
+            help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
     ] = False,
@@ -119,7 +126,7 @@ def report_command(
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # Load the ASH configuration
-    ash_config = resolve_config(config_path=config)
+    ash_config = resolve_config(config_path=config, config_overrides=config_overrides)
 
     # Create plugin context
     plugin_context = PluginContext(

@@ -114,6 +114,13 @@ def build_ash_image_cli_command(
             help="Custom build arguments to pass to the container build",
         ),
     ] = [],
+    config_overrides: Annotated[
+        List[str],
+        typer.Option(
+            "--config-overrides",
+            help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
+        ),
+    ] = [],
     # General Options
     offline: Annotated[
         bool,
@@ -166,6 +173,7 @@ def build_ash_image_cli_command(
         # General params
         show_summary=run,
         config=config,
+        config_overrides=config_overrides,
         offline=offline,
         progress=False,
         log_level=log_level,

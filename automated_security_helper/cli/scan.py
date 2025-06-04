@@ -62,6 +62,14 @@ def run_ash_scan_cli_command(
             envvar="ASH_PLUGIN_MODULES",
         ),
     ] = [],
+    config_overrides: Annotated[
+        List[str],
+        typer.Option(
+            "--config-overrides",
+            help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2'). "
+            "Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. See docs/config-overrides.md",
+        ),
+    ] = [],
     offline: Annotated[
         bool,
         typer.Option(
@@ -311,6 +319,7 @@ def run_ash_scan_cli_command(
         source_dir=source_dir,
         output_dir=output_dir,
         config=config,
+        config_overrides=config_overrides,
         offline=offline,
         strategy=strategy,
         scanners=scanners,

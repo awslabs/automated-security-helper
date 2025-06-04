@@ -62,6 +62,10 @@ class ASHScanOrchestrator(BaseModel):
     config_path: Annotated[
         Optional[Path], Field(None, description="Path to configuration file")
     ]
+    config_overrides: Annotated[
+        Optional[List[str]],
+        Field(None, description="Configuration overrides as key-value pairs"),
+    ]
     color_system: Annotated[
         Optional[str], Field(None, description="Color system to use for console output")
     ] = None
@@ -136,7 +140,12 @@ class ASHScanOrchestrator(BaseModel):
         super().model_post_init(context)
         ASH_LOGGER.info(f"Initializing ASH v{get_ash_version()}")
 
-        self.config = resolve_config(config_path=self.config_path)
+        self.config = resolve_config(
+            config_path=self.config_path,
+            config_overrides=self.config_overrides
+            if hasattr(self, "config_overrides")
+            else None,
+        )
 
         ASH_LOGGER.verbose("Setting up working directories")
         if self.source_dir is None:

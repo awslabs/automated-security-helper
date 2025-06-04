@@ -47,6 +47,7 @@ def run_ash_scan(
     source_dir: str = Path.cwd().as_posix(),
     output_dir: str = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
     config: str = None,
+    config_overrides: List[str] = None,
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
     scanners: List[str] = [],
@@ -104,20 +105,24 @@ def run_ash_scan(
     final_log_level = (
         AshLogLevel.VERBOSE
         if verbose
-        else AshLogLevel.DEBUG
-        if debug
-        else AshLogLevel.ERROR
-        if (
-            quiet
-            or simple
-            or log_level
-            in [
-                AshLogLevel.QUIET,
-                AshLogLevel.ERROR,
-                AshLogLevel.SIMPLE,
-            ]
+        else (
+            AshLogLevel.DEBUG
+            if debug
+            else (
+                AshLogLevel.ERROR
+                if (
+                    quiet
+                    or simple
+                    or log_level
+                    in [
+                        AshLogLevel.QUIET,
+                        AshLogLevel.ERROR,
+                        AshLogLevel.SIMPLE,
+                    ]
+                )
+                else log_level
+            )
         )
-        else log_level
     )
     final_logging_log_level = logging._nameToLevel.get(
         final_log_level.value, logging.INFO
@@ -166,6 +171,7 @@ def run_ash_scan(
             container_uid=container_uid,
             container_gid=container_gid,
             config=config,
+            config_overrides=config_overrides,
             strategy=strategy,
             scanners=scanners,
             exclude_scanners=exclude_scanners,
@@ -317,6 +323,9 @@ def run_ash_scan(
             else:
                 logger.info(f"Using config file specified at: {config}")
 
+            if config_overrides:
+                logger.info(f"Applying {len(config_overrides)} configuration overrides")
+
             final_scanners = scanners or []
             if mode == RunMode.precommit:
                 fast_scanners = [
@@ -338,6 +347,7 @@ def run_ash_scan(
                 enabled_scanners=final_scanners,
                 excluded_scanners=final_excluded_scanners,
                 config_path=config,
+                config_overrides=config_overrides,
                 verbose=verbose or debug,
                 debug=debug,
                 strategy=(
@@ -348,19 +358,21 @@ def run_ash_scan(
                 no_cleanup=not cleanup,
                 output_formats=output_formats,
                 show_progress=progress
-                and not quiet  # Don't show progress in quiet mode
-                and not simple  # Don't show progress in simple mode
-                and (
-                    os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-                    not in [
-                        "YES",
-                        "1",
-                        "TRUE",
-                    ]  # Running inside the container is not guaranteed to produce the live progress outputs correctly
-                    or os.environ.get("CI", None)
-                    is not None  # Neither is running in a CI pipeline
-                ),
-                simple_mode=simple,  # Pass the simple mode flag to the orchestrator
+                and final_log_level
+                not in [
+                    AshLogLevel.QUIET,
+                    AshLogLevel.SIMPLE,
+                    AshLogLevel.VERBOSE,
+                    AshLogLevel.DEBUG,
+                ]
+                and os.environ.get("CI", None) is not None
+                and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+                not in [
+                    "YES",
+                    "1",
+                    "TRUE",
+                ],
+                simple_mode=simple,
                 color_system="auto" if color else None,
                 offline=(
                     offline

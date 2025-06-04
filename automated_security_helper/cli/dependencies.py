@@ -92,6 +92,13 @@ def install_dependencies(
             envvar="ASH_CONFIG",
         ),
     ] = None,
+    config_overrides: Annotated[
+        List[str],
+        typer.Option(
+            "--config-overrides",
+            help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
     ] = False,
@@ -157,6 +164,7 @@ def install_dependencies(
                         work_dir=work_dir,
                         config=resolve_config(
                             source_dir=source_dir,
+                            config_overrides=config_overrides,
                         ),
                     )
                 )

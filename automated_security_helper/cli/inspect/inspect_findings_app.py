@@ -898,6 +898,18 @@ def findings_command(
         "ash_aggregated_results.json",
         help="Name of the report file to analyze. Defaults to 'ash_aggregated_results.json'.",
     ),
+    # config: str = typer.Option(
+    #     None,
+    #     "--config",
+    #     "-c",
+    #     help="The path to the configuration file",
+    #     envvar="ASH_CONFIG",
+    # ),
+    # config_overrides: List[str] = typer.Option(
+    #     [],
+    #     "--config-overrides",
+    #     help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
+    # ),
 ):
     """Interactively explore security findings."""
     # Try to load the model from the output directory
