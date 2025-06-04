@@ -53,10 +53,19 @@ streamlit run ash_ui.py
 ### AI Analysis
 
 1. Navigate to the "AI Analysis" tab
-2. Select your AWS region and Bedrock model
+2. Select your AWS profile and region
 3. Click "Connect to Bedrock"
-4. Select a finding from the "View Results" tab
-5. Click "Analyze with Bedrock" to get AI-powered analysis and recommendations
+4. Load findings directly in the AI Analysis tab:
+   - Enter the path to your results file
+   - Click "Load Findings"
+5. Filter findings:
+   - By default, only actionable findings (HIGH, CRITICAL, MEDIUM severity) are shown
+   - Uncheck "Show actionable findings only" to see all findings
+6. Select a finding to analyze:
+   - Use the dropdown to select a specific finding
+   - Use Previous/Next buttons to navigate through findings
+7. Click "Analyze with Bedrock" to get AI-powered analysis and recommendations
+   - The analysis includes security concerns, potential impacts, and recommended fixes
 
 ## AWS Credentials
 
