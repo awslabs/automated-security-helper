@@ -68,12 +68,14 @@ streamlit run ./automated-security-helper/examples/streamlit_ui/ash_ui.py
    - Enter the path to your results file
    - Click "Load Findings"
 5. Filter findings:
-   - By default, only actionable findings (HIGH, CRITICAL, MEDIUM severity) are shown
-   - Uncheck "Show actionable findings only" to see all findings
+   - By default, only unsuppressed findings are shown
+   - Uncheck "Show unsuppressed findings only" to see all findings
 6. Select a finding to analyze:
    - Use the dropdown to select a specific finding
    - Use Previous/Next buttons to navigate through findings
-7. Click "Analyze with Bedrock" to get AI-powered analysis and recommendations
+7. Select a model from the list
+   - Available models and inference profiles are retrieved from Amazon Bedrock using the selected profile
+8. Click "Analyze with Bedrock" to get AI-powered analysis and recommendations
    - The analysis includes security concerns, potential impacts, and recommended fixes
 
 ## AWS Credentials
