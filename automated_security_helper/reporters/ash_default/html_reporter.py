@@ -43,6 +43,8 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             model.sarif.runs[0].results if model.sarif and model.sarif.runs else []
         )
 
+        # Don't add dummy results - let the formatter handle empty results
+
         # Group results by severity and rule
         findings_by_severity = self._group_results_by_severity(results)
         findings_by_type = self._group_results_by_rule(results)
@@ -182,9 +184,6 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     def _format_findings_table(self, findings: List[Result]) -> str:
         """Format the findings table."""
-        if not findings:
-            return "<p>No findings to display.</p>"
-
         table = """
         <table>
             <tr>
@@ -194,6 +193,13 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 <th>Location</th>
             </tr>
         """
+
+        if not findings:
+            table += """
+            <tr>
+                <td colspan="4">No findings to display</td>
+            </tr>
+            """
 
         for finding in findings:
             finding_level = (

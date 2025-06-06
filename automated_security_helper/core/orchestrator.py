@@ -103,6 +103,12 @@ class ASHScanOrchestrator(BaseModel):
     no_cleanup: Annotated[
         bool, Field(False, description="Keep work directory after scan")
     ]
+    ignore_suppressions: Annotated[
+        bool,
+        Field(
+            False, description="Ignore all suppression rules and report all findings"
+        ),
+    ] = False
 
     metadata: Annotated[
         Dict[str, Any],
@@ -338,6 +344,7 @@ class ASHScanOrchestrator(BaseModel):
                         output_dir=self.output_dir,
                         work_dir=self.output_dir.joinpath(ASH_WORK_DIR_NAME),
                         config=self.config,
+                        ignore_suppressions=self.ignore_suppressions,
                     ),
                     strategy=self.strategy,
                     enabled_scanners=self.enabled_scanners,

@@ -69,6 +69,7 @@ def run_ash_scan(
     debug: bool = False,
     color: bool = True,
     fail_on_findings: bool | None = None,
+    ignore_suppressions: bool = False,
     mode: RunMode = RunMode.local,
     show_summary: bool = True,
     log_level: AshLogLevel = AshLogLevel.INFO,
@@ -384,6 +385,7 @@ def run_ash_scan(
                     Path(existing_results) if existing_results else None
                 ),
                 python_based_plugins_only=python_based_plugins_only,
+                ignore_suppressions=ignore_suppressions,
                 ash_plugin_modules=ash_plugin_modules,  # Pass the ash_plugin_modules parameter to the orchestrator
             )
 

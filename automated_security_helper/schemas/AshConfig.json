@@ -89,7 +89,8 @@
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
             "ignore_paths": [],
-            "severity_threshold": "MEDIUM"
+            "severity_threshold": "MEDIUM",
+            "suppressions": []
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
         },
@@ -352,6 +353,15 @@
           ],
           "title": "Severity Threshold",
           "type": "string"
+        },
+        "suppressions": {
+          "default": [],
+          "description": "Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers.",
+          "items": {
+            "$ref": "#/$defs/Suppression"
+          },
+          "title": "Suppressions",
+          "type": "array"
         }
       },
       "title": "AshConfigGlobalSettingsSection",
@@ -1858,6 +1868,12 @@
           "default": null,
           "description": "ASH configuration"
         },
+        "ignore_suppressions": {
+          "default": false,
+          "description": "Ignore all suppression rules",
+          "title": "Ignore Suppressions",
+          "type": "boolean"
+        },
         "output_dir": {
           "description": "Primary output directory for all ASH results",
           "format": "path",
@@ -2730,6 +2746,79 @@
         }
       },
       "title": "SemgrepScannerConfigOptions",
+      "type": "object"
+    },
+    "Suppression": {
+      "description": "Represents a finding suppression rule.",
+      "properties": {
+        "expiration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Expiration date (YYYY-MM-DD)",
+          "title": "Expiration"
+        },
+        "file_path": {
+          "description": "File path pattern to match",
+          "title": "File Path",
+          "type": "string"
+        },
+        "line_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ending line number",
+          "title": "Line End"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Starting line number",
+          "title": "Line Start"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reason for suppression",
+          "title": "Reason"
+        },
+        "rule_id": {
+          "description": "Rule ID to suppress",
+          "title": "Rule Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_id",
+        "file_path"
+      ],
+      "title": "Suppression",
       "type": "object"
     },
     "SyftScannerConfig": {

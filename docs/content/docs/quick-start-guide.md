@@ -123,6 +123,16 @@ global_settings:
   ignore_paths:
     - path: 'tests/test_data'
       reason: 'Test data only'
+  suppressions:
+    - rule_id: 'RULE-123'
+      file_path: 'src/example.py'
+      line_start: 10
+      line_end: 15
+      reason: 'False positive due to test mock'
+      expiration: '2025-12-31'
+    - rule_id: 'RULE-456'
+      file_path: 'src/*.js'
+      reason: 'Known issue, planned for fix in v2.0'
 scanners:
   bandit:
     enabled: true

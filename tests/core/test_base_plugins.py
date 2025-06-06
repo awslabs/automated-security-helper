@@ -36,74 +36,94 @@ class TestConverterPlugin:
 
         name: str = "dummy"
 
-    class DummyConverter(ConverterPluginBase):
+    class DummyConverter(ConverterPluginBase["TestConverterPlugin.DummyConfig"]):
         """Dummy converter for testing."""
 
         def validate(self) -> bool:
             return True
 
-        def convert(self) -> list[Path]:
+        def convert(self, target: Path | str) -> list[Path]:
             return [Path("test.txt")]
 
-    def test_setup_paths_default(self, test_plugin_context):
+    def test_setup_paths_default(self, test_plugin_context, dummy_converter_config):
         """Test setup_paths with default values."""
-        converter = self.DummyConverter(context=test_plugin_context)
+        converter = self.DummyConverter(
+            context=test_plugin_context, config=dummy_converter_config
+        )
         assert converter.context.source_dir == test_plugin_context.source_dir
         assert converter.context.output_dir == test_plugin_context.output_dir
         assert converter.context.work_dir == test_plugin_context.work_dir
 
-    def test_setup_paths_custom(self, test_plugin_context):
+    def test_setup_paths_custom(self, dummy_converter_config):
         """Test setup_paths with custom values."""
         source = Path("/custom/source")
         output = Path("/custom/output")
         # Create a custom context with the specified paths
+        from automated_security_helper.config.ash_config import AshConfig
+
         custom_context = PluginContext(
             source_dir=source,
             output_dir=output,
             work_dir=output.joinpath(ASH_WORK_DIR_NAME),
-            config=test_plugin_context.config,
+            config=AshConfig(project_name="test-project"),
         )
-        converter = self.DummyConverter(context=custom_context)
+        converter = self.DummyConverter(
+            context=custom_context, config=dummy_converter_config
+        )
         assert converter.context.source_dir == source
         assert converter.context.output_dir == output
         assert converter.context.work_dir == output.joinpath(ASH_WORK_DIR_NAME)
 
-    def test_setup_paths_string_conversion(self, test_plugin_context):
+    def test_setup_paths_string_conversion(self, dummy_converter_config):
         """Test setup_paths converts string paths to Path objects."""
         # Create a custom context with string paths
+        from automated_security_helper.config.ash_config import AshConfig
+
         custom_context = PluginContext(
             source_dir="/test/source",
             output_dir="/test/output",
-            config=test_plugin_context.config,
+            config=AshConfig(project_name="test-project"),
         )
-        converter = self.DummyConverter(context=custom_context)
+        converter = self.DummyConverter(
+            context=custom_context, config=dummy_converter_config
+        )
         assert isinstance(converter.context.source_dir, Path)
         assert isinstance(converter.context.output_dir, Path)
         assert isinstance(converter.context.work_dir, Path)
 
-    def test_configure_with_config(self, test_plugin_context):
+    def test_configure_with_config(self, test_plugin_context, dummy_converter_config):
         """Test configure method with config."""
-        converter = self.DummyConverter(context=test_plugin_context)
+        converter = self.DummyConverter(
+            context=test_plugin_context, config=dummy_converter_config
+        )
         config = self.DummyConfig()
         converter.configure(config)
         assert converter.config == config
 
-    def test_configure_without_config(self, test_plugin_context):
+    def test_configure_without_config(
+        self, test_plugin_context, dummy_converter_config
+    ):
         """Test configure method without config."""
-        converter = self.DummyConverter(context=test_plugin_context)
+        converter = self.DummyConverter(
+            context=test_plugin_context, config=dummy_converter_config
+        )
         original_config = converter.config
         converter.configure(None)
         assert converter.config == original_config
 
-    def test_validate_implementation(self, test_plugin_context):
+    def test_validate_implementation(self, test_plugin_context, dummy_converter_config):
         """Test validate method implementation."""
-        converter = self.DummyConverter(context=test_plugin_context)
+        converter = self.DummyConverter(
+            context=test_plugin_context, config=dummy_converter_config
+        )
         assert converter.validate() is True
 
-    def test_convert_implementation(self, test_plugin_context):
+    def test_convert_implementation(self, test_plugin_context, dummy_converter_config):
         """Test convert method implementation."""
-        converter = self.DummyConverter(context=test_plugin_context)
-        result = converter.convert()
+        converter = self.DummyConverter(
+            context=test_plugin_context, config=dummy_converter_config
+        )
+        result = converter.convert(target="test_target")
         assert isinstance(result, list)
         assert all(isinstance(p, Path) for p in result)
 
@@ -129,7 +149,7 @@ class TestReporterPlugin:
         name: str = "dummy"
         extension: str = ".txt"
 
-    class DummyReporter(ReporterPluginBase):
+    class DummyReporter(ReporterPluginBase["TestReporterPlugin.DummyConfig"]):
         """Dummy reporter for testing."""
 
         def validate(self) -> bool:
@@ -138,59 +158,81 @@ class TestReporterPlugin:
         def report(self, model: AshAggregatedResults) -> str:
             return '{"report": "complete"}'
 
-    def test_setup_paths_default(self, test_plugin_context):
+    def test_setup_paths_default(self, test_plugin_context, dummy_reporter_config):
         """Test setup_paths with default values."""
-        reporter = self.DummyReporter(context=test_plugin_context)
+        reporter = self.DummyReporter(
+            context=test_plugin_context, config=dummy_reporter_config
+        )
         assert reporter.context.source_dir == test_plugin_context.source_dir
         assert reporter.context.output_dir == test_plugin_context.output_dir
 
-    def test_setup_paths_custom(self, test_plugin_context):
+    def test_setup_paths_custom(self, dummy_reporter_config):
         """Test setup_paths with custom values."""
         source = Path("/custom/source")
         output = Path("/custom/output")
+        from automated_security_helper.config.ash_config import AshConfig
+
         custom_context = PluginContext(
-            source_dir=source, output_dir=output, config=test_plugin_context.config
+            source_dir=source,
+            output_dir=output,
+            config=AshConfig(project_name="test-project"),
         )
-        reporter = self.DummyReporter(context=custom_context)
+        reporter = self.DummyReporter(
+            context=custom_context, config=dummy_reporter_config
+        )
         assert reporter.context.source_dir == source
         assert reporter.context.output_dir == output
 
-    def test_configure_with_config(self, test_plugin_context):
+    def test_configure_with_config(self, test_plugin_context, dummy_reporter_config):
         """Test configure method with config."""
-        reporter = self.DummyReporter(context=test_plugin_context)
+        reporter = self.DummyReporter(
+            context=test_plugin_context, config=dummy_reporter_config
+        )
         config = self.DummyConfig()
         reporter.configure(config)
-        assert reporter._config == config
+        # Just check that the config was updated with the same values
+        assert reporter.config.name == config.name
+        assert reporter.config.extension == config.extension
 
-    def test_validate_implementation(self, test_plugin_context):
+    def test_validate_implementation(self, test_plugin_context, dummy_reporter_config):
         """Test validate method implementation."""
-        reporter = self.DummyReporter(context=test_plugin_context)
+        reporter = self.DummyReporter(
+            context=test_plugin_context, config=dummy_reporter_config
+        )
         assert reporter.validate() is True
 
-    def test_pre_report(self, test_plugin_context):
+    def test_pre_report(self, test_plugin_context, dummy_reporter_config):
         """Test _pre_report sets start time."""
-        reporter = self.DummyReporter(context=test_plugin_context)
+        reporter = self.DummyReporter(
+            context=test_plugin_context, config=dummy_reporter_config
+        )
         reporter._pre_report()
         assert reporter.start_time is not None
         assert isinstance(reporter.start_time, datetime)
 
-    def test_post_report(self, test_plugin_context):
+    def test_post_report(self, test_plugin_context, dummy_reporter_config):
         """Test _post_report sets end time."""
-        reporter = self.DummyReporter(context=test_plugin_context)
+        reporter = self.DummyReporter(
+            context=test_plugin_context, config=dummy_reporter_config
+        )
         reporter._post_report()
         assert reporter.end_time is not None
         assert isinstance(reporter.end_time, datetime)
 
-    def test_report_with_model(self, test_plugin_context):
+    def test_report_with_model(self, test_plugin_context, dummy_reporter_config):
         """Test report method with AshAggregatedResults."""
-        reporter = self.DummyReporter(context=test_plugin_context)
+        reporter = self.DummyReporter(
+            context=test_plugin_context, config=dummy_reporter_config
+        )
         model = AshAggregatedResults(findings=[], metadata={})
         result = reporter.report(model)
         assert result == '{"report": "complete"}'
 
-    def test_report_end_to_end(self, test_plugin_context):
+    def test_report_end_to_end(self, test_plugin_context, dummy_reporter_config):
         """Test report method end to end with AshAggregatedResults."""
-        reporter = self.DummyReporter(context=test_plugin_context)
+        reporter = self.DummyReporter(
+            context=test_plugin_context, config=dummy_reporter_config
+        )
         model = AshAggregatedResults(findings=[], metadata={})
 
         reporter._pre_report()
@@ -225,6 +267,8 @@ class TestScannerPlugin:
     class DummyScanner(ScannerPluginBase):
         """Dummy scanner for testing."""
 
+        config: "TestScannerPlugin.DummyConfig" = None
+
         def validate(self) -> bool:
             return True
 
@@ -232,11 +276,14 @@ class TestScannerPlugin:
             self,
             target: Path,
             target_type: Literal["source", "converted"],
-            global_ignore_paths: List[IgnorePathWithReason] = [],
+            global_ignore_paths: List[IgnorePathWithReason] = None,
             config=None,
             *args,
             **kwargs,
         ):
+            if global_ignore_paths is None:
+                global_ignore_paths = []
+
             self.output.append("hello world")
             return SarifReport(
                 version="2.1.0",
@@ -357,10 +404,6 @@ class TestScannerPlugin:
 
     def test_run_subprocess_with_stdout_stderr(self, tmp_path, test_plugin_context):
         """Test _run_subprocess with stdout and stderr output."""
-        # Skip this test for now as it's failing consistently
-        # import pytest
-        # pytest.skip("Skipping test_run_subprocess_with_stdout_stderr due to consistent failures")
-
         config = self.DummyConfig()
         scanner = self.DummyScanner(
             context=test_plugin_context,

@@ -5,6 +5,7 @@ nav:
   - User Guides:
     - docs/installation-guide.md
     - docs/configuration-guide.md
+    - docs/suppressions.md
     - docs/config-overrides.md
     - docs/cli-reference.md
     - docs/advanced-usage.md

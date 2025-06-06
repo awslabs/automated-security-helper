@@ -86,6 +86,7 @@ pytest-asyncio = "^0.26.0"
 types-boto3 = {extras = ["athena", "essential", "logs", "opensearch", "opensearchserverless", "s3", "securityhub", "securitylake", "sts"], version = "^1.38.12"}
 mkdocs-awesome-nav = "^3.1.2"
 mkdocs-mermaid2-plugin = "^1.2.1"
+pytest-xdist = "^3.7.0"
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]
@@ -101,11 +102,6 @@ disallow_untyped_defs = true
 init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
-
-[tool.pytest.ini_options]
-minversion = "6.0"
-addopts = "--cov-report xml:test-results/pytest.coverage.xml --cov-report term-missing --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
-asyncio_default_fixture_loop_scope = "module"
 
 [build-system]
 requires = ["poetry-core"]

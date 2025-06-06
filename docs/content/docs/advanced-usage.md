@@ -170,6 +170,28 @@ ash --config-overrides 'scanners.semgrep.options.rules=["p/ci", "p/owasp-top-ten
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
+## Working with Suppressions
+
+### Adding Suppressions via Config Overrides
+
+```bash
+# Add a suppression rule
+ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "file_path": "src/example.py", "reason": "False positive"}]'
+
+# Add a suppression with line range and expiration
+ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "file_path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
+```
+
+### Temporarily Ignoring Suppressions
+
+```bash
+# Run a scan ignoring all suppression rules
+ash --ignore-suppressions
+
+# Useful for verifying if suppressed issues have been fixed
+ash --ignore-suppressions --output-dir ./verification-scan
+```
+
 ## Programmatic Usage
 
 ASH v3 can be used programmatically in Python:

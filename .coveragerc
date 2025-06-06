@@ -1,0 +1,40 @@
+[run]
+source = automated_security_helper
+omit =
+    */tests/*
+    */__pycache__/*
+    */__init__.py
+    */venv/*
+    */.venv/*
+    */setup.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    pass
+    raise ImportError
+    except ImportError
+    def __str__
+# Show missing lines in reports
+show_missing = True
+# Fail if total coverage is below 80%
+fail_under = 80
+
+[html]
+directory = test-results/coverage_html
+title = ASH Coverage Report
+
+[xml]
+output = test-results/pytest.coverage.xml
+
+[json]
+output = test-results/coverage.json
+pretty_print = True
+
+[paths]
+source =
+    automated_security_helper/
+    */site-packages/automated_security_helper/

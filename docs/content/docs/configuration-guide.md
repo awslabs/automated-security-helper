@@ -63,6 +63,18 @@ global_settings:
     - path: 'node_modules/'
       reason: 'Third-party dependencies'
 
+  # Findings to suppress based on rule ID, file path, and line numbers
+  suppressions:
+    - rule_id: 'RULE-123'  # Scanner-specific rule ID
+      file_path: 'src/example.py'  # File path (supports glob patterns)
+      line_start: 10  # Optional starting line number
+      line_end: 15  # Optional ending line number
+      reason: 'False positive due to test mock'  # Reason for suppression
+      expiration: '2025-12-31'  # Optional expiration date (YYYY-MM-DD)
+    - rule_id: 'RULE-456'
+      file_path: 'src/*.js'  # Glob pattern matching all JS files in src/
+      reason: 'Known issue, planned for fix in v2.0'
+
   # Whether to fail with non-zero exit code if actionable findings are found
   fail_on_findings: true
 ```

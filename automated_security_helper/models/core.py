@@ -5,6 +5,8 @@
 
 from typing import List, Annotated
 from pydantic import BaseModel, Field, ConfigDict
+from datetime import datetime, date
+from pydantic import validator
 
 
 class ToolExtraArg(BaseModel):
@@ -48,3 +50,50 @@ class ToolArgs(BaseModel):
     format_arg: str | None = None
     format_arg_value: str | None = None
     extra_args: List[ToolExtraArg] = []
+
+
+class Suppression(BaseModel):
+    """Represents a finding suppression rule."""
+
+    rule_id: Annotated[str, Field(..., description="Rule ID to suppress")]
+    file_path: Annotated[str, Field(..., description="File path pattern to match")]
+    line_start: Annotated[
+        int | None, Field(None, description="Starting line number")
+    ] = None
+    line_end: Annotated[int | None, Field(None, description="Ending line number")] = (
+        None
+    )
+    reason: Annotated[str | None, Field(None, description="Reason for suppression")] = (
+        None
+    )
+    expiration: Annotated[
+        str | None, Field(None, description="Expiration date (YYYY-MM-DD)")
+    ] = None
+
+    @validator("line_end")
+    def validate_line_range(cls, v, values):
+        """Validate that line_end is greater than or equal to line_start if both are provided."""
+        if (
+            v is not None
+            and values.get("line_start") is not None
+            and v < values["line_start"]
+        ):
+            raise ValueError("line_end must be greater than or equal to line_start")
+        return v
+
+    @validator("expiration")
+    def validate_expiration_date(cls, v):
+        """Validate that expiration date is in the correct format and is a valid date."""
+        if v is not None:
+            try:
+                # Parse the date string to ensure it's a valid date
+                expiration_date = datetime.strptime(v, "%Y-%m-%d").date()
+                # Check if the date is in the future
+                if expiration_date < date.today():
+                    raise ValueError("expiration date must be in the future")
+                return v
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid expiration date format. Use YYYY-MM-DD: {str(e)}"
+                )
+        return v

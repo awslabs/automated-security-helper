@@ -188,6 +188,12 @@ def run_ash_scan_cli_command(
             help="Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value."
         ),
     ] = None,
+    ignore_suppressions: Annotated[
+        bool,
+        typer.Option(
+            help="Ignore all suppression rules and report all findings regardless of suppression status."
+        ),
+    ] = False,
     ### CONTAINER-RELATED OPTIONS
     build: Annotated[
         bool,
@@ -337,6 +343,7 @@ def run_ash_scan_cli_command(
         debug=debug,
         color=color,
         fail_on_findings=fail_on_findings,
+        ignore_suppressions=ignore_suppressions,
         mode=mode,
         show_summary=show_summary,
         simple=precommit_mode

@@ -26,7 +26,7 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.core import IgnorePathWithReason, Suppression
 from automated_security_helper.reporters.ash_default.csv_reporter import (
     CSVReporterConfig,
 )
@@ -270,6 +270,13 @@ class AshConfigGlobalSettingsSection(BaseModel):
         List[IgnorePathWithReason],
         Field(
             description="Global list of IgnorePaths. Each path requires a reason for ignoring, e.g. 'Folder contains test data only and is not committed'."
+        ),
+    ] = []
+
+    suppressions: Annotated[
+        List[Suppression],
+        Field(
+            description="Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers."
         ),
     ] = []
 
