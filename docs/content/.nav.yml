@@ -1,0 +1,25 @@
+nav:
+  - index.md
+  - docs/quick-start-guide.md
+  - Migrating from ASH v2 to v3: docs/migration-guide.md
+  - User Guides:
+    - docs/installation-guide.md
+    - docs/configuration-guide.md
+    - docs/config-overrides.md
+    - docs/cli-reference.md
+    - docs/advanced-usage.md
+  - Plugin Development:
+    - docs/plugins/index.md
+    - docs/plugins/workflow.md
+    - docs/plugins/scanner-plugins.md
+    - docs/plugins/reporter-plugins.md
+    - docs/plugins/converter-plugins.md
+    - docs/plugins/plugin-best-practices.md
+  - Tutorials:
+    - tutorials/running-ash-locally.md
+    - tutorials/running-ash-in-ci.md
+    - tutorials/using-ash-with-pre-commit.md
+  - Reference:
+    - docs/support.md
+  - contributing.md
+  - faq.md

@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=../automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
-# ash_plugin_modules:
-#   - automated_security_helper.plugin_modules.ash_aws_plugins
+ash_plugin_modules:
+  - automated_security_helper.plugin_modules.ash_aws_plugins
 external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM

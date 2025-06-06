@@ -7,14 +7,22 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.asff_reporter impo
 from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
     CloudWatchLogsReporter,
 )
+from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+    BedrockSummaryReporter,
+)
+from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+    S3Reporter,
+)
 
 
 # Make plugins discoverable
-ASH_CONVERTERS = []
-ASH_SCANNERS = []
+# ASH_CONVERTERS = []
+# ASH_SCANNERS = []
 ASH_REPORTERS = [
     AsffReporter,
     CloudWatchLogsReporter,
+    BedrockSummaryReporter,
+    S3Reporter,
 ]
 
 # __all__ = [

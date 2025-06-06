@@ -1,8 +1,4 @@
-# Cloud9 Quickstart Guide
-
-Follow the instruction in the [quickstart page](/quickstart/README.md) to deploy an AWS Cloud9 Environment with ASH pre-installed.
-
-## Using `ash` with `pre-commit`
+# Using `ash` with `pre-commit`
 
 The `ash` tool can be used interactively on a workstation or run using the [`pre-commit`](https://pre-commit.com/) command.
 If `pre-commit` is used to run `ash`, then the `pre-commit` processing takes care of installing
@@ -19,30 +15,32 @@ configured with `pre-commit` hooks.
 Refer to the [pre-commit-hooks](https://github.com/awslabs/automated-security-helper/blob/main/.pre-commit-hooks.yaml) file for information about the `pre-commit`
 hook itself.
 
+## Configuration
+
 To configure a git repository to use the `ash` hook, start with the following `pre-commit-config` configuration:
 
 ```yaml
-  - repo: https://github.com/awslabs/automated-security-helper.git
-    rev: 'v1.3.3' # update with the latest tagged version in the repository
+repos:
+  - repo: https://github.com/awslabs/automated-security-helper
+    rev: v3.0.0-beta  # update with the latest tagged version in the repository
     hooks:
-    - id: ash
-      name: scan files using ash
-      stages: [ manual ]
-      # uncomment the line below if using "finch" on MacOS
-      # args: [ "-f" ]
+      - id: ash-simple-scan
 ```
+
+## Running the Pre-commit Hook
 
 Once the `.pre-commit-config.yaml` file is updated, the `ash` tool can be run using the following command:
 
 ```bash
-pre-commit run --hook-stage manual ash
+pre-commit run ash-simple-scan --all-files
 ```
 
-Results from the run of the `ash` tool can be found in the `aggregated_results.txt` file
-the `--output-dir` folder/directory.
+## Output Files
 
-When ASH converts CloudFormation files into CDK and runs cdk-nag on them,
-the output of the cdk-nag check results are preserved in a 'ash_cf2cdk_output'
-folder/directory under `--output-dir` after the ASH scan is run.
+Results from the run of the `ash` tool can be found in the `.ash/ash_output/` directory:
 
-This folder/directory is in addition to the `aggregated_results.txt` file found in `--output-dir`.
+- `ash_aggregated_results.json`: Complete machine-readable results
+- `reports/ash.summary.txt`: Human-readable text summary
+- `reports/ash.summary.md`: Markdown summary for GitHub PRs and other platforms
+- `reports/ash.html`: Interactive HTML report
+- `reports/ash.csv`: CSV report for filtering and sorting findings

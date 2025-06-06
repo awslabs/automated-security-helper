@@ -15,6 +15,7 @@ from automated_security_helper.core.enums import AshLogLevel, ReportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.interfaces import IReporter
+from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
 
 
@@ -35,7 +36,6 @@ def report_command(
             "--format",
             help=f"Report format to generate (reporter plugin name). Defaults to 'markdown'. Examples values: {', '.join(get_report_formats(''))}",
             autocompletion=get_report_formats,
-            shell_complete=get_report_formats,
         ),
     ] = ReportFormat.markdown.value,
     output_dir: Annotated[
@@ -81,16 +81,20 @@ def report_command(
     final_log_level = (
         AshLogLevel.VERBOSE
         if verbose
-        else AshLogLevel.DEBUG
-        if debug
-        else AshLogLevel.ERROR
-        if log_level
-        in [
-            AshLogLevel.QUIET,
-            AshLogLevel.ERROR,
-            AshLogLevel.SIMPLE,
-        ]
-        else log_level
+        else (
+            AshLogLevel.DEBUG
+            if debug
+            else (
+                AshLogLevel.ERROR
+                if log_level
+                in [
+                    AshLogLevel.QUIET,
+                    AshLogLevel.ERROR,
+                    AshLogLevel.SIMPLE,
+                ]
+                else log_level
+            )
+        )
     )
     final_logging_log_level = logging._nameToLevel.get(
         final_log_level.value, logging.INFO
@@ -138,6 +142,7 @@ def report_command(
 
     # Set the plugin context for the plugin manager
     ash_plugin_manager.set_context(plugin_context)
+    load_plugins(plugin_context=plugin_context)
 
     # Load the results file
     try:
@@ -213,7 +218,10 @@ def report_command(
             # "yaml",
         ]:
             print_json(report_content)
-        elif report_format == "markdown":
+        elif report_format in [
+            "markdown",
+            "bedrock-summary",
+        ]:
             print(Markdown(report_content))
         else:
             print(report_content)
