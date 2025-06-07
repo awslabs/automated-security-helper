@@ -1,5 +1,5 @@
 #checkov:skip=CKV_DOCKER_7:Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
-ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
+ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-bullseye
 
 # First stage: Build poetry requirements
 FROM ${BASE_IMAGE} AS poetry-reqs
