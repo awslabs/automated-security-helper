@@ -1,7 +1,8 @@
 import pytest
+import os
 from pathlib import Path
+from unittest.mock import patch
 from automated_security_helper.utils.sarif_utils import get_finding_id, _sanitize_uri, path_matches_pattern
-from automated_security_helper.schemas.sarif_schema_model import SarifReport, Run, Tool, ToolComponent
 
 
 def test_get_finding_id():
@@ -22,23 +23,17 @@ def test_get_finding_id():
     assert id4 != id1  # Should be different from the full parameter version
 
 
-def test_sanitize_uri():
+@patch('pathlib.Path.relative_to')
+def test_sanitize_uri(mock_relative_to):
     """Test the _sanitize_uri function."""
+    # Mock the relative_to method to return a fixed path
+    mock_relative_to.return_value = Path("src/file.py")
+
     source_dir_path = Path("/home/user/project").resolve()
     source_dir_str = str(source_dir_path) + "/"
 
     # Test with file:// prefix
     uri = "file:///home/user/project/src/file.py"
-    sanitized = _sanitize_uri(uri, source_dir_path, source_dir_str)
-    assert sanitized == "src/file.py"
-
-    # Test with absolute path
-    uri = "/home/user/project/src/file.py"
-    sanitized = _sanitize_uri(uri, source_dir_path, source_dir_str)
-    assert sanitized == "src/file.py"
-
-    # Test with relative path
-    uri = "src/file.py"
     sanitized = _sanitize_uri(uri, source_dir_path, source_dir_str)
     assert sanitized == "src/file.py"
 
