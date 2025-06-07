@@ -188,8 +188,8 @@ def run_command_with_output_handling(
             env=env,
         )
 
-        # Default to 1 if it doesn't exist, something went wrong during execution
-        returncode = result.returncode or 1
+        # Use the actual returncode from the result
+        returncode = result.returncode
 
         response = {"returncode": returncode}
 

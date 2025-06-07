@@ -8,6 +8,7 @@ from typing import Annotated, Literal, Optional, TYPE_CHECKING
 
 import boto3
 from pydantic import Field
+import yaml
 
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -98,8 +99,6 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             output_dict = model.to_simple_dict()
             output_content = json.dumps(output_dict, default=str, indent=2)
         else:
-            import yaml
-
             output_dict = model.to_simple_dict()
             output_content = yaml.dump(output_dict, default_flow_style=False)
 
