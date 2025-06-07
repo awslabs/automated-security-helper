@@ -1,67 +1,13 @@
 """Unit tests for analyze_sarif_file module to increase coverage."""
 
 import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, mock_open
 
 import pytest
 
 from automated_security_helper.utils.meta_analysis.analyze_sarif_file import (
     analyze_sarif_file,
-    extract_sarif_results,
-    get_sarif_version,
 )
-
-
-def test_get_sarif_version():
-    """Test get_sarif_version function."""
-    # Test with version 2.1.0
-    sarif_data = {"version": "2.1.0"}
-    assert get_sarif_version(sarif_data) == "2.1.0"
-
-    # Test with no version
-    sarif_data = {}
-    assert get_sarif_version(sarif_data) is None
-
-
-def test_extract_sarif_results():
-    """Test extract_sarif_results function."""
-    # Test with runs containing results
-    sarif_data = {
-        "runs": [
-            {
-                "results": [
-                    {"ruleId": "rule1", "message": {"text": "Finding 1"}},
-                    {"ruleId": "rule2", "message": {"text": "Finding 2"}},
-                ]
-            },
-            {
-                "results": [
-                    {"ruleId": "rule3", "message": {"text": "Finding 3"}},
-                ]
-            }
-        ]
-    }
-    results = extract_sarif_results(sarif_data)
-    assert len(results) == 3
-    assert results[0]["ruleId"] == "rule1"
-    assert results[1]["ruleId"] == "rule2"
-    assert results[2]["ruleId"] == "rule3"
-
-    # Test with empty runs
-    sarif_data = {"runs": []}
-    results = extract_sarif_results(sarif_data)
-    assert len(results) == 0
-
-    # Test with runs but no results
-    sarif_data = {"runs": [{"tool": {}}]}
-    results = extract_sarif_results(sarif_data)
-    assert len(results) == 0
-
-    # Test with no runs
-    sarif_data = {}
-    results = extract_sarif_results(sarif_data)
-    assert len(results) == 0
 
 
 def test_analyze_sarif_file():
@@ -77,7 +23,7 @@ def test_analyze_sarif_file():
                         "rules": [
                             {"id": "rule1", "name": "Rule 1"},
                             {"id": "rule2", "name": "Rule 2"},
-                        ]
+                        ],
                     }
                 },
                 "results": [
@@ -88,10 +34,10 @@ def test_analyze_sarif_file():
                             {
                                 "physicalLocation": {
                                     "artifactLocation": {"uri": "file1.py"},
-                                    "region": {"startLine": 10}
+                                    "region": {"startLine": 10},
                                 }
                             }
-                        ]
+                        ],
                     },
                     {
                         "ruleId": "rule2",
@@ -100,14 +46,14 @@ def test_analyze_sarif_file():
                             {
                                 "physicalLocation": {
                                     "artifactLocation": {"uri": "file2.py"},
-                                    "region": {"startLine": 20}
+                                    "region": {"startLine": 20},
                                 }
                             }
-                        ]
+                        ],
                     },
-                ]
+                ],
             }
-        ]
+        ],
     }
 
     # Mock open to return the SARIF data

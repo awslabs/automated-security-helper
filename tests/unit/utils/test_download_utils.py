@@ -1,11 +1,9 @@
 """Unit tests for download_utils.py."""
 
 import pytest
-import platform
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock
 
 from automated_security_helper.utils.download_utils import (
     download_file,
@@ -15,7 +13,6 @@ from automated_security_helper.utils.download_utils import (
     create_url_download_command,
     get_opengrep_url,
 )
-from automated_security_helper.core.constants import ASH_BIN_PATH
 
 
 @patch("automated_security_helper.utils.download_utils.urllib.request.urlopen")
@@ -113,7 +110,9 @@ def test_unquarantine_macos_binary_non_macos(mock_run_command):
 @patch("automated_security_helper.utils.download_utils.download_file")
 @patch("automated_security_helper.utils.download_utils.make_executable")
 @patch("automated_security_helper.utils.download_utils.unquarantine_macos_binary")
-def test_install_binary_from_url(mock_unquarantine, mock_make_executable, mock_download_file):
+def test_install_binary_from_url(
+    mock_unquarantine, mock_make_executable, mock_download_file
+):
     """Test install_binary_from_url function."""
     # Setup mocks
     mock_download_file.return_value = Path("/test/destination/file")
@@ -122,16 +121,12 @@ def test_install_binary_from_url(mock_unquarantine, mock_make_executable, mock_d
     with patch("platform.system", return_value="Darwin"):
         # Call function
         result = install_binary_from_url(
-            "https://example.com/file",
-            Path("/test/destination"),
-            "renamed_file"
+            "https://example.com/file", Path("/test/destination"), "renamed_file"
         )
 
         # Verify mocks were called correctly
         mock_download_file.assert_called_once_with(
-            "https://example.com/file",
-            Path("/test/destination"),
-            "renamed_file"
+            "https://example.com/file", Path("/test/destination"), "renamed_file"
         )
         mock_make_executable.assert_called_once_with(Path("/test/destination/file"))
         mock_unquarantine.assert_called_once_with(Path("/test/destination/file"))
@@ -149,9 +144,7 @@ def test_create_url_download_command(mock_mkdir, mock_exists):
 
     # Call function
     result = create_url_download_command(
-        "https://example.com/file",
-        "/custom/destination",
-        "renamed_file"
+        "https://example.com/file", "/custom/destination", "renamed_file"
     )
 
     # Verify mkdir was called
@@ -171,23 +164,43 @@ def test_get_opengrep_url():
     """Test get_opengrep_url function for different platforms and architectures."""
     # Test Linux amd64
     url = get_opengrep_url("linux", "amd64", "v1.1.5", "manylinux")
-    assert url == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_manylinux_x86"
+    assert (
+        url
+        == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_manylinux_x86"
+    )
 
     # Test Linux arm64
     url = get_opengrep_url("linux", "arm64", "v1.1.5", "musllinux")
-    assert url == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_musllinux_aarch64"
+    assert (
+        url
+        == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_musllinux_aarch64"
+    )
 
     # Test macOS amd64
     url = get_opengrep_url("darwin", "amd64", "v1.1.5")
-    assert url == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_osx_x86"
+    assert (
+        url
+        == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_osx_x86"
+    )
 
     # Test macOS arm64
     url = get_opengrep_url("darwin", "arm64", "v1.1.5")
-    assert url == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_osx_arm64"
+    assert (
+        url
+        == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_osx_arm64"
+    )
 
     # Test Windows
     url = get_opengrep_url("windows", "amd64", "v1.1.5")
-    assert url == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_windows_x86.exe"
+    assert (
+        url
+        == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_windows_x86.exe"
+    )
 
     # Test invalid linux_type
-    with patch("automated_security_h
+    with patch(
+        "automated_security_helper.utils.download_utils.platform.system"
+    ) as mock_system:
+        mock_system.return_value = "Linux"
+        with pytest.raises(ValueError):
+            get_opengrep_url("linux", "amd64", "v1.1.5", "invalid_linux_type")

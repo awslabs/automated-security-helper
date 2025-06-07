@@ -15,7 +15,7 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
-class ASFFReporterConfigOptions(ReporterOptionsBase):
+class AsffReporterConfigOptions(ReporterOptionsBase):
     aws_account_id: Annotated[str | None, Field(pattern=r"^\d{12}$")] = None
     aws_region: Annotated[
         str | None,
@@ -25,20 +25,20 @@ class ASFFReporterConfigOptions(ReporterOptionsBase):
     ] = None
 
 
-class ASFFReporterConfig(ReporterPluginConfigBase):
+class AsffReporterConfig(ReporterPluginConfigBase):
     name: Literal["asff"] = "asff"
     extension: str = "asff"
     enabled: bool = True
-    options: ASFFReporterConfigOptions = ASFFReporterConfigOptions()
+    options: AsffReporterConfigOptions = AsffReporterConfigOptions()
 
 
 @ash_reporter_plugin
-class AsffReporter(ReporterPluginBase[ASFFReporterConfig]):
+class AsffReporter(ReporterPluginBase[AsffReporterConfig]):
     """Formats results as Amazon Security Finding Format (ASFF)."""
 
     def model_post_init(self, context):
         if self.config is None:
-            self.config = ASFFReporterConfig()
+            self.config = AsffReporterConfig()
         return super().model_post_init(context)
 
     def report(self, model: "AshAggregatedResults") -> str:

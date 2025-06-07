@@ -539,8 +539,6 @@ def run_ash_scan(
             print(
                 f"[bold red]ERROR (2) Exiting due to {actionable_findings} actionable findings found in ASH scan[/bold red]",
             )
-        raise sys.exit(
-            2
-        ) from None  # Using exit code 2 specifically for actionable findings
+        sys.exit(2)  # Using exit code 2 specifically for actionable findings
 
     return results

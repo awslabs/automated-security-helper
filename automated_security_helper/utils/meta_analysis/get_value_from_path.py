@@ -13,7 +13,7 @@ def get_value_from_path(obj: Dict, path: str) -> Dict[str, Any]:
     Returns:
         Dictionary with 'exists' (bool) and 'value' (Any) keys
     """
-    if not path:
+    if not path or obj is None:
         return {"exists": False, "value": None}
 
     current = obj
@@ -47,7 +47,7 @@ def get_value_from_path(obj: Dict, path: str) -> Dict[str, Any]:
             except (ValueError, IndexError):
                 return {"exists": False, "value": None}
         else:
-            if part not in current:
+            if not isinstance(current, dict) or part not in current:
                 return {"exists": False, "value": None}
 
             # If the value is null, the field exists but has null value
