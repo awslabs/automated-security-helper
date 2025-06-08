@@ -103,7 +103,7 @@ def test_run_ash_scan_container_mode(mock_logger, mock_container, ash_temp_path)
         ),
         patch("builtins.open", mock_open(read_data="{}")),
         patch(
-            "automated_security_helper.interactions.run_ash_scan.AshAggregatedResults"
+            "automated_security_helper.models.asharp_model.AshAggregatedResults"
         ) as mock_results,
     ):
         mock_results.model_validate_json.return_value = MagicMock()
@@ -141,7 +141,7 @@ def test_run_ash_scan_with_actionable_findings(
         patch("os.chdir"),
         patch("builtins.open", mock_open()),
         patch(
-            "automated_security_helper.interactions.run_ash_scan.AshAggregatedResults"
+            "automated_security_helper.models.asharp_model.AshAggregatedResults"
         ) as mock_results,
         patch(
             "automated_security_helper.interactions.run_ash_scan.sys.exit"
@@ -180,7 +180,7 @@ def test_run_ash_scan_with_custom_phases(mock_logger, mock_orchestrator, ash_tem
         patch("os.chdir"),
         patch("builtins.open", mock_open()),
         patch(
-            "automated_security_helper.interactions.run_ash_scan.AshAggregatedResults"
+            "automated_security_helper.models.asharp_model.AshAggregatedResults"
         ) as mock_results,
     ):
         mock_results.model_dump_json.return_value = "{}"

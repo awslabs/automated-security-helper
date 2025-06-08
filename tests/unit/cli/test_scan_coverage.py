@@ -136,9 +136,8 @@ def test_run_ash_scan_cli_command_with_use_existing(
     args, kwargs = mock_run_ash_scan.call_args
 
     # Check that existing_results was set correctly
-    assert kwargs["existing_results"] == str(
-        Path(f"{test_output_dir}/ash_aggregated_results.json")
-    )
+    expected_path = Path(test_output_dir).joinpath("ash_aggregated_results.json")
+    assert kwargs["existing_results"] == str(expected_path)
 
 
 @patch("automated_security_helper.cli.scan.run_ash_scan")

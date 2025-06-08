@@ -62,13 +62,17 @@ def test_sanitize_sarif_paths():
     result = sanitize_sarif_paths(sarif, source_dir)
 
     # Check that the path was made relative
-    assert (
+    sanitized_uri = (
         result.runs[0]
         .results[0]
         .locations[0]
         .physicalLocation.root.artifactLocation.uri
-        == "to/test.py"
     )
+
+    # The path should be relative and use forward slashes
+    expected_path = "to/test.py"
+    # Normalize both paths for comparison (handle Windows vs Unix differences)
+    assert sanitized_uri.replace("\\", "/") == expected_path
 
 
 def test_sanitize_sarif_paths_with_empty_report():

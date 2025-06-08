@@ -62,7 +62,6 @@ def test_get_host_gid_success(mock_run_command):
 )
 @patch("automated_security_helper.interactions.run_ash_container.Path.mkdir")
 @patch("automated_security_helper.interactions.run_ash_container.validate_path")
-@patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 @patch("automated_security_helper.utils.subprocess_utils.run_command")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_uid")
@@ -72,7 +71,6 @@ def test_run_ash_container_basic(
     mock_get_host_uid,
     mock_run_command,
     mock_find_executable,
-    mock_run_cmd_direct,
     mock_validate_path,
     mock_mkdir,
 ):
@@ -83,11 +81,6 @@ def test_run_ash_container_basic(
 
     # Mock subprocess_utils.find_executable
     mock_find_executable.return_value = "/usr/bin/docker"
-
-    # Mock run_cmd_direct to return successful result
-    mock_build_result = MagicMock()
-    mock_build_result.returncode = 0
-    mock_run_cmd_direct.return_value = mock_build_result
 
     # Mock validate_path to return the path as-is
     mock_validate_path.return_value = "/test/source"
@@ -100,31 +93,39 @@ def test_run_ash_container_basic(
     mock_run_result.returncode = 0
     mock_run_command.return_value = mock_run_result
 
-    # Call run_ash_container
-    result = run_ash_container(
-        source_dir="/test/source", output_dir="/test/output", build=True, run=True
-    )
+    # Use context manager to patch run_cmd_direct
+    with patch(
+        "automated_security_helper.interactions.run_ash_container.run_cmd_direct"
+    ) as mock_run_cmd_direct:
+        # Mock run_cmd_direct to return successful result
+        mock_build_result = MagicMock()
+        mock_build_result.returncode = 0
+        mock_run_cmd_direct.return_value = mock_build_result
 
-    # Verify result
-    assert result.returncode == 0
+        # Call run_ash_container
+        result = run_ash_container(
+            source_dir="/test/source", output_dir="/test/output", build=True, run=True
+        )
 
-    # Verify run_cmd_direct was called twice (build and run)
-    assert mock_run_cmd_direct.call_count == 2
+        # Verify result
+        assert result.returncode == 0
 
-    # Check first call was for build
-    build_cmd = mock_run_cmd_direct.call_args_list[0][0][0]
-    assert "build" in build_cmd
+        # Verify run_cmd_direct was called twice (build and run)
+        assert mock_run_cmd_direct.call_count == 2
 
-    # Check second call was for run
-    run_cmd = mock_run_cmd_direct.call_args_list[1][0][0]
-    assert "run" in run_cmd
+        # Check first call was for build
+        build_cmd = mock_run_cmd_direct.call_args_list[0][0][0]
+        assert "build" in build_cmd
+
+        # Check second call was for run
+        run_cmd = mock_run_cmd_direct.call_args_list[1][0][0]
+        assert "run" in run_cmd
 
 
 @pytest.mark.skipif(
     sys.platform.lower() == "windows" and os.environ.get("CI", None) is not None,
     reason="GitHub Actions windows-latest runners do not have an OCI runtime available",
 )
-@patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 @patch("automated_security_helper.utils.subprocess_utils.run_command")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_uid")
@@ -134,7 +135,6 @@ def test_run_ash_container_build_only(
     mock_get_host_uid,
     mock_run_command,
     mock_find_executable,
-    mock_run_cmd_direct,
 ):
     """Test run_ash_container with build only."""
     # Mock get_host_uid and get_host_gid
@@ -144,28 +144,32 @@ def test_run_ash_container_build_only(
     # Mock subprocess_utils.find_executable
     mock_find_executable.return_value = "/usr/bin/docker"
 
-    # Mock run_cmd_direct to return successful result
-    mock_build_result = MagicMock()
-    mock_build_result.returncode = 0
-    mock_run_cmd_direct.return_value = mock_build_result
+    # Use context manager to patch run_cmd_direct
+    with patch(
+        "automated_security_helper.interactions.run_ash_container.run_cmd_direct"
+    ) as mock_run_cmd_direct:
+        # Mock run_cmd_direct to return successful result
+        mock_build_result = MagicMock()
+        mock_build_result.returncode = 0
+        mock_run_cmd_direct.return_value = mock_build_result
 
-    # Call run_ash_container with build only
-    result = run_ash_container(
-        source_dir="/test/source", output_dir="/test/output", build=True, run=False
-    )
+        # Call run_ash_container with build only
+        result = run_ash_container(
+            source_dir="/test/source", output_dir="/test/output", build=True, run=False
+        )
 
-    # Verify result
-    assert result.returncode == 0
+        # Verify result
+        assert result.returncode == 0
 
-    # Verify run_cmd_direct was called only for build
-    mock_run_cmd_direct.assert_called_once()
+        # Verify run_cmd_direct was called only for build
+        mock_run_cmd_direct.assert_called_once()
 
-    # Check for build command
-    build_cmd = mock_run_cmd_direct.call_args[0][0]
-    assert "build" in build_cmd
+        # Check for build command
+        build_cmd = mock_run_cmd_direct.call_args[0][0]
+        assert "build" in build_cmd
 
-    # Verify subprocess_utils.run_command was not called (no run phase)
-    mock_run_command.assert_not_called()
+        # Verify subprocess_utils.run_command was not called (no run phase)
+        mock_run_command.assert_not_called()
 
 
 @pytest.mark.skipif(
@@ -174,7 +178,6 @@ def test_run_ash_container_build_only(
 )
 @patch("automated_security_helper.interactions.run_ash_container.Path.mkdir")
 @patch("automated_security_helper.interactions.run_ash_container.validate_path")
-@patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_uid")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_gid")
@@ -182,7 +185,6 @@ def test_run_ash_container_run_only(
     mock_get_host_gid,
     mock_get_host_uid,
     mock_find_executable,
-    mock_run_cmd_direct,
     mock_validate_path,
     mock_mkdir,
 ):
@@ -200,25 +202,29 @@ def test_run_ash_container_run_only(
     # Mock Path.mkdir to prevent actual directory creation
     mock_mkdir.return_value = None
 
-    # Mock run_cmd_direct for the run phase
-    mock_run_result = MagicMock()
-    mock_run_result.returncode = 0
-    mock_run_cmd_direct.return_value = mock_run_result
+    # Use context manager to patch run_cmd_direct
+    with patch(
+        "automated_security_helper.interactions.run_ash_container.run_cmd_direct"
+    ) as mock_run_cmd_direct:
+        # Mock run_cmd_direct for the run phase
+        mock_run_result = MagicMock()
+        mock_run_result.returncode = 0
+        mock_run_cmd_direct.return_value = mock_run_result
 
-    # Call run_ash_container with run only
-    result = run_ash_container(
-        source_dir="/test/source", output_dir="/test/output", build=False, run=True
-    )
+        # Call run_ash_container with run only
+        result = run_ash_container(
+            source_dir="/test/source", output_dir="/test/output", build=False, run=True
+        )
 
-    # Verify result
-    assert result.returncode == 0
+        # Verify result
+        assert result.returncode == 0
 
-    # Verify run_cmd_direct was called only once for run
-    mock_run_cmd_direct.assert_called_once()
+        # Verify run_cmd_direct was called only once for run
+        mock_run_cmd_direct.assert_called_once()
 
-    # Check for run command
-    run_cmd = mock_run_cmd_direct.call_args[0][0]
-    assert "run" in run_cmd
+        # Check for run command
+        run_cmd = mock_run_cmd_direct.call_args[0][0]
+        assert "run" in run_cmd
 
 
 @pytest.mark.skipif(
@@ -227,7 +233,6 @@ def test_run_ash_container_run_only(
 )
 @patch("automated_security_helper.interactions.run_ash_container.Path.mkdir")
 @patch("automated_security_helper.interactions.run_ash_container.validate_path")
-@patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
 @patch("automated_security_helper.utils.subprocess_utils")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 @patch("automated_security_helper.utils.subprocess_utils.run_command")
@@ -239,7 +244,6 @@ def test_run_ash_container_with_custom_options(
     mock_run_command,
     mock_find_executable,
     mock_subprocess_utils,
-    mock_run_cmd_direct,
     mock_validate_path,
     mock_mkdir,
 ):
@@ -250,11 +254,6 @@ def test_run_ash_container_with_custom_options(
 
     # Mock subprocess_utils.find_executable
     mock_find_executable.return_value = "/usr/bin/podman"
-
-    # Mock run_cmd_direct to return successful result
-    mock_build_result = MagicMock()
-    mock_build_result.returncode = 0
-    mock_run_cmd_direct.return_value = mock_build_result
 
     # Mock validate_path to return the path as-is
     mock_validate_path.return_value = "/test/source"
@@ -267,45 +266,56 @@ def test_run_ash_container_with_custom_options(
     mock_run_result.returncode = 0
     mock_subprocess_utils.run_command.return_value = mock_run_result
 
-    # Call run_ash_container with custom options
-    result = run_ash_container(
-        source_dir="/test/source",
-        output_dir="/test/output",
-        build=True,
-        run=True,
-        oci_runner="podman",
-        build_target=BuildTarget.CI,
-        container_uid="2000",
-        container_gid="2000",
-        offline=True,
-        log_level=AshLogLevel.DEBUG,
-        config_overrides=["reporters.html.enabled=true"],
-    )
+    # Use context manager to patch run_cmd_direct
+    with patch(
+        "automated_security_helper.interactions.run_ash_container.run_cmd_direct"
+    ) as mock_run_cmd_direct:
+        # Mock run_cmd_direct to return successful result
+        mock_build_result = MagicMock()
+        mock_build_result.returncode = 0
+        mock_run_cmd_direct.return_value = mock_build_result
 
-    # Verify result
-    assert result.returncode == 0
+        # Call run_ash_container with custom options
+        result = run_ash_container(
+            source_dir="/test/source",
+            output_dir="/test/output",
+            build=True,
+            run=True,
+            oci_runner="podman",
+            build_target=BuildTarget.CI,
+            container_uid="2000",
+            container_gid="2000",
+            offline=True,
+            log_level=AshLogLevel.DEBUG,
+            config_overrides=["reporters.html.enabled=true"],
+        )
 
-    # Verify run_cmd_direct was called twice (build and run)
-    assert mock_run_cmd_direct.call_count == 2
+        # Verify result
+        assert result.returncode == 0
 
-    # Check first call was for build
-    build_cmd = mock_run_cmd_direct.call_args_list[0][0][0]
-    assert "build" in build_cmd
-    assert "--target" in build_cmd
-    assert "ci" in build_cmd
+        # Verify run_cmd_direct was called twice (build and run)
+        assert mock_run_cmd_direct.call_count == 2
 
-    # Check second call was for run
-    run_cmd = mock_run_cmd_direct.call_args_list[1][0][0]
-    assert "run" in run_cmd
+        # Check first call was for build
+        build_cmd = mock_run_cmd_direct.call_args_list[0][0][0]
+        assert "build" in build_cmd
+        assert "/usr/bin/podman" in build_cmd or "podman" in build_cmd
+        assert "--target" in build_cmd
+        assert "ci" in build_cmd
 
-    # Check for environment variables in run command
-    assert "-e" in run_cmd
-    # Find the environment variable arguments
-    env_args = []
-    for i, arg in enumerate(run_cmd):
-        if arg == "-e" and i + 1 < len(run_cmd):
-            env_args.append(run_cmd[i + 1])
+        # Check second call was for run
+        run_cmd = mock_run_cmd_direct.call_args_list[1][0][0]
+        assert "run" in run_cmd
+        assert "/usr/bin/podman" in run_cmd or "podman" in run_cmd
 
-    # Check that some expected environment variables are present
-    assert any("ASH_ACTUAL_SOURCE_DIR" in env_arg for env_arg in env_args)
-    assert any("ASH_ACTUAL_OUTPUT_DIR" in env_arg for env_arg in env_args)
+        # Check for environment variables in run command
+        assert "-e" in run_cmd
+        # Find the environment variable arguments
+        env_args = []
+        for i, arg in enumerate(run_cmd):
+            if arg == "-e" and i + 1 < len(run_cmd):
+                env_args.append(run_cmd[i + 1])
+
+        # Check that some expected environment variables are present
+        assert any("ASH_ACTUAL_SOURCE_DIR" in env_arg for env_arg in env_args)
+        assert any("ASH_ACTUAL_OUTPUT_DIR" in env_arg for env_arg in env_args)
