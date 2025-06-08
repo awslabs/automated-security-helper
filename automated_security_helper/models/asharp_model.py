@@ -268,7 +268,9 @@ class AshAggregatedResults(BaseModel):
         Returns:
             dict: A simple dictionary representation of the AshAggregatedResults
         """
-        conf = self.ash_config.model_dump(by_alias=True, exclude_unset=True)
+        conf = {}
+        if self.ash_config is not None:
+            conf = self.ash_config.model_dump(by_alias=True, exclude_unset=True)
         if len(conf.keys()) == 0:
             conf = get_default_config()
         simple_dict = {

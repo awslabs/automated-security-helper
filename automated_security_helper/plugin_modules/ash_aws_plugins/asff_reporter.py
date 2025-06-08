@@ -5,6 +5,11 @@ import yaml
 
 from typing import Annotated, Literal, TYPE_CHECKING
 
+try:
+    import boto3
+except ImportError:
+    boto3 = None
+
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
@@ -16,13 +21,13 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class AsffReporterConfigOptions(ReporterOptionsBase):
-    aws_account_id: Annotated[str | None, Field(pattern=r"^\d{12}$")] = None
     aws_region: Annotated[
         str | None,
         Field(
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}"
         ),
     ] = None
+    aws_profile: str | None = None
 
 
 class AsffReporterConfig(ReporterPluginConfigBase):

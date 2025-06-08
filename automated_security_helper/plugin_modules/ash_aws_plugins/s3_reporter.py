@@ -26,11 +26,18 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         str | None,
         Field(
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}"
+            default_factory=lambda: os.environ.get(
+                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
+            ),
+            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
         ),
-    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None))
-    aws_profile: Optional[str] = os.environ.get("AWS_PROFILE", None)
-    bucket_name: str | None = os.environ.get("ASH_S3_BUCKET_NAME", None)
+    ]
+    aws_profile: Optional[str] = Field(
+        default_factory=lambda: os.environ.get("AWS_PROFILE", None)
+    )
+    bucket_name: str | None = Field(
+        default_factory=lambda: os.environ.get("ASH_S3_BUCKET_NAME", None)
+    )
     key_prefix: str = "ash-reports/"
     file_format: Literal["json", "yaml"] = "json"
 

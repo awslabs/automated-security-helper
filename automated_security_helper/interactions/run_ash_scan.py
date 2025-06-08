@@ -18,6 +18,7 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget
 from automated_security_helper.core.enums import Phases
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.enums import Strategy
 from automated_security_helper.core.enums import RunMode
 from automated_security_helper.interactions.run_ash_container import (
@@ -100,7 +101,6 @@ def run_ash_scan(
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
     from automated_security_helper.core.enums import ExecutionStrategy
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
-    from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.utils.log import get_logger
 
     final_log_level = (
@@ -221,10 +221,10 @@ def run_ash_scan(
                     results = AshAggregatedResults.model_validate_json(content)
                 except Exception as e:
                     logger.error(f"Failed to parse results file: {e}")
-                    raise sys.exit(1) from None
+                    sys.exit(1)
         else:
             logger.error(f"Results file not found at {output_file}")
-            raise sys.exit(1) from None
+            sys.exit(1)
 
     else:
         # Local mode - use the orchestrator directly
@@ -446,7 +446,7 @@ def run_ash_scan(
             print(
                 f"[bold red]ERROR (1) Exiting due to exception during ASH scan: {e}[/bold red]",
             )
-            raise sys.exit(1) from None
+            sys.exit(1)
         finally:
             # Return to the starting directory
             os.chdir(starting_dir)
