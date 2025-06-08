@@ -57,10 +57,10 @@ def create_test_sarif():
 
 
 @pytest.mark.skipif(
-    condition=sys.platform.lower() == "windows",
+    condition=sys.platform.lower().startswith("win"),
     reason="Current issues with sanitization of URIs on Windows. Does not affect using ASH, only testing.",
 )
-def test_sanitize_sarif_paths_absolute():
+def test_sanitize_sarif_paths():
     """Test sanitizing paths in SARIF report."""
     sarif = create_test_sarif()
     source_dir = Path("/absolute/path")
