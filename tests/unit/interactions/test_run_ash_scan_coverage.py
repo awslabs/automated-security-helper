@@ -48,10 +48,10 @@ def test_format_duration():
     assert format_duration(3700) == "1h 1m 40s"
 
 
-def test_run_ash_scan_local_mode(mock_logger, mock_orchestrator, tmp_path):
+def test_run_ash_scan_local_mode(mock_logger, mock_orchestrator, ash_temp_path):
     """Test run_ash_scan in local mode."""
-    source_dir = tmp_path / "source"
-    output_dir = tmp_path / "output"
+    source_dir = ash_temp_path / "source"
+    output_dir = ash_temp_path / "output"
     source_dir.mkdir()
     output_dir.mkdir()
 
@@ -64,7 +64,7 @@ def test_run_ash_scan_local_mode(mock_logger, mock_orchestrator, tmp_path):
             "pathlib.Path.cwd",
             return_value=Path("/fake/cwd"),
         ),
-        patch("automated_security_helper.interactions.run_ash_scan.os.chdir"),
+        patch("os.chdir"),
         patch("builtins.open", mock_open()),
         patch(
             "automated_security_helper.models.asharp_model.AshAggregatedResults"
@@ -84,10 +84,10 @@ def test_run_ash_scan_local_mode(mock_logger, mock_orchestrator, tmp_path):
 
 
 @pytest.mark.skip(reason="Need to fix mocks")
-def test_run_ash_scan_container_mode(mock_logger, mock_container, tmp_path):
+def test_run_ash_scan_container_mode(mock_logger, mock_container, ash_temp_path):
     """Test run_ash_scan in container mode."""
-    source_dir = tmp_path / "source"
-    output_dir = tmp_path / "output"
+    source_dir = ash_temp_path / "source"
+    output_dir = ash_temp_path / "output"
     source_dir.mkdir()
     output_dir.mkdir()
 
@@ -96,7 +96,7 @@ def test_run_ash_scan_container_mode(mock_logger, mock_container, tmp_path):
             "pathlib.Path.cwd",
             return_value=Path("/fake/cwd"),
         ),
-        patch("automated_security_helper.interactions.run_ash_scan.os.chdir"),
+        patch("os.chdir"),
         patch(
             "pathlib.Path.exists",
             return_value=True,
@@ -138,7 +138,7 @@ def test_run_ash_scan_with_actionable_findings(
             "pathlib.Path.cwd",
             return_value=Path("/fake/cwd"),
         ),
-        patch("automated_security_helper.interactions.run_ash_scan.os.chdir"),
+        patch("os.chdir"),
         patch("builtins.open", mock_open()),
         patch(
             "automated_security_helper.interactions.run_ash_scan.AshAggregatedResults"
@@ -161,10 +161,10 @@ def test_run_ash_scan_with_actionable_findings(
         mock_exit.assert_called_once_with(2)
 
 
-def test_run_ash_scan_with_custom_phases(mock_logger, mock_orchestrator, tmp_path):
+def test_run_ash_scan_with_custom_phases(mock_logger, mock_orchestrator, ash_temp_path):
     """Test run_ash_scan with custom phases."""
-    source_dir = tmp_path / "source"
-    output_dir = tmp_path / "output"
+    source_dir = ash_temp_path / "source"
+    output_dir = ash_temp_path / "output"
     source_dir.mkdir()
     output_dir.mkdir()
 
@@ -177,7 +177,7 @@ def test_run_ash_scan_with_custom_phases(mock_logger, mock_orchestrator, tmp_pat
             "pathlib.Path.cwd",
             return_value=Path("/fake/cwd"),
         ),
-        patch("automated_security_helper.interactions.run_ash_scan.os.chdir"),
+        patch("os.chdir"),
         patch("builtins.open", mock_open()),
         patch(
             "automated_security_helper.interactions.run_ash_scan.AshAggregatedResults"

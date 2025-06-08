@@ -295,7 +295,7 @@ class TestScannerPlugin:
         with pytest.raises(ScannerError):
             self.DummyScanner(context=test_plugin_context)
 
-    def test_model_post_init_with_config(self, tmp_path, test_plugin_context):
+    def test_model_post_init_with_config(self, ash_temp_path, test_plugin_context):
         """Test model_post_init with config."""
         config = self.DummyConfig()
         scanner = self.DummyScanner(config=config, context=test_plugin_context)
@@ -342,27 +342,27 @@ class TestScannerPlugin:
         with pytest.raises(ScannerError):
             scanner._pre_scan(Path("nonexistent.txt"), target_type="converted")
 
-    def test_pre_scan_creates_dirs(self, tmp_path, test_plugin_context):
+    def test_pre_scan_creates_dirs(self, ash_temp_path, test_plugin_context):
         """Test _pre_scan creates necessary directories."""
         config = self.DummyConfig()
         scanner = self.DummyScanner(
             context=test_plugin_context,
             config=config,
         )
-        test_file = tmp_path.joinpath("test.txt")
+        test_file = ash_temp_path.joinpath("test.txt")
         test_file.touch()
         scanner._pre_scan(test_file, target_type="converted")
         assert scanner.context.work_dir.exists()
         assert scanner.results_dir.exists()
 
-    def test_post_scan_sets_end_time(self, tmp_path, test_plugin_context):
+    def test_post_scan_sets_end_time(self, ash_temp_path, test_plugin_context):
         """Test _post_scan sets end_time."""
         config = self.DummyConfig()
         scanner = self.DummyScanner(
             context=test_plugin_context,
             config=config,
         )
-        test_file = tmp_path.joinpath("test.txt")
+        test_file = ash_temp_path.joinpath("test.txt")
         test_file.touch()
         scanner._pre_scan(
             test_file,
@@ -402,7 +402,9 @@ class TestScannerPlugin:
         assert scanner.exit_code == 1
         assert len(scanner.errors) > 0
 
-    def test_run_subprocess_with_stdout_stderr(self, tmp_path, test_plugin_context):
+    def test_run_subprocess_with_stdout_stderr(
+        self, ash_temp_path, test_plugin_context
+    ):
         """Test _run_subprocess with stdout and stderr output."""
         config = self.DummyConfig()
         scanner = self.DummyScanner(
@@ -418,25 +420,29 @@ class TestScannerPlugin:
                 ]
             ),
         )
-        scanner.results_dir = tmp_path
+        scanner.results_dir = ash_temp_path
         scanner._run_subprocess(
             [
                 "python",
                 "-c",
                 "import sys; print('hello'); print('error', file=sys.stderr)",
             ],
-            tmp_path,
-            cwd=tmp_path,  # Use tmp_path as the working directory to avoid directory not found errors
+            ash_temp_path,
+            cwd=ash_temp_path,  # Use ash_temp_path as the working directory to avoid directory not found errors
             stderr_preference="both",
             stdout_preference="both",
         )
         assert len(scanner.output) > 0
         assert len(scanner.errors) > 0
         assert (
-            Path(tmp_path).joinpath(f"{scanner.__class__.__name__}.stdout.log").exists()
+            Path(ash_temp_path)
+            .joinpath(f"{scanner.__class__.__name__}.stdout.log")
+            .exists()
         )
         assert (
-            Path(tmp_path).joinpath(f"{scanner.__class__.__name__}.stderr.log").exists()
+            Path(ash_temp_path)
+            .joinpath(f"{scanner.__class__.__name__}.stderr.log")
+            .exists()
         )
 
     def test_run_subprocess_binary_not_found(self, test_plugin_context):

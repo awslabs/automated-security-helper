@@ -33,8 +33,8 @@ def test_scanner_output():
     # This could conflict with other tests using the same path
 
 # GOOD: Using an isolated file path
-def test_scanner_output(tmp_path):
-    output_file = tmp_path / "scanner_output.json"
+def test_scanner_output(ash_temp_path):
+    output_file = ash_temp_path / "scanner_output.json"
     # This is isolated to this test
 ```
 
@@ -90,8 +90,8 @@ Pytest fixtures provide a clean way to set up and tear down resources:
 
 ```python
 @pytest.fixture
-def isolated_config_file(tmp_path):
-    config_file = tmp_path / "config.yaml"
+def isolated_config_file(ash_temp_path):
+    config_file = ash_temp_path / "config.yaml"
     config_file.write_text("key: value")
     return config_file
 
@@ -114,7 +114,7 @@ def test_that_must_run_serially():
 If you encounter issues with parallel test execution, consider these common problems:
 
 1. **Resource Conflicts**: Tests might be using the same files, directories, or environment variables.
-   - Solution: Use the `isolated_test_context` or pytest's `tmp_path` fixture.
+   - Solution: Use the `isolated_test_context` or pytest's `ash_temp_path` fixture.
 
 2. **Database Conflicts**: Tests might be using the same database tables.
    - Solution: Use separate database schemas or in-memory databases for testing.

@@ -119,9 +119,9 @@ def full_ash_config(mock_scanner_plugin) -> AshConfig:
 
 
 @pytest.fixture
-def config_file_with_suppressions(tmp_path) -> Path:
+def config_file_with_suppressions(ash_temp_path) -> Path:
     """Create a temporary ASH config file with suppressions."""
-    config_file = tmp_path / ".ash.yaml"
+    config_file = ash_temp_path / ".ash.yaml"
 
     config_data = {
         "project_name": "test-project",

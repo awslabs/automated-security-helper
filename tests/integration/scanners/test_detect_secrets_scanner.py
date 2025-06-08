@@ -112,20 +112,20 @@ def test_detect_secrets_scanner_scan(
     "Need to rework, updated scan method short circuits if the target dir is empty before it actually runs"
 )
 def test_detect_secrets_scanner_with_no_findings(
-    detect_secrets_scanner, mock_secrets_collection, tmp_path
+    detect_secrets_scanner, mock_secrets_collection, ash_temp_path
 ):
     """Test DetectSecretsScanner when no secrets are found."""
     mock_secrets_collection.return_value.data = {}
 
-    target_dir = tmp_path / "target"
+    target_dir = ash_temp_path / "target"
     target_dir.mkdir()
 
     from automated_security_helper.config.ash_config import AshConfig
 
     detect_secrets_scanner.context = PluginContext(
         source_dir=target_dir,
-        output_dir=tmp_path / "output",
-        work_dir=tmp_path / "output" / ASH_WORK_DIR_NAME,
+        output_dir=ash_temp_path / "output",
+        work_dir=ash_temp_path / "output" / ASH_WORK_DIR_NAME,
         config=AshConfig(),  # Use default AshConfig instead of None
     )
 
@@ -140,7 +140,7 @@ def test_detect_secrets_scanner_with_no_findings(
     "Need to rework, updated scan method short circuits if the target dir is empty before it actually runs"
 )
 def test_detect_secrets_scanner_sarif_output(
-    detect_secrets_scanner, mock_secrets_collection, tmp_path
+    detect_secrets_scanner, mock_secrets_collection, ash_temp_path
 ):
     """Test DetectSecretsScanner SARIF output format."""
     # Set up mock data
@@ -162,11 +162,11 @@ def test_detect_secrets_scanner_sarif_output(
         )
     }
 
-    target_dir = tmp_path / "target"
+    target_dir = ash_temp_path / "target"
     target_dir.mkdir()
 
     detect_secrets_scanner.source_dir = str(target_dir)
-    detect_secrets_scanner.output_dir = str(tmp_path / "output")
+    detect_secrets_scanner.output_dir = str(ash_temp_path / "output")
 
     result = detect_secrets_scanner.scan(target_dir, target_type="source")
 
@@ -186,7 +186,7 @@ def test_detect_secrets_scanner_sarif_output(
 
 
 def test_detect_secrets_scanner_with_multiple_files(
-    detect_secrets_scanner, mock_secrets_collection, tmp_path
+    detect_secrets_scanner, mock_secrets_collection, ash_temp_path
 ):
     """Test DetectSecretsScanner with multiple files containing secrets."""
     from detect_secrets.core.potential_secret import PotentialSecret
@@ -219,11 +219,11 @@ def test_detect_secrets_scanner_with_multiple_files(
         ),
     }
 
-    target_dir = tmp_path / "target"
+    target_dir = ash_temp_path / "target"
     target_dir.mkdir()
 
     detect_secrets_scanner.source_dir = str(target_dir)
-    detect_secrets_scanner.output_dir = str(tmp_path / "output")
+    detect_secrets_scanner.output_dir = str(ash_temp_path / "output")
 
     result = detect_secrets_scanner.scan(target_dir, target_type="source")
 

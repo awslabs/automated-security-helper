@@ -34,9 +34,9 @@ def mock_scanner_with_findings():
 
 
 @pytest.fixture
-def scanner_test_files(tmp_path):
+def scanner_test_files(ash_temp_path):
     """Create test files for scanner testing."""
-    source_dir = tmp_path / "source"
+    source_dir = ash_temp_path / "source"
     source_dir.mkdir()
 
     # Create a test Python file with potential security issues
@@ -56,15 +56,15 @@ def unsafe_function():
 
 
 @pytest.fixture
-def bandit_scanner_context(tmp_path):
+def bandit_scanner_context(ash_temp_path):
     """Create a context for testing the Bandit scanner."""
     from automated_security_helper.scanners.ash_default.bandit_scanner import (
         BanditScannerConfig,
     )
 
-    source_dir = tmp_path / "source"
+    source_dir = ash_temp_path / "source"
     source_dir.mkdir()
-    output_dir = tmp_path / "output"
+    output_dir = ash_temp_path / "output"
     output_dir.mkdir()
 
     # Create a test Python file with potential security issues
@@ -106,13 +106,13 @@ def unsafe_function():
 
 
 @pytest.fixture
-def semgrep_scanner_context(tmp_path):
+def semgrep_scanner_context(ash_temp_path):
     """Create a context for testing the Semgrep scanner."""
     from automated_security_helper.config.scanner_types import SemgrepScannerConfig
 
-    source_dir = tmp_path / "source"
+    source_dir = ash_temp_path / "source"
     source_dir.mkdir()
-    output_dir = tmp_path / "output"
+    output_dir = ash_temp_path / "output"
     output_dir.mkdir()
 
     # Create a test Python file with potential security issues

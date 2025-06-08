@@ -76,9 +76,9 @@ def example_scanner():
 
 
 @pytest.fixture
-def temp_python_file(tmp_path):
+def temp_python_file(ash_temp_path):
     """Create a temporary Python file for testing."""
-    file_path = tmp_path / "test.py"
+    file_path = ash_temp_path / "test.py"
     return file_path
 
 

@@ -126,9 +126,9 @@ def example_suppressor(suppression_config=None):
 
 
 @pytest.fixture
-def temp_python_file(tmp_path):
+def temp_python_file(ash_temp_path):
     """Create a temporary Python file for testing."""
-    file_path = tmp_path / "test.py"
+    file_path = ash_temp_path / "test.py"
     return file_path
 
 
@@ -195,12 +195,12 @@ class TestScannerSuppressorReporterIntegration:
         assert len(report["findings"]) == 0  # Report shows no issues
 
     def test_scan_suppress_and_report_with_partial_suppression(
-        self, example_scanner, example_reporter, tmp_path
+        self, example_scanner, example_reporter, ash_temp_path
     ):
         """Test scanning, suppressing, and reporting with partial suppression."""
         # Arrange
-        file1 = tmp_path / "test1.py"
-        file2 = tmp_path / "test2.py"
+        file1 = ash_temp_path / "test1.py"
+        file2 = ash_temp_path / "test2.py"
         file1.write_text("import pickle\npickle.loads(b'')")
         file2.write_text("import pickle\npickle.loads(b'')")
 

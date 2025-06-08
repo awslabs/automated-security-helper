@@ -82,11 +82,11 @@ class ExampleReporter:
 
 # Example of a complex test with multiple components and mocks
 @pytest.mark.integration
-def test_complex_scenario_with_multiple_components(tmp_path, mocker):
+def test_complex_scenario_with_multiple_components(ash_temp_path, mocker):
     """Test a complex scenario with multiple components and mocks."""
     # Arrange
     # Create test files
-    src_dir = tmp_path / "src"
+    src_dir = ash_temp_path / "src"
     src_dir.mkdir()
 
     file1 = src_dir / "main.py"
@@ -101,7 +101,10 @@ def test_complex_scenario_with_multiple_components(tmp_path, mocker):
     config = {
         "scanners": {"example": {"enabled": True, "options": {"severity": "HIGH"}}},
         "reporters": {
-            "example": {"enabled": True, "output_file": str(tmp_path / "report.json")}
+            "example": {
+                "enabled": True,
+                "output_file": str(ash_temp_path / "report.json"),
+            }
         },
     }
 
@@ -152,7 +155,7 @@ def test_complex_scenario_with_multiple_components(tmp_path, mocker):
 
 # Example of a test with a mock HTTP server
 @pytest.mark.integration
-def test_with_mock_http_server(tmp_path):
+def test_with_mock_http_server(ash_temp_path):
     """Test with a mock HTTP server."""
 
     # Set up a mock HTTP server
@@ -301,10 +304,10 @@ def test_with_resource_management():
         ("import os\nos.system('ls')", 0),
     ],
 )
-def test_with_parameterized_fixtures(file_content, expected_findings, tmp_path):
+def test_with_parameterized_fixtures(file_content, expected_findings, ash_temp_path):
     """Test with parameterized fixtures."""
     # Create a test file
-    test_file = tmp_path / "test.py"
+    test_file = ash_temp_path / "test.py"
     test_file.write_text(file_content)
 
     # Scan the file
@@ -322,7 +325,7 @@ def test_with_parameterized_fixtures(file_content, expected_findings, tmp_path):
 
 # Example of a test with custom test data
 @pytest.mark.integration
-def test_with_custom_test_data(tmp_path):
+def test_with_custom_test_data(ash_temp_path):
     """Test with custom test data."""
     # Define test data
     test_data = [
@@ -345,7 +348,7 @@ def test_with_custom_test_data(tmp_path):
 
     # Create test files
     for data in test_data:
-        file_path = tmp_path / data["file_name"]
+        file_path = ash_temp_path / data["file_name"]
         file_path.write_text(data["content"])
 
         # Scan the file
@@ -365,16 +368,16 @@ def test_with_custom_test_data(tmp_path):
 
 # Example of a test with a workflow
 @pytest.mark.integration
-def test_workflow(tmp_path):
+def test_workflow(ash_temp_path):
     """Test a complete workflow."""
     # Set up the test environment
-    src_dir = tmp_path / "src"
+    src_dir = ash_temp_path / "src"
     src_dir.mkdir()
 
-    config_dir = tmp_path / ".ash"
+    config_dir = ash_temp_path / ".ash"
     config_dir.mkdir()
 
-    output_dir = tmp_path / "output"
+    output_dir = ash_temp_path / "output"
     output_dir.mkdir()
 
     # Create test files

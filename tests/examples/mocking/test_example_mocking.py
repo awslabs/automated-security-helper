@@ -85,10 +85,10 @@ def test_basic_mocking(mocker):
 
 
 # Mocking methods
-def test_mocking_methods(mocker, tmp_path):
+def test_mocking_methods(mocker, ash_temp_path):
     """Test mocking methods."""
     # Create a test file
-    test_file = tmp_path / "test.py"
+    test_file = ash_temp_path / "test.py"
     test_file.write_text("print('Hello, world!')")
 
     # Mock the read_text method of Path

@@ -101,46 +101,74 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture
-def temp_config_dir(tmp_path):
+def ash_temp_path():
+    """Create a temporary directory using the gitignored tests/pytest-temp directory.
+
+    This fixture provides a consistent temporary directory that is gitignored
+    and located within the tests directory structure.
+
+    Returns:
+        Path to the temporary directory
+    """
+    import uuid
+    import shutil
+
+    # Get the tests directory
+    tests_dir = Path(__file__).parent
+    temp_base_dir = tests_dir / "pytest-temp"
+
+    # Create a unique subdirectory for this test session
+    temp_dir = temp_base_dir / str(uuid.uuid4())
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    yield temp_dir
+
+    # Cleanup after the test
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def temp_config_dir(ash_temp_path):
     """Create a temporary directory for configuration files.
 
     Args:
-        tmp_path: Pytest fixture that provides a temporary directory
+        ash_temp_path: ASH fixture that provides a temporary directory
 
     Returns:
         Path to the temporary configuration directory
     """
-    config_dir = tmp_path / "config"
+    config_dir = ash_temp_path / "config"
     config_dir.mkdir()
     return config_dir
 
 
 @pytest.fixture
-def temp_output_dir(tmp_path):
+def temp_output_dir(ash_temp_path):
     """Create a temporary directory for output files.
 
     Args:
-        tmp_path: Pytest fixture that provides a temporary directory
+        ash_temp_path: ASH fixture that provides a temporary directory
 
     Returns:
         Path to the temporary output directory
     """
-    output_dir = tmp_path / "output"
+    output_dir = ash_temp_path / "output"
     output_dir.mkdir()
     return output_dir
 
 
 @pytest.fixture
-def temp_project_dir(tmp_path):
+def temp_project_dir(ash_temp_path):
     """Create a temporary directory for project files.
 
     Args:
-        tmp_path: Pytest fixture that provides a temporary directory
+        ash_temp_path: ASH fixture that provides a temporary directory
 
     Returns:
         Path to the temporary project directory
     """
-    project_dir = tmp_path / "project"
+    project_dir = ash_temp_path / "project"
     project_dir.mkdir()
 
     # Create a basic project structure
@@ -212,16 +240,16 @@ def test_plugin_context():
 
 
 @pytest.fixture
-def test_source_dir(tmp_path):
+def test_source_dir(ash_temp_path):
     """Create a test source directory with sample files.
 
     Args:
-        tmp_path: Pytest fixture that provides a temporary directory
+        ash_temp_path: ASH fixture that provides a temporary directory
 
     Returns:
         Path to the test source directory
     """
-    source_dir = tmp_path / "source"
+    source_dir = ash_temp_path / "source"
     source_dir.mkdir()
 
     # Create a sample file
@@ -249,9 +277,9 @@ def sample_ash_model():
 
 
 @pytest.fixture
-def test_data_dir(tmp_path):
+def test_data_dir(ash_temp_path):
     """Create a test data directory with sample files."""
-    data_dir = tmp_path / "test_data"
+    data_dir = ash_temp_path / "test_data"
     data_dir.mkdir()
 
     # Create a sample CloudFormation template
@@ -280,9 +308,9 @@ def test_data_dir(tmp_path):
 
 
 @pytest.fixture
-def test_output_dir(tmp_path):
+def test_output_dir(ash_temp_path):
     """Create a test output directory."""
-    output_dir = tmp_path / "output"
+    output_dir = ash_temp_path / "output"
     output_dir.mkdir()
     return output_dir
 

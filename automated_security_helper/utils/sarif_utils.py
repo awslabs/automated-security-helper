@@ -420,16 +420,22 @@ def apply_suppressions_to_sarif(
 
                         flat_finding = FlatVulnerability(
                             id=get_finding_id(result.ruleId, uri, line_start, line_end),
-                            title=result.message.root.text
-                            if result.message
-                            else "Unknown Issue",
-                            description=result.message.root.text
-                            if result.message
-                            else "No description available",
+                            title=(
+                                result.message.root.text
+                                if result.message
+                                else "Unknown Issue"
+                            ),
+                            description=(
+                                result.message.root.text
+                                if result.message
+                                else "No description available"
+                            ),
                             severity="MEDIUM",  # Default severity, not used for matching
-                            scanner=run.tool.driver.name
-                            if run.tool and run.tool.driver
-                            else "unknown",
+                            scanner=(
+                                run.tool.driver.name
+                                if run.tool and run.tool.driver
+                                else "unknown"
+                            ),
                             scanner_type="SAST",  # Default type, not used for matching
                             rule_id=result.ruleId,
                             file_path=uri,

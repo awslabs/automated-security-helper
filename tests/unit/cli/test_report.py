@@ -77,7 +77,16 @@ def test_report_command_basic(
 def test_report_command_with_resilient_parsing():
     """Test report command with resilient parsing."""
     # Call report_command with no arguments (resilient parsing)
-    report_command()
+    # Create the results file first
+    # Mock Path.exists to return True for results file
+    # Mock open to return a file with JSON content
+    mock_file = MagicMock()
+    mock_file.__enter__.return_value.read.return_value = (
+        '{"metadata": {"summary_stats": {"actionable": 5}}}'
+    )
+    # Call report_command with verbose option
+    with patch("builtins.open", return_value=mock_file):
+        report_command()
 
 
 @patch("automated_security_helper.cli.report.PluginContext")
