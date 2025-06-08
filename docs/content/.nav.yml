@@ -16,6 +16,10 @@ nav:
     - docs/plugins/reporter-plugins.md
     - docs/plugins/converter-plugins.md
     - docs/plugins/plugin-best-practices.md
+  - Contributing:
+    - contributing.md
+    - Testing:
+      - docs/testing/**
   - Tutorials:
     - tutorials/running-ash-locally.md
     - tutorials/running-ash-in-ci.md

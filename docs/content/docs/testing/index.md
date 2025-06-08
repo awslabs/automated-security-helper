@@ -30,11 +30,7 @@ tests/
 │   ├── mocks.py           # Mock objects and factories
 │   ├── test_data.py       # Test data utilities
 │   └── ...
-├── conftest.py            # Pytest configuration and shared fixtures
-└── docs/                  # Test documentation
-    ├── testing_framework.md  # This document
-    ├── test_selection.md     # Documentation for test selection
-    └── ...
+└── conftest.py            # Pytest configuration and shared fixtures
 ```
 
 ### Naming Conventions
