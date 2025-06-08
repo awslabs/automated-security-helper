@@ -39,6 +39,7 @@ def test_line_range_matches_with_none_line_start():
         line_end=None,
     )
     suppression = Suppression(
+        reason="Test suppression",
         rule_id="TEST-001",
         path="src/file.py",
         line_start=10,
@@ -106,6 +107,7 @@ def test_check_for_expiring_suppressions_with_future_date():
     future_date = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
 
     suppression = Suppression(
+        reason="Test suppression",
         rule_id="TEST-001",
         path="src/file.py",
         expiration=future_date,
@@ -121,6 +123,7 @@ def test_check_for_expiring_suppressions_with_expiring_date():
     expiring_date = (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")
 
     suppression = Suppression(
+        reason="Test suppression",
         rule_id="TEST-001",
         path="src/file.py",
         expiration=expiring_date,

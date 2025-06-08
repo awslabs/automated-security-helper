@@ -11,13 +11,13 @@ ASH provides two mechanisms for excluding findings:
 
 Key differences:
 
-| Feature | Ignore Paths | Suppressions |
-|---------|-------------|-------------|
-| Scope | Entire files/directories | Specific findings |
-| Visibility | Files not scanned at all | Findings still visible but marked as suppressed |
-| Granularity | File-level only | Rule ID, file path, and line number |
-| Tracking | No tracking of ignored files | Suppressed findings are tracked and reported |
-| Expiration | No expiration mechanism | Can set expiration dates |
+| Feature     | Ignore Paths                 | Suppressions                                    |
+|-------------|------------------------------|-------------------------------------------------|
+| Scope       | Entire files/directories     | Specific findings                               |
+| Visibility  | Files not scanned at all     | Findings still visible but marked as suppressed |
+| Granularity | File-level only              | Rule ID, file path, and line number             |
+| Tracking    | No tracking of ignored files | Suppressed findings are tracked and reported    |
+| Expiration  | No expiration mechanism      | Can set expiration dates                        |
 
 ## Configuring Suppressions
 
@@ -27,13 +27,13 @@ Suppressions are defined in the `.ash.yaml` configuration file under the `global
 global_settings:
   suppressions:
     - rule_id: 'RULE-123'
-      file_path: 'src/example.py'
+      path: 'src/example.py'
       line_start: 10
       line_end: 15
       reason: 'False positive due to test mock'
       expiration: '2025-12-31'
     - rule_id: 'RULE-456'
-      file_path: 'src/*.js'
+      path: 'src/*.js'
       reason: 'Known issue, planned for fix in v2.0'
 ```
 
@@ -41,14 +41,14 @@ global_settings:
 
 Each suppression rule can include the following properties:
 
-| Property | Required | Description |
-|----------|----------|-------------|
-| `rule_id` | Yes | The scanner-specific rule ID to suppress |
-| `file_path` | Yes | File path or glob pattern to match |
-| `line_start` | No | Starting line number for the suppression |
-| `line_end` | No | Ending line number for the suppression |
-| `reason` | No | Justification for the suppression |
-| `expiration` | No | Date when the suppression expires (YYYY-MM-DD) |
+| Property     | Required | Description                                    |
+|--------------|----------|------------------------------------------------|
+| `path`       | Yes      | File path or glob pattern to match             |
+| `reason`     | Yes      | Justification for the suppression              |
+| `rule_id`    | Yes      | The scanner-specific rule ID to suppress       |
+| `line_start` | No       | Starting line number for the suppression       |
+| `line_end`   | No       | Ending line number for the suppression         |
+| `expiration` | No       | Date when the suppression expires (YYYY-MM-DD) |
 
 ### Matching Rules
 
@@ -63,7 +63,7 @@ Each suppression rule can include the following properties:
 ```yaml
 suppressions:
   - rule_id: 'B605'  # Bandit rule for os.system
-    file_path: 'src/utils.py'
+    path: 'src/utils.py'
     reason: 'Command is properly sanitized'
 ```
 
@@ -72,7 +72,7 @@ suppressions:
 ```yaml
 suppressions:
   - rule_id: 'CKV_AWS_123'
-    file_path: 'terraform/*.tf'
+    path: 'terraform/*.tf'
     reason: 'Approved exception per security review'
 ```
 
@@ -81,7 +81,7 @@ suppressions:
 ```yaml
 suppressions:
   - rule_id: 'detect-secrets'
-    file_path: 'config/settings.py'
+    path: 'config/settings.py'
     line_start: 45
     line_end: 47
     reason: 'Test credentials used in CI only'
@@ -92,7 +92,7 @@ suppressions:
 ```yaml
 suppressions:
   - rule_id: 'RULE-789'
-    file_path: 'src/legacy.py'
+    path: 'src/legacy.py'
     reason: 'Will be fixed in next sprint'
     expiration: '2025-06-30'
 ```

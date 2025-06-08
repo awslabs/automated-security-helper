@@ -93,6 +93,7 @@ class TestSuppressionMatcher:
 
         # Create test suppressions
         suppression_with_range = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
             line_start=5,
@@ -100,6 +101,7 @@ class TestSuppressionMatcher:
         )
 
         suppression_single_line = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
             line_start=20,
@@ -107,6 +109,7 @@ class TestSuppressionMatcher:
         )
 
         suppression_no_line = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
             line_start=None,
@@ -146,6 +149,7 @@ class TestSuppressionMatcher:
 
         # Create test suppressions
         suppression_match_all = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
             line_start=5,
@@ -153,21 +157,25 @@ class TestSuppressionMatcher:
         )
 
         suppression_match_rule_only = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/other.py",
         )
 
         suppression_match_path_only = Suppression(
+            reason="Test suppression",
             rule_id="OTHER-RULE",
             path="src/example.py",
         )
 
         suppression_match_no_line = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
         )
 
         suppression_no_match = Suppression(
+            reason="Test suppression",
             rule_id="OTHER-RULE",
             path="src/other.py",
         )
@@ -197,17 +205,20 @@ class TestSuppressionMatcher:
 
         # Create test suppressions
         suppression_match = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
         )
 
         suppression_no_match = Suppression(
+            reason="Test suppression",
             rule_id="OTHER-RULE",
             path="src/other.py",
         )
 
         tomorrow = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
         suppression_not_expired = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
             expiration=tomorrow,
@@ -251,36 +262,42 @@ class TestSuppressionMatcher:
         next_year = (date.today() + timedelta(days=365)).strftime("%Y-%m-%d")
 
         suppression_today = Suppression(
+            reason="Test suppression",
             rule_id="RULE-1",
             path="src/example.py",
             expiration=today,
         )
 
         suppression_tomorrow = Suppression(
+            reason="Test suppression",
             rule_id="RULE-2",
             path="src/example.py",
             expiration=tomorrow,
         )
 
         suppression_next_week = Suppression(
+            reason="Test suppression",
             rule_id="RULE-3",
             path="src/example.py",
             expiration=next_week,
         )
 
         suppression_next_month = Suppression(
+            reason="Test suppression",
             rule_id="RULE-4",
             path="src/example.py",
             expiration=next_month,
         )
 
         suppression_next_year = Suppression(
+            reason="Test suppression",
             rule_id="RULE-5",
             path="src/example.py",
             expiration=next_year,
         )
 
         suppression_no_expiration = Suppression(
+            reason="Test suppression",
             rule_id="RULE-6",
             path="src/example.py",
         )

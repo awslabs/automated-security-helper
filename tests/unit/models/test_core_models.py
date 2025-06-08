@@ -30,6 +30,7 @@ class TestSuppression:
     def test_suppression_model_minimal(self):
         """Test that a minimal suppression model can be created."""
         suppression = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
         )
@@ -37,13 +38,14 @@ class TestSuppression:
         assert suppression.path == "src/example.py"
         assert suppression.line_start is None
         assert suppression.line_end is None
-        assert suppression.reason is None
+        assert suppression.reason == "Test suppression"
         assert suppression.expiration is None
 
     def test_suppression_model_invalid_line_range(self):
         """Test that a suppression model with invalid line range raises an error."""
         with pytest.raises(ValidationError) as excinfo:
             Suppression(
+                reason="Test suppression",
                 rule_id="RULE-123",
                 path="src/example.py",
                 line_start=20,
@@ -57,6 +59,7 @@ class TestSuppression:
         """Test that a suppression model with invalid expiration format raises an error."""
         with pytest.raises(ValidationError) as excinfo:
             Suppression(
+                reason="Test suppression",
                 rule_id="RULE-123",
                 path="src/example.py",
                 expiration="invalid-date",
@@ -68,6 +71,7 @@ class TestSuppression:
         yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
         with pytest.raises(ValidationError) as excinfo:
             Suppression(
+                reason="Test suppression",
                 rule_id="RULE-123",
                 path="src/example.py",
                 expiration=yesterday,
@@ -78,6 +82,7 @@ class TestSuppression:
         """Test that a suppression model with future date is valid."""
         tomorrow = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
         suppression = Suppression(
+            reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
             expiration=tomorrow,

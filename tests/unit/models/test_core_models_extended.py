@@ -96,13 +96,15 @@ def test_tool_args_with_extra_fields():
 
 def test_suppression_model_minimal():
     """Test the Suppression model with minimal fields."""
-    suppression = Suppression(rule_id="TEST001", path="src/main.py")
+    suppression = Suppression(
+        reason="Test suppression", rule_id="TEST001", path="src/main.py"
+    )
 
     assert suppression.rule_id == "TEST001"
     assert suppression.path == "src/main.py"
     assert suppression.line_start is None
     assert suppression.line_end is None
-    assert suppression.reason is None
+    assert suppression.reason == "Test suppression"
     assert suppression.expiration is None
 
 
@@ -129,7 +131,10 @@ def test_suppression_model_with_future_expiration():
     future_date = (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
 
     suppression = Suppression(
-        rule_id="TEST001", path="src/main.py", expiration=future_date
+        reason="Test suppression",
+        rule_id="TEST001",
+        path="src/main.py",
+        expiration=future_date,
     )
 
     assert suppression.rule_id == "TEST001"
@@ -141,6 +146,7 @@ def test_suppression_model_invalid_line_range():
     """Test the Suppression model with an invalid line range."""
     with pytest.raises(ValueError) as excinfo:
         Suppression(
+            reason="Test suppression",
             rule_id="TEST001",
             path="src/main.py",
             line_start=20,
@@ -154,6 +160,7 @@ def test_suppression_model_invalid_expiration_format():
     """Test the Suppression model with an invalid expiration date format."""
     with pytest.raises(ValueError) as excinfo:
         Suppression(
+            reason="Test suppression",
             rule_id="TEST001",
             path="src/main.py",
             expiration="01/01/2025",  # Wrong format
@@ -168,6 +175,11 @@ def test_suppression_model_past_expiration():
     past_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     with pytest.raises(ValueError) as excinfo:
-        Suppression(rule_id="TEST001", path="src/main.py", expiration=past_date)
+        Suppression(
+            reason="Test suppression",
+            rule_id="TEST001",
+            path="src/main.py",
+            expiration=past_date,
+        )
 
     assert "expiration date must be in the future" in str(excinfo.value)
