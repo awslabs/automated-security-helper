@@ -63,7 +63,7 @@ def create_test_sarif():
 def test_sanitize_sarif_paths():
     """Test sanitizing paths in SARIF report."""
     sarif = create_test_sarif()
-    source_dir = "/absolute/path"
+    source_dir = Path("/absolute/path")
 
     # Test with absolute path
     result = sanitize_sarif_paths(sarif, source_dir)
