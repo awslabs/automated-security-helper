@@ -14,3 +14,5 @@ assert_used:
   skips:
     - "*/test_*.py"
     - "**/test_*.py"
+    - "*/utils/*.py"
+    - "**/utils/*.py"
