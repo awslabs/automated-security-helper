@@ -1,6 +1,10 @@
 """Unit tests for the run_ash_container functionality."""
 
+import os
+import sys
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from automated_security_helper.interactions.run_ash_container import (
     run_ash_container,
@@ -52,6 +56,10 @@ def test_get_host_gid_success(mock_run_command):
     )
 
 
+@pytest.mark.skipif(
+    sys.platform.lower() == "windows" and os.environ.get("CI", None) is not None,
+    reason="GitHub Actions windows-latest runners do not have an OCI runtime available",
+)
 @patch("automated_security_helper.interactions.run_ash_container.Path.mkdir")
 @patch("automated_security_helper.interactions.run_ash_container.validate_path")
 @patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
@@ -112,6 +120,10 @@ def test_run_ash_container_basic(
     assert "run" in run_cmd
 
 
+@pytest.mark.skipif(
+    sys.platform.lower() == "windows" and os.environ.get("CI", None) is not None,
+    reason="GitHub Actions windows-latest runners do not have an OCI runtime available",
+)
 @patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 @patch("automated_security_helper.utils.subprocess_utils.run_command")
@@ -156,6 +168,10 @@ def test_run_ash_container_build_only(
     mock_run_command.assert_not_called()
 
 
+@pytest.mark.skipif(
+    sys.platform.lower() == "windows" and os.environ.get("CI", None) is not None,
+    reason="GitHub Actions windows-latest runners do not have an OCI runtime available",
+)
 @patch("automated_security_helper.interactions.run_ash_container.Path.mkdir")
 @patch("automated_security_helper.interactions.run_ash_container.validate_path")
 @patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
@@ -205,6 +221,10 @@ def test_run_ash_container_run_only(
     assert "run" in run_cmd
 
 
+@pytest.mark.skipif(
+    sys.platform.lower() == "windows" and os.environ.get("CI", None) is not None,
+    reason="GitHub Actions windows-latest runners do not have an OCI runtime available",
+)
 @patch("automated_security_helper.interactions.run_ash_container.Path.mkdir")
 @patch("automated_security_helper.interactions.run_ash_container.validate_path")
 @patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")

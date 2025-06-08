@@ -74,6 +74,10 @@ def test_make_executable_unix(mock_stat, mock_chmod):
         mock_chmod.assert_called_once_with(0o755)  # 0o644 | 0o111
 
 
+@pytest.mark.skipif(
+    sys.platform.lower() != "windows",
+    reason="Windows specific test",
+)
 @patch("pathlib.Path.chmod")
 def test_make_executable_windows(mock_chmod):
     """Test make_executable on Windows."""
@@ -86,6 +90,10 @@ def test_make_executable_windows(mock_chmod):
         mock_chmod.assert_not_called()
 
 
+@pytest.mark.skipif(
+    sys.platform.lower() != "darwin",
+    reason="Windows specific test",
+)
 @patch("automated_security_helper.utils.download_utils.run_command")
 def test_unquarantine_macos_binary(mock_run_command):
     """Test unquarantine_macos_binary on macOS."""
