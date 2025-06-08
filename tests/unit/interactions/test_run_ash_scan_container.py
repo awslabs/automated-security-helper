@@ -55,13 +55,15 @@ def test_get_host_gid_success(mock_run_command):
 @patch("automated_security_helper.interactions.run_ash_container.Path.mkdir")
 @patch("automated_security_helper.interactions.run_ash_container.validate_path")
 @patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
-@patch("automated_security_helper.utils.subprocess_utils")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
+@patch("automated_security_helper.utils.subprocess_utils.run_command")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_uid")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_gid")
 def test_run_ash_container_basic(
     mock_get_host_gid,
     mock_get_host_uid,
-    mock_subprocess_utils,
+    mock_run_command,
+    mock_find_executable,
     mock_run_cmd_direct,
     mock_validate_path,
     mock_mkdir,
@@ -72,7 +74,7 @@ def test_run_ash_container_basic(
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_subprocess_utils.find_executable.return_value = "/usr/bin/docker"
+    mock_find_executable.return_value = "/usr/bin/docker"
 
     # Mock run_cmd_direct to return successful result
     mock_build_result = MagicMock()
@@ -88,7 +90,7 @@ def test_run_ash_container_basic(
     # Mock subprocess_utils.run_command for the run phase
     mock_run_result = MagicMock()
     mock_run_result.returncode = 0
-    mock_subprocess_utils.run_command.return_value = mock_run_result
+    mock_run_command.return_value = mock_run_result
 
     # Call run_ash_container
     result = run_ash_container(
@@ -111,11 +113,16 @@ def test_run_ash_container_basic(
 
 
 @patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
-@patch("automated_security_helper.utils.subprocess_utils")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
+@patch("automated_security_helper.utils.subprocess_utils.run_command")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_uid")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_gid")
 def test_run_ash_container_build_only(
-    mock_get_host_gid, mock_get_host_uid, mock_subprocess_utils, mock_run_cmd_direct
+    mock_get_host_gid,
+    mock_get_host_uid,
+    mock_run_command,
+    mock_find_executable,
+    mock_run_cmd_direct,
 ):
     """Test run_ash_container with build only."""
     # Mock get_host_uid and get_host_gid
@@ -123,7 +130,7 @@ def test_run_ash_container_build_only(
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_subprocess_utils.find_executable.return_value = "/usr/bin/docker"
+    mock_find_executable.return_value = "/usr/bin/docker"
 
     # Mock run_cmd_direct to return successful result
     mock_build_result = MagicMock()
@@ -146,19 +153,19 @@ def test_run_ash_container_build_only(
     assert "build" in build_cmd
 
     # Verify subprocess_utils.run_command was not called (no run phase)
-    mock_subprocess_utils.run_command.assert_not_called()
+    mock_run_command.assert_not_called()
 
 
 @patch("automated_security_helper.interactions.run_ash_container.Path.mkdir")
 @patch("automated_security_helper.interactions.run_ash_container.validate_path")
 @patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
-@patch("automated_security_helper.utils.subprocess_utils")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_uid")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_gid")
 def test_run_ash_container_run_only(
     mock_get_host_gid,
     mock_get_host_uid,
-    mock_subprocess_utils,
+    mock_find_executable,
     mock_run_cmd_direct,
     mock_validate_path,
     mock_mkdir,
@@ -169,7 +176,7 @@ def test_run_ash_container_run_only(
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_subprocess_utils.find_executable.return_value = "/usr/bin/docker"
+    mock_find_executable.return_value = "/usr/bin/docker"
 
     # Mock validate_path to return the path as-is
     mock_validate_path.return_value = "/test/source"
@@ -202,11 +209,15 @@ def test_run_ash_container_run_only(
 @patch("automated_security_helper.interactions.run_ash_container.validate_path")
 @patch("automated_security_helper.interactions.run_ash_container.run_cmd_direct")
 @patch("automated_security_helper.utils.subprocess_utils")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
+@patch("automated_security_helper.utils.subprocess_utils.run_command")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_uid")
 @patch("automated_security_helper.utils.subprocess_utils.get_host_gid")
 def test_run_ash_container_with_custom_options(
     mock_get_host_gid,
     mock_get_host_uid,
+    mock_run_command,
+    mock_find_executable,
     mock_subprocess_utils,
     mock_run_cmd_direct,
     mock_validate_path,
@@ -218,7 +229,7 @@ def test_run_ash_container_with_custom_options(
     mock_get_host_gid.return_value = 1000
 
     # Mock subprocess_utils.find_executable
-    mock_subprocess_utils.find_executable.return_value = "/usr/bin/podman"
+    mock_find_executable.return_value = "/usr/bin/podman"
 
     # Mock run_cmd_direct to return successful result
     mock_build_result = MagicMock()
