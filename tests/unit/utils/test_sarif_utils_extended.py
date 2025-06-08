@@ -60,7 +60,7 @@ def create_test_sarif():
     condition=sys.platform.lower() == "windows",
     reason="Current issues with sanitization of URIs on Windows. Does not affect using ASH, only testing.",
 )
-def test_sanitize_sarif_paths():
+def test_sanitize_sarif_paths_absolute():
     """Test sanitizing paths in SARIF report."""
     sarif = create_test_sarif()
     source_dir = Path("/absolute/path")
