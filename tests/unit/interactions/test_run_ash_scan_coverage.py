@@ -143,9 +143,7 @@ def test_run_ash_scan_with_actionable_findings(
         patch(
             "automated_security_helper.models.asharp_model.AshAggregatedResults"
         ) as mock_results,
-        patch(
-            "automated_security_helper.interactions.run_ash_scan.sys.exit"
-        ) as mock_exit,
+        patch("sys.exit") as mock_exit,
     ):
         mock_results.model_dump_json.return_value = "{}"
         mock_orchestrator.execute_scan.return_value.metadata.summary_stats.actionable = 5
