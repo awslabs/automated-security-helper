@@ -1,19 +1,12 @@
 """Unit tests for clean_dict module to increase coverage."""
 
-import pytest
-
 from automated_security_helper.utils.clean_dict import clean_dict
 
 
 def test_clean_dict_with_none_values():
     """Test clean_dict with None values."""
     # Create test dictionary with None values
-    test_dict = {
-        "key1": "value1",
-        "key2": None,
-        "key3": "value3",
-        "key4": None
-    }
+    test_dict = {"key1": "value1", "key2": None, "key3": "value3", "key4": None}
 
     # Clean the dictionary
     result = clean_dict(test_dict)
@@ -30,13 +23,7 @@ def test_clean_dict_with_none_values():
 def test_clean_dict_with_empty_values():
     """Test clean_dict with empty values."""
     # Create test dictionary with empty values
-    test_dict = {
-        "key1": "value1",
-        "key2": "",
-        "key3": [],
-        "key4": {},
-        "key5": "value5"
-    }
+    test_dict = {"key1": "value1", "key2": "", "key3": [], "key4": {}, "key5": "value5"}
 
     # Clean the dictionary
     result = clean_dict(test_dict)
@@ -59,12 +46,9 @@ def test_clean_dict_with_nested_dicts():
         "key2": {
             "nested1": "nested_value1",
             "nested2": None,
-            "nested3": {
-                "deep1": "deep_value1",
-                "deep2": None
-            }
+            "nested3": {"deep1": "deep_value1", "deep2": None},
         },
-        "key3": None
+        "key3": None,
     }
 
     # Clean the dictionary
@@ -86,11 +70,8 @@ def test_clean_dict_with_lists():
     # Create test dictionary with lists
     test_dict = {
         "key1": "value1",
-        "key2": [
-            {"item1": "value1", "item2": None},
-            {"item3": "value3", "item4": ""}
-        ],
-        "key3": []
+        "key2": [{"item1": "value1", "item2": None}, {"item3": "value3", "item4": ""}],
+        "key3": [],
     }
 
     # Clean the dictionary
@@ -110,12 +91,7 @@ def test_clean_dict_with_lists():
 def test_clean_dict_with_empty_result():
     """Test clean_dict that results in an empty dictionary."""
     # Create test dictionary where all values will be removed
-    test_dict = {
-        "key1": None,
-        "key2": "",
-        "key3": [],
-        "key4": {}
-    }
+    test_dict = {"key1": None, "key2": "", "key3": [], "key4": {}}
 
     # Clean the dictionary
     result = clean_dict(test_dict)

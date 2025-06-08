@@ -2,7 +2,6 @@
 
 from unittest.mock import patch, MagicMock, mock_open
 
-import pytest
 
 from automated_security_helper.core.enums import RunMode, Phases
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
@@ -184,16 +183,15 @@ def test_run_ash_scan_with_actionable_findings(
     with patch("builtins.open", mock_open()):
         with patch("os.chdir"):
             # Mock sys.exit to prevent test from exiting
-            with patch("sys.exit") as _:
+            with patch("sys.exit") as mock_exit:
                 # Call the function with fail_on_findings=True
-                with pytest.raises(SystemExit):
-                    run_ash_scan(
-                        mode=RunMode.local,
-                        source_dir="/test/source",
-                        output_dir="/test/output",
-                        fail_on_findings=True,
-                        show_summary=True,
-                    )
-
-    # Verify orchestrator was created and execute_scan was called
-    mock_orchestrator_class.a
+                run_ash_scan(
+                    mode=RunMode.local,
+                    source_dir="/test/source",
+                    output_dir="/test/output",
+                    fail_on_findings=True,
+                    show_summary=True,
+                )
+                # Verify sys.exit was called
+                mock_exit.assert_called_once()
+                mock_exit.assert_called_with(2)

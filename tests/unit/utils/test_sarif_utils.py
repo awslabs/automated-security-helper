@@ -1,8 +1,10 @@
-import pytest
-import os
 from pathlib import Path
 from unittest.mock import patch
-from automated_security_helper.utils.sarif_utils import get_finding_id, _sanitize_uri, path_matches_pattern
+from automated_security_helper.utils.sarif_utils import (
+    get_finding_id,
+    _sanitize_uri,
+    path_matches_pattern,
+)
 
 
 def test_get_finding_id():
@@ -23,7 +25,7 @@ def test_get_finding_id():
     assert id4 != id1  # Should be different from the full parameter version
 
 
-@patch('pathlib.Path.relative_to')
+@patch("pathlib.Path.relative_to")
 def test_sanitize_uri(mock_relative_to):
     """Test the _sanitize_uri function."""
     # Mock the relative_to method to return a fixed path

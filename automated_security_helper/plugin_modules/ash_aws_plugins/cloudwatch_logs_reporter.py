@@ -33,7 +33,7 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
         ),
     ]
     log_group_name: str | None = Field(
-        default_factory=lambda: os.environ.get("ASH_LOG_GROUP_NAME", None)
+        default_factory=lambda: os.environ.get("ASH_CLOUDWATCH_LOG_GROUP_NAME", None)
     )
     log_stream_name: str = "ASHScanResults"
 

@@ -2,10 +2,10 @@
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock
 
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
     CloudWatchLogsReporter,
     CloudWatchLogsReporterConfig,
@@ -60,13 +60,17 @@ def test_cloudwatch_logs_reporter_config_options_defaults():
     # Save original environment variables
     original_aws_region = os.environ.get("AWS_REGION")
     original_aws_default_region = os.environ.get("AWS_DEFAULT_REGION")
-    original_log_group = os.environ.get("ASH_CLOUDWATCH_LOG_GROUP")
+    original_log_group = os.environ.get(
+        "ASH_CLOUDWATCH_LOG_GROUP_NAME"
+    )  # Fixed env var name
     original_log_stream = os.environ.get("ASH_CLOUDWATCH_LOG_STREAM")
 
     try:
         # Set environment variables
         os.environ["AWS_REGION"] = "us-west-2"
-        os.environ["ASH_CLOUDWATCH_LOG_GROUP"] = "test-log-group"
+        os.environ["ASH_CLOUDWATCH_LOG_GROUP_NAME"] = (
+            "test-log-group"  # Fixed env var name
+        )
         os.environ["ASH_CLOUDWATCH_LOG_STREAM"] = "test-log-stream"
 
         # Create config options
@@ -75,7 +79,9 @@ def test_cloudwatch_logs_reporter_config_options_defaults():
         # Verify defaults
         assert options.aws_region == "us-west-2"
         assert options.log_group_name == "test-log-group"
-        assert options.log_stream_name == "test-log-stream"
+        assert (
+            options.log_stream_name == "ASHScanResults"
+        )  # This is hardcoded, not from env
     finally:
         # Restore environment variables
         if original_aws_region is not None:
@@ -89,9 +95,11 @@ def test_cloudwatch_logs_reporter_config_options_defaults():
             del os.environ["AWS_DEFAULT_REGION"]
 
         if original_log_group is not None:
-            os.environ["ASH_CLOUDWATCH_LOG_GROUP"] = original_log_group
-        elif "ASH_CLOUDWATCH_LOG_GROUP" in os.environ:
-            del os.environ["ASH_CLOUDWATCH_LOG_GROUP"]
+            os.environ["ASH_CLOUDWATCH_LOG_GROUP_NAME"] = (
+                original_log_group  # Fixed env var name
+            )
+        elif "ASH_CLOUDWATCH_LOG_GROUP_NAME" in os.environ:
+            del os.environ["ASH_CLOUDWATCH_LOG_GROUP_NAME"]  # Fixed env var name
 
         if original_log_stream is not None:
             os.environ["ASH_CLOUDWATCH_LOG_STREAM"] = original_log_stream
@@ -106,7 +114,7 @@ def test_cloudwatch_logs_reporter_with_config():
         source_dir=Path("/test/source"),
         output_dir=Path("/test/output"),
         work_dir=Path("/test/work"),
-        config=MagicMock(),
+        config=get_default_config(),
     )
 
     # Create config

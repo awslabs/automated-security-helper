@@ -363,13 +363,13 @@ def validate(
                 f"Config file '{Path(config_path).absolute().as_posix()}' is not valid: {e}",
                 fg=typer.colors.RED,
             )
-            raise sys.exit(1) from None
+            sys.exit(1)
         else:
             typer.secho(
                 "Unable to resolve a valid configuration from the input details provided",
                 fg=typer.colors.RED,
             )
-        raise sys.exit(1) from None
+        sys.exit(1)
 
 
 if __name__ == "__main__":

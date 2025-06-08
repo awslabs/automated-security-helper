@@ -23,12 +23,12 @@ def test_cloudwatch_logs_reporter_config_options_defaults():
     # Save original environment variables
     original_region = os.environ.get("AWS_REGION")
     original_default_region = os.environ.get("AWS_DEFAULT_REGION")
-    original_log_group = os.environ.get("ASH_LOG_GROUP_NAME")
+    original_log_group = os.environ.get("ASH_CLOUDWATCH_LOG_GROUP_NAME")
 
     try:
         # Set environment variables for testing
         os.environ["AWS_REGION"] = "us-west-2"
-        os.environ["ASH_LOG_GROUP_NAME"] = "test-log-group"
+        os.environ["ASH_CLOUDWATCH_LOG_GROUP_NAME"] = "test-log-group"
 
         # Create config options
         options = CloudWatchLogsReporterConfigOptions()
@@ -50,9 +50,9 @@ def test_cloudwatch_logs_reporter_config_options_defaults():
             del os.environ["AWS_DEFAULT_REGION"]
 
         if original_log_group:
-            os.environ["ASH_LOG_GROUP_NAME"] = original_log_group
-        elif "ASH_LOG_GROUP_NAME" in os.environ:
-            del os.environ["ASH_LOG_GROUP_NAME"]
+            os.environ["ASH_CLOUDWATCH_LOG_GROUP_NAME"] = original_log_group
+        elif "ASH_CLOUDWATCH_LOG_GROUP_NAME" in os.environ:
+            del os.environ["ASH_CLOUDWATCH_LOG_GROUP_NAME"]
 
 
 def test_cloudwatch_logs_reporter_config_defaults():

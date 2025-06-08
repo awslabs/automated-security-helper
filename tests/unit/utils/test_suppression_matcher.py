@@ -1,13 +1,11 @@
 """Unit tests for suppression_matcher.py."""
 
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
 from automated_security_helper.models.core import Suppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.suppression_matcher import (
-    matches_suppression,
     _rule_id_matches,
     _file_path_matches,
     _line_range_matches,
@@ -65,7 +63,7 @@ def test_should_suppress_finding_with_invalid_expiration():
     )
 
     # Mock the Suppression class to bypass validation
-    with patch("automated_security_helper.utils.suppression_matcher.Suppression") as mock_suppression_class:
+    with patch("automated_security_helper.utils.suppression_matcher.Suppression") as _:
         # Create a mock suppression instance
         mock_suppression = MagicMock()
         mock_suppression.rule_id = "TEST-001"
@@ -74,7 +72,9 @@ def test_should_suppress_finding_with_invalid_expiration():
         mock_suppression.line_start = None
         mock_suppression.line_end = None
 
-        with patch("automated_security_helper.utils.suppression_matcher.ASH_LOGGER") as mock_logger:
+        with patch(
+            "automated_security_helper.utils.suppression_matcher.ASH_LOGGER"
+        ) as mock_logger:
             result, matching = should_suppress_finding(finding, [mock_suppression])
             assert not result
             assert matching is None
@@ -84,7 +84,7 @@ def test_should_suppress_finding_with_invalid_expiration():
 def test_check_for_expiring_suppressions_with_invalid_date():
     """Test check_for_expiring_suppressions with invalid date format."""
     # Mock the Suppression class to bypass validation
-    with patch("automated_security_helper.utils.suppression_matcher.Suppression") as mock_suppression:
+    with patch("automated_security_helper.utils.suppression_matcher.Suppression"):
         # Create a mock suppression instance
         mock_instance = MagicMock()
         mock_instance.rule_id = "TEST-001"
@@ -92,7 +92,9 @@ def test_check_for_expiring_suppressions_with_invalid_date():
         mock_instance.expiration = "invalid-date"
 
         # Mock the logger
-        with patch("automated_security_helper.utils.suppression_matcher.ASH_LOGGER") as mock_logger:
+        with patch(
+            "automated_security_helper.utils.suppression_matcher.ASH_LOGGER"
+        ) as mock_logger:
             result = check_for_expiring_suppressions([mock_instance])
             assert len(result) == 0
             mock_logger.warning.assert_called_once()

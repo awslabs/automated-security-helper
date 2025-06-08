@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock, mock_open
 
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
     S3Reporter,
     S3ReporterConfig,
@@ -24,7 +25,7 @@ def test_s3_reporter_validate_aws_error(mock_boto3):
         source_dir=Path("/test/source"),
         output_dir=Path("/test/output"),
         work_dir=Path("/test/work"),
-        config=MagicMock(),
+        config=get_default_config(),
     )
 
     # Create mock boto3 session and clients
@@ -63,7 +64,7 @@ def test_s3_reporter_validate_missing_config(mock_boto3):
         source_dir=Path("/test/source"),
         output_dir=Path("/test/output"),
         work_dir=Path("/test/work"),
-        config=MagicMock(),
+        config=get_default_config(),
     )
 
     # Create reporter
@@ -93,7 +94,7 @@ def test_s3_reporter_report_json_format(mock_boto3):
         source_dir=Path("/test/source"),
         output_dir=Path("/test/output"),
         work_dir=Path("/test/work"),
-        config=MagicMock(),
+        config=get_default_config(),
     )
 
     # Create mock boto3 session and clients
@@ -117,8 +118,14 @@ def test_s3_reporter_report_json_format(mock_boto3):
     mock_model.scan_metadata.scan_time.strftime.return_value = "20250101-120000"
     mock_model.to_simple_dict.return_value = {"test": "data"}
 
-    # Mock open
-    with patch("builtins.open", mock_open()) as mock_file:
+    # Mock file operations - we need to mock the specific path operations
+    mock_path = MagicMock()
+    mock_path.parent.mkdir = MagicMock()
+
+    with (
+        patch("builtins.open", mock_open()) as mock_file,
+        patch.object(Path, "mkdir") as mock_mkdir,
+    ):
         # Call report
         result = reporter.report(mock_model)
 
@@ -129,7 +136,8 @@ def test_s3_reporter_report_json_format(mock_boto3):
     assert "ash-report-20250101-120000.json" in kwargs["Key"]
     assert kwargs["ContentType"] == "application/json"
 
-    # Verify file was written
+    # Verify file operations - mkdir should be called on the parent directory
+    mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
     mock_file.assert_called_once()
 
     # Verify result
@@ -145,7 +153,7 @@ def test_s3_reporter_report_yaml_format(mock_boto3):
         source_dir=Path("/test/source"),
         output_dir=Path("/test/output"),
         work_dir=Path("/test/work"),
-        config=MagicMock(),
+        config=get_default_config(),
     )
 
     # Create mock boto3 session and clients
@@ -169,8 +177,11 @@ def test_s3_reporter_report_yaml_format(mock_boto3):
     mock_model.scan_metadata.scan_time.strftime.return_value = "20250101-120000"
     mock_model.to_simple_dict.return_value = {"test": "data"}
 
-    # Mock open
-    with patch("builtins.open", mock_open()) as mock_file:
+    # Mock file operations - we need to mock the specific path operations
+    with (
+        patch("builtins.open", mock_open()) as mock_file,
+        patch.object(Path, "mkdir") as mock_mkdir,
+    ):
         # Call report
         result = reporter.report(mock_model)
 
@@ -181,7 +192,8 @@ def test_s3_reporter_report_yaml_format(mock_boto3):
     assert "ash-report-20250101-120000.yaml" in kwargs["Key"]
     assert kwargs["ContentType"] == "application/yaml"
 
-    # Verify file was written
+    # Verify file operations - mkdir should be called on the parent directory
+    mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
     mock_file.assert_called_once()
 
     # Verify result
@@ -197,7 +209,7 @@ def test_s3_reporter_report_error_handling(mock_boto3):
         source_dir=Path("/test/source"),
         output_dir=Path("/test/output"),
         work_dir=Path("/test/work"),
-        config=MagicMock(),
+        config=get_default_config(),
     )
 
     # Create mock boto3 session and clients

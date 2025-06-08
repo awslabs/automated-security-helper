@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from unittest.mock import MagicMock, patch
+
+import typer
 from automated_security_helper.cli.report import report_command
+import pytest
 
 
 @patch("automated_security_helper.cli.report.load_plugins")
@@ -94,11 +97,12 @@ def test_report_command_with_nonexistent_file(mock_print, mock_plugin_context):
         )
         mock_path.return_value = mock_path_instance
 
-        # Call report_command
-        report_command(
-            report_format="markdown",
-            output_dir="/test/output",
-        )
+        with pytest.raises(typer.Exit) as pytest_wrapped_e:
+            report_command(
+                report_format="markdown",
+                output_dir="/test/output",
+            )
+        assert pytest_wrapped_e.type is typer.Exit
 
     # Verify error message was printed
     mock_print.assert_called()

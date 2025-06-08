@@ -29,13 +29,10 @@ from automated_security_helper.core.enums import (
     Phases,
     Strategy,
 )
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import (
-    create_process_with_pipes,
     create_completed_process,
     raise_called_process_error,
-    get_host_uid,
-    get_host_gid,
-    find_executable,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -141,7 +138,7 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
         print(f"Running command: {' '.join(shlex.quote(arg) for arg in cmd_list)}")
 
     # Create process using subprocess_utils
-    process = create_process_with_pipes(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+    process = subprocess_utils.create_process_with_pipes(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
         args=cmd_list,
         text=True,
         shell=shell,
@@ -279,8 +276,8 @@ def run_ash_container(
     """
     # Get host UID and GID using safe subprocess calls
     try:
-        host_uid = get_host_uid()
-        host_gid = get_host_gid()
+        host_uid = subprocess_utils.get_host_uid()
+        host_gid = subprocess_utils.get_host_gid()
     except Exception as e:
         typer.secho(f"Error getting user ID information: {e}", fg=typer.colors.RED)
         return create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
@@ -316,7 +313,7 @@ def run_ash_container(
 
     for runner in runners:
         try:
-            exists = find_executable(runner)
+            exists = subprocess_utils.find_executable(runner)
             if not exists:
                 continue
             resolved_oci_runner = exists

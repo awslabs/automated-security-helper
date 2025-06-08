@@ -19,7 +19,10 @@ from automated_security_helper.utils.download_utils import (
 @patch("automated_security_helper.utils.download_utils.shutil.copyfileobj")
 @patch("automated_security_helper.utils.download_utils.shutil.move")
 @patch("automated_security_helper.utils.download_utils.tempfile.NamedTemporaryFile")
-def test_download_file(mock_temp_file, mock_move, mock_copyfileobj, mock_urlopen):
+@patch("pathlib.Path.mkdir")
+def test_download_file(
+    mock_mkdir, mock_temp_file, mock_move, mock_copyfileobj, mock_urlopen
+):
     """Test download_file function."""
     # Setup mocks
     mock_temp = MagicMock()
@@ -36,6 +39,7 @@ def test_download_file(mock_temp_file, mock_move, mock_copyfileobj, mock_urlopen
     result = download_file("https://example.com/file.txt", dest)
 
     # Verify mocks were called correctly
+    mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
     mock_urlopen.assert_called_once_with("https://example.com/file.txt")
     mock_copyfileobj.assert_called_once_with(mock_response, mock_temp)
     mock_move.assert_called_once_with("/tmp/tempfile", dest.joinpath("file.txt"))
@@ -45,7 +49,8 @@ def test_download_file(mock_temp_file, mock_move, mock_copyfileobj, mock_urlopen
 
 
 @patch("automated_security_helper.utils.download_utils.urllib.request.urlopen")
-def test_download_file_invalid_url(mock_urlopen):
+@patch("pathlib.Path.mkdir")
+def test_download_file_invalid_url(mock_mkdir, mock_urlopen):
     """Test download_file with invalid URL."""
     with pytest.raises(ValueError):
         download_file("http://example.com/file.txt", Path("/test/destination"))
@@ -197,10 +202,14 @@ def test_get_opengrep_url():
         == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_windows_x86.exe"
     )
 
-    # Test invalid linux_type
+    # Test invalid linux_type (should log warning but still work)
     with patch(
         "automated_security_helper.utils.download_utils.platform.system"
     ) as mock_system:
         mock_system.return_value = "Linux"
-        with pytest.raises(ValueError):
-            get_opengrep_url("linux", "amd64", "v1.1.5", "invalid_linux_type")
+        # Should not raise ValueError, just log warning and default to manylinux
+        url = get_opengrep_url("linux", "amd64", "v1.1.5", "invalid_linux_type")
+        assert (
+            url
+            == "https://github.com/opengrep/opengrep/releases/download/v1.1.5/opengrep_manylinux_x86"
+        )

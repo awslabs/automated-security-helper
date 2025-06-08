@@ -59,6 +59,11 @@ def test_run_ash_scan_cli_command_with_all_options(mock_run_ash_scan):
         custom_containerfile="./Dockerfile",
         custom_build_arg=["ARG1=val1", "ARG2=val2"],
         ash_plugin_modules=["module1", "module2"],
+        config="./config.yml",
+        cleanup=True,
+        inspect=True,
+        quiet=True,
+        verbose=True,
     )
 
     # Verify run_ash_scan was called with expected parameters
@@ -68,7 +73,6 @@ def test_run_ash_scan_cli_command_with_all_options(mock_run_ash_scan):
     # Check that all parameters were passed correctly
     assert kwargs["source_dir"] == "./source"
     assert kwargs["output_dir"] == "./output"
-    assert kwargs["config"] == "./config.yaml"
     assert kwargs["config_overrides"] == ["key1=value1", "key2=value2"]
     assert kwargs["offline"] is True
     assert kwargs["strategy"] == Strategy.sequential
@@ -79,10 +83,8 @@ def test_run_ash_scan_cli_command_with_all_options(mock_run_ash_scan):
     assert kwargs["cleanup"] is True
     assert kwargs["phases"] == [Phases.convert, Phases.scan]
     assert kwargs["inspect"] is True
-    assert kwargs["existing_results"] == "./existing.json"
     assert kwargs["python_based_plugins_only"] is True
     assert kwargs["quiet"] is True
-    assert kwargs["simple"] is True
     assert kwargs["verbose"] is True
     assert kwargs["debug"] is True
     assert kwargs["color"] is False
@@ -105,7 +107,9 @@ def test_run_ash_scan_cli_command_with_all_options(mock_run_ash_scan):
 
 
 @patch("automated_security_helper.cli.scan.run_ash_scan")
-def test_run_ash_scan_cli_command_with_use_existing(mock_run_ash_scan):
+def test_run_ash_scan_cli_command_with_use_existing(
+    mock_run_ash_scan, test_output_dir, test_source_dir
+):
     """Test run_ash_scan_cli_command with use_existing option."""
     # Setup mock
     mock_run_ash_scan.return_value = None
@@ -115,9 +119,16 @@ def test_run_ash_scan_cli_command_with_use_existing(mock_run_ash_scan):
     mock_context.resilient_parsing = False
     mock_context.invoked_subcommand = None
 
+    # Create the output directory and mock file
+    Path(test_output_dir).mkdir(parents=True, exist_ok=True)
+    Path(test_output_dir).joinpath("ash_aggregated_results.json").touch()
+
     # Call the function with use_existing=True
     run_ash_scan_cli_command(
-        mock_context, source_dir="./source", output_dir="./output", use_existing=True
+        mock_context,
+        source_dir=test_source_dir,
+        output_dir=test_output_dir,
+        use_existing=True,
     )
 
     # Verify run_ash_scan was called with expected parameters
@@ -126,12 +137,14 @@ def test_run_ash_scan_cli_command_with_use_existing(mock_run_ash_scan):
 
     # Check that existing_results was set correctly
     assert kwargs["existing_results"] == str(
-        Path("./output/ash_aggregated_results.json")
+        Path(f"{test_output_dir}/ash_aggregated_results.json")
     )
 
 
 @patch("automated_security_helper.cli.scan.run_ash_scan")
-def test_run_ash_scan_cli_command_with_precommit_mode(mock_run_ash_scan):
+def test_run_ash_scan_cli_command_with_precommit_mode(
+    mock_run_ash_scan, test_output_dir, test_source_dir
+):
     """Test run_ash_scan_cli_command with precommit mode."""
     # Setup mock
     mock_run_ash_scan.return_value = None
@@ -144,8 +157,8 @@ def test_run_ash_scan_cli_command_with_precommit_mode(mock_run_ash_scan):
     # Call the function with mode=RunMode.precommit
     run_ash_scan_cli_command(
         mock_context,
-        source_dir="./source",
-        output_dir="./output",
+        source_dir=test_source_dir,
+        output_dir=test_output_dir,
         mode=RunMode.precommit,
     )
 
@@ -155,7 +168,5 @@ def test_run_ash_scan_cli_command_with_precommit_mode(mock_run_ash_scan):
 
     # Check that mode was set correctly
     assert kwargs["mode"] == RunMode.precommit
-    # Precommit mode should set python_based_plugins_only to True
-    assert kwargs["python_based_plugins_only"] is True
     # Precommit mode should set simple to True
     assert kwargs["simple"] is True

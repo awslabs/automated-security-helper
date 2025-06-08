@@ -1,14 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from pydantic import Field
 import yaml
 
-from typing import Annotated, Literal, TYPE_CHECKING
-
-try:
-    import boto3
-except ImportError:
-    boto3 = None
+from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -21,13 +15,7 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
 class AsffReporterConfigOptions(ReporterOptionsBase):
-    aws_region: Annotated[
-        str | None,
-        Field(
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}"
-        ),
-    ] = None
-    aws_profile: str | None = None
+    pass
 
 
 class AsffReporterConfig(ReporterPluginConfigBase):

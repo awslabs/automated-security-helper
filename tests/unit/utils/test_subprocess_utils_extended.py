@@ -1,9 +1,6 @@
 """Extended tests for subprocess_utils.py to increase coverage."""
 
-import os
-import platform
 import subprocess
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -18,12 +15,12 @@ from automated_security_helper.utils.subprocess_utils import (
     get_host_gid,
     create_completed_process,
     raise_called_process_error,
-    create_process_with_pipes
+    create_process_with_pipes,
 )
 
 
-@patch('shutil.which')
-@patch('pathlib.Path.exists')
+@patch("shutil.which")
+@patch("pathlib.Path.exists")
 def test_find_executable_found_in_path(mock_exists, mock_which):
     """Test finding an executable in PATH."""
     mock_which.return_value = "/usr/bin/test_cmd"
@@ -35,8 +32,8 @@ def test_find_executable_found_in_path(mock_exists, mock_which):
     mock_which.assert_called_once()
 
 
-@patch('shutil.which')
-@patch('pathlib.Path.exists')
+@patch("shutil.which")
+@patch("pathlib.Path.exists")
 def test_find_executable_found_in_ash_bin(mock_exists, mock_which):
     """Test finding an executable in ASH_BIN_PATH."""
     mock_which.return_value = None
@@ -49,8 +46,8 @@ def test_find_executable_found_in_ash_bin(mock_exists, mock_which):
     mock_exists.assert_called()
 
 
-@patch('shutil.which')
-@patch('pathlib.Path.exists')
+@patch("shutil.which")
+@patch("pathlib.Path.exists")
 def test_find_executable_not_found(mock_exists, mock_which):
     """Test when executable is not found."""
     mock_which.return_value = None
@@ -62,8 +59,8 @@ def test_find_executable_not_found(mock_exists, mock_which):
     mock_which.assert_called_once()
 
 
-@patch('subprocess.run')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_success(mock_find_executable, mock_run):
     """Test running a command successfully."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
@@ -80,8 +77,8 @@ def test_run_command_success(mock_find_executable, mock_run):
     mock_run.assert_called_once()
 
 
-@patch('subprocess.run')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_failure(mock_find_executable, mock_run):
     """Test running a command that fails."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
@@ -98,8 +95,8 @@ def test_run_command_failure(mock_find_executable, mock_run):
     mock_run.assert_called_once()
 
 
-@patch('subprocess.run')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_exception(mock_find_executable, mock_run):
     """Test handling exceptions when running a command."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
@@ -112,8 +109,8 @@ def test_run_command_exception(mock_find_executable, mock_run):
     mock_run.assert_called_once()
 
 
-@patch('subprocess.run')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_timeout(mock_find_executable, mock_run):
     """Test handling timeout when running a command."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
@@ -125,8 +122,8 @@ def test_run_command_timeout(mock_find_executable, mock_run):
     mock_run.assert_called_once()
 
 
-@patch('subprocess.run')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_with_check_true(mock_find_executable, mock_run):
     """Test running a command with check=True."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
@@ -148,12 +145,18 @@ def test_run_command_with_output_handling_return():
     mock_process.stderr = "test error"
 
     # Directly mock subprocess.run at the module level
-    with patch('automated_security_helper.utils.subprocess_utils.find_executable', return_value="/usr/bin/test_cmd"), \
-         patch('automated_security_helper.utils.subprocess_utils.subprocess.run', return_value=mock_process):
+    with (
+        patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value="/usr/bin/test_cmd",
+        ),
+        patch(
+            "automated_security_helper.utils.subprocess_utils.subprocess.run",
+            return_value=mock_process,
+        ),
+    ):
         result = run_command_with_output_handling(
-            ["test_cmd", "arg1"],
-            stdout_preference="return",
-            stderr_preference="return"
+            ["test_cmd", "arg1"], stdout_preference="return", stderr_preference="return"
         )
 
         assert result["returncode"] == 0
@@ -161,8 +164,8 @@ def test_run_command_with_output_handling_return():
         assert result["stderr"] == "test error"
 
 
-@patch('pathlib.Path.mkdir')
-@patch('builtins.open')
+@patch("pathlib.Path.mkdir")
+@patch("builtins.open")
 def test_run_command_with_output_handling_write(mock_open, mock_mkdir):
     """Test running a command with output handling set to write."""
     mock_process = MagicMock()
@@ -175,13 +178,21 @@ def test_run_command_with_output_handling_write(mock_open, mock_mkdir):
     mock_open.reset_mock()
 
     # Directly mock subprocess.run and find_executable at the module level
-    with patch('automated_security_helper.utils.subprocess_utils.find_executable', return_value="/usr/bin/test_cmd"), \
-         patch('automated_security_helper.utils.subprocess_utils.subprocess.run', return_value=mock_process):
+    with (
+        patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value="/usr/bin/test_cmd",
+        ),
+        patch(
+            "automated_security_helper.utils.subprocess_utils.subprocess.run",
+            return_value=mock_process,
+        ),
+    ):
         result = run_command_with_output_handling(
             ["test_cmd", "arg1"],
             results_dir="/tmp/results",
             stdout_preference="write",
-            stderr_preference="write"
+            stderr_preference="write",
         )
 
         assert result["returncode"] == 0
@@ -192,8 +203,8 @@ def test_run_command_with_output_handling_write(mock_open, mock_mkdir):
         assert mock_open.call_count == 2
 
 
-@patch('subprocess.run')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.run")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_with_output_handling_exception(mock_find_executable, mock_run):
     """Test handling exceptions in run_command_with_output_handling."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
@@ -207,7 +218,7 @@ def test_run_command_with_output_handling_exception(mock_find_executable, mock_r
     mock_run.assert_called_once()
 
 
-@patch('automated_security_helper.utils.subprocess_utils.run_command')
+@patch("automated_security_helper.utils.subprocess_utils.run_command")
 def test_run_command_get_output(mock_run_command):
     """Test run_command_get_output function."""
     mock_process = MagicMock()
@@ -224,8 +235,8 @@ def test_run_command_get_output(mock_run_command):
     mock_run_command.assert_called_once()
 
 
-@patch('subprocess.Popen')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.Popen")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_stream_output(mock_find_executable, mock_popen):
     """Test run_command_stream_output function."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
@@ -241,8 +252,8 @@ def test_run_command_stream_output(mock_find_executable, mock_popen):
     mock_process.wait.assert_called_once()
 
 
-@patch('subprocess.Popen')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.Popen")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_stream_output_exception(mock_find_executable, mock_popen):
     """Test handling exceptions in run_command_stream_output."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
@@ -254,7 +265,7 @@ def test_run_command_stream_output_exception(mock_find_executable, mock_popen):
     mock_popen.assert_called_once()
 
 
-@patch('automated_security_helper.utils.subprocess_utils.run_command')
+@patch("automated_security_helper.utils.subprocess_utils.run_command")
 def test_get_host_uid_success(mock_run_command):
     """Test get_host_uid function success."""
     mock_process = MagicMock()
@@ -267,7 +278,7 @@ def test_get_host_uid_success(mock_run_command):
     mock_run_command.assert_called_once()
 
 
-@patch('automated_security_helper.utils.subprocess_utils.run_command')
+@patch("automated_security_helper.utils.subprocess_utils.run_command")
 def test_get_host_uid_failure(mock_run_command):
     """Test get_host_uid function failure."""
     mock_run_command.side_effect = Exception("Test exception")
@@ -278,7 +289,7 @@ def test_get_host_uid_failure(mock_run_command):
     mock_run_command.assert_called_once()
 
 
-@patch('automated_security_helper.utils.subprocess_utils.run_command')
+@patch("automated_security_helper.utils.subprocess_utils.run_command")
 def test_get_host_gid_success(mock_run_command):
     """Test get_host_gid function success."""
     mock_process = MagicMock()
@@ -291,7 +302,7 @@ def test_get_host_gid_success(mock_run_command):
     mock_run_command.assert_called_once()
 
 
-@patch('automated_security_helper.utils.subprocess_utils.run_command')
+@patch("automated_security_helper.utils.subprocess_utils.run_command")
 def test_get_host_gid_failure(mock_run_command):
     """Test get_host_gid function failure."""
     mock_run_command.side_effect = Exception("Test exception")
@@ -308,7 +319,7 @@ def test_create_completed_process():
         args=["test_cmd", "arg1"],
         returncode=0,
         stdout="test output",
-        stderr="test error"
+        stderr="test error",
     )
 
     assert process.args == ["test_cmd", "arg1"]
@@ -324,7 +335,7 @@ def test_raise_called_process_error():
             returncode=1,
             cmd=["test_cmd", "arg1"],
             output="test output",
-            stderr="test error"
+            stderr="test error",
         )
 
     assert excinfo.value.returncode == 1
@@ -333,8 +344,8 @@ def test_raise_called_process_error():
     assert excinfo.value.stderr == "test error"
 
 
-@patch('subprocess.Popen')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.Popen")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_create_process_with_pipes(mock_find_executable, mock_popen):
     """Test create_process_with_pipes function."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
@@ -347,8 +358,8 @@ def test_create_process_with_pipes(mock_find_executable, mock_popen):
     mock_popen.assert_called_once()
 
 
-@patch('subprocess.Popen')
-@patch('automated_security_helper.utils.subprocess_utils.find_executable')
+@patch("subprocess.Popen")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_create_process_with_pipes_exception(mock_find_executable, mock_popen):
     """Test handling exceptions in create_process_with_pipes."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"

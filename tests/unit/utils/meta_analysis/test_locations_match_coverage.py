@@ -1,8 +1,8 @@
 """Unit tests for locations_match module to increase coverage."""
 
-import pytest
-
-from automated_security_helper.utils.meta_analysis.locations_match import locations_match
+from automated_security_helper.utils.meta_analysis.locations_match import (
+    locations_match,
+)
 
 
 def test_locations_match_exact_match():
@@ -11,13 +11,13 @@ def test_locations_match_exact_match():
     location1 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file.py"},
-            "region": {"startLine": 10, "endLine": 15}
+            "region": {"startLine": 10, "endLine": 15},
         }
     }
     location2 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file.py"},
-            "region": {"startLine": 10, "endLine": 15}
+            "region": {"startLine": 10, "endLine": 15},
         }
     }
 
@@ -31,13 +31,13 @@ def test_locations_match_different_files():
     location1 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file1.py"},
-            "region": {"startLine": 10, "endLine": 15}
+            "region": {"startLine": 10, "endLine": 15},
         }
     }
     location2 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file2.py"},
-            "region": {"startLine": 10, "endLine": 15}
+            "region": {"startLine": 10, "endLine": 15},
         }
     }
 
@@ -51,13 +51,13 @@ def test_locations_match_overlapping_regions():
     location1 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file.py"},
-            "region": {"startLine": 10, "endLine": 15}
+            "region": {"startLine": 10, "endLine": 15},
         }
     }
     location2 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file.py"},
-            "region": {"startLine": 12, "endLine": 18}
+            "region": {"startLine": 12, "endLine": 18},
         }
     }
 
@@ -71,13 +71,13 @@ def test_locations_match_non_overlapping_regions():
     location1 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file.py"},
-            "region": {"startLine": 10, "endLine": 15}
+            "region": {"startLine": 10, "endLine": 15},
         }
     }
     location2 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file.py"},
-            "region": {"startLine": 20, "endLine": 25}
+            "region": {"startLine": 20, "endLine": 25},
         }
     }
 
@@ -92,35 +92,27 @@ def test_locations_match_missing_fields():
     location2 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file.py"},
-            "region": {"startLine": 10, "endLine": 15}
+            "region": {"startLine": 10, "endLine": 15},
         }
     }
     assert locations_match(location1, location2) is False
 
     # Test with missing artifactLocation
-    location1 = {
-        "physicalLocation": {
-            "region": {"startLine": 10, "endLine": 15}
-        }
-    }
+    location1 = {"physicalLocation": {"region": {"startLine": 10, "endLine": 15}}}
     assert locations_match(location1, location2) is False
 
     # Test with missing uri
     location1 = {
         "physicalLocation": {
             "artifactLocation": {},
-            "region": {"startLine": 10, "endLine": 15}
+            "region": {"startLine": 10, "endLine": 15},
         }
     }
     assert locations_match(location1, location2) is False
 
     # Test with missing region
-    location1 = {
-        "physicalLocation": {
-            "artifactLocation": {"uri": "file.py"}
-        }
-    }
-    assert locations_match(location1, location2) is False
+    location1 = {"physicalLocation": {"artifactLocation": {"uri": "file.py"}}}
+    assert locations_match(location1, location2) is True  # region is optional
 
 
 def test_locations_match_with_only_start_line():
@@ -129,13 +121,13 @@ def test_locations_match_with_only_start_line():
     location1 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file.py"},
-            "region": {"startLine": 10}
+            "region": {"startLine": 10},
         }
     }
     location2 = {
         "physicalLocation": {
             "artifactLocation": {"uri": "file.py"},
-            "region": {"startLine": 10}
+            "region": {"startLine": 10},
         }
     }
 

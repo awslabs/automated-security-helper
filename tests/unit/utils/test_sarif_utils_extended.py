@@ -1,7 +1,5 @@
 """Extended tests for sarif_utils.py to increase coverage."""
 
-import os
-import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -9,7 +7,7 @@ from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
     attach_scanner_details,
     apply_suppressions_to_sarif,
-    path_matches_pattern
+    path_matches_pattern,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
@@ -21,10 +19,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PhysicalLocation,
     ArtifactLocation,
     Region,
-    PropertyBag,
-    Location
+    Location,
 )
-from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.models.core import Suppression
 
 
@@ -34,12 +30,7 @@ def create_test_sarif():
         version="2.1.0",
         runs=[
             Run(
-                tool=Tool(
-                    driver=ToolComponent(
-                        name="TestScanner",
-                        version="1.0.0"
-                    )
-                ),
+                tool=Tool(driver=ToolComponent(name="TestScanner", version="1.0.0")),
                 results=[
                     Result(
                         ruleId="TEST001",
@@ -51,17 +42,14 @@ def create_test_sarif():
                                     artifactLocation=ArtifactLocation(
                                         uri="file:///absolute/path/to/test.py"
                                     ),
-                                    region=Region(
-                                        startLine=10,
-                                        endLine=15
-                                    )
+                                    region=Region(startLine=10, endLine=15),
                                 )
                             )
-                        ]
+                        ],
                     )
-                ]
+                ],
             )
-        ]
+        ],
     )
 
 
@@ -74,7 +62,13 @@ def test_sanitize_sarif_paths():
     result = sanitize_sarif_paths(sarif, source_dir)
 
     # Check that the path was made relative
-    assert result.runs[0].results[0].locations[0].physicalLocation.root.artifactLocation.uri == "to/test.py"
+    assert (
+        result.runs[0]
+        .results[0]
+        .locations[0]
+        .physicalLocation.root.artifactLocation.uri
+        == "to/test.py"
+    )
 
 
 def test_sanitize_sarif_paths_with_empty_report():
@@ -91,22 +85,17 @@ def test_sanitize_sarif_paths_with_no_locations():
         version="2.1.0",
         runs=[
             Run(
-                tool=Tool(
-                    driver=ToolComponent(
-                        name="TestScanner",
-                        version="1.0.0"
-                    )
-                ),
+                tool=Tool(driver=ToolComponent(name="TestScanner", version="1.0.0")),
                 results=[
                     Result(
                         ruleId="TEST001",
                         level="error",
                         message=Message(text="Test finding"),
-                        locations=[]
+                        locations=[],
                     )
-                ]
+                ],
             )
-        ]
+        ],
     )
 
     result = sanitize_sarif_paths(sarif, "/some/path")
@@ -134,15 +123,15 @@ def test_attach_scanner_details():
 def test_attach_scanner_details_with_invocation():
     """Test attaching scanner details with invocation details."""
     sarif = create_test_sarif()
-    invocation = {
-        "command_line": "scanner --scan file.py",
-        "working_directory": "/tmp"
-    }
+    invocation = {"command_line": "scanner --scan file.py", "working_directory": "/tmp"}
 
     result = attach_scanner_details(sarif, "NewScanner", "2.0.0", invocation)
 
     # Check that invocation details were added
-    assert result.runs[0].tool.driver.properties.scanner_details["tool_invocation"] == invocation
+    assert (
+        result.runs[0].tool.driver.properties.scanner_details["tool_invocation"]
+        == invocation
+    )
 
 
 def test_attach_scanner_details_with_empty_report():
@@ -158,18 +147,16 @@ def test_attach_scanner_details_with_no_tool():
         version="2.1.0",
         runs=[
             Run(
-                tool=Tool(
-                    driver=ToolComponent(name="DefaultTool")
-                ),
+                tool=Tool(driver=ToolComponent(name="DefaultTool")),
                 results=[
                     Result(
                         ruleId="TEST001",
                         level="error",
-                        message=Message(text="Test finding")
+                        message=Message(text="Test finding"),
                     )
-                ]
+                ],
             )
-        ]
+        ],
     )
 
     result = attach_scanner_details(sarif, "NewScanner", "2.0.0")
@@ -197,7 +184,7 @@ def test_path_matches_pattern():
     assert path_matches_pattern("dir\\file.txt", "dir/file.txt") is True
 
 
-@patch('automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions')
+@patch("automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions")
 def test_apply_suppressions_to_sarif(mock_check):
     """Test applying suppressions to SARIF report."""
     mock_check.return_value = []
@@ -216,14 +203,14 @@ def test_apply_suppressions_to_sarif(mock_check):
     result = apply_suppressions_to_sarif(sarif, plugin_context)
 
     # Initialize suppressions if needed
-    if not hasattr(result.runs[0].results[0], 'suppressions'):
+    if not hasattr(result.runs[0].results[0], "suppressions"):
         result.runs[0].results[0].suppressions = []
 
     # Check that suppressions were applied
     assert result is not None
 
 
-@patch('automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions')
+@patch("automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions")
 def test_apply_suppressions_with_ignore_flag(mock_check):
     """Test applying suppressions when ignore_suppressions flag is set."""
     mock_check.return_value = []
@@ -241,15 +228,23 @@ def test_apply_suppressions_with_ignore_flag(mock_check):
     result = apply_suppressions_to_sarif(sarif, plugin_context)
 
     # Check that suppressions were not applied
-    assert not hasattr(result.runs[0].results[0], 'suppressions') or not result.runs[0].results[0].suppressions
+    assert (
+        not hasattr(result.runs[0].results[0], "suppressions")
+        or not result.runs[0].results[0].suppressions
+    )
 
 
-@patch('automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions')
-@patch('automated_security_helper.utils.sarif_utils.should_suppress_finding')
+@patch("automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions")
+@patch("automated_security_helper.utils.sarif_utils.should_suppress_finding")
 def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
     """Test applying suppressions with rule matching."""
     mock_check.return_value = []
-    mock_should_suppress.return_value = (True, Suppression(rule_id="TEST001", file_path="to/test.py", reason="Test suppression"))
+    mock_should_suppress.return_value = (
+        True,
+        Suppression(
+            rule_id="TEST001", file_path="to/test.py", reason="Test suppression"
+        ),
+    )
 
     sarif = create_test_sarif()
 
@@ -257,7 +252,9 @@ def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
     plugin_context = MagicMock()
     plugin_context.config.global_settings.ignore_paths = []
     plugin_context.config.global_settings.suppressions = [
-        Suppression(rule_id="TEST001", file_path="to/test.py", reason="Test suppression")
+        Suppression(
+            rule_id="TEST001", file_path="to/test.py", reason="Test suppression"
+        )
     ]
     plugin_context.ignore_suppressions = False
 
@@ -267,12 +264,17 @@ def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
     assert len(result.runs[0].results[0].suppressions) > 0
 
 
-@patch('automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions')
+@patch("automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions")
 def test_apply_suppressions_with_expiring_suppressions(mock_check):
     """Test applying suppressions with expiring suppressions."""
     # Mock expiring suppressions
     mock_check.return_value = [
-        Suppression(rule_id="TEST001", file_path="to/test.py", reason="Expiring", expiration="2025-12-31")
+        Suppression(
+            rule_id="TEST001",
+            file_path="to/test.py",
+            reason="Expiring",
+            expiration="2025-12-31",
+        )
     ]
 
     sarif = create_test_sarif()
@@ -281,7 +283,12 @@ def test_apply_suppressions_with_expiring_suppressions(mock_check):
     plugin_context = MagicMock()
     plugin_context.config.global_settings.ignore_paths = []
     plugin_context.config.global_settings.suppressions = [
-        Suppression(rule_id="TEST001", file_path="to/test.py", reason="Expiring", expiration="2025-12-31")
+        Suppression(
+            rule_id="TEST001",
+            file_path="to/test.py",
+            reason="Expiring",
+            expiration="2025-12-31",
+        )
     ]
     plugin_context.ignore_suppressions = False
 

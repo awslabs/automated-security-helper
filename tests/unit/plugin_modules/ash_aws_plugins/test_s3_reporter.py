@@ -1,6 +1,6 @@
 """Unit tests for the S3 reporter plugin."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, mock_open
 import os
 from pathlib import Path
 
@@ -228,7 +228,6 @@ def test_s3_reporter_report_json_format(mock_boto3):
         output_dir=Path("/tmp/output"),
         work_dir=Path("/tmp/work"),
     )
-    context.output_dir = "/test/output"
     config = S3ReporterConfig(
         options=S3ReporterConfigOptions(
             aws_region="us-west-2",
@@ -244,19 +243,11 @@ def test_s3_reporter_report_json_format(mock_boto3):
     model.scan_metadata.scan_time.strftime.return_value = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
-    # Mock Path operations
-    mock_path = MagicMock()
-    mock_path.parent.mkdir = MagicMock()
-
-    # Mock open for writing local file
-    mock_open = MagicMock()
-    mock_file = MagicMock()
-    mock_open.return_value.__enter__.return_value = mock_file
-
-    with patch("pathlib.Path") as mock_path_class, patch("builtins.open", mock_open):
-        # Configure Path mock
-        mock_path_class.return_value = mock_path
-
+    # Mock file operations
+    with (
+        patch("builtins.open", mock_open()) as mock_file,
+        patch.object(Path, "mkdir") as mock_mkdir,
+    ):
         # Call report
         result = reporter.report(model)
 
@@ -267,9 +258,9 @@ def test_s3_reporter_report_json_format(mock_boto3):
         assert call_args["Key"].startswith("ash-reports/ash-report-20250606-120000")
         assert call_args["ContentType"] == "application/json"
 
-        # Verify local file was written
-        mock_path.parent.mkdir.assert_called_once_with(parents=True, exist_ok=True)
-        mock_open.assert_called_once()
+        # Verify local file operations
+        mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+        mock_file.assert_called_once()
 
         # Verify result is the S3 URL
         assert result.startswith("s3://test-bucket/ash-reports/")
@@ -294,7 +285,6 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3):
         output_dir=Path("/tmp/output"),
         work_dir=Path("/tmp/work"),
     )
-    context.output_dir = "/test/output"
     config = S3ReporterConfig(
         options=S3ReporterConfigOptions(
             aws_region="us-west-2",
@@ -310,19 +300,11 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3):
     model.scan_metadata.scan_time.strftime.return_value = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
-    # Mock Path operations
-    mock_path = MagicMock()
-    mock_path.parent.mkdir = MagicMock()
-
-    # Mock open for writing local file
-    mock_open = MagicMock()
-    mock_file = MagicMock()
-    mock_open.return_value.__enter__.return_value = mock_file
-
-    with patch("pathlib.Path") as mock_path_class, patch("builtins.open", mock_open):
-        # Configure Path mock
-        mock_path_class.return_value = mock_path
-
+    # Mock file operations
+    with (
+        patch("builtins.open", mock_open()) as mock_file,
+        patch.object(Path, "mkdir") as mock_mkdir,
+    ):
         # Call report
         result = reporter.report(model)
 
@@ -335,6 +317,10 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3):
         assert call_args["Bucket"] == "test-bucket"
         assert call_args["Key"].endswith(".yaml")
         assert call_args["ContentType"] == "application/yaml"
+
+        # Verify local file operations
+        mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+        mock_file.assert_called_once()
 
         # Verify result is the S3 URL
         assert result.startswith("s3://test-bucket/ash-reports/")

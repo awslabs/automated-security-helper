@@ -50,7 +50,7 @@ repos:
           ## REQUIRED ARGS
           # N/A - ASH pre-commit hooks include `--mode=precommit` by default.
           # The only ARGS needed are custom args past what is available by default.
-
+          #
           ## EXTRA ARGS (these are specific to this repo's usage of the hook and are not required)
           # Default behavior is to fail if any actionable findings are found.
           # We are working through resolution right now while still needing

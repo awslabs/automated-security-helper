@@ -4,9 +4,8 @@
 """Core models for security findings."""
 
 from typing import List, Annotated
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from datetime import datetime, date
-from pydantic import validator
 
 
 class ToolExtraArg(BaseModel):
@@ -70,18 +69,19 @@ class Suppression(BaseModel):
         str | None, Field(None, description="Expiration date (YYYY-MM-DD)")
     ] = None
 
-    @validator("line_end")
+    @field_validator("line_end")
     def validate_line_range(cls, v, values):
         """Validate that line_end is greater than or equal to line_start if both are provided."""
         if (
             v is not None
-            and values.get("line_start") is not None
-            and v < values["line_start"]
+            and hasattr(values, "data")
+            and values.data.get("line_start") is not None
+            and v < values.data["line_start"]
         ):
             raise ValueError("line_end must be greater than or equal to line_start")
         return v
 
-    @validator("expiration")
+    @field_validator("expiration")
     def validate_expiration_date(cls, v):
         """Validate that expiration date is in the correct format and is a valid date."""
         if v is not None:

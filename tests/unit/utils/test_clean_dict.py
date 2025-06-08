@@ -1,16 +1,11 @@
 """Unit tests for clean_dict.py."""
 
-import pytest
 from automated_security_helper.utils.clean_dict import clean_dict
 
 
 def test_clean_dict_with_none_values():
     """Test clean_dict removes None values from dictionaries."""
-    input_dict = {
-        "key1": "value1",
-        "key2": None,
-        "key3": "value3"
-    }
+    input_dict = {"key1": "value1", "key2": None, "key3": "value3"}
 
     result = clean_dict(input_dict)
 
@@ -25,10 +20,7 @@ def test_clean_dict_with_nested_dict():
     """Test clean_dict removes None values from nested dictionaries."""
     input_dict = {
         "key1": "value1",
-        "key2": {
-            "nested1": "nested_value1",
-            "nested2": None
-        }
+        "key2": {"nested1": "nested_value1", "nested2": None},
     }
 
     result = clean_dict(input_dict)
@@ -43,12 +35,7 @@ def test_clean_dict_with_list():
     """Test clean_dict processes lists correctly."""
     input_dict = {
         "key1": "value1",
-        "key2": [
-            "item1",
-            None,
-            "item3",
-            {"subkey1": "subvalue1", "subkey2": None}
-        ]
+        "key2": ["item1", None, "item3", {"subkey1": "subvalue1", "subkey2": None}],
     }
 
     result = clean_dict(input_dict)

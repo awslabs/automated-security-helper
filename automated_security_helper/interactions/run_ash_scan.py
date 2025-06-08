@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from typing import List
+from pydantic import BaseModel
 import typer
 import json
 import sys
@@ -142,7 +143,8 @@ def run_ash_scan(
         use_color=color,
         simple_format=simple_logging,  # Pass the simple flag to the logger
     )
-
+    # Initialize results as None at the start to avoid UnboundLocalError
+    results = None
     # If mode is container, run the container version
     if mode == RunMode.container:
         # Pass the current context to run_ash_container
@@ -415,7 +417,7 @@ def run_ash_scan(
             if simple and not quiet:
                 typer.echo("\nASH scan completed.")
 
-            if isinstance(results, AshAggregatedResults):
+            if isinstance(results, BaseModel):
                 content = results.model_dump_json(indent=2, by_alias=True)
             else:
                 content = json.dumps(results, indent=2, default=str)
@@ -465,8 +467,7 @@ def run_ash_scan(
     )
 
     # Get the count of actionable findings from summary_stats
-    actionable_findings = results.metadata.summary_stats.actionable
-
+    actionable_findings = results.metadata.summary_stats.actionable if results else None
     # Only display the final metrics and guidance if show_summary is True
     if show_summary:
         # Calculate scan duration
@@ -495,7 +496,8 @@ def run_ash_scan(
             )
 
         # If there are actionable findings, provide guidance
-        if actionable_findings > 0:
+
+        if actionable_findings is not None and actionable_findings > 0:
             print("\n[magenta]=== Actionable findings detected! ===[/magenta]")
             print("To investigate...")
             print(
@@ -517,10 +519,8 @@ def run_ash_scan(
             )
 
     # Exit with non-zero code if configured to fail on findings and there are actionable findings
-    if (
-        final_fail_on_findings
-        and actionable_findings > 0
-        or actionable_findings is None
+    if final_fail_on_findings and (
+        actionable_findings is None or actionable_findings > 0
     ):
         # Document exit codes
         if show_summary and not quiet:
@@ -534,11 +534,19 @@ def run_ash_scan(
                 "  1: Error during execution",
             )
             print(
-                f"  2: Actionable findings detected when configured with fail_on_findings: {final_fail_on_findings} (default: True)",
+                f"  2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: {final_fail_on_findings}",
             )
+        if actionable_findings is None:
+            print(
+                "[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]"
+            )
+            sys.exit(
+                1
+            )  # Using exit code 1 specifically for errors due to None actionable findings
+        else:
             print(
                 f"[bold red]ERROR (2) Exiting due to {actionable_findings} actionable findings found in ASH scan[/bold red]",
             )
-        sys.exit(2)  # Using exit code 2 specifically for actionable findings
+            sys.exit(2)  # Using exit code 2 specifically for actionable findings
 
     return results
