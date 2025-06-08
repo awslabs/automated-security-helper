@@ -96,10 +96,10 @@ def test_tool_args_with_extra_fields():
 
 def test_suppression_model_minimal():
     """Test the Suppression model with minimal fields."""
-    suppression = Suppression(rule_id="TEST001", file_path="src/main.py")
+    suppression = Suppression(rule_id="TEST001", path="src/main.py")
 
     assert suppression.rule_id == "TEST001"
-    assert suppression.file_path == "src/main.py"
+    assert suppression.path == "src/main.py"
     assert suppression.line_start is None
     assert suppression.line_end is None
     assert suppression.reason is None
@@ -110,14 +110,14 @@ def test_suppression_model_with_line_range():
     """Test the Suppression model with line range."""
     suppression = Suppression(
         rule_id="TEST001",
-        file_path="src/main.py",
+        path="src/main.py",
         line_start=10,
         line_end=20,
         reason="False positive",
     )
 
     assert suppression.rule_id == "TEST001"
-    assert suppression.file_path == "src/main.py"
+    assert suppression.path == "src/main.py"
     assert suppression.line_start == 10
     assert suppression.line_end == 20
     assert suppression.reason == "False positive"
@@ -129,11 +129,11 @@ def test_suppression_model_with_future_expiration():
     future_date = (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
 
     suppression = Suppression(
-        rule_id="TEST001", file_path="src/main.py", expiration=future_date
+        rule_id="TEST001", path="src/main.py", expiration=future_date
     )
 
     assert suppression.rule_id == "TEST001"
-    assert suppression.file_path == "src/main.py"
+    assert suppression.path == "src/main.py"
     assert suppression.expiration == future_date
 
 
@@ -142,7 +142,7 @@ def test_suppression_model_invalid_line_range():
     with pytest.raises(ValueError) as excinfo:
         Suppression(
             rule_id="TEST001",
-            file_path="src/main.py",
+            path="src/main.py",
             line_start=20,
             line_end=10,  # End line before start line
         )
@@ -155,7 +155,7 @@ def test_suppression_model_invalid_expiration_format():
     with pytest.raises(ValueError) as excinfo:
         Suppression(
             rule_id="TEST001",
-            file_path="src/main.py",
+            path="src/main.py",
             expiration="01/01/2025",  # Wrong format
         )
 
@@ -168,6 +168,6 @@ def test_suppression_model_past_expiration():
     past_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     with pytest.raises(ValueError) as excinfo:
-        Suppression(rule_id="TEST001", file_path="src/main.py", expiration=past_date)
+        Suppression(rule_id="TEST001", path="src/main.py", expiration=past_date)
 
     assert "expiration date must be in the future" in str(excinfo.value)

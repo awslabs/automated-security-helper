@@ -176,7 +176,7 @@ class SuppressionFactory:
 
         return CoreSuppression(
             rule_id=rule_id,
-            file_path=file_path,
+            path=file_path,
             line_start=line_start,
             line_end=line_end,
             reason=reason,

@@ -37,6 +37,9 @@ class IgnorePathWithReason(BaseModel):
 
     path: Annotated[str, Field(..., description="Path or pattern to exclude")]
     reason: Annotated[str, Field(..., description="Reason for exclusion")]
+    expiration: Annotated[
+        str | None, Field(None, description="(Optional) Expiration date (YYYY-MM-DD)")
+    ] = None
 
 
 class ToolArgs(BaseModel):
@@ -51,22 +54,15 @@ class ToolArgs(BaseModel):
     extra_args: List[ToolExtraArg] = []
 
 
-class Suppression(BaseModel):
+class Suppression(IgnorePathWithReason):
     """Represents a finding suppression rule."""
 
     rule_id: Annotated[str, Field(..., description="Rule ID to suppress")]
-    file_path: Annotated[str, Field(..., description="File path pattern to match")]
     line_start: Annotated[
-        int | None, Field(None, description="Starting line number")
+        int | None, Field(None, description="(Optional) Starting line number")
     ] = None
-    line_end: Annotated[int | None, Field(None, description="Ending line number")] = (
-        None
-    )
-    reason: Annotated[str | None, Field(None, description="Reason for suppression")] = (
-        None
-    )
-    expiration: Annotated[
-        str | None, Field(None, description="Expiration date (YYYY-MM-DD)")
+    line_end: Annotated[
+        int | None, Field(None, description="(Optional) Ending line number")
     ] = None
 
     @field_validator("line_end")

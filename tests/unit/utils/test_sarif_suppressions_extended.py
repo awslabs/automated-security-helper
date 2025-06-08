@@ -83,7 +83,7 @@ class TestSarifSuppressions:
                 "suppressions": [
                     Suppression(
                         rule_id="RULE-123",
-                        file_path="src/example.py",
+                        path="src/example.py",
                         reason="Test suppression",
                     )
                 ]
@@ -174,7 +174,7 @@ class TestSarifSuppressions:
                 "suppressions": [
                     Suppression(
                         rule_id="RULE-123",
-                        file_path="src/example.py",
+                        path="src/example.py",
                         line_start=5,
                         line_end=15,
                         reason="Test suppression",
@@ -250,7 +250,7 @@ class TestSarifSuppressions:
                 "suppressions": [
                     Suppression(
                         rule_id="RULE-123",
-                        file_path="src/example.py",
+                        path="src/example.py",
                         reason="Test suppression",
                     )
                 ]
@@ -339,7 +339,7 @@ class TestSarifSuppressions:
                 "suppressions": [
                     Suppression(
                         rule_id="RULE-123",
-                        file_path="src/example.py",
+                        path="src/example.py",
                         reason="Test suppression",
                     )
                 ],

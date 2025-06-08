@@ -28,7 +28,7 @@ def matches_suppression(finding: FlatVulnerability, suppression: Suppression) ->
         return False
 
     # Check if file path matches
-    if not _file_path_matches(finding.file_path, suppression.file_path):
+    if not _file_path_matches(finding.file_path, suppression.path):
         return False
 
     # Check if line range matches (if specified)

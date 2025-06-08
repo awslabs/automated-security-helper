@@ -40,7 +40,7 @@ def test_line_range_matches_with_none_line_start():
     )
     suppression = Suppression(
         rule_id="TEST-001",
-        file_path="src/file.py",
+        path="src/file.py",
         line_start=10,
         line_end=20,
     )
@@ -107,7 +107,7 @@ def test_check_for_expiring_suppressions_with_future_date():
 
     suppression = Suppression(
         rule_id="TEST-001",
-        file_path="src/file.py",
+        path="src/file.py",
         expiration=future_date,
     )
 
@@ -122,7 +122,7 @@ def test_check_for_expiring_suppressions_with_expiring_date():
 
     suppression = Suppression(
         rule_id="TEST-001",
-        file_path="src/file.py",
+        path="src/file.py",
         expiration=expiring_date,
     )
 

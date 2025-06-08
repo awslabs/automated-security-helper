@@ -9,7 +9,7 @@ from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
 
 @patch("automated_security_helper.utils.log.get_logger")
-@patch("automated_security_helper.interactions.run_ash_scan.run_ash_container")
+@patch("automated_security_helper.interactions.run_ash_container.run_ash_container")
 def test_run_ash_scan_container_mode(mock_run_ash_container, mock_get_logger):
     """Test run_ash_scan in container mode."""
     # Setup mocks
@@ -85,7 +85,7 @@ def test_run_ash_scan_local_mode(mock_orchestrator_class, mock_get_logger):
     reason="Test is failing, will circle back as code is working. Likely need to improve mocks."
 )
 @patch("automated_security_helper.utils.log.get_logger")
-@patch("automated_security_helper.interactions.run_ash_scan.run_ash_container")
+@patch("automated_security_helper.interactions.run_ash_container.run_ash_container")
 def test_run_ash_scan_container_mode_with_failure(
     mock_run_ash_container, mock_get_logger
 ):

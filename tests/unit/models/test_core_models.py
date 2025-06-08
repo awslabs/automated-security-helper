@@ -14,14 +14,14 @@ class TestSuppression:
         """Test that a valid suppression model can be created."""
         suppression = Suppression(
             rule_id="RULE-123",
-            file_path="src/example.py",
+            path="src/example.py",
             line_start=10,
             line_end=15,
             reason="False positive due to test mock",
             expiration="2099-12-31",
         )
         assert suppression.rule_id == "RULE-123"
-        assert suppression.file_path == "src/example.py"
+        assert suppression.path == "src/example.py"
         assert suppression.line_start == 10
         assert suppression.line_end == 15
         assert suppression.reason == "False positive due to test mock"
@@ -31,10 +31,10 @@ class TestSuppression:
         """Test that a minimal suppression model can be created."""
         suppression = Suppression(
             rule_id="RULE-123",
-            file_path="src/example.py",
+            path="src/example.py",
         )
         assert suppression.rule_id == "RULE-123"
-        assert suppression.file_path == "src/example.py"
+        assert suppression.path == "src/example.py"
         assert suppression.line_start is None
         assert suppression.line_end is None
         assert suppression.reason is None
@@ -45,7 +45,7 @@ class TestSuppression:
         with pytest.raises(ValidationError) as excinfo:
             Suppression(
                 rule_id="RULE-123",
-                file_path="src/example.py",
+                path="src/example.py",
                 line_start=20,
                 line_end=10,
             )
@@ -58,7 +58,7 @@ class TestSuppression:
         with pytest.raises(ValidationError) as excinfo:
             Suppression(
                 rule_id="RULE-123",
-                file_path="src/example.py",
+                path="src/example.py",
                 expiration="invalid-date",
             )
         assert "Invalid expiration date format" in str(excinfo.value)
@@ -69,7 +69,7 @@ class TestSuppression:
         with pytest.raises(ValidationError) as excinfo:
             Suppression(
                 rule_id="RULE-123",
-                file_path="src/example.py",
+                path="src/example.py",
                 expiration=yesterday,
             )
         assert "expiration date must be in the future" in str(excinfo.value)
@@ -79,7 +79,7 @@ class TestSuppression:
         tomorrow = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
         suppression = Suppression(
             rule_id="RULE-123",
-            file_path="src/example.py",
+            path="src/example.py",
             expiration=tomorrow,
         )
         assert suppression.expiration == tomorrow

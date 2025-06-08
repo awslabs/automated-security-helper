@@ -241,9 +241,7 @@ def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
     mock_check.return_value = []
     mock_should_suppress.return_value = (
         True,
-        Suppression(
-            rule_id="TEST001", file_path="to/test.py", reason="Test suppression"
-        ),
+        Suppression(rule_id="TEST001", path="to/test.py", reason="Test suppression"),
     )
 
     sarif = create_test_sarif()
@@ -252,9 +250,7 @@ def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
     plugin_context = MagicMock()
     plugin_context.config.global_settings.ignore_paths = []
     plugin_context.config.global_settings.suppressions = [
-        Suppression(
-            rule_id="TEST001", file_path="to/test.py", reason="Test suppression"
-        )
+        Suppression(rule_id="TEST001", path="to/test.py", reason="Test suppression")
     ]
     plugin_context.ignore_suppressions = False
 
@@ -271,7 +267,7 @@ def test_apply_suppressions_with_expiring_suppressions(mock_check):
     mock_check.return_value = [
         Suppression(
             rule_id="TEST001",
-            file_path="to/test.py",
+            path="to/test.py",
             reason="Expiring",
             expiration="2025-12-31",
         )
@@ -285,7 +281,7 @@ def test_apply_suppressions_with_expiring_suppressions(mock_check):
     plugin_context.config.global_settings.suppressions = [
         Suppression(
             rule_id="TEST001",
-            file_path="to/test.py",
+            path="to/test.py",
             reason="Expiring",
             expiration="2025-12-31",
         )

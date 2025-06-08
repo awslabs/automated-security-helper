@@ -7804,6 +7804,19 @@
     "IgnorePathWithReason": {
       "description": "Represents a path exclusion entry.",
       "properties": {
+        "expiration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Expiration date (YYYY-MM-DD)",
+          "title": "Expiration"
+        },
         "path": {
           "description": "Path or pattern to exclude",
           "title": "Path",
@@ -20200,13 +20213,8 @@
             }
           ],
           "default": null,
-          "description": "Expiration date (YYYY-MM-DD)",
+          "description": "(Optional) Expiration date (YYYY-MM-DD)",
           "title": "Expiration"
-        },
-        "file_path": {
-          "description": "File path pattern to match",
-          "title": "File Path",
-          "type": "string"
         },
         "line_end": {
           "anyOf": [
@@ -20218,7 +20226,7 @@
             }
           ],
           "default": null,
-          "description": "Ending line number",
+          "description": "(Optional) Ending line number",
           "title": "Line End"
         },
         "line_start": {
@@ -20231,21 +20239,18 @@
             }
           ],
           "default": null,
-          "description": "Starting line number",
+          "description": "(Optional) Starting line number",
           "title": "Line Start"
         },
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
+          "type": "string"
+        },
         "reason": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Reason for suppression",
-          "title": "Reason"
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
         },
         "rule_id": {
           "description": "Rule ID to suppress",
@@ -20254,8 +20259,9 @@
         }
       },
       "required": [
-        "rule_id",
-        "file_path"
+        "path",
+        "reason",
+        "rule_id"
       ],
       "title": "Suppression",
       "type": "object"

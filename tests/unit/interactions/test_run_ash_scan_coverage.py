@@ -57,11 +57,11 @@ def test_run_ash_scan_local_mode(mock_logger, mock_orchestrator, tmp_path):
 
     with (
         patch(
-            "automated_security_helper.interactions.run_ash_scan.Path.exists",
+            "pathlib.Path.exists",
             return_value=False,
         ),
         patch(
-            "automated_security_helper.interactions.run_ash_scan.Path.cwd",
+            "pathlib.Path.cwd",
             return_value=Path("/fake/cwd"),
         ),
         patch("automated_security_helper.interactions.run_ash_scan.os.chdir"),
@@ -93,12 +93,12 @@ def test_run_ash_scan_container_mode(mock_logger, mock_container, tmp_path):
 
     with (
         patch(
-            "automated_security_helper.interactions.run_ash_scan.Path.cwd",
+            "pathlib.Path.cwd",
             return_value=Path("/fake/cwd"),
         ),
         patch("automated_security_helper.interactions.run_ash_scan.os.chdir"),
         patch(
-            "automated_security_helper.interactions.run_ash_scan.Path.exists",
+            "pathlib.Path.exists",
             return_value=True,
         ),
         patch("builtins.open", mock_open(read_data="{}")),
@@ -131,11 +131,11 @@ def test_run_ash_scan_with_actionable_findings(
 
     with (
         patch(
-            "automated_security_helper.interactions.run_ash_scan.Path.exists",
+            "pathlib.Path.exists",
             return_value=False,
         ),
         patch(
-            "automated_security_helper.interactions.run_ash_scan.Path.cwd",
+            "pathlib.Path.cwd",
             return_value=Path("/fake/cwd"),
         ),
         patch("automated_security_helper.interactions.run_ash_scan.os.chdir"),
@@ -170,11 +170,11 @@ def test_run_ash_scan_with_custom_phases(mock_logger, mock_orchestrator, tmp_pat
 
     with (
         patch(
-            "automated_security_helper.interactions.run_ash_scan.Path.exists",
+            "pathlib.Path.exists",
             return_value=False,
         ),
         patch(
-            "automated_security_helper.interactions.run_ash_scan.Path.cwd",
+            "pathlib.Path.cwd",
             return_value=Path("/fake/cwd"),
         ),
         patch("automated_security_helper.interactions.run_ash_scan.os.chdir"),

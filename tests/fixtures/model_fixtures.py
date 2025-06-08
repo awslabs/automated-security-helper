@@ -15,7 +15,7 @@ def sample_suppression():
     """Create a sample suppression for testing."""
     return Suppression(
         rule_id="TEST-001",
-        file_path="src/example.py",
+        path="src/example.py",
         reason="Test suppression",
     )
 
@@ -25,7 +25,7 @@ def sample_suppression_with_lines():
     """Create a sample suppression with line numbers for testing."""
     return Suppression(
         rule_id="TEST-001",
-        file_path="src/example.py",
+        path="src/example.py",
         line_start=10,
         line_end=15,
         reason="Test suppression with lines",

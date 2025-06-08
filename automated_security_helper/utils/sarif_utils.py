@@ -308,7 +308,7 @@ def apply_suppressions_to_sarif(
         for suppression in expiring_suppressions:
             expiration_date = suppression.expiration
             rule_id = suppression.rule_id
-            file_path = suppression.file_path
+            file_path = suppression.path
             reason = suppression.reason or "No reason provided"
             ASH_LOGGER.warning(
                 f"  - Rule '{rule_id}' for '{file_path}' expires on {expiration_date}. Reason: {reason}"
@@ -321,7 +321,7 @@ def apply_suppressions_to_sarif(
         for suppression in expiring_suppressions:
             expiration_date = suppression.expiration
             rule_id = suppression.rule_id
-            file_path = suppression.file_path
+            file_path = suppression.path
             reason = suppression.reason or "No reason provided"
             ASH_LOGGER.warning(
                 f"  - Rule '{rule_id}' for '{file_path}' expires on {expiration_date}. Reason: {reason}"
