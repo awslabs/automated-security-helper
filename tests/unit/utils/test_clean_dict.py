@@ -42,14 +42,13 @@ def test_clean_dict_with_list():
 
     assert "key1" in result
     assert "key2" in result
-    # The current implementation doesn't remove None items from lists
-    # It only processes the items recursively
-    assert len(result["key2"]) == 4
+    # The implementation now removes None and empty items from lists
+    # and processes the remaining items recursively
+    assert len(result["key2"]) == 3
     assert result["key2"][0] == "item1"
-    assert result["key2"][1] is None
-    assert result["key2"][2] == "item3"
-    assert "subkey1" in result["key2"][3]
-    assert "subkey2" not in result["key2"][3]
+    assert result["key2"][1] == "item3"
+    assert "subkey1" in result["key2"][2]
+    assert "subkey2" not in result["key2"][2]
 
 
 def test_clean_dict_with_non_dict_input():
