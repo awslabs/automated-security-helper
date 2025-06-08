@@ -62,7 +62,7 @@ def test_s3_reporter_config_options_defaults():
             del os.environ["ASH_S3_BUCKET_NAME"]
 
 
-def test_s3_reporter_config_defaults():
+def test_s3_reporter_config_defaults(ash_temp_path):
     """Test default values for S3 reporter config."""
     config = S3ReporterConfig()
     assert config.name == "s3"
@@ -71,15 +71,15 @@ def test_s3_reporter_config_defaults():
     assert isinstance(config.options, S3ReporterConfigOptions)
 
 
-def test_s3_reporter_model_post_init():
+def test_s3_reporter_model_post_init(ash_temp_path):
     """Test model_post_init creates default config if none provided."""
     from automated_security_helper.base.plugin_context import PluginContext
 
     # Create reporter with proper context
     context = PluginContext(
-        source_dir=Path("/tmp/source"),
-        output_dir=Path("/tmp/output"),
-        work_dir=Path("/tmp/work"),
+        source_dir=Path(f"{ash_temp_path}/source"),
+        output_dir=Path(f"{ash_temp_path}/output"),
+        work_dir=Path(f"{ash_temp_path}/work"),
     )
     reporter = S3Reporter(context=context)
 
@@ -92,7 +92,7 @@ def test_s3_reporter_model_post_init():
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
-def test_s3_reporter_validate_success(mock_boto3):
+def test_s3_reporter_validate_success(mock_boto3, ash_temp_path):
     """Test validate method with successful AWS access."""
     from automated_security_helper.base.plugin_context import PluginContext
 
@@ -112,9 +112,9 @@ def test_s3_reporter_validate_success(mock_boto3):
 
     # Create reporter with proper context and config
     context = PluginContext(
-        source_dir=Path("/tmp/source"),
-        output_dir=Path("/tmp/output"),
-        work_dir=Path("/tmp/work"),
+        source_dir=Path(f"{ash_temp_path}/source"),
+        output_dir=Path(f"{ash_temp_path}/output"),
+        work_dir=Path(f"{ash_temp_path}/work"),
     )
     config = S3ReporterConfig(
         options=S3ReporterConfigOptions(
@@ -141,13 +141,13 @@ def test_s3_reporter_validate_success(mock_boto3):
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
-def test_s3_reporter_validate_missing_config(mock_boto3):
+def test_s3_reporter_validate_missing_config(mock_boto3, ash_temp_path):
     """Test validate method with missing configuration."""
     # Create reporter with context and config with missing values
     context = PluginContext(
-        source_dir=Path("/tmp/test"),
-        output_dir=Path("/tmp/output"),
-        work_dir=Path("/tmp/work"),
+        source_dir=Path(f"{ash_temp_path}/test"),
+        output_dir=Path(f"{ash_temp_path}/output"),
+        work_dir=Path(f"{ash_temp_path}/work"),
     )
     config = S3ReporterConfig(
         options=S3ReporterConfigOptions(aws_region=None, bucket_name=None)
@@ -166,7 +166,7 @@ def test_s3_reporter_validate_missing_config(mock_boto3):
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
-def test_s3_reporter_validate_aws_error(mock_boto3):
+def test_s3_reporter_validate_aws_error(mock_boto3, ash_temp_path):
     """Test validate method with AWS error."""
     # Create mock session and clients
     mock_session = MagicMock()
@@ -183,9 +183,9 @@ def test_s3_reporter_validate_aws_error(mock_boto3):
 
     # Create reporter with context and config
     context = PluginContext(
-        source_dir=Path("/tmp/test"),
-        output_dir=Path("/tmp/output"),
-        work_dir=Path("/tmp/work"),
+        source_dir=Path(f"{ash_temp_path}/test"),
+        output_dir=Path(f"{ash_temp_path}/output"),
+        work_dir=Path(f"{ash_temp_path}/work"),
     )
     config = S3ReporterConfig(
         options=S3ReporterConfigOptions(
@@ -212,7 +212,7 @@ def test_s3_reporter_validate_aws_error(mock_boto3):
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
-def test_s3_reporter_report_json_format(mock_boto3):
+def test_s3_reporter_report_json_format(mock_boto3, ash_temp_path):
     """Test report method with JSON format."""
     # Create mock session and client
     mock_session = MagicMock()
@@ -224,9 +224,9 @@ def test_s3_reporter_report_json_format(mock_boto3):
 
     # Create reporter with context and config
     context = PluginContext(
-        source_dir=Path("/tmp/test"),
-        output_dir=Path("/tmp/output"),
-        work_dir=Path("/tmp/work"),
+        source_dir=Path(f"{ash_temp_path}/test"),
+        output_dir=Path(f"{ash_temp_path}/output"),
+        work_dir=Path(f"{ash_temp_path}/work"),
     )
     config = S3ReporterConfig(
         options=S3ReporterConfigOptions(
@@ -268,7 +268,7 @@ def test_s3_reporter_report_json_format(mock_boto3):
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.yaml")
-def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3):
+def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3, ash_temp_path):
     """Test report method with YAML format."""
     # Create mock session and client
     mock_session = MagicMock()
@@ -281,9 +281,9 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3):
 
     # Create reporter with context and config
     context = PluginContext(
-        source_dir=Path("/tmp/test"),
-        output_dir=Path("/tmp/output"),
-        work_dir=Path("/tmp/work"),
+        source_dir=Path(f"{ash_temp_path}/test"),
+        output_dir=Path(f"{ash_temp_path}/output"),
+        work_dir=Path(f"{ash_temp_path}/work"),
     )
     config = S3ReporterConfig(
         options=S3ReporterConfigOptions(
@@ -327,7 +327,7 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3):
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
-def test_s3_reporter_report_error_handling(mock_boto3):
+def test_s3_reporter_report_error_handling(mock_boto3, ash_temp_path):
     """Test report method error handling."""
     # Create mock session and client
     mock_session = MagicMock()
@@ -342,9 +342,9 @@ def test_s3_reporter_report_error_handling(mock_boto3):
 
     # Create reporter with context and config
     context = PluginContext(
-        source_dir=Path("/tmp/test"),
-        output_dir=Path("/tmp/output"),
-        work_dir=Path("/tmp/work"),
+        source_dir=Path(f"{ash_temp_path}/test"),
+        output_dir=Path(f"{ash_temp_path}/output"),
+        work_dir=Path(f"{ash_temp_path}/work"),
     )
     context.output_dir = "/test/output"
     config = S3ReporterConfig(

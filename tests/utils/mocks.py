@@ -21,6 +21,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Region,
 )
+from tests.utils.helpers import get_ash_temp_path
 
 
 def create_mock_finding(
@@ -141,7 +142,7 @@ def create_mock_plugin_context(
     from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 
     if source_dir is None:
-        source_dir = Path("/tmp/source")
+        source_dir = get_ash_temp_path()
 
     if output_dir is None:
         output_dir = Path("/tmp/output")

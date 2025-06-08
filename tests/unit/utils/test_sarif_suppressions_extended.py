@@ -1,7 +1,5 @@
 """Tests for SARIF suppression processing."""
 
-from pathlib import Path
-
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.core import Suppression, IgnorePathWithReason
@@ -23,7 +21,9 @@ from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sa
 class TestSarifSuppressions:
     """Tests for SARIF suppression processing."""
 
-    def test_apply_suppressions_to_sarif_with_rule_match(self):
+    def test_apply_suppressions_to_sarif_with_rule_match(
+        self, test_source_dir, test_output_dir
+    ):
         """Test applying suppressions to SARIF report with rule ID match."""
         # Create a test SARIF report
         sarif_report = SarifReport(
@@ -91,8 +91,8 @@ class TestSarifSuppressions:
         )
 
         plugin_context = PluginContext(
-            source_dir=Path("/tmp/source"),
-            output_dir=Path("/tmp/output"),
+            source_dir=test_source_dir,
+            output_dir=test_output_dir,
             config=config,
         )
 
@@ -114,7 +114,9 @@ class TestSarifSuppressions:
             or len(result.runs[0].results[1].suppressions) == 0
         )
 
-    def test_apply_suppressions_to_sarif_with_file_and_line_match(self):
+    def test_apply_suppressions_to_sarif_with_file_and_line_match(
+        self, test_source_dir, test_output_dir
+    ):
         """Test applying suppressions to SARIF report with file path and line match."""
         # Create a test SARIF report
         sarif_report = SarifReport(
@@ -184,8 +186,8 @@ class TestSarifSuppressions:
         )
 
         plugin_context = PluginContext(
-            source_dir=Path("/tmp/source"),
-            output_dir=Path("/tmp/output"),
+            source_dir=test_source_dir,
+            output_dir=test_output_dir,
             config=config,
         )
 
@@ -207,7 +209,9 @@ class TestSarifSuppressions:
             or len(result.runs[0].results[1].suppressions) == 0
         )
 
-    def test_apply_suppressions_to_sarif_with_ignore_suppressions_flag(self):
+    def test_apply_suppressions_to_sarif_with_ignore_suppressions_flag(
+        self, test_source_dir, test_output_dir
+    ):
         """Test applying suppressions to SARIF report with ignore_suppressions flag."""
         # Create a test SARIF report
         sarif_report = SarifReport(
@@ -258,8 +262,8 @@ class TestSarifSuppressions:
         )
 
         plugin_context = PluginContext(
-            source_dir=Path("/tmp/source"),
-            output_dir=Path("/tmp/output"),
+            source_dir=test_source_dir,
+            output_dir=test_output_dir,
             config=config,
             ignore_suppressions=True,
         )
@@ -273,7 +277,9 @@ class TestSarifSuppressions:
             or len(result.runs[0].results[0].suppressions) == 0
         )
 
-    def test_apply_suppressions_to_sarif_with_ignore_paths_and_suppressions(self):
+    def test_apply_suppressions_to_sarif_with_ignore_paths_and_suppressions(
+        self, test_source_dir, test_output_dir
+    ):
         """Test applying both ignore_paths and suppressions to SARIF report."""
         # Create a test SARIF report
         sarif_report = SarifReport(
@@ -347,8 +353,8 @@ class TestSarifSuppressions:
         )
 
         plugin_context = PluginContext(
-            source_dir=Path("/tmp/source"),
-            output_dir=Path("/tmp/output"),
+            source_dir=test_source_dir,
+            output_dir=test_output_dir,
             config=config,
         )
 

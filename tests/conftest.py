@@ -6,6 +6,8 @@ import pytest
 from pathlib import Path
 from typing import List, Literal
 
+from tests.utils.helpers import get_ash_temp_path
+
 # Add the project root to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -110,17 +112,9 @@ def ash_temp_path():
     Returns:
         Path to the temporary directory
     """
-    import uuid
     import shutil
 
-    # Get the tests directory
-    tests_dir = Path(__file__).parent
-    temp_base_dir = tests_dir / "pytest-temp"
-
-    # Create a unique subdirectory for this test session
-    temp_dir = temp_base_dir / str(uuid.uuid4())
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
+    temp_dir = get_ash_temp_path()
     yield temp_dir
 
     # Cleanup after the test
@@ -207,7 +201,7 @@ def temp_env_vars():
 
 
 @pytest.fixture
-def test_plugin_context():
+def test_plugin_context(ash_temp_path):
     """Create a test plugin context for testing.
 
     Returns:
@@ -217,10 +211,10 @@ def test_plugin_context():
     from pathlib import Path
 
     # Create a real PluginContext object instead of a mock
-    source_dir = Path("/tmp/test_source_dir")
-    output_dir = Path("/tmp/test_output_dir")
-    work_dir = Path("/tmp/test_work_dir")
-    config_dir = Path("/tmp/test_config_dir")
+    source_dir = Path(f"{ash_temp_path}/test_source_dir")
+    output_dir = Path(f"{ash_temp_path}/test_output_dir")
+    work_dir = Path(f"{ash_temp_path}/test_work_dir")
+    config_dir = Path(f"{ash_temp_path}/test_config_dir")
 
     # Use a proper AshConfig object
     from automated_security_helper.config.default_config import get_default_config
@@ -250,7 +244,7 @@ def test_source_dir(ash_temp_path):
         Path to the test source directory
     """
     source_dir = ash_temp_path / "source"
-    source_dir.mkdir()
+    Path(source_dir).mkdir(exist_ok=True, parents=True)
 
     # Create a sample file
     test_file = source_dir / "test.py"
@@ -280,7 +274,7 @@ def sample_ash_model():
 def test_data_dir(ash_temp_path):
     """Create a test data directory with sample files."""
     data_dir = ash_temp_path / "test_data"
-    data_dir.mkdir()
+    Path(data_dir).mkdir(exist_ok=True, parents=True)
 
     # Create a sample CloudFormation template
     cfn_dir = data_dir / "cloudformation"
@@ -311,7 +305,7 @@ def test_data_dir(ash_temp_path):
 def test_output_dir(ash_temp_path):
     """Create a test output directory."""
     output_dir = ash_temp_path / "output"
-    output_dir.mkdir()
+    Path(output_dir).mkdir(exist_ok=True, parents=True)
     return output_dir
 
 

@@ -21,12 +21,12 @@ from automated_security_helper.utils.download_utils import (
 @patch("automated_security_helper.utils.download_utils.tempfile.NamedTemporaryFile")
 @patch("pathlib.Path.mkdir")
 def test_download_file(
-    mock_mkdir, mock_temp_file, mock_move, mock_copyfileobj, mock_urlopen
+    mock_mkdir, mock_temp_file, mock_move, mock_copyfileobj, mock_urlopen, ash_temp_path
 ):
     """Test download_file function."""
     # Setup mocks
     mock_temp = MagicMock()
-    mock_temp.name = "/tmp/tempfile"
+    mock_temp.name = f"{ash_temp_path}/tempfile"
     mock_temp_file.return_value.__enter__.return_value = mock_temp
 
     mock_response = MagicMock()
@@ -42,7 +42,9 @@ def test_download_file(
     mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
     mock_urlopen.assert_called_once_with("https://example.com/file.txt")
     mock_copyfileobj.assert_called_once_with(mock_response, mock_temp)
-    mock_move.assert_called_once_with("/tmp/tempfile", dest.joinpath("file.txt"))
+    mock_move.assert_called_once_with(
+        f"{ash_temp_path}/tempfile", dest.joinpath("file.txt")
+    )
 
     # Verify result
     assert result == dest.joinpath("file.txt")

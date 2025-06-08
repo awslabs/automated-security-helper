@@ -166,7 +166,7 @@ def test_run_command_with_output_handling_return():
 
 @patch("pathlib.Path.mkdir")
 @patch("builtins.open")
-def test_run_command_with_output_handling_write(mock_open, mock_mkdir):
+def test_run_command_with_output_handling_write(mock_open, mock_mkdir, ash_temp_path):
     """Test running a command with output handling set to write."""
     mock_process = MagicMock()
     mock_process.returncode = 0
@@ -190,7 +190,7 @@ def test_run_command_with_output_handling_write(mock_open, mock_mkdir):
     ):
         result = run_command_with_output_handling(
             ["test_cmd", "arg1"],
-            results_dir="/tmp/results",
+            results_dir=f"{ash_temp_path}/results",
             stdout_preference="write",
             stderr_preference="write",
         )

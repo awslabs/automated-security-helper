@@ -196,7 +196,7 @@ def test_path_matches_pattern():
 
 
 @patch("automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions")
-def test_apply_suppressions_to_sarif(mock_check):
+def test_apply_suppressions_to_sarif(mock_check, test_output_dir):
     """Test applying suppressions to SARIF report."""
     mock_check.return_value = []
 
@@ -209,7 +209,7 @@ def test_apply_suppressions_to_sarif(mock_check):
     ]
     plugin_context.config.global_settings.suppressions = []
     plugin_context.ignore_suppressions = False
-    plugin_context.output_dir = Path("/tmp/output")
+    plugin_context.output_dir = test_output_dir
 
     result = apply_suppressions_to_sarif(sarif, plugin_context)
 
