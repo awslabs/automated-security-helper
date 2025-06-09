@@ -647,6 +647,10 @@ class ScanPhase(EnginePhase):
         total_scanners = len(scanner_tuples)
         completed = 0
 
+        # Create a list of all scanner names for tracking remaining scanners
+        all_scanner_names = [scanner_tuple[0] for scanner_tuple in scanner_tuples]
+        remaining_scanners = all_scanner_names.copy()
+
         # Process each scanner
         for scanner_tuple in scanner_tuples:
             scanner_name = scanner_tuple[0]
@@ -735,6 +739,38 @@ class ScanPhase(EnginePhase):
                     # Log completion
                     ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
 
+                    # Remove from remaining scanners and notify about completion
+                    if scanner_name in remaining_scanners:
+                        remaining_scanners.remove(scanner_name)
+
+                    # Notify about scan completion with remaining scanners info
+                    try:
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
+
+                        remaining_count = len(remaining_scanners)
+                        remaining_list = (
+                            ", ".join(remaining_scanners)
+                            if remaining_scanners
+                            else "None"
+                        )
+
+                        self.notify_event(
+                            AshEventType.SCAN_COMPLETE,
+                            scanner=scanner_name,
+                            completed_count=completed + 1,
+                            total_count=total_scanners,
+                            remaining_count=remaining_count,
+                            remaining_scanners=remaining_scanners,
+                            message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
+                        )
+
+                    except Exception as event_error:
+                        ASH_LOGGER.error(
+                            f"Failed to notify scan completion event: {str(event_error)}"
+                        )
+
             except Exception as e:
                 # Include stack trace for debugging
                 import traceback
@@ -798,6 +834,14 @@ class ScanPhase(EnginePhase):
         total_scanners = len(scanner_tuples)
         ASH_LOGGER.debug(f"Total scanners: {total_scanners}")
         scanner_tasks = {}
+
+        # Create a list of all scanner names for tracking remaining scanners
+        all_scanner_names = [scanner_tuple[0] for scanner_tuple in scanner_tuples]
+        remaining_scanners = all_scanner_names.copy()
+        # Use a lock to protect the remaining_scanners list in parallel execution
+        import threading
+
+        remaining_scanners_lock = threading.Lock()
 
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = []
@@ -919,6 +963,39 @@ class ScanPhase(EnginePhase):
 
                         # Log completion
                         ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
+
+                        # Remove from remaining scanners and notify about completion
+                        with remaining_scanners_lock:
+                            if scanner_name in remaining_scanners:
+                                remaining_scanners.remove(scanner_name)
+
+                            # Notify about scan completion with remaining scanners info
+                            try:
+                                from automated_security_helper.plugins.events import (
+                                    AshEventType,
+                                )
+
+                                remaining_count = len(remaining_scanners)
+                                remaining_list = (
+                                    ", ".join(remaining_scanners)
+                                    if remaining_scanners
+                                    else "None"
+                                )
+
+                                self.notify_event(
+                                    AshEventType.SCAN_COMPLETE,
+                                    scanner=scanner_name,
+                                    completed_count=completed_count + 1,
+                                    total_count=total_scanners,
+                                    remaining_count=remaining_count,
+                                    remaining_scanners=remaining_scanners.copy(),  # Copy to avoid race conditions
+                                    message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
+                                )
+
+                            except Exception as event_error:
+                                ASH_LOGGER.error(
+                                    f"Failed to notify scan completion event: {str(event_error)}"
+                                )
 
                 except Exception as e:
                     # Include stack trace for debugging

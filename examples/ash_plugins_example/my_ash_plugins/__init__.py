@@ -4,7 +4,6 @@
 """Example external plugin package for ASH."""
 
 from automated_security_helper.plugins.events import AshEventType
-from automated_security_helper.plugins.decorators import event_subscriber
 
 from my_ash_plugins.converter import ExampleConverter
 from my_ash_plugins.scanner import ExampleScanner
@@ -16,11 +15,31 @@ ASH_SCANNERS = [ExampleScanner]
 ASH_REPORTERS = [ExampleReporter]
 
 
-# Register event handlers
-@event_subscriber(AshEventType.SCAN_COMPLETE)
-def handle_scan_complete(results, plugin_context, **kwargs):
+def handle_scan_complete(**kwargs):
     """Example event handler for scan complete event."""
-    print(
-        f"Example plugin received scan complete event with {len(results) if results else 0} results"
-    )
+    scanner = kwargs.get("scanner", "Unknown")
+    remaining_count = kwargs.get("remaining_count", 0)
+    remaining_scanners = kwargs.get("remaining_scanners", [])
+
+    print(f"Example plugin: Scanner '{scanner}' completed!")
+    if remaining_count > 0:
+        print(
+            f"Example plugin: {remaining_count} scanners remaining: {', '.join(remaining_scanners)}"
+        )
+    else:
+        print("Example plugin: All scanners completed!")
+
     return True
+
+
+def handle_scan_start(**kwargs):
+    """Example event handler for scan start event."""
+    print("Example plugin: Scan phase started!")
+    return True
+
+
+# Event callback registry following the same pattern as ASH_SCANNERS, ASH_REPORTERS, etc.
+ASH_EVENT_CALLBACKS = {
+    AshEventType.SCAN_COMPLETE: [handle_scan_complete],
+    AshEventType.SCAN_START: [handle_scan_start],
+}

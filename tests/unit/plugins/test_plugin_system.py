@@ -10,12 +10,14 @@ from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.base.plugin_context import PluginContext
 
+# Ensure models are rebuilt after all imports
+PluginContext.model_rebuild()
+
 
 def test_event_subscription():
     """Test that events can be subscribed to and triggered."""
     # Clear any existing subscribers
-    if hasattr(ash_plugin_manager, "_subscribers"):
-        ash_plugin_manager._subscribers = {}
+    ash_plugin_manager.plugin_library.event_callbacks.clear()
 
     results = []
 
@@ -62,8 +64,7 @@ def test_plugin_registration():
 def test_convert_phase_events(mock_plugin_context):
     """Test that convert phase events are properly triggered."""
     # Clear any existing subscribers
-    if hasattr(ash_plugin_manager, "_subscribers"):
-        ash_plugin_manager._subscribers = {}
+    ash_plugin_manager.plugin_library.event_callbacks.clear()
 
     # Create tracking variables for event handlers
     start_called = False
@@ -134,8 +135,7 @@ def test_convert_phase_events(mock_plugin_context):
 def test_scan_phase_events(mock_plugin_context):
     """Test that scan phase events are properly triggered."""
     # Clear any existing subscribers
-    if hasattr(ash_plugin_manager, "_subscribers"):
-        ash_plugin_manager._subscribers = {}
+    ash_plugin_manager.plugin_library.event_callbacks.clear()
 
     # Create tracking variables for event handlers
     start_called = False
@@ -208,8 +208,7 @@ def test_scan_phase_events(mock_plugin_context):
 def test_report_phase_events(mock_plugin_context):
     """Test that report phase events are properly triggered."""
     # Clear any existing subscribers
-    if hasattr(ash_plugin_manager, "_subscribers"):
-        ash_plugin_manager._subscribers = {}
+    ash_plugin_manager.plugin_library.event_callbacks.clear()
 
     # Create tracking variables for event handlers
     start_called = False

@@ -74,9 +74,9 @@ jobs:
           #   method: python-container
           #   platform: windows/amd64
           ### Temp disabled to not impact others as this currently hangs
-          # - os: windows-latest
-          #   method: python-local
-          #   platform: windows/amd64
+          - os: windows-latest
+            method: python-local
+            platform: windows/amd64
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15

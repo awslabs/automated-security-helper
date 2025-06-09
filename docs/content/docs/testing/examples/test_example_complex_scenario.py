@@ -188,6 +188,10 @@ def test_with_mock_http_server(ash_temp_path):
         def fetch_json(url):
             import urllib.request
 
+            # Ensure URL uses HTTPS scheme
+            if not url.startswith("https://"):
+                raise ValueError("URL must use HTTPS scheme")
+
             with urllib.request.urlopen(url) as response:
                 return json.loads(response.read().decode())
 

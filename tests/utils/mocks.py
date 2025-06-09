@@ -142,10 +142,10 @@ def create_mock_plugin_context(
     from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 
     if source_dir is None:
-        source_dir = get_ash_temp_path()
+        source_dir = get_ash_temp_path().joinpath("source")
 
     if output_dir is None:
-        output_dir = Path("/tmp/output")
+        output_dir = get_ash_temp_path().joinpath("output")
 
     if config is None:
         config = AshConfig(project_name="test-project")

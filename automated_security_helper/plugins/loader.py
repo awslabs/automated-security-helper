@@ -13,6 +13,7 @@ def load_internal_plugins():
         "automated_security_helper.converters",
         "automated_security_helper.scanners",
         "automated_security_helper.reporters",
+        "automated_security_helper.events",  # Load event subscribers
     ]
 
     loaded_plugins = {"converters": [], "scanners": [], "reporters": []}
@@ -41,6 +42,18 @@ def load_internal_plugins():
                     f"Found {len(module.ASH_REPORTERS)} reporters in {module_name}"
                 )
                 loaded_plugins["reporters"].extend(module.ASH_REPORTERS)
+
+            # Register event callbacks
+            if hasattr(module, "ASH_EVENT_CALLBACKS"):
+                ASH_LOGGER.debug(
+                    f"Found event callbacks in {module_name}: {list(module.ASH_EVENT_CALLBACKS.keys())}"
+                )
+                for event_type, callbacks in module.ASH_EVENT_CALLBACKS.items():
+                    for callback in callbacks:
+                        ASH_LOGGER.debug(
+                            f"Registering event callback {callback.__name__} for {event_type}"
+                        )
+                        ash_plugin_manager.subscribe(event_type, callback)
 
         except ImportError as e:
             ASH_LOGGER.warning(f"Failed to import internal module {module_name}: {e}")
@@ -71,6 +84,19 @@ def load_additional_plugin_modules(plugin_modules: List[str] = []) -> dict:
                 discovered["scanners"].extend(module.ASH_SCANNERS)
             if hasattr(module, "ASH_REPORTERS"):
                 discovered["reporters"].extend(module.ASH_REPORTERS)
+
+            # Register event callbacks from external modules
+            if hasattr(module, "ASH_EVENT_CALLBACKS"):
+                ASH_LOGGER.debug(
+                    f"Found event callbacks in {module_path}: {list(module.ASH_EVENT_CALLBACKS.keys())}"
+                )
+                for event_type, callbacks in module.ASH_EVENT_CALLBACKS.items():
+                    for callback in callbacks:
+                        ASH_LOGGER.debug(
+                            f"Registering event callback {callback.__name__} for {event_type}"
+                        )
+                        ash_plugin_manager.subscribe(event_type, callback)
+
         except ImportError as e:
             ASH_LOGGER.warning(f"Failed to import plugin module {module_path}: {e}")
 
@@ -120,17 +146,5 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
         f"{len(all_plugins['scanners'])} scanners, and "
         f"{len(all_plugins['reporters'])} reporters"
     )
-
-    # Register adapters for all plugins
-    from automated_security_helper.plugins.adapters import (
-        register_converter_adapters,
-        register_scanner_adapters,
-        register_reporter_adapters,
-    )
-
-    ASH_LOGGER.debug("Registering adapters for all loaded plugins")
-    register_converter_adapters(all_plugins["converters"])
-    register_scanner_adapters(all_plugins["scanners"])
-    register_reporter_adapters(all_plugins["reporters"])
 
     return all_plugins

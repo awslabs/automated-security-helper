@@ -6,6 +6,10 @@ from enum import Enum, auto
 class AshEventType(Enum):
     """Standard event types for ASH plugins."""
 
+    # Execution lifecycle events
+    EXECUTION_START = auto()
+    EXECUTION_COMPLETE = auto()
+
     # Phase lifecycle events
     CONVERT_START = auto()
     CONVERT_TARGET = auto()  # For individual target conversion
