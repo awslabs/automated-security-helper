@@ -1,30 +1,45 @@
 nav:
-  - index.md
-  - docs/quick-start-guide.md
-  - Migrating from ASH v2 to v3: docs/migration-guide.md
-  - User Guides:
-    - docs/installation-guide.md
-    - docs/configuration-guide.md
-    - docs/suppressions.md
-    - docs/config-overrides.md
-    - docs/cli-reference.md
-    - docs/advanced-usage.md
-  - Plugin Development:
-    - docs/plugins/index.md
-    - docs/plugins/workflow.md
-    - docs/plugins/scanner-plugins.md
-    - docs/plugins/reporter-plugins.md
-    - docs/plugins/converter-plugins.md
-    - docs/plugins/plugin-best-practices.md
-  - Contributing:
-    - contributing.md
-    - Testing:
-      - docs/testing/**
+  - Home: index.md
+  - Getting Started:
+    - Quick Start Guide: docs/quick-start-guide.md
+    - Installation Guide: docs/installation-guide.md
+    - Migrating from ASH v2 to v3: docs/migration-guide.md
+  - User Guide:
+    - Configuration: docs/configuration-guide.md
+    - CLI Reference: docs/cli-reference.md
+    - Suppressions: docs/suppressions.md
+    - Configuration Overrides: docs/config-overrides.md
+  - Built-in Plugins:
+    - Overview: docs/plugins/builtin/index.md
+    - Scanners: docs/plugins/builtin/scanners.md
+    - Reporters: docs/plugins/builtin/reporters.md
+    - Converters: docs/plugins/builtin/converters.md
+    - Event Callbacks: docs/plugins/builtin/event-callbacks.md
   - Tutorials:
-    - tutorials/running-ash-locally.md
-    - tutorials/running-ash-in-ci.md
-    - tutorials/using-ash-with-pre-commit.md
+    - Running ASH Locally: tutorials/running-ash-locally.md
+    - Running ASH in CI: tutorials/running-ash-in-ci.md
+    - Using ASH with Pre-commit: tutorials/using-ash-with-pre-commit.md
+  - Advanced Usage:
+    - Advanced Features: docs/advanced-usage.md
+    - Plugin Development:
+      - Overview: docs/plugins/index.md
+      - Plugin Workflow: docs/plugins/workflow.md
+      - Development Guide: docs/plugins/development-guide.md
+      - Creating Plugins:
+        - Scanner Plugins: docs/plugins/scanner-plugins.md
+        - Reporter Plugins: docs/plugins/reporter-plugins.md
+        - Converter Plugins: docs/plugins/converter-plugins.md
+        - Event Subscribers: docs/plugins/event-subscribers.md
+      - Plugin Best Practices: docs/plugins/plugin-best-practices.md
+  - Contributing:
+    - How to Contribute: contributing.md
+    - Testing:
+      - Overview: docs/testing/index.md
+      - Test Organization: docs/testing/test_organization.md
+      - Writing Effective Tests: docs/testing/writing_effective_tests.md
+      - Test Selection: docs/testing/test_selection.md
+      - Parallel Testing: docs/testing/parallel_testing.md
+      - Test Utilities: docs/testing/test_utilities.md
   - Reference:
-    - docs/support.md
-  - contributing.md
-  - faq.md
+    - Support: docs/support.md
+    - FAQ: faq.md

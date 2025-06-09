@@ -284,11 +284,11 @@ For complete documentation, visit the [ASH Documentation](https://awslabs.github
 ## Feedback and Contributing
 
 - Create an issue [here](https://github.com/awslabs/automated-security-helper/issues)
-- See [CONTRIBUTING](CONTRIBUTING.md) for contribution guidelines
+- See [CONTRIBUTING](contributing.md) for contribution guidelines
 
 ## Security
 
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for security issue reporting information.
+See [CONTRIBUTING](contributing.md#security-issue-notifications) for security issue reporting information.
 
 ## License
 

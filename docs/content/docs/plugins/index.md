@@ -2,6 +2,16 @@
 
 ASH v3 features a flexible plugin architecture that allows you to extend its functionality through custom plugins. This guide provides an overview of the plugin system and how to develop your own plugins.
 
+## Built-in Plugins
+
+ASH ships with a comprehensive set of built-in plugins that provide core functionality:
+
+- **[Built-in Plugins Overview](./builtin/index.md)**: Complete guide to all built-in plugins
+- **[Security Scanners](./builtin/scanners.md)**: 10 built-in security scanners (Bandit, Semgrep, Checkov, etc.)
+- **[Report Formats](./builtin/reporters.md)**: 12 output formats (SARIF, HTML, CSV, etc.)
+- **[File Converters](./builtin/converters.md)**: Archive extraction and Jupyter notebook processing
+- **[Event Callbacks](./builtin/event-callbacks.md)**: Scan lifecycle event handling
+
 ## Plugin Types
 
 ASH supports three types of plugins:
