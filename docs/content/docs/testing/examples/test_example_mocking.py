@@ -62,7 +62,9 @@ class ExampleScanner:
     def report_findings(self, findings):
         """Report findings to an external service."""
         response = requests.post(
-            "https://example.com/api/report", json={"findings": findings}
+            "https://example.com/api/report",
+            json={"findings": findings},
+            timeout=30,
         )
 
         if response.status_code != 200:
