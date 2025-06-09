@@ -38,10 +38,10 @@ def full_ash_config(mock_scanner_plugin) -> AshConfig:
     """Create a complete AshConfig with all options for testing."""
     # Lazy load required classes to avoid circular imports
     from automated_security_helper.config.scanner_types import CustomScannerConfig
-    from automated_security_helper.scanners.ash_default.bandit_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         BanditScannerConfig,
     )
-    from automated_security_helper.scanners.ash_default.cdk_nag_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
         CdkNagScannerConfig,
         CdkNagScannerConfigOptions,
         CdkNagPacks,

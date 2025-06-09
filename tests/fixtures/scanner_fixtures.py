@@ -58,7 +58,7 @@ def unsafe_function():
 @pytest.fixture
 def bandit_scanner_context(ash_temp_path):
     """Create a context for testing the Bandit scanner."""
-    from automated_security_helper.scanners.ash_default.bandit_scanner import (
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         BanditScannerConfig,
     )
 

@@ -7,11 +7,11 @@ import zipfile
 import tarfile
 import nbformat
 
-from automated_security_helper.converters.ash_default.archive_converter import (
+from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverter,
     ArchiveConverterConfig,
 )
-from automated_security_helper.converters.ash_default.jupyter_converter import (
+from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
     JupyterConverter,
     JupyterConverterConfig,
 )
@@ -107,7 +107,7 @@ class TestArchiveConverter:
 
         # Apply the monkeypatch
         monkeypatch.setattr(
-            "automated_security_helper.converters.ash_default.archive_converter.scan_set",
+            "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter.scan_set",
             mock_scan_set,
         )
 
@@ -134,7 +134,7 @@ class TestArchiveConverter:
 
         # Apply the monkeypatch
         monkeypatch.setattr(
-            "automated_security_helper.converters.ash_default.archive_converter.scan_set",
+            "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter.scan_set",
             mock_scan_set,
         )
 
@@ -199,7 +199,7 @@ class TestJupyterConverter:
 
         # Apply the monkeypatch
         monkeypatch.setattr(
-            "automated_security_helper.converters.ash_default.jupyter_converter.scan_set",
+            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.scan_set",
             mock_scan_set,
         )
 

@@ -1,10 +1,14 @@
 """Tests for reporter plugins."""
 
-from automated_security_helper.reporters.ash_default.flatjson_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter import (
     FlatJSONReporter,
 )
-from automated_security_helper.reporters.ash_default.html_reporter import HtmlReporter
-from automated_security_helper.reporters.ash_default.csv_reporter import CsvReporter
+from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
+    HtmlReporter,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
+    CsvReporter,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 

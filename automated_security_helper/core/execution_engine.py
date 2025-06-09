@@ -238,7 +238,7 @@ class ScanExecutionEngine:
         # Register custom scanners from build configuration
         # for scanner_config in self._context.config.build.custom_scanners:
         #     try:
-        #         from automated_security_helper.scanners.ash_default.custom_scanner import (
+        #         from automated_security_helper.plugin_modules.ash_builtin.scanners.custom_scanner import (
         #             CustomScanner,
         #         )
 

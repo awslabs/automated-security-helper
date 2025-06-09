@@ -15,7 +15,7 @@ def get_reporter_mappings() -> Dict[str, Dict[str, str]]:
 
     # Try to import reporter plugins dynamically
     try:
-        from automated_security_helper.reporters.ash_default import (
+        from automated_security_helper.plugin_modules.ash_builtin.reporters import (
             CsvReporter,
             CycloneDXReporter,
             HtmlReporter,

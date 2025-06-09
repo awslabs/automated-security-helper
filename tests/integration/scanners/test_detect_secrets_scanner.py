@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
-from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
 )

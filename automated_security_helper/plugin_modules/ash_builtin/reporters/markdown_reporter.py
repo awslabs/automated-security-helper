@@ -11,7 +11,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
-from automated_security_helper.reporters.ash_default.report_content_emitter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin

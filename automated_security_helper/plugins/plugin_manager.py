@@ -21,7 +21,7 @@ class AshPluginRegistration(BaseModel):
     plugin_module_path: Annotated[
         str,
         Field(
-            description="The module path containing the plugin. This module will be imported at the start of ASH to identify plugins to use. Example: `automated_security_helper.scanners.ash_default`"
+            description="The module path containing the plugin. This module will be imported at the start of ASH to identify plugins to use. Example: `automated_security_helper.plugin_modules.ash_builtin.scanners`"
         ),
     ]
     description: Annotated[

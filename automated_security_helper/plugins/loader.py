@@ -10,10 +10,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 def load_internal_plugins():
     """Load all internal ASH plugins."""
     internal_modules = [
-        "automated_security_helper.converters",
-        "automated_security_helper.scanners",
-        "automated_security_helper.reporters",
-        "automated_security_helper.events",  # Load event subscribers
+        "automated_security_helper.plugin_modules.ash_defaults",
     ]
 
     loaded_plugins = {"converters": [], "scanners": [], "reporters": []}

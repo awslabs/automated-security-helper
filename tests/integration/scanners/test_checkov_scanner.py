@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from automated_security_helper.scanners.ash_default.checkov_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,

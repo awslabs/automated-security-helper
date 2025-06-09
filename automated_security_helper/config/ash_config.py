@@ -14,10 +14,10 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.converters.ash_default.archive_converter import (
+from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverterConfig,
 )
-from automated_security_helper.converters.ash_default.jupyter_converter import (
+from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
     JupyterConverterConfig,
 )
 from automated_security_helper.core.constants import (
@@ -27,70 +27,70 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason, Suppression
-from automated_security_helper.reporters.ash_default.csv_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
     CSVReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.cyclonedx_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter import (
     CycloneDXReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.gitlab_sast_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
     GitLabSASTReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.html_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
     HTMLReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.flatjson_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter import (
     FlatJSONReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.junitxml_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.junitxml_reporter import (
     JUnitXMLReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.markdown_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
     MarkdownReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.ocsf_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter import (
     OCSFReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.spdx_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.spdx_reporter import (
     SPDXReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.text_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter import (
     TextReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.yaml_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporter import (
     YAMLReporterConfig,
 )
-from automated_security_helper.reporters.ash_default.sarif_reporter import (
+from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_reporter import (
     SARIFReporterConfig,
 )
-from automated_security_helper.scanners.ash_default.bandit_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
 )
-from automated_security_helper.scanners.ash_default.cdk_nag_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
     CdkNagScannerConfig,
 )
-from automated_security_helper.scanners.ash_default.cfn_nag_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
     CfnNagScannerConfig,
 )
-from automated_security_helper.scanners.ash_default.checkov_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScannerConfig,
 )
-from automated_security_helper.scanners.ash_default.detect_secrets_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
     DetectSecretsScannerConfig,
 )
-from automated_security_helper.scanners.ash_default.grype_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
     GrypeScannerConfig,
 )
-from automated_security_helper.scanners.ash_default.npm_audit_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     NpmAuditScannerConfig,
 )
-from automated_security_helper.scanners.ash_default.opengrep_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScannerConfig,
 )
-from automated_security_helper.scanners.ash_default.semgrep_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
     SemgrepScannerConfig,
 )
-from automated_security_helper.scanners.ash_default.syft_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScannerConfig,
 )
 from automated_security_helper.utils.log import ASH_LOGGER

@@ -1,7 +1,7 @@
 """Tests for CDK Nag scanner."""
 
 import pytest
-from automated_security_helper.scanners.ash_default.cdk_nag_scanner import (
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
     CdkNagScanner,
     CdkNagScannerConfig,
     CdkNagScannerConfigOptions,
