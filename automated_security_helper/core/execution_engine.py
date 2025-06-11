@@ -145,6 +145,13 @@ class ScanExecutionEngine:
         )
 
         # CLI parameters take precedence over config
+        # evaluate ash_plugin_modules, split any entries with commas into separate items and trim surrounding whitespace
+        config_plugin_modules = [
+            subitem.strip()
+            for item in config_plugin_modules
+            if item is not None
+            for subitem in item.split(", ")
+        ]
         combined_plugin_modules = list(set(ash_plugin_modules + config_plugin_modules))
 
         if len(combined_plugin_modules) > 0:
