@@ -9,9 +9,11 @@
     },
     {
       "args": [
-        "--verbose"
+        "--verbose",
+        "--scanners",
+        "detect-secrets"
       ],
-      "console": "integratedTerminal",
+      "console": "internalConsole",
       "env": {
         "PATH": "${workspaceFolder}/.venv/bin:/opt/homebrew/bin:~/.local/share/mise/installs/node/20.19.0/bin:${env.PATH}"
       },
@@ -28,7 +30,7 @@
         "--config",
         "${workspaceFolder}/.ash/.ash.yaml"
       ],
-      "console": "integratedTerminal",
+      "console": "internalConsole",
       "env": {
         "PATH": "${workspaceFolder}/.venv/bin:/opt/homebrew/bin:~/.local/share/mise/installs/node/20.19.0/bin:${env.PATH}"
       },
@@ -39,14 +41,14 @@
     },
     {
       "args": [],
-      "console": "integratedTerminal",
+      "console": "internalConsole",
       "name": "ASH: Test CDK Nag Headless Wrapper",
       "program": "./automated_security_helper/utils/cdk_nag_wrapper.py",
       "request": "launch",
       "type": "debugpy"
     },
     {
-      "console": "integratedTerminal",
+      "console": "internalConsole",
       "env": {
         "_PYTEST_RAISE": "1"
       },

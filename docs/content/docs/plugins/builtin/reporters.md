@@ -1,6 +1,6 @@
 # Built-in Reporters
 
-ASH includes 12 built-in reporters that generate scan results in various formats to support different use cases, from human-readable reports to machine-processable data formats for CI/CD integration.
+ASH includes 13 built-in reporters that generate scan results in various formats to support different use cases, from human-readable reports to machine-processable data formats for CI/CD integration.
 
 ## Reporter Overview
 
@@ -144,6 +144,44 @@ reporters:
 - GitLab CI/CD pipelines
 - Security dashboard visualization
 - Merge request security gates
+
+---
+
+### GitLab SAST Reporter
+
+**Purpose**: Generates reports in GitLab Security Dashboard format for seamless CI/CD integration.
+
+**Configuration**:
+```yaml
+reporters:
+  gitlab-sast:
+    enabled: true
+    options:
+      include_suppressed: false
+```
+
+**Output Structure**:
+- GitLab SAST report format
+- Vulnerability details with locations
+- Severity mapping to GitLab standards
+- Scanner metadata and timestamps
+
+**Use Cases**:
+- GitLab CI/CD pipeline integration
+- GitLab Security Dashboard visualization
+- Compliance with GitLab security workflows
+
+**Integration Example**:
+```yaml
+# .gitlab-ci.yml
+security_scan:
+  stage: test
+  script:
+    - ash scan . --reporters gitlab-sast
+  artifacts:
+    reports:
+      sast: output/gl-sast-report.json
+```
 
 ---
 

@@ -24,7 +24,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Region,
     Location,
 )
-from automated_security_helper.models.core import Suppression
+from automated_security_helper.models.core import AshSuppression
 
 
 def create_test_sarif():
@@ -79,7 +79,7 @@ def test_sanitize_sarif_paths():
     # The path should be relative and use forward slashes
     expected_path = "to/test.py"
     # Normalize both paths for comparison (handle Windows vs Unix differences)
-    assert sanitized_uri.replace("\\", "/") == expected_path
+    assert str(sanitized_uri).replace("\\", "/") == expected_path
 
 
 def test_sanitize_sarif_paths_with_empty_report():
@@ -252,7 +252,7 @@ def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
     mock_check.return_value = []
     mock_should_suppress.return_value = (
         True,
-        Suppression(rule_id="TEST001", path="to/test.py", reason="Test suppression"),
+        AshSuppression(rule_id="TEST001", path="to/test.py", reason="Test suppression"),
     )
 
     sarif = create_test_sarif()
@@ -261,7 +261,7 @@ def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
     plugin_context = MagicMock()
     plugin_context.config.global_settings.ignore_paths = []
     plugin_context.config.global_settings.suppressions = [
-        Suppression(rule_id="TEST001", path="to/test.py", reason="Test suppression")
+        AshSuppression(rule_id="TEST001", path="to/test.py", reason="Test suppression")
     ]
     plugin_context.ignore_suppressions = False
 
@@ -276,7 +276,7 @@ def test_apply_suppressions_with_expiring_suppressions(mock_check):
     """Test applying suppressions with expiring suppressions."""
     # Mock expiring suppressions
     mock_check.return_value = [
-        Suppression(
+        AshSuppression(
             rule_id="TEST001",
             path="to/test.py",
             reason="Expiring",
@@ -290,7 +290,7 @@ def test_apply_suppressions_with_expiring_suppressions(mock_check):
     plugin_context = MagicMock()
     plugin_context.config.global_settings.ignore_paths = []
     plugin_context.config.global_settings.suppressions = [
-        Suppression(
+        AshSuppression(
             rule_id="TEST001",
             path="to/test.py",
             reason="Expiring",

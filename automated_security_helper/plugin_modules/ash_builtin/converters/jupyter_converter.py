@@ -74,7 +74,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
 
         # Add warning if no Jupyter notebook files found
         if not ipynb_files:
-            ASH_LOGGER.warning(
+            ASH_LOGGER.info(
                 f"No Jupyter notebook (.ipynb) files found in {self.context.source_dir}"
             )
             return results

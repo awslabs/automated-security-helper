@@ -12,6 +12,7 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBas
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.core.constants import KNOWN_LOCKFILE_NAMES
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -270,7 +271,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 self._secrets_collection.root = Path(target).absolute()
             # Find all files to scan from the scan set
             scannable = [
-                item
+                str(item)
                 for item in (
                     [item for item in self.context.work_dir.glob("**/*.*")]
                     if target_type == "converted"
@@ -283,6 +284,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 if Path(item).name
                 not in [
                     "ash_aggregated_results.json",
+                    *KNOWN_LOCKFILE_NAMES,
                 ]
             ]
             if len(scannable) == 0:

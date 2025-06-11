@@ -26,7 +26,7 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.core import IgnorePathWithReason, Suppression
+from automated_security_helper.models.core import IgnorePathWithReason, AshSuppression
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
     CSVReporterConfig,
 )
@@ -274,7 +274,7 @@ class AshConfigGlobalSettingsSection(BaseModel):
     ] = []
 
     suppressions: Annotated[
-        List[Suppression],
+        List[AshSuppression],
         Field(
             description="Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers."
         ),

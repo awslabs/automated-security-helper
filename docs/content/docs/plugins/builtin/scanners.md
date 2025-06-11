@@ -13,7 +13,7 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 | **[Detect-Secrets](#detect-secrets)** | Secret detection                | All text files                  | Entropy-based secret detection             |
 | **[Grype](#grype)**                   | Container vulnerability scanner | Container images, SBOMs         | CVE database matching                      |
 | **[NPM Audit](#npm-audit)**           | Node.js dependency scanner      | package.json, package-lock.json | NPM vulnerability database                 |
-| **[OpenGrep](#opengrep)**             | Code pattern matching           | Multiple languages              | Custom rule engine                         |
+| **[Opengrep](#opengrep)**             | Code pattern matching           | Multiple languages              | Custom rule engine                         |
 | **[Semgrep](#semgrep)**               | Static analysis scanner         | 30+ languages                   | Community and custom rules                 |
 | **[Syft](#syft)**                     | SBOM generator                  | Container images, filesystems   | Software inventory generation              |
 
@@ -198,9 +198,9 @@ scanners:
 
 ---
 
-### OpenGrep
+### Opengrep
 
-**Purpose**: Fast code pattern matching with custom rule support.
+**Purpose**: Open source fork of Semgrep. Static analysis with extensive rule library covering security, correctness, and performance.
 
 **Configuration**:
 ```yaml

@@ -4,7 +4,7 @@ import pytest
 from datetime import date, timedelta
 from pydantic import ValidationError
 
-from automated_security_helper.models.core import Suppression
+from automated_security_helper.models.core import AshSuppression
 
 
 class TestSuppression:
@@ -12,7 +12,7 @@ class TestSuppression:
 
     def test_suppression_model_valid(self):
         """Test that a valid suppression model can be created."""
-        suppression = Suppression(
+        suppression = AshSuppression(
             rule_id="RULE-123",
             path="src/example.py",
             line_start=10,
@@ -29,7 +29,7 @@ class TestSuppression:
 
     def test_suppression_model_minimal(self):
         """Test that a minimal suppression model can be created."""
-        suppression = Suppression(
+        suppression = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
@@ -44,7 +44,7 @@ class TestSuppression:
     def test_suppression_model_invalid_line_range(self):
         """Test that a suppression model with invalid line range raises an error."""
         with pytest.raises(ValidationError) as excinfo:
-            Suppression(
+            AshSuppression(
                 reason="Test suppression",
                 rule_id="RULE-123",
                 path="src/example.py",
@@ -58,7 +58,7 @@ class TestSuppression:
     def test_suppression_model_invalid_expiration_format(self):
         """Test that a suppression model with invalid expiration format raises an error."""
         with pytest.raises(ValidationError) as excinfo:
-            Suppression(
+            AshSuppression(
                 reason="Test suppression",
                 rule_id="RULE-123",
                 path="src/example.py",
@@ -70,7 +70,7 @@ class TestSuppression:
         """Test that a suppression model with expired date raises an error."""
         yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
         with pytest.raises(ValidationError) as excinfo:
-            Suppression(
+            AshSuppression(
                 reason="Test suppression",
                 rule_id="RULE-123",
                 path="src/example.py",
@@ -81,7 +81,7 @@ class TestSuppression:
     def test_suppression_model_future_date(self):
         """Test that a suppression model with future date is valid."""
         tomorrow = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
-        suppression = Suppression(
+        suppression = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",

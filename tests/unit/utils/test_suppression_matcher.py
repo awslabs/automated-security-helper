@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
-from automated_security_helper.models.core import Suppression
+from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.suppression_matcher import (
     _rule_id_matches,
@@ -38,7 +38,7 @@ def test_line_range_matches_with_none_line_start():
         line_start=None,
         line_end=None,
     )
-    suppression = Suppression(
+    suppression = AshSuppression(
         reason="Test suppression",
         rule_id="TEST-001",
         path="src/file.py",
@@ -64,7 +64,9 @@ def test_should_suppress_finding_with_invalid_expiration():
     )
 
     # Mock the Suppression class to bypass validation
-    with patch("automated_security_helper.utils.suppression_matcher.Suppression") as _:
+    with patch(
+        "automated_security_helper.utils.suppression_matcher.AshSuppression"
+    ) as _:
         # Create a mock suppression instance
         mock_suppression = MagicMock()
         mock_suppression.rule_id = "TEST-001"
@@ -85,7 +87,7 @@ def test_should_suppress_finding_with_invalid_expiration():
 def test_check_for_expiring_suppressions_with_invalid_date():
     """Test check_for_expiring_suppressions with invalid date format."""
     # Mock the Suppression class to bypass validation
-    with patch("automated_security_helper.utils.suppression_matcher.Suppression"):
+    with patch("automated_security_helper.utils.suppression_matcher.AshSuppression"):
         # Create a mock suppression instance
         mock_instance = MagicMock()
         mock_instance.rule_id = "TEST-001"
@@ -106,7 +108,7 @@ def test_check_for_expiring_suppressions_with_future_date():
     # Create a date that's beyond the threshold
     future_date = (datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d")
 
-    suppression = Suppression(
+    suppression = AshSuppression(
         reason="Test suppression",
         rule_id="TEST-001",
         path="src/file.py",
@@ -122,7 +124,7 @@ def test_check_for_expiring_suppressions_with_expiring_date():
     # Create a date that's within the threshold
     expiring_date = (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")
 
-    suppression = Suppression(
+    suppression = AshSuppression(
         reason="Test suppression",
         rule_id="TEST-001",
         path="src/file.py",

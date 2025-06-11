@@ -202,7 +202,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     package_locations = []
                     for node_path in vuln_info.get("nodes", []):
                         # Convert node_modules path to a file location
-                        rel_path = node_path.replace("node_modules/", "")
+                        rel_path = str(node_path).replace("node_modules/", "")
                         package_locations.append(rel_path)
 
                     # Create a result for this vulnerability

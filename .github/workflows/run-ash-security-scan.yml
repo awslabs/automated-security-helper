@@ -98,7 +98,7 @@ jobs:
         shell: bash
         run: |-
           uvx --from $ASH_UVX_SOURCE ash \
-            --source-dir . --output-dir ${{ inputs.output-dir }} ${{ inputs.ash-args }} --build-target ci ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}} --mode ${{ inputs.ash-mode }} ${{ inputs.verbose && '--verbose' }}
+            --source-dir . --output-dir ${{ inputs.output-dir }} ${{ inputs.ash-args }} --no-progress --build-target ci ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}} --mode ${{ inputs.ash-mode }} ${{ inputs.verbose && '--verbose' }}
 
       - name: Show ASH Summary Report
         if: success() || failure()

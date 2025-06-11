@@ -7,12 +7,14 @@ import fnmatch
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from automated_security_helper.models.core import Suppression
+from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-def matches_suppression(finding: FlatVulnerability, suppression: Suppression) -> bool:
+def matches_suppression(
+    finding: FlatVulnerability, suppression: AshSuppression
+) -> bool:
     """
     Determine if a finding matches a suppression rule.
 
@@ -24,7 +26,9 @@ def matches_suppression(finding: FlatVulnerability, suppression: Suppression) ->
         True if the finding matches the suppression rule, False otherwise
     """
     # Check if rule ID matches
-    if not _rule_id_matches(finding.rule_id, suppression.rule_id):
+    if suppression.rule_id and not _rule_id_matches(
+        finding.rule_id, suppression.rule_id
+    ):
         return False
 
     # Check if file path matches
@@ -58,7 +62,9 @@ def _file_path_matches(
     return fnmatch.fnmatch(finding_file_path, suppression_file_path)
 
 
-def _line_range_matches(finding: FlatVulnerability, suppression: Suppression) -> bool:
+def _line_range_matches(
+    finding: FlatVulnerability, suppression: AshSuppression
+) -> bool:
     """Check if the finding's line range overlaps with the suppression line range."""
     # If suppression doesn't specify line range, it matches any line
     if suppression.line_start is None and suppression.line_end is None:
@@ -94,8 +100,8 @@ def _line_range_matches(finding: FlatVulnerability, suppression: Suppression) ->
 
 
 def should_suppress_finding(
-    finding: FlatVulnerability, suppressions: List[Suppression]
-) -> Tuple[bool, Optional[Suppression]]:
+    finding: FlatVulnerability, suppressions: List[AshSuppression]
+) -> Tuple[bool, Optional[AshSuppression]]:
     """
     Determine if a finding should be suppressed based on the suppression rules.
 
@@ -131,8 +137,8 @@ def should_suppress_finding(
 
 
 def check_for_expiring_suppressions(
-    suppressions: List[Suppression], days_threshold: int = 30
-) -> List[Suppression]:
+    suppressions: List[AshSuppression], days_threshold: int = 30
+) -> List[AshSuppression]:
     """
     Check for suppressions that will expire within the specified number of days.
 

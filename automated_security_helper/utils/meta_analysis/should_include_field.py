@@ -13,7 +13,7 @@ def should_include_field(path: str) -> bool:
         return False
 
     # Normalize path format for consistent comparison
-    normalized_path = path.replace("[0]", "[]").replace("runs.", "runs[].")
+    normalized_path = str(path).replace("[0]", "[]").replace("runs.", "runs[].")
 
     # Include only fields under runs[].results
     if (

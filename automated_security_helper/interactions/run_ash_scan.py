@@ -343,6 +343,24 @@ def run_ash_scan(
             # Process excluded scanners
             final_excluded_scanners = exclude_scanners or []
 
+            final_show_progress = (
+                progress
+                and final_log_level
+                not in [
+                    AshLogLevel.QUIET,
+                    AshLogLevel.SIMPLE,
+                    AshLogLevel.VERBOSE,
+                    AshLogLevel.DEBUG,
+                ]
+                and os.environ.get("CI", None) is None
+                and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+                not in [
+                    "YES",
+                    "1",
+                    "TRUE",
+                ]
+            )
+
             orchestrator = ASHScanOrchestrator(
                 source_dir=source_dir,
                 output_dir=output_dir,
@@ -360,21 +378,7 @@ def run_ash_scan(
                 ),
                 no_cleanup=not cleanup,
                 output_formats=output_formats,
-                show_progress=progress
-                and final_log_level
-                not in [
-                    AshLogLevel.QUIET,
-                    AshLogLevel.SIMPLE,
-                    AshLogLevel.VERBOSE,
-                    AshLogLevel.DEBUG,
-                ]
-                and os.environ.get("CI", None) is not None
-                and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-                not in [
-                    "YES",
-                    "1",
-                    "TRUE",
-                ],
+                show_progress=final_show_progress,
                 simple_mode=simple,
                 color_system="auto" if color else None,
                 offline=(

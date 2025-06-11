@@ -5,7 +5,7 @@ from automated_security_helper.models.core import (
     ScanStatistics,
     IgnorePathWithReason,
     ToolArgs,
-    Suppression,
+    AshSuppression,
 )
 
 
@@ -96,7 +96,7 @@ def test_tool_args_with_extra_fields():
 
 def test_suppression_model_minimal():
     """Test the Suppression model with minimal fields."""
-    suppression = Suppression(
+    suppression = AshSuppression(
         reason="Test suppression", rule_id="TEST001", path="src/main.py"
     )
 
@@ -110,7 +110,7 @@ def test_suppression_model_minimal():
 
 def test_suppression_model_with_line_range():
     """Test the Suppression model with line range."""
-    suppression = Suppression(
+    suppression = AshSuppression(
         rule_id="TEST001",
         path="src/main.py",
         line_start=10,
@@ -130,7 +130,7 @@ def test_suppression_model_with_future_expiration():
     # Create a date 30 days in the future
     future_date = (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
 
-    suppression = Suppression(
+    suppression = AshSuppression(
         reason="Test suppression",
         rule_id="TEST001",
         path="src/main.py",
@@ -145,7 +145,7 @@ def test_suppression_model_with_future_expiration():
 def test_suppression_model_invalid_line_range():
     """Test the Suppression model with an invalid line range."""
     with pytest.raises(ValueError) as excinfo:
-        Suppression(
+        AshSuppression(
             reason="Test suppression",
             rule_id="TEST001",
             path="src/main.py",
@@ -159,7 +159,7 @@ def test_suppression_model_invalid_line_range():
 def test_suppression_model_invalid_expiration_format():
     """Test the Suppression model with an invalid expiration date format."""
     with pytest.raises(ValueError) as excinfo:
-        Suppression(
+        AshSuppression(
             reason="Test suppression",
             rule_id="TEST001",
             path="src/main.py",
@@ -175,7 +175,7 @@ def test_suppression_model_past_expiration():
     past_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     with pytest.raises(ValueError) as excinfo:
-        Suppression(
+        AshSuppression(
             reason="Test suppression",
             rule_id="TEST001",
             path="src/main.py",

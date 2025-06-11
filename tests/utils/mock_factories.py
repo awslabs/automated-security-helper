@@ -22,7 +22,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Suppression,
     Kind1,
 )
-from automated_security_helper.models.core import Suppression as CoreSuppression
+from automated_security_helper.models.core import AshSuppression as CoreSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig

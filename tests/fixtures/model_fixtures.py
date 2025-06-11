@@ -6,14 +6,14 @@
 import pytest
 import json
 
-from automated_security_helper.models.core import Suppression, IgnorePathWithReason
+from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 
 @pytest.fixture
 def sample_suppression():
     """Create a sample suppression for testing."""
-    return Suppression(
+    return AshSuppression(
         rule_id="TEST-001",
         path="src/example.py",
         reason="Test suppression",
@@ -23,7 +23,7 @@ def sample_suppression():
 @pytest.fixture
 def sample_suppression_with_lines():
     """Create a sample suppression with line numbers for testing."""
-    return Suppression(
+    return AshSuppression(
         rule_id="TEST-001",
         path="src/example.py",
         line_start=10,

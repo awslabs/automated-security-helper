@@ -54,10 +54,12 @@ class ToolArgs(BaseModel):
     extra_args: List[ToolExtraArg] = []
 
 
-class Suppression(IgnorePathWithReason):
+class AshSuppression(IgnorePathWithReason):
     """Represents a finding suppression rule."""
 
-    rule_id: Annotated[str, Field(..., description="Rule ID to suppress")]
+    rule_id: Annotated[str | None, Field(None, description="Rule ID to suppress")] = (
+        None
+    )
     line_start: Annotated[
         int | None, Field(None, description="(Optional) Starting line number")
     ] = None

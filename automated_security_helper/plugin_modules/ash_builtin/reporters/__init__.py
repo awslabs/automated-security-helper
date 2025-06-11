@@ -7,6 +7,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter
 from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter import (
     CycloneDXReporter,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
+    GitLabSASTReporter,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
     HtmlReporter,
 )
@@ -41,6 +44,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporte
 __all__ = [
     "CsvReporter",
     "CycloneDXReporter",
+    "GitLabSASTReporter",
     "HtmlReporter",
     "FlatJSONReporter",
     "FlatJsonReporter",

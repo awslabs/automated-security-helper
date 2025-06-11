@@ -1596,13 +1596,86 @@
           "default": [],
           "description": "Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers.",
           "items": {
-            "$ref": "#/$defs/automated_security_helper__models__core__Suppression"
+            "$ref": "#/$defs/AshSuppression"
           },
           "title": "Suppressions",
           "type": "array"
         }
       },
       "title": "AshConfigGlobalSettingsSection",
+      "type": "object"
+    },
+    "AshSuppression": {
+      "description": "Represents a finding suppression rule.",
+      "properties": {
+        "expiration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Expiration date (YYYY-MM-DD)",
+          "title": "Expiration"
+        },
+        "line_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Ending line number",
+          "title": "Line End"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Starting line number",
+          "title": "Line Start"
+        },
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
+        },
+        "rule_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Rule ID to suppress",
+          "title": "Rule Id"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "AshSuppression",
       "type": "object"
     },
     "Assessor": {
@@ -14111,7 +14184,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__Suppression"
+                "$ref": "#/$defs/Suppression"
               },
               "minItems": 0,
               "type": "array"
@@ -16940,6 +17013,83 @@
         }
       },
       "title": "SummaryStats",
+      "type": "object"
+    },
+    "Suppression": {
+      "additionalProperties": false,
+      "properties": {
+        "guid": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A stable, unique identifer for the suprression in the form of a GUID.",
+          "title": "Guid"
+        },
+        "justification": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A string representing the justification for the suppression.",
+          "title": "Justification"
+        },
+        "kind": {
+          "$ref": "#/$defs/Kind1",
+          "description": "A string that indicates where the suppression is persisted."
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Location"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Identifies the location associated with the suppression."
+        },
+        "properties": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PropertyBag"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Key/value pairs that provide additional information about the suppression."
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__State"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A string that indicates the state of the suppression."
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Suppression",
       "type": "object"
     },
     "Swid": {
@@ -20200,72 +20350,6 @@
       "title": "YAMLReporterConfigOptions",
       "type": "object"
     },
-    "automated_security_helper__models__core__Suppression": {
-      "description": "Represents a finding suppression rule.",
-      "properties": {
-        "expiration": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD)",
-          "title": "Expiration"
-        },
-        "line_end": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "(Optional) Ending line number",
-          "title": "Line End"
-        },
-        "line_start": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "(Optional) Starting line number",
-          "title": "Line Start"
-        },
-        "path": {
-          "description": "Path or pattern to exclude",
-          "title": "Path",
-          "type": "string"
-        },
-        "reason": {
-          "description": "Reason for exclusion",
-          "title": "Reason",
-          "type": "string"
-        },
-        "rule_id": {
-          "description": "Rule ID to suppress",
-          "title": "Rule Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path",
-        "reason",
-        "rule_id"
-      ],
-      "title": "Suppression",
-      "type": "object"
-    },
     "automated_security_helper__schemas__cyclonedx_bom_1_6_schema__Attachment": {
       "additionalProperties": false,
       "properties": {
@@ -20573,83 +20657,6 @@
       ],
       "title": "State",
       "type": "string"
-    },
-    "automated_security_helper__schemas__sarif_schema_model__Suppression": {
-      "additionalProperties": false,
-      "properties": {
-        "guid": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A stable, unique identifer for the suprression in the form of a GUID.",
-          "title": "Guid"
-        },
-        "justification": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A string representing the justification for the suppression.",
-          "title": "Justification"
-        },
-        "kind": {
-          "$ref": "#/$defs/Kind1",
-          "description": "A string that indicates where the suppression is persisted."
-        },
-        "location": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Location"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Identifies the location associated with the suppression."
-        },
-        "properties": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PropertyBag"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Key/value pairs that provide additional information about the suppression."
-        },
-        "state": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/automated_security_helper__schemas__sarif_schema_model__State"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A string that indicates the state of the suppression."
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "title": "Suppression",
-      "type": "object"
     },
     "automated_security_helper__schemas__sarif_schema_model__Tool": {
       "additionalProperties": false,

@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from rich import print
 from typing import Annotated, List, Optional
 import typer
@@ -320,6 +321,19 @@ def run_ash_scan_cli_command(
                 f"{poss_existing_results.name} not found in output directory at {poss_existing_results.as_posix()}"
             )
 
+    cli_final_show_progress = (
+        progress
+        and not verbose
+        and not precommit_mode
+        and os.environ.get("CI", None) is None
+        and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+        not in [
+            "YES",
+            "1",
+            "TRUE",
+        ]
+    )
+
     # Call run_ash_scan with all parameters
     run_ash_scan(
         source_dir=source_dir,
@@ -330,7 +344,7 @@ def run_ash_scan_cli_command(
         strategy=strategy,
         scanners=scanners,
         exclude_scanners=exclude_scanners,
-        progress=not precommit_mode and not verbose and progress,
+        progress=cli_final_show_progress,
         output_formats=output_formats,
         cleanup=cleanup,
         phases=phases,

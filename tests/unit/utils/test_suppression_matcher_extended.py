@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from automated_security_helper.models.core import Suppression
+from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.suppression_matcher import (
     matches_suppression,
@@ -92,7 +92,7 @@ class TestSuppressionMatcher:
         )
 
         # Create test suppressions
-        suppression_with_range = Suppression(
+        suppression_with_range = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
@@ -100,7 +100,7 @@ class TestSuppressionMatcher:
             line_end=20,
         )
 
-        suppression_single_line = Suppression(
+        suppression_single_line = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
@@ -108,7 +108,7 @@ class TestSuppressionMatcher:
             line_end=None,
         )
 
-        suppression_no_line = Suppression(
+        suppression_no_line = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
@@ -148,7 +148,7 @@ class TestSuppressionMatcher:
         )
 
         # Create test suppressions
-        suppression_match_all = Suppression(
+        suppression_match_all = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
@@ -156,25 +156,25 @@ class TestSuppressionMatcher:
             line_end=20,
         )
 
-        suppression_match_rule_only = Suppression(
+        suppression_match_rule_only = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/other.py",
         )
 
-        suppression_match_path_only = Suppression(
+        suppression_match_path_only = AshSuppression(
             reason="Test suppression",
             rule_id="OTHER-RULE",
             path="src/example.py",
         )
 
-        suppression_match_no_line = Suppression(
+        suppression_match_no_line = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
         )
 
-        suppression_no_match = Suppression(
+        suppression_no_match = AshSuppression(
             reason="Test suppression",
             rule_id="OTHER-RULE",
             path="src/other.py",
@@ -204,20 +204,20 @@ class TestSuppressionMatcher:
         )
 
         # Create test suppressions
-        suppression_match = Suppression(
+        suppression_match = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
         )
 
-        suppression_no_match = Suppression(
+        suppression_no_match = AshSuppression(
             reason="Test suppression",
             rule_id="OTHER-RULE",
             path="src/other.py",
         )
 
         tomorrow = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
-        suppression_not_expired = Suppression(
+        suppression_not_expired = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
@@ -261,42 +261,42 @@ class TestSuppressionMatcher:
         next_month = (date.today() + timedelta(days=29)).strftime("%Y-%m-%d")
         next_year = (date.today() + timedelta(days=365)).strftime("%Y-%m-%d")
 
-        suppression_today = Suppression(
+        suppression_today = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-1",
             path="src/example.py",
             expiration=today,
         )
 
-        suppression_tomorrow = Suppression(
+        suppression_tomorrow = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-2",
             path="src/example.py",
             expiration=tomorrow,
         )
 
-        suppression_next_week = Suppression(
+        suppression_next_week = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-3",
             path="src/example.py",
             expiration=next_week,
         )
 
-        suppression_next_month = Suppression(
+        suppression_next_month = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-4",
             path="src/example.py",
             expiration=next_month,
         )
 
-        suppression_next_year = Suppression(
+        suppression_next_year = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-5",
             path="src/example.py",
             expiration=next_year,
         )
 
-        suppression_no_expiration = Suppression(
+        suppression_no_expiration = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-6",
             path="src/example.py",

@@ -103,7 +103,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
 
         # Add warning if no archive files found
         if not archive_files:
-            ASH_LOGGER.warning(
+            ASH_LOGGER.info(
                 f"No archive files (.zip, .tar, .gz) found in {self.context.source_dir}"
             )
             return results

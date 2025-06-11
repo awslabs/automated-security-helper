@@ -26,5 +26,5 @@ def generate_jq_query(field_path: str) -> str:
         return f'. | select(has("{field_path}")) | select(.{field_path} != null)'
 
     # Default case for other paths
-    normalized_path = field_path.replace("[0]", "[]")
+    normalized_path = str(field_path).replace("[0]", "[]")
     return f'. | select(has("{normalized_path.split(".")[0]}")) | select(.{normalized_path} != null)'

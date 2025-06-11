@@ -2,7 +2,7 @@
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.models.core import Suppression, IgnorePathWithReason
+from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Run,
@@ -81,7 +81,7 @@ class TestSarifSuppressions:
             project_name="test-project",
             global_settings={
                 "suppressions": [
-                    Suppression(
+                    AshSuppression(
                         rule_id="RULE-123",
                         path="src/example.py",
                         reason="Test suppression",
@@ -174,7 +174,7 @@ class TestSarifSuppressions:
             project_name="test-project",
             global_settings={
                 "suppressions": [
-                    Suppression(
+                    AshSuppression(
                         rule_id="RULE-123",
                         path="src/example.py",
                         line_start=5,
@@ -252,7 +252,7 @@ class TestSarifSuppressions:
             project_name="test-project",
             global_settings={
                 "suppressions": [
-                    Suppression(
+                    AshSuppression(
                         rule_id="RULE-123",
                         path="src/example.py",
                         reason="Test suppression",
@@ -343,7 +343,7 @@ class TestSarifSuppressions:
                     )
                 ],
                 "suppressions": [
-                    Suppression(
+                    AshSuppression(
                         rule_id="RULE-123",
                         path="src/example.py",
                         reason="Test suppression",
@@ -361,7 +361,10 @@ class TestSarifSuppressions:
         # Apply suppressions
         result = apply_suppressions_to_sarif(sarif_report, plugin_context)
 
-        # Check that the first finding is suppressed
+        # Check that only one result remains (the second one was removed due to ignore_path)
+        assert len(result.runs[0].results) == 1
+
+        # Check that the remaining finding (first one) is suppressed
         assert result.runs[0].results[0].suppressions is not None
         assert len(result.runs[0].results[0].suppressions) == 1
         assert result.runs[0].results[0].suppressions[0].kind == "external"
@@ -370,11 +373,5 @@ class TestSarifSuppressions:
             in result.runs[0].results[0].suppressions[0].justification
         )
 
-        # Check that the second finding is suppressed due to ignore_path
-        assert result.runs[0].results[1].suppressions is not None
-        assert len(result.runs[0].results[1].suppressions) == 1
-        assert result.runs[0].results[1].suppressions[0].kind == "external"
-        assert (
-            "Test ignore path"
-            in result.runs[0].results[1].suppressions[0].justification
-        )
+        # The second finding should be completely removed due to ignore_path
+        # (not present in results at all)

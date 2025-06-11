@@ -81,7 +81,7 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
         ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
 
     # Replace backslashes with forward slashes for consistency
-    uri = uri.replace("\\", "/")
+    uri = str(uri).replace("\\", "/")
     return uri
 
 
@@ -250,8 +250,8 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
     import fnmatch
 
     # Normalize paths for comparison
-    path = path.replace("\\", "/")
-    pattern = pattern.replace("\\", "/")
+    path = str(path).replace("\\", "/")
+    pattern = str(pattern).replace("\\", "/")
     patterns = [
         pattern + "/**/*.*",
         pattern + "/*.*",
@@ -354,47 +354,20 @@ def apply_suppressions_to_sarif(
                                     ASH_WORK_DIR_NAME
                                 ).resolve()
                             ):
-                                # if path_matches_pattern(
-                                #     uri, "**/scanners/*/source"
-                                # ) or path_matches_pattern(uri, "**/scanners/*/converted"):
-                                # if re.match(
-                                #     pattern=r"scanners[\/\\]+[\w-]+[\/\\]+(source|converted)[\/\\]+",
-                                #     string=uri,
-                                #     flags=re.IGNORECASE,
-                                # ):
                                 ASH_LOGGER.verbose(
                                     f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'"
                                 )
                                 is_in_ignorable_path = True
                                 continue
+                            # Evaluate the global_settings.ignore_paths entries to see if this path matches an ignore_path
                             for ignore_path in ignore_paths:
                                 # Check if the URI matches the ignore path pattern
                                 if path_matches_pattern(uri, ignore_path.path):
-                                    # Initialize suppressions list if it doesn't exist
-                                    if not result.suppressions:
-                                        result.suppressions = []
-
-                                    # Add suppression
-                                    ASH_LOGGER.verbose(
-                                        f"Suppressing rule '{result.ruleId}' on location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
+                                    ASH_LOGGER.debug(
+                                        f"Ignorning finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
                                     )
-                                    suppression = Suppression(
-                                        kind=Kind1.external,
-                                        justification=f"(ASH) Suppressing finding on uri '{uri}' based on path match against pattern '{ignore_path.path}' with global reason: {ignore_path.reason}",
-                                    )
-                                    if len(result.suppressions) == 0:
-                                        result.suppressions.append(suppression)
-                                    else:
-                                        ASH_LOGGER.trace(
-                                            f"Multiple suppressions found for rule '{result.ruleId}' on location '{uri}'. Only the first suppression will be applied."
-                                        )
-                                    # result.level = Level.none
-                                    # result.kind = Kind.informational
+                                    is_in_ignorable_path = True
                                     break  # No need to check other ignore paths
-                                # else:
-                                #     ASH_LOGGER.verbose(
-                                #         f"Rule '{result.ruleId}' on location '{uri}' does not match global ignore path '{ignore_path.path}'"
-                                #     )
 
             # Check if result matches any suppression rule
             if not is_in_ignorable_path and suppressions:
@@ -455,7 +428,7 @@ def apply_suppressions_to_sarif(
                         # Add suppression
                         reason = matching_suppression.reason or "No reason provided"
                         ASH_LOGGER.verbose(
-                            f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule. Reason: [yellow]{reason}[/yellow]"
+                            f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
                         )
                         suppression = Suppression(
                             kind=Kind1.external,

@@ -65,8 +65,10 @@ def get_related_test_files(changed_files: List[str]) -> List[str]:
         # For source files, find corresponding test files
         if file_path.startswith("automated_security_helper/"):
             # Extract the module path
-            module_path = file_path.replace("automated_security_helper/", "").replace(
-                ".py", ""
+            module_path = (
+                str(file_path)
+                .replace("automated_security_helper/", "")
+                .replace(".py", "")
             )
             module_parts = module_path.split("/")
 
