@@ -77,7 +77,7 @@ ash scan --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "
 6. Configure multiple scanner options:
    ```bash
    ash scan \
-     --config-overrides 'scanners.bandit.options.confidence_level=high' \
+     --config-overrides 'scanners.bandit.options.confidence_level=HIGH' \
      --config-overrides 'scanners.bandit.options.ignore_nosec=true'
    ```
 
@@ -103,7 +103,7 @@ scanners:
   bandit:
     enabled: true
     options:
-      confidence_level: high
+      confidence_level: HIGH
 reporters:
   markdown:
     enabled: true
@@ -176,7 +176,7 @@ ash config validate
 You can also validate with overrides:
 
 ```bash
-ash config validate --config-overrides 'scanners.bandit.options.confidence_level=high'
+ash config validate --config-overrides 'scanners.bandit.options.confidence_level=HIGH'
 ```
 
 ### Custom Plugins

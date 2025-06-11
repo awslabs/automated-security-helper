@@ -32,6 +32,24 @@ ASH_CONFIG_FILE_NAMES = [
     "ash.json",
 ]
 
+KNOWN_LOCKFILE_NAMES = [
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "npm-shrinkwrap.json",
+    "poetry.lock",
+    "pipenv.lock",
+    "conda-lock.yml",
+    "conda-lock.yaml",
+    "conda-environment.yml",
+    "conda-environment.yaml",
+    "environment.yml",
+    "environment.yaml",
+    "requirements.txt",
+    "Pipfile",
+    "Pipfile.lock",
+]
+
 KNOWN_SCANNABLE_EXTENSIONS = [
     # JavaScript and TypeScript ecosystem
     "js",

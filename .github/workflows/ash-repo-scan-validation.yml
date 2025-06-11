@@ -74,9 +74,9 @@ jobs:
           #   method: python-container
           #   platform: windows/amd64
           ### Temp disabled to not impact others as this currently hangs
-          # - os: windows-latest
-          #   method: python-local
-          #   platform: windows/amd64
+          - os: windows-latest
+            method: python-local
+            platform: windows/amd64
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -136,23 +136,30 @@ jobs:
         # It should fail if there are findings in the scan, but that's a valid test for us still.
         shell: bash
         continue-on-error: true
+        timeout-minutes: 10
         run: |
           echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }})"
+          echo "ASH Version:"
           ash --version
+          echo "ASH Help:"
           ash --help
-          ash scan --mode=container --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress  --config ./.ash/.ash_no_ignore.yaml
+          echo "ASH Scan Output:"
+          ash scan --mode container --build-target ci --verbose --no-progress  --config ./.ash/.ash_no_ignore.yaml
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
         # It should fail if there are findings in the scan, but that's a valid test for us still.
-        shell: bash
         continue-on-error: true
+        timeout-minutes: 4
         run: |
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
+          echo "ASH Version:"
           ash --version
+          echo "ASH Help:"
           ash --help
-          ash scan --mode=local --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --no-progress --config ./.ash/.ash_no_ignore.yaml
+          echo "ASH Scan Output:"
+          ash scan --mode local --build-target ci --verbose --no-progress --config ./.ash/.ash_no_ignore.yaml
 
       ############ PowerShell #########
 
@@ -162,6 +169,7 @@ jobs:
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
         # It should fail if there are findings in the scan, but that's a valid test for us still.
         continue-on-error: true
+        timeout-minutes: 10
         run: |
           Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
           . ./utils/ash_helpers.ps1
@@ -174,14 +182,18 @@ jobs:
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
         # It should fail if there are findings in the scan, but that's a valid test for us still.
         continue-on-error: true
+        timeout-minutes: 10
         if: matrix.method == 'bash'
         shell: bash
         run: |
           echo "Testing ASH using Bash on ${{ matrix.os }} (${{ matrix.platform }})"
           chmod +x ./ash
+          echo "ASH Version:"
           ./ash --version
+          echo "ASH Help:"
           ./ash --help
-          ./ash --build-target ci --source-dir "$(pwd)" --output-dir "$(pwd)/.ash/ash_output" --verbose --debug --config ./.ash/.ash_no_ignore.yaml
+          echo "ASH Scan Output:"
+          ./ash --build-target ci --verbose --config ./.ash/.ash_no_ignore.yaml
 
 
       - name: Verify scan completed

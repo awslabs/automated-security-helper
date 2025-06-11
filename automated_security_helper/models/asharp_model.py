@@ -268,7 +268,9 @@ class AshAggregatedResults(BaseModel):
         Returns:
             dict: A simple dictionary representation of the AshAggregatedResults
         """
-        conf = self.ash_config.model_dump(by_alias=True, exclude_unset=True)
+        conf = {}
+        if self.ash_config is not None:
+            conf = self.ash_config.model_dump(by_alias=True, exclude_unset=True)
         if len(conf.keys()) == 0:
             conf = get_default_config()
         simple_dict = {
@@ -423,6 +425,42 @@ class AshAggregatedResults(BaseModel):
                     if result.properties:
                         properties = result.properties.model_dump(exclude_none=True)
 
+                    # Extract tags
+                    tags = []
+                    if result.properties and hasattr(result.properties, "tags"):
+                        tags = result.properties.tags
+
+                    # Try to get the actual scanner name from properties
+                    actual_scanner = tool_name
+                    if result.properties and hasattr(result.properties, "scanner_name"):
+                        actual_scanner = result.properties.scanner_name
+                    elif result.properties and hasattr(
+                        result.properties, "scanner_details"
+                    ):
+                        if hasattr(result.properties.scanner_details, "tool_name"):
+                            actual_scanner = result.properties.scanner_details.tool_name
+
+                    # If we have tags that might indicate the scanner, use those as a fallback
+                    if (
+                        actual_scanner == "AWS Labs - Automated Security Helper"
+                        and tags
+                    ):
+                        for tag in tags:
+                            # Common scanner names that might appear in tags
+                            if tag.lower() in [
+                                "bandit",
+                                "semgrep",
+                                "checkov",
+                                "cfn-nag",
+                                "cdk-nag",
+                                "detect-secrets",
+                                "grype",
+                                "syft",
+                                "npm-audit",
+                            ]:
+                                actual_scanner = tag
+                                break
+
                     # Check if finding is suppressed
                     is_suppressed = False
                     supp_kind = None
@@ -436,6 +474,36 @@ class AshAggregatedResults(BaseModel):
                         supp = result.suppressions[0]
                         supp_kind = supp.kind or None
                         supp_reas = supp.justification or None
+
+                        # Update suppressed count in summary stats
+                        self.metadata.summary_stats.bump("suppressed")
+
+                        # Update scanner status info if available
+                        scanner_name = (
+                            actual_scanner.lower() if actual_scanner else None
+                        )
+                        if scanner_name and scanner_name in self.scanner_results:
+                            target_type = "source"  # Default to source
+                            if file_path and "converted" in file_path.lower():
+                                target_type = "converted"
+
+                            # Update suppressed finding count
+                            target_info = getattr(
+                                self.scanner_results[scanner_name], target_type
+                            )
+                            if target_info:
+                                if target_info.suppressed_finding_count is None:
+                                    target_info.suppressed_finding_count = 1
+                                else:
+                                    target_info.suppressed_finding_count += 1
+
+                                # Update severity counts
+                                if not hasattr(
+                                    target_info.severity_counts, "suppressed"
+                                ):
+                                    target_info.severity_counts.suppressed = 1
+                                else:
+                                    target_info.severity_counts.suppressed += 1
 
                     # Extract code snippet if available and not already extracted
                     if code_snippet is None:
@@ -468,10 +536,7 @@ class AshAggregatedResults(BaseModel):
                             ):
                                 code_snippet = location.physicalLocation.root.snippet
 
-                    # Extract tags
-                    tags = []
-                    if result.properties and hasattr(result.properties, "tags"):
-                        tags = result.properties.tags
+                    # Tags already extracted above
 
                     # Extract references
                     references = []
@@ -486,6 +551,11 @@ class AshAggregatedResults(BaseModel):
                                 references.append(
                                     loc.physicalLocation.root.artifactLocation.uri
                                 )
+
+                    # Extract tags
+                    tags = []
+                    if result.properties and hasattr(result.properties, "tags"):
+                        tags = result.properties.tags
 
                     # Try to get the actual scanner name from properties
                     actual_scanner = tool_name

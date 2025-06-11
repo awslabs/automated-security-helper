@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from rich import print
 from typing import Annotated, List, Optional
 import typer
@@ -188,6 +189,12 @@ def run_ash_scan_cli_command(
             help="Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value."
         ),
     ] = None,
+    ignore_suppressions: Annotated[
+        bool,
+        typer.Option(
+            help="Ignore all suppression rules and report all findings regardless of suppression status."
+        ),
+    ] = False,
     ### CONTAINER-RELATED OPTIONS
     build: Annotated[
         bool,
@@ -314,6 +321,19 @@ def run_ash_scan_cli_command(
                 f"{poss_existing_results.name} not found in output directory at {poss_existing_results.as_posix()}"
             )
 
+    cli_final_show_progress = (
+        progress
+        and not verbose
+        and not precommit_mode
+        and os.environ.get("CI", None) is None
+        and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+        not in [
+            "YES",
+            "1",
+            "TRUE",
+        ]
+    )
+
     # Call run_ash_scan with all parameters
     run_ash_scan(
         source_dir=source_dir,
@@ -324,7 +344,7 @@ def run_ash_scan_cli_command(
         strategy=strategy,
         scanners=scanners,
         exclude_scanners=exclude_scanners,
-        progress=not precommit_mode and not verbose and progress,
+        progress=cli_final_show_progress,
         output_formats=output_formats,
         cleanup=cleanup,
         phases=phases,
@@ -337,6 +357,7 @@ def run_ash_scan_cli_command(
         debug=debug,
         color=color,
         fail_on_findings=fail_on_findings,
+        ignore_suppressions=ignore_suppressions,
         mode=mode,
         show_summary=show_summary,
         simple=precommit_mode

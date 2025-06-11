@@ -20,11 +20,6 @@ from automated_security_helper.core.progress import (
     LiveProgressDisplay,
 )
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.adapters import (
-    register_converter_adapters,
-    register_scanner_adapters,
-    register_reporter_adapters,
-)
 from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugins.interfaces import IConverter, IReporter, IScanner
@@ -136,6 +131,11 @@ class ScanExecutionEngine:
         # Discover external plugins if enabled
         ash_plugin_manager.set_context(self._context)
 
+        # Load internal plugins first to ensure event callbacks are registered
+        from automated_security_helper.plugins.loader import load_internal_plugins
+
+        load_internal_plugins()
+
         # Combine plugin modules from config and CLI parameters
         config_plugin_modules = (
             getattr(self._context.config, "ash_plugin_modules", [])
@@ -158,28 +158,7 @@ class ScanExecutionEngine:
             load_additional_plugin_modules(combined_plugin_modules)
 
             # Discover plugins from specified modules
-            discovered_plugins = discover_plugins(
-                plugin_modules=combined_plugin_modules
-            )
-
-            # Register adapters for discovered plugins
-            if discovered_plugins.get("converters"):
-                ASH_LOGGER.debug(
-                    f"Registering {len(discovered_plugins['converters'])} discovered converter plugins"
-                )
-                register_converter_adapters(discovered_plugins["converters"])
-            if discovered_plugins.get("scanners"):
-                ASH_LOGGER.debug(
-                    f"Registering {len(discovered_plugins['scanners'])} discovered scanner plugins"
-                )
-                register_scanner_adapters(discovered_plugins["scanners"])
-            if discovered_plugins.get("reporters"):
-                ASH_LOGGER.debug(
-                    f"Registering {len(discovered_plugins['reporters'])} discovered reporter plugins"
-                )
-                register_reporter_adapters(discovered_plugins["reporters"])
-                register_reporter_adapters(discovered_plugins["reporters"])
-
+            discover_plugins(plugin_modules=combined_plugin_modules)
         # Config can override environment
         if self._context.config:
             if (
@@ -259,7 +238,7 @@ class ScanExecutionEngine:
         # Register custom scanners from build configuration
         # for scanner_config in self._context.config.build.custom_scanners:
         #     try:
-        #         from automated_security_helper.scanners.ash_default.custom_scanner import (
+        #         from automated_security_helper.plugin_modules.ash_builtin.scanners.custom_scanner import (
         #             CustomScanner,
         #         )
 

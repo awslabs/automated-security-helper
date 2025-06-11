@@ -4,7 +4,8 @@
 """Core models for security findings."""
 
 from typing import List, Annotated
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from datetime import datetime, date
 
 
 class ToolExtraArg(BaseModel):
@@ -36,6 +37,9 @@ class IgnorePathWithReason(BaseModel):
 
     path: Annotated[str, Field(..., description="Path or pattern to exclude")]
     reason: Annotated[str, Field(..., description="Reason for exclusion")]
+    expiration: Annotated[
+        str | None, Field(None, description="(Optional) Expiration date (YYYY-MM-DD)")
+    ] = None
 
 
 class ToolArgs(BaseModel):
@@ -48,3 +52,46 @@ class ToolArgs(BaseModel):
     format_arg: str | None = None
     format_arg_value: str | None = None
     extra_args: List[ToolExtraArg] = []
+
+
+class AshSuppression(IgnorePathWithReason):
+    """Represents a finding suppression rule."""
+
+    rule_id: Annotated[str | None, Field(None, description="Rule ID to suppress")] = (
+        None
+    )
+    line_start: Annotated[
+        int | None, Field(None, description="(Optional) Starting line number")
+    ] = None
+    line_end: Annotated[
+        int | None, Field(None, description="(Optional) Ending line number")
+    ] = None
+
+    @field_validator("line_end")
+    def validate_line_range(cls, v, values):
+        """Validate that line_end is greater than or equal to line_start if both are provided."""
+        if (
+            v is not None
+            and hasattr(values, "data")
+            and values.data.get("line_start") is not None
+            and v < values.data["line_start"]
+        ):
+            raise ValueError("line_end must be greater than or equal to line_start")
+        return v
+
+    @field_validator("expiration")
+    def validate_expiration_date(cls, v):
+        """Validate that expiration date is in the correct format and is a valid date."""
+        if v is not None:
+            try:
+                # Parse the date string to ensure it's a valid date
+                expiration_date = datetime.strptime(v, "%Y-%m-%d").date()
+                # Check if the date is in the future
+                if expiration_date < date.today():
+                    raise ValueError("expiration date must be in the future")
+                return v
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid expiration date format. Use YYYY-MM-DD: {str(e)}"
+                )
+        return v

@@ -19,7 +19,7 @@ def get_normalized_filename(str_to_normalize: str | Path) -> str:
     if isinstance(str_to_normalize, Path):
         str_to_normalize = get_shortest_name(input=str_to_normalize)
 
-    str_to_normalize = str_to_normalize.replace("/", "__").replace(".", "__")
+    str_to_normalize = str(str_to_normalize).replace("/", "__").replace(".", "__")
 
     normalized = re.sub(
         pattern=r"\W+",

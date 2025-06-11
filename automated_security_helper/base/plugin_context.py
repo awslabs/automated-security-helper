@@ -25,6 +25,9 @@ class PluginContext(BaseModel):
         Path, Field(description="Working directory for temporary files")
     ] = None
     config: Annotated["AshConfig", Field(description="ASH configuration")] = None
+    ignore_suppressions: Annotated[
+        bool, Field(description="Ignore all suppression rules")
+    ] = False
 
     @field_validator("config")
     def validate_config(cls, value):

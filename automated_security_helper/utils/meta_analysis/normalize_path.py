@@ -1,22 +1,23 @@
 def normalize_path(path: str) -> str:
     """
-    Normalize a file path for comparison.
+    Normalize a field path by extracting the leaf field name.
+
+    For example:
+    - 'runs[0].results[0].ruleId' -> 'ruleId'
+    - 'tool.driver.name' -> 'name'
+    - 'runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri' -> 'uri'
 
     Args:
-        path: File path
+        path: Field path
 
     Returns:
-        Normalized path
+        Normalized path (leaf field name)
     """
-    # Remove file:// prefix
-    if path.startswith("file://"):
-        path = path[7:]
+    # Extract the leaf field name (last part after the dot)
+    if "." in path:
+        # Handle array notation by removing array indices
+        parts = path.split(".")
+        return parts[-1].split("[")[0]
 
-    # Convert backslashes to forward slashes
-    path = path.replace("\\", "/")
-
-    # Get just the filename if paths are very different
-    if "/" in path:
-        return path.split("/")[-1]
-
-    return path
+    # Handle case where there's no dot but might have array notation
+    return path.split("[")[0]

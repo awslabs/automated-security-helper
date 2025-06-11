@@ -1,3 +1,8 @@
+# TEMP
+/automated_security_helper/identifiers/
+/fix_*.py
+
+# ASH Ignores
 utils/cfn-to-cdk/cfn_to_cdk/
 utils/cfn-to-cdk/cdk.out/
 /**/aggregated_results.txt
@@ -14,6 +19,7 @@ test_output.json
 tests/pytest-temp/
 output/
 .*q/
+.kir*/
 /Amazon*.md
 .envrc
 utils/try*.sh

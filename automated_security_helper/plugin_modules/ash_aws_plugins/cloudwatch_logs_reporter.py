@@ -26,10 +26,15 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         str | None,
         Field(
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}"
+            default_factory=lambda: os.environ.get(
+                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
+            ),
+            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
         ),
-    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None))
-    log_group_name: str | None = os.environ.get("ASH_LOG_GROUP_NAME", None)
+    ]
+    log_group_name: str | None = Field(
+        default_factory=lambda: os.environ.get("ASH_CLOUDWATCH_LOG_GROUP_NAME", None)
+    )
     log_stream_name: str = "ASHScanResults"
 
 

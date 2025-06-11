@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-from typing import TYPE_CHECKING, Any, Dict, Annotated, List, Literal
+from typing import TYPE_CHECKING, Any, Callable, Dict, Annotated, List, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
+from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
@@ -20,7 +21,7 @@ class AshPluginRegistration(BaseModel):
     plugin_module_path: Annotated[
         str,
         Field(
-            description="The module path containing the plugin. This module will be imported at the start of ASH to identify plugins to use. Example: `automated_security_helper.scanners.ash_default`"
+            description="The module path containing the plugin. This module will be imported at the start of ASH to identify plugins to use. Example: `automated_security_helper.plugin_modules.ash_builtin.scanners`"
         ),
     ]
     description: Annotated[
@@ -55,6 +56,12 @@ class AshPluginLibrary(BaseModel):
             description="A dictionary of scanners to register with the plugin manager"
         ),
     ] = {}
+    event_callbacks: Annotated[
+        Dict[AshEventType, List[Callable]],
+        Field(
+            description="A dictionary of event callbacks to register with the plugin manager"
+        ),
+    ] = {}
 
 
 class AshPluginManager(BaseModel):
@@ -72,33 +79,32 @@ class AshPluginManager(BaseModel):
 
     def subscribe(self, event_type, callback):
         """Subscribe a callback to a specific event type"""
-        if not hasattr(self, "_subscribers"):
-            self._subscribers = {}
+        if event_type not in self.plugin_library.event_callbacks:
+            self.plugin_library.event_callbacks[event_type] = []
 
-        if event_type not in self._subscribers:
-            self._subscribers[event_type] = []
-
-        self._subscribers[event_type].append(callback)
+        self.plugin_library.event_callbacks[event_type].append(callback)
         ASH_LOGGER.debug(
-            f"Subscribed callback to event {event_type}. Total subscribers for this event: {len(self._subscribers[event_type])}"
+            f"Subscribed callback to event {event_type}. Total subscribers for this event: {len(self.plugin_library.event_callbacks[event_type])}"
         )
         return callback  # Return for decorator usage
 
     def notify(self, event_type, *args, **kwargs):
         """Notify all subscribers of an event"""
-        if not hasattr(self, "_subscribers"):
-            ASH_LOGGER.debug(f"No subscribers dictionary exists for event {event_type}")
+        if not hasattr(self.plugin_library, "event_callbacks"):
+            ASH_LOGGER.debug(
+                f"No event callbacks dictionary exists for event {event_type}"
+            )
             return []
 
-        if event_type not in self._subscribers:
+        if event_type not in self.plugin_library.event_callbacks:
             ASH_LOGGER.debug(f"No subscribers for event {event_type}")
             return []
 
         ASH_LOGGER.debug(
-            f"Notifying {len(self._subscribers[event_type])} subscribers of event {event_type}"
+            f"Notifying {len(self.plugin_library.event_callbacks[event_type])} subscribers of event {event_type}"
         )
         results = []
-        for callback in self._subscribers[event_type]:
+        for callback in self.plugin_library.event_callbacks[event_type]:
             ASH_LOGGER.debug(
                 f"Calling subscriber callback {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}"
             )

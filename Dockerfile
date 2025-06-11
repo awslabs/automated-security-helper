@@ -1,5 +1,5 @@
 #checkov:skip=CKV_DOCKER_7:Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
-ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
+ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-bullseye
 
 # First stage: Build poetry requirements
 FROM ${BASE_IMAGE} AS poetry-reqs
@@ -192,12 +192,6 @@ ENV _ASH_EXEC_MODE="local"
 #
 RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
 ENV PATH="${ASH_BIN_PATH}:$PATH"
-
-#
-# Explicit Semgrep install to resolve underlying dependency
-# resolution issues when running inside the container
-#
-RUN python3 -m pip install semgrep --force
 
 #
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)

@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from typing import List
+from pydantic import BaseModel
 import typer
 import json
 import sys
@@ -18,6 +19,7 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget
 from automated_security_helper.core.enums import Phases
+from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.enums import Strategy
 from automated_security_helper.core.enums import RunMode
 from automated_security_helper.interactions.run_ash_container import (
@@ -69,6 +71,7 @@ def run_ash_scan(
     debug: bool = False,
     color: bool = True,
     fail_on_findings: bool | None = None,
+    ignore_suppressions: bool = False,
     mode: RunMode = RunMode.local,
     show_summary: bool = True,
     log_level: AshLogLevel = AshLogLevel.INFO,
@@ -99,7 +102,6 @@ def run_ash_scan(
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
     from automated_security_helper.core.enums import ExecutionStrategy
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
-    from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.utils.log import get_logger
 
     final_log_level = (
@@ -141,7 +143,8 @@ def run_ash_scan(
         use_color=color,
         simple_format=simple_logging,  # Pass the simple flag to the logger
     )
-
+    # Initialize results as None at the start to avoid UnboundLocalError
+    results = None
     # If mode is container, run the container version
     if mode == RunMode.container:
         # Pass the current context to run_ash_container
@@ -220,10 +223,10 @@ def run_ash_scan(
                     results = AshAggregatedResults.model_validate_json(content)
                 except Exception as e:
                     logger.error(f"Failed to parse results file: {e}")
-                    raise sys.exit(1) from None
+                    sys.exit(1)
         else:
             logger.error(f"Results file not found at {output_file}")
-            raise sys.exit(1) from None
+            sys.exit(1)
 
     else:
         # Local mode - use the orchestrator directly
@@ -340,6 +343,24 @@ def run_ash_scan(
             # Process excluded scanners
             final_excluded_scanners = exclude_scanners or []
 
+            final_show_progress = (
+                progress
+                and final_log_level
+                not in [
+                    AshLogLevel.QUIET,
+                    AshLogLevel.SIMPLE,
+                    AshLogLevel.VERBOSE,
+                    AshLogLevel.DEBUG,
+                ]
+                and os.environ.get("CI", None) is None
+                and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+                not in [
+                    "YES",
+                    "1",
+                    "TRUE",
+                ]
+            )
+
             orchestrator = ASHScanOrchestrator(
                 source_dir=source_dir,
                 output_dir=output_dir,
@@ -357,21 +378,7 @@ def run_ash_scan(
                 ),
                 no_cleanup=not cleanup,
                 output_formats=output_formats,
-                show_progress=progress
-                and final_log_level
-                not in [
-                    AshLogLevel.QUIET,
-                    AshLogLevel.SIMPLE,
-                    AshLogLevel.VERBOSE,
-                    AshLogLevel.DEBUG,
-                ]
-                and os.environ.get("CI", None) is not None
-                and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-                not in [
-                    "YES",
-                    "1",
-                    "TRUE",
-                ],
+                show_progress=final_show_progress,
                 simple_mode=simple,
                 color_system="auto" if color else None,
                 offline=(
@@ -384,6 +391,7 @@ def run_ash_scan(
                     Path(existing_results) if existing_results else None
                 ),
                 python_based_plugins_only=python_based_plugins_only,
+                ignore_suppressions=ignore_suppressions,
                 ash_plugin_modules=ash_plugin_modules,  # Pass the ash_plugin_modules parameter to the orchestrator
             )
 
@@ -413,7 +421,7 @@ def run_ash_scan(
             if simple and not quiet:
                 typer.echo("\nASH scan completed.")
 
-            if isinstance(results, AshAggregatedResults):
+            if isinstance(results, BaseModel):
                 content = results.model_dump_json(indent=2, by_alias=True)
             else:
                 content = json.dumps(results, indent=2, default=str)
@@ -444,7 +452,7 @@ def run_ash_scan(
             print(
                 f"[bold red]ERROR (1) Exiting due to exception during ASH scan: {e}[/bold red]",
             )
-            raise sys.exit(1) from None
+            sys.exit(1)
         finally:
             # Return to the starting directory
             os.chdir(starting_dir)
@@ -463,8 +471,7 @@ def run_ash_scan(
     )
 
     # Get the count of actionable findings from summary_stats
-    actionable_findings = results.metadata.summary_stats.actionable
-
+    actionable_findings = results.metadata.summary_stats.actionable if results else None
     # Only display the final metrics and guidance if show_summary is True
     if show_summary:
         # Calculate scan duration
@@ -493,7 +500,8 @@ def run_ash_scan(
             )
 
         # If there are actionable findings, provide guidance
-        if actionable_findings > 0:
+
+        if actionable_findings is not None and actionable_findings > 0:
             print("\n[magenta]=== Actionable findings detected! ===[/magenta]")
             print("To investigate...")
             print(
@@ -515,10 +523,8 @@ def run_ash_scan(
             )
 
     # Exit with non-zero code if configured to fail on findings and there are actionable findings
-    if (
-        final_fail_on_findings
-        and actionable_findings > 0
-        or actionable_findings is None
+    if final_fail_on_findings and (
+        actionable_findings is None or actionable_findings > 0
     ):
         # Document exit codes
         if show_summary and not quiet:
@@ -532,13 +538,19 @@ def run_ash_scan(
                 "  1: Error during execution",
             )
             print(
-                f"  2: Actionable findings detected when configured with fail_on_findings: {final_fail_on_findings} (default: True)",
+                f"  2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: {final_fail_on_findings}",
             )
+        if actionable_findings is None:
+            print(
+                "[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]"
+            )
+            sys.exit(
+                1
+            )  # Using exit code 1 specifically for errors due to None actionable findings
+        else:
             print(
                 f"[bold red]ERROR (2) Exiting due to {actionable_findings} actionable findings found in ASH scan[/bold red]",
             )
-        raise sys.exit(
-            2
-        ) from None  # Using exit code 2 specifically for actionable findings
+            sys.exit(2)  # Using exit code 2 specifically for actionable findings
 
     return results

@@ -16,6 +16,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Suppression,
     Kind1,
 )
+from automated_security_helper.utils.suppression_matcher import (
+    should_suppress_finding,
+    check_for_expiring_suppressions,
+)
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 
 def get_finding_id(
@@ -76,7 +81,7 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
         ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
 
     # Replace backslashes with forward slashes for consistency
-    uri = uri.replace("\\", "/")
+    uri = str(uri).replace("\\", "/")
     return uri
 
 
@@ -245,8 +250,8 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
     import fnmatch
 
     # Normalize paths for comparison
-    path = path.replace("\\", "/")
-    pattern = pattern.replace("\\", "/")
+    path = str(path).replace("\\", "/")
+    pattern = str(pattern).replace("\\", "/")
     patterns = [
         pattern + "/**/*.*",
         pattern + "/*.*",
@@ -274,16 +279,54 @@ def apply_suppressions_to_sarif(
     plugin_context: PluginContext,
 ) -> SarifReport:
     """
-    Apply suppressions to a SARIF report based on global ignore paths.
+    Apply suppressions to a SARIF report based on global ignore paths and suppression rules.
 
     Args:
         sarif_report: The SARIF report to modify
-        ignore_paths: List of paths to ignore with reasons
+        plugin_context: Plugin context containing configuration
 
     Returns:
         The modified SARIF report with suppressions applied
     """
     ignore_paths = plugin_context.config.global_settings.ignore_paths or []
+    suppressions = plugin_context.config.global_settings.suppressions or []
+
+    # If ignore_suppressions flag is set, skip applying suppressions
+    if (
+        hasattr(plugin_context, "ignore_suppressions")
+        and plugin_context.ignore_suppressions
+    ):
+        ASH_LOGGER.info(
+            "Ignoring all suppression rules as requested by --ignore-suppressions flag"
+        )
+        return sarif_report
+
+    # Check for expiring suppressions and warn the user
+    expiring_suppressions = check_for_expiring_suppressions(suppressions)
+    if expiring_suppressions:
+        ASH_LOGGER.warning("The following suppressions will expire within 30 days:")
+        for suppression in expiring_suppressions:
+            expiration_date = suppression.expiration
+            rule_id = suppression.rule_id
+            file_path = suppression.path
+            reason = suppression.reason or "No reason provided"
+            ASH_LOGGER.warning(
+                f"  - Rule '{rule_id}' for '{file_path}' expires on {expiration_date}. Reason: {reason}"
+            )
+
+    # Check for expiring suppressions and warn the user
+    expiring_suppressions = check_for_expiring_suppressions(suppressions)
+    if expiring_suppressions:
+        ASH_LOGGER.warning("The following suppressions will expire within 30 days:")
+        for suppression in expiring_suppressions:
+            expiration_date = suppression.expiration
+            rule_id = suppression.rule_id
+            file_path = suppression.path
+            reason = suppression.reason or "No reason provided"
+            ASH_LOGGER.warning(
+                f"  - Rule '{rule_id}' for '{file_path}' expires on {expiration_date}. Reason: {reason}"
+            )
+
     if not sarif_report or not sarif_report.runs:
         return sarif_report
     for run in sarif_report.runs:
@@ -311,47 +354,91 @@ def apply_suppressions_to_sarif(
                                     ASH_WORK_DIR_NAME
                                 ).resolve()
                             ):
-                                # if path_matches_pattern(
-                                #     uri, "**/scanners/*/source"
-                                # ) or path_matches_pattern(uri, "**/scanners/*/converted"):
-                                # if re.match(
-                                #     pattern=r"scanners[\/\\]+[\w-]+[\/\\]+(source|converted)[\/\\]+",
-                                #     string=uri,
-                                #     flags=re.IGNORECASE,
-                                # ):
                                 ASH_LOGGER.verbose(
                                     f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'"
                                 )
                                 is_in_ignorable_path = True
                                 continue
+                            # Evaluate the global_settings.ignore_paths entries to see if this path matches an ignore_path
                             for ignore_path in ignore_paths:
                                 # Check if the URI matches the ignore path pattern
                                 if path_matches_pattern(uri, ignore_path.path):
-                                    # Initialize suppressions list if it doesn't exist
-                                    if not result.suppressions:
-                                        result.suppressions = []
-
-                                    # Add suppression
-                                    ASH_LOGGER.verbose(
-                                        f"Suppressing rule '{result.ruleId}' on location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
+                                    ASH_LOGGER.debug(
+                                        f"Ignorning finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
                                     )
-                                    suppression = Suppression(
-                                        kind=Kind1.external,
-                                        justification=f"(ASH) Suppressing finding on uri '{uri}' based on path match against pattern '{ignore_path.path}' with global reason: {ignore_path.reason}",
-                                    )
-                                    if len(result.suppressions) == 0:
-                                        result.suppressions.append(suppression)
-                                    else:
-                                        ASH_LOGGER.trace(
-                                            f"Multiple suppressions found for rule '{result.ruleId}' on location '{uri}'. Only the first suppression will be applied."
-                                        )
-                                    # result.level = Level.none
-                                    # result.kind = Kind.informational
+                                    is_in_ignorable_path = True
                                     break  # No need to check other ignore paths
-                                # else:
-                                #     ASH_LOGGER.verbose(
-                                #         f"Rule '{result.ruleId}' on location '{uri}' does not match global ignore path '{ignore_path.path}'"
-                                #     )
+
+            # Check if result matches any suppression rule
+            if not is_in_ignorable_path and suppressions:
+                # Convert SARIF result to FlatVulnerability for suppression matching
+                flat_finding = None
+                if result.ruleId and result.locations and len(result.locations) > 0:
+                    location = result.locations[0]
+                    if (
+                        location.physicalLocation
+                        and location.physicalLocation.root.artifactLocation
+                    ):
+                        uri = location.physicalLocation.root.artifactLocation.uri
+                        line_start = None
+                        line_end = None
+                        if (
+                            hasattr(location.physicalLocation, "root")
+                            and location.physicalLocation.root
+                            and hasattr(location.physicalLocation.root, "region")
+                            and location.physicalLocation.root.region
+                        ):
+                            line_start = location.physicalLocation.root.region.startLine
+                            line_end = location.physicalLocation.root.region.endLine
+
+                        flat_finding = FlatVulnerability(
+                            id=get_finding_id(result.ruleId, uri, line_start, line_end),
+                            title=(
+                                result.message.root.text
+                                if result.message
+                                else "Unknown Issue"
+                            ),
+                            description=(
+                                result.message.root.text
+                                if result.message
+                                else "No description available"
+                            ),
+                            severity="MEDIUM",  # Default severity, not used for matching
+                            scanner=(
+                                run.tool.driver.name
+                                if run.tool and run.tool.driver
+                                else "unknown"
+                            ),
+                            scanner_type="SAST",  # Default type, not used for matching
+                            rule_id=result.ruleId,
+                            file_path=uri,
+                            line_start=line_start,
+                            line_end=line_end,
+                        )
+
+                if flat_finding:
+                    should_suppress, matching_suppression = should_suppress_finding(
+                        flat_finding, suppressions
+                    )
+                    if should_suppress:
+                        # Initialize suppressions list if it doesn't exist
+                        if not result.suppressions:
+                            result.suppressions = []
+                        if len(result.suppressions) >= 1:
+                            ASH_LOGGER.debug(
+                                f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues."
+                            )
+                            continue
+                        # Add suppression
+                        reason = matching_suppression.reason or "No reason provided"
+                        ASH_LOGGER.verbose(
+                            f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
+                        )
+                        suppression = Suppression(
+                            kind=Kind1.external,
+                            justification=f"(ASH) Suppressing finding for rule '{result.ruleId}' in '{flat_finding.file_path}' with reason: {reason}",
+                        )
+                        result.suppressions.append(suppression)
 
             # Add the result to the updated results list
             if not is_in_ignorable_path:

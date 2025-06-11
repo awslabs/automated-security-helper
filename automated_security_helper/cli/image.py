@@ -13,22 +13,6 @@ from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 def build_ash_image_cli_command(
     ctx: typer.Context,
     ### CONTAINER-RELATED OPTIONS
-    build: Annotated[
-        bool,
-        typer.Option(
-            "--build/--no-build",
-            "-b/-B",
-            help="Whether to build the ASH container image",
-        ),
-    ] = True,
-    run: Annotated[
-        bool,
-        typer.Option(
-            "--run/--no-run",
-            "-r/-R",
-            help="Whether to run the ASH container image",
-        ),
-    ] = False,
     force: Annotated[
         bool,
         typer.Option(
@@ -159,8 +143,8 @@ def build_ash_image_cli_command(
     # Call run_ash_scan with all parameters
     run_ash_scan(
         # Container-specific params
-        build=build,
-        run=run,
+        build=True,
+        run=False,
         force=force,
         oci_runner=oci_runner,
         build_target=build_target,
@@ -171,7 +155,7 @@ def build_ash_image_cli_command(
         custom_containerfile=custom_containerfile,
         custom_build_arg=custom_build_arg,
         # General params
-        show_summary=run,
+        show_summary=False,
         config=config,
         config_overrides=config_overrides,
         offline=offline,

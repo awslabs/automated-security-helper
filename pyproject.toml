@@ -60,12 +60,11 @@ regex = "^2024.5.15"
 sarif-tools = "^3.0.4"
 rich = "^13.5.3"
 semgrep = "^1.122.0"
-typer = "^0.15.4"
+typer = "^0.16.0"
 detect-secrets = "^1.5.0"
 jupyterlab = "^4.4.2"
-boto3 = ">=1.35.49"
+boto3 = ">=1.35.49" # Limited by Checkov
 textual = "^3.2.0"
-click = "<8.2.0"
 streamlit = "^1.45.1"
 
 [tool.poetry.group.dev.dependencies]
@@ -79,12 +78,14 @@ datamodel-code-generator = "*"
 lazydocs = "^0.4.8"
 mkdocs = "^1.6.1"
 mkdocs-material = "^9.6.11"
-mkdocs-awesome-pages-plugin = "^2.10.1"
 pymdown-extensions = "^10.14.3"
 mkdocstrings = {extras = ["python"], version = "^0.29.1"}
 mkdocs-autorefs = "^1.4.1"
 pytest-asyncio = "^0.26.0"
 types-boto3 = {extras = ["athena", "essential", "logs", "opensearch", "opensearchserverless", "s3", "securityhub", "securitylake", "sts"], version = "^1.38.12"}
+mkdocs-awesome-nav = "^3.1.2"
+mkdocs-mermaid2-plugin = "^1.2.1"
+pytest-xdist = "^3.7.0"
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]
@@ -100,11 +101,6 @@ disallow_untyped_defs = true
 init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
-
-[tool.pytest.ini_options]
-minversion = "6.0"
-addopts = "--cov-report xml:test-results/pytest.coverage.xml --cov-report term-missing --junit-xml=test-results/pytest.junit.xml --cov=automated_security_helper"
-asyncio_default_fixture_loop_scope = "module"
 
 [build-system]
 requires = ["poetry-core"]

@@ -84,6 +84,7 @@ ash scan [options]
 | `--strategy`                  | Whether to run scanners in parallel or sequential       | `parallel`            |                         |
 | `--log-level`                 | Set the log level                                       | `INFO`                |                         |
 | `--fail-on-findings`          | Exit with non-zero code if findings are found           | From config           |                         |
+| `--ignore-suppressions`       | Ignore all suppression rules and report all findings    | `False`               |                         |
 | `--offline`                   | Run in offline mode (container mode only)               | `False`               |                         |
 | `--offline-semgrep-rulesets`  | Semgrep rulesets for offline mode                       | `p/ci`                |                         |
 | `--build/--no-build`, `-b/-B` | Whether to build the ASH container image                | `True`                |                         |
