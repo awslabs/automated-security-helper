@@ -425,7 +425,7 @@ def apply_suppressions_to_sarif(
                         if not result.suppressions:
                             result.suppressions = []
                         if len(result.suppressions) >= 1:
-                            ASH_LOGGER.warning(
+                            ASH_LOGGER.debug(
                                 f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues."
                             )
                             continue

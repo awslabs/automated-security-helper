@@ -386,7 +386,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 self._plugin_log(
                     f"No package lock files found in {target_type} directory to scan. Exiting.",
                     target_type=target_type,
-                    level=logging.WARNING,
+                    level=logging.INFO,
                     append_to_stream="stderr",
                 )
                 self._post_scan(
