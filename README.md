@@ -19,7 +19,6 @@
 - [Basic Usage](#basic-usage)
   - [Sample Output](#sample-output)
 - [Configuration](#configuration)
-  - [Example Configurations](#example-configurations)
 - [Using ASH with pre-commit](#using-ash-with-pre-commit)
 - [Output Files](#output-files)
 - [FAQ](#faq)
@@ -132,16 +131,41 @@ ash --mode precommit
 ### Sample Output
 
 ```
-🔍 ASH v3.0.0-beta scan started
-✓ Converting files: 0.2s
-✓ Running scanners: 3.5s
-  ✓ bandit: 0.8s (5 findings)
-  ✓ semgrep: 1.2s (3 findings)
-  ✓ detect-secrets: 0.5s (1 finding)
-✓ Generating reports: 0.3s
+                                                 ASH Scan Results Summary
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━┳━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Scanner        ┃ Suppressed ┃ Critical ┃ High ┃ Medium ┃ Low ┃ Info ┃ Duration ┃ Actionable ┃ Result ┃ Threshold       ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━╇━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ bandit         │ 7          │ 0        │ 1    │ 0      │ 56  │ 0    │ 19.9s    │ 1          │ FAILED │ MEDIUM (global) │
+│ cdk-nag        │ 0          │ 0        │ 30   │ 0      │ 0   │ 5    │ 48.7s    │ 30         │ FAILED │ MEDIUM (global) │
+│ cfn-nag        │ 0          │ 0        │ 0    │ 15     │ 0   │ 0    │ 45.1s    │ 15         │ FAILED │ MEDIUM (global) │
+│ checkov        │ 10         │ 0        │ 25   │ 0      │ 0   │ 0    │ 38.9s    │ 25         │ FAILED │ MEDIUM (global) │
+│ detect-secrets │ 0          │ 0        │ 48   │ 0      │ 0   │ 0    │ 18.9s    │ 48         │ FAILED │ MEDIUM (global) │
+│ grype          │ 0          │ 0        │ 2    │ 1      │ 0   │ 0    │ 40.3s    │ 3          │ FAILED │ MEDIUM (global) │
+└────────────────┴────────────┴──────────┴──────┴────────┴─────┴──────┴──────────┴────────────┴────────┴─────────────────┘
+                                                     source-dir: '.'
+                                              output-dir: '.ash/ash_output'
 
-📊 Summary: 9 findings (2 HIGH, 5 MEDIUM, 2 LOW)
-📝 Reports available in: .ash/ash_output/reports/
+=== ASH Scan Completed in 1m 6s: Next Steps ===
+View detailed findings...
+  - SARIF: '.ash/ash_output/reports/ash.sarif'
+  - JUnit: '.ash/ash_output/reports/ash.junit.xml'
+  - ASH aggregated results JSON available at: '.ash/ash_output/ash_aggregated_results.json'
+
+=== Actionable findings detected! ===
+To investigate...
+  1. Open one of the summary reports for a user-friendly table of the findings:
+    - HTML report of all findings: '.ash/ash_output/reports/ash.html'
+    - Markdown summary: '.ash/ash_output/reports/ash.summary.md'
+    - Text summary: '.ash/ash_output/reports/ash.summary.txt'
+  2. Use ash report to view a short text summary of the scan in your terminal
+  3. Use ash inspect findings to explore the findings interactively
+  4. Review scanner-specific reports and outputs in the '.ash/ash_output/scanners' directory
+
+=== ASH Exit Codes ===
+  0: Success - No actionable findings or not configured to fail on findings
+  1: Error during execution
+  2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
+ERROR (2) Exiting due to 122 actionable findings found in ASH scan
 ```
 
 ## Configuration
@@ -167,79 +191,6 @@ reporters:
     options:
       include_detailed_findings: true
 ```
-
-### Example Configurations
-
-<details>
-<summary>Basic Security Scan</summary>
-
-```yaml
-project_name: basic-security-scan
-global_settings:
-  severity_threshold: HIGH
-scanners:
-  bandit:
-    enabled: true
-  semgrep:
-    enabled: true
-  detect-secrets:
-    enabled: true
-reporters:
-  markdown:
-    enabled: true
-  html:
-    enabled: true
-```
-</details>
-
-<details>
-<summary>Infrastructure as Code Scan</summary>
-
-```yaml
-project_name: iac-scan
-global_settings:
-  severity_threshold: MEDIUM
-scanners:
-  checkov:
-    enabled: true
-    options:
-      framework: ["cloudformation", "terraform", "kubernetes"]
-  cfn-nag:
-    enabled: true
-  cdk-nag:
-    enabled: true
-reporters:
-  json:
-    enabled: true
-  sarif:
-    enabled: true
-```
-</details>
-
-<details>
-<summary>CI/CD Pipeline Scan</summary>
-
-```yaml
-project_name: ci-pipeline-scan
-global_settings:
-  severity_threshold: MEDIUM
-  fail_on_findings: true
-scanners:
-  bandit:
-    enabled: true
-  semgrep:
-    enabled: true
-  detect-secrets:
-    enabled: true
-  checkov:
-    enabled: true
-reporters:
-  sarif:
-    enabled: true
-  markdown:
-    enabled: true
-```
-</details>
 
 ## Using ASH with pre-commit
 
