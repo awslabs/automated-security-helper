@@ -158,6 +158,10 @@ jobs:
           ash --version
           echo "ASH Help:"
           ash --help
+          echo "ASH Dependencies Install"
+          ash dependencies install
+          echo "ASH Config Get"
+          ash config get
           echo "ASH Scan Output:"
           ash scan --mode local --build-target ci --verbose --no-progress --config ./.ash/.ash_no_ignore.yaml
 
