@@ -30,6 +30,8 @@ COPY automated_security_helper*/ automated_security_helper/
 RUN tree .
 RUN git status --short || true
 RUN poetry build
+RUN python -m pip install poetry-plugin-export
+RUN poetry export --without-hashes --format=requirements.txt > requirements.txt
 
 # Second stage: Core ASH image
 FROM ${BASE_IMAGE} AS core
@@ -170,12 +172,10 @@ ENV NODE_OPTIONS=--max_old_space_size=512
 # COPY ASH source to /ash instead of / to isolate
 #
 COPY --from=poetry-reqs /src/dist/*.whl .
-RUN python3 -m pip install *.whl && rm *.whl
-
-# These aren't needed anymore, the Python package now handles
-# the /utils script logic as well as the shell entrypoint.
-# COPY ./utils/*.* /ash/utils/
-# COPY ./ash-multi /ash/ash
+COPY --from=poetry-reqs /src/requirements.txt .
+RUN python -m pip install -r requirements.txt && \
+    python -m pip install *.whl --no-deps && \
+    rm -rf *.whl requirements.txt
 
 #
 # Make sure the ash script is executable

@@ -42,6 +42,9 @@ automated-security-helper = "automated_security_helper.cli:ash_cli"
 generate-ash-schemas = 'automated_security_helper.schemas.generate_schemas:main'
 get-scan-set = 'automated_security_helper.utils.get_scan_set:main'
 
+[tool.poetry.requires-plugins]
+poetry-plugin-export = "*"
+
 [tool.poetry.dependencies]
 aws-cdk-lib = "^2.196.0"
 bandit = {extras = ["baseline", "sarif", "toml"], version = "^1.8.3"}
@@ -66,7 +69,6 @@ jupyterlab = "^4.4.2"
 boto3 = ">=1.35.49" # Limited by Checkov
 textual = "^3.2.0"
 streamlit = "^1.45.1"
-importlib-metadata = "<=7.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.2"
