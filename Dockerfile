@@ -101,16 +101,16 @@ RUN set -uex; \
 RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py
 RUN python3 -m pip install --no-cache-dir --upgrade pip
 
-#
-# Git (git-secrets)
-#
-RUN git clone https://github.com/awslabs/git-secrets.git && \
-    cd git-secrets && \
-    make install
+# #
+# # Git (git-secrets)
+# #
+# RUN git clone https://github.com/awslabs/git-secrets.git && \
+#     cd git-secrets && \
+#     make install
 
 
 #
-# YAML (Checkov, cfn-nag)
+# cfn-nag
 #
 RUN echo "gem: --no-document" >> /etc/gemrc && \
     gem install cfn-nag

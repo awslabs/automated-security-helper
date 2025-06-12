@@ -66,6 +66,7 @@ jupyterlab = "^4.4.2"
 boto3 = ">=1.35.49" # Limited by Checkov
 textual = "^3.2.0"
 streamlit = "^1.45.1"
+importlib-metadata = "<=7.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.2"
