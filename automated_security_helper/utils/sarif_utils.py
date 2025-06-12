@@ -2,10 +2,15 @@
 
 import os
 import random
+from typing import List
 import uuid
 from pathlib import Path
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.core.constants import (
+    ASH_WORK_DIR_NAME,
+    KNOWN_IGNORE_PATHS,
+)
+from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     ToolComponent,
@@ -288,7 +293,25 @@ def apply_suppressions_to_sarif(
     Returns:
         The modified SARIF report with suppressions applied
     """
-    ignore_paths = plugin_context.config.global_settings.ignore_paths or []
+    known_ignore_formatted: List[IgnorePathWithReason] = []
+    for item in KNOWN_IGNORE_PATHS:
+        known_ignore_formatted.append(
+            IgnorePathWithReason(
+                path=item,
+                reason="Known ignore path",
+            )
+        )
+        known_ignore_formatted.append(
+            IgnorePathWithReason(
+                path=f"**/{item}",
+                reason="Known ignore path",
+            )
+        )
+    ignore_paths = [
+        *(plugin_context.config.global_settings.ignore_paths or []),
+        *known_ignore_formatted,
+    ]
+
     suppressions = plugin_context.config.global_settings.suppressions or []
 
     # If ignore_suppressions flag is set, skip applying suppressions
@@ -300,19 +323,6 @@ def apply_suppressions_to_sarif(
             "Ignoring all suppression rules as requested by --ignore-suppressions flag"
         )
         return sarif_report
-
-    # Check for expiring suppressions and warn the user
-    expiring_suppressions = check_for_expiring_suppressions(suppressions)
-    if expiring_suppressions:
-        ASH_LOGGER.warning("The following suppressions will expire within 30 days:")
-        for suppression in expiring_suppressions:
-            expiration_date = suppression.expiration
-            rule_id = suppression.rule_id
-            file_path = suppression.path
-            reason = suppression.reason or "No reason provided"
-            ASH_LOGGER.warning(
-                f"  - Rule '{rule_id}' for '{file_path}' expires on {expiration_date}. Reason: {reason}"
-            )
 
     # Check for expiring suppressions and warn the user
     expiring_suppressions = check_for_expiring_suppressions(suppressions)
