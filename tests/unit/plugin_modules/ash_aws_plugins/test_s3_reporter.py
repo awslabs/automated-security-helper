@@ -240,7 +240,7 @@ def test_s3_reporter_report_json_format(mock_boto3, ash_temp_path):
 
     # Create mock model
     model = MagicMock()
-    model.scan_metadata.scan_time.strftime.return_value = "20250606-120000"
+    model.metadata.summary_stats.start = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
     # Mock file operations
@@ -297,7 +297,7 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3, ash_temp_path):
 
     # Create mock model
     model = MagicMock()
-    model.scan_metadata.scan_time.strftime.return_value = "20250606-120000"
+    model.metadata.summary_stats.start = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
     # Mock file operations
@@ -361,7 +361,7 @@ def test_s3_reporter_report_error_handling(mock_boto3, ash_temp_path):
 
     # Create mock model
     model = MagicMock()
-    model.scan_metadata.scan_time.strftime.return_value = "20250606-120000"
+    model.metadata.summary_stats.start = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
     # Mock Path operations

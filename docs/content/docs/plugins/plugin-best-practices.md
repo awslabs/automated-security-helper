@@ -72,7 +72,7 @@ class MyCustomScanner(ScannerPluginBase):
 
 ## Plugin Event Subscribers
 
-ASH supports event subscribers for reacting to events during the scan process. Event subscribers are registered using the `ASH_EVENT_CALLBACKS` dictionary pattern:
+ASH supports event subscribers for reacting to events during the scan process. Event subscribers are registered using the `ASH_EVENT_HANDLERS` dictionary pattern:
 
 ```python
 # my_ash_plugins/__init__.py
@@ -83,13 +83,13 @@ def handle_scan_complete(**kwargs):
     scanner = kwargs.get('scanner', 'Unknown')
     remaining_count = kwargs.get('remaining_count', 0)
     remaining_scanners = kwargs.get('remaining_scanners', [])
-    
+
     print(f"Scanner '{scanner}' completed!")
     if remaining_count > 0:
         print(f"{remaining_count} scanners remaining: {', '.join(remaining_scanners)}")
     else:
         print("All scanners completed!")
-    
+
     return True
 
 def handle_report_complete(**kwargs):
@@ -99,7 +99,7 @@ def handle_report_complete(**kwargs):
     return True
 
 # Event callback registry following the same pattern as ASH_SCANNERS, ASH_REPORTERS, etc.
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [handle_scan_complete],
     AshEventType.REPORT_COMPLETE: [handle_report_complete],
 }
@@ -109,7 +109,7 @@ ASH_EVENT_CALLBACKS = {
 
 - `AshEventType.SCAN_START`: Fired when the scan phase begins
 - `AshEventType.SCAN_COMPLETE`: Fired when each individual scanner completes
-- `AshEventType.CONVERT_START`: Fired when the convert phase begins  
+- `AshEventType.CONVERT_START`: Fired when the convert phase begins
 - `AshEventType.CONVERT_COMPLETE`: Fired when the convert phase completes
 - `AshEventType.REPORT_START`: Fired when the report phase begins
 - `AshEventType.REPORT_COMPLETE`: Fired when the report phase completes

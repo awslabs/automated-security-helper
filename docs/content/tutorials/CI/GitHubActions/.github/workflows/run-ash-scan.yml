@@ -14,6 +14,9 @@ on:
 env:
   ASH_OUTPUT_PATH: ash_output
 
+permissions:
+  contents: read
+
 jobs:
   containerjob:
     name: Run ASH Scan

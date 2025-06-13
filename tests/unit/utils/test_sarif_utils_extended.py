@@ -195,7 +195,9 @@ def test_path_matches_pattern():
     assert path_matches_pattern("dir\\file.txt", "dir/file.txt") is True
 
 
-@patch("automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions")
+@patch(
+    "automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker.check_for_expiring_suppressions"
+)
 def test_apply_suppressions_to_sarif(mock_check, test_output_dir):
     """Test applying suppressions to SARIF report."""
     mock_check.return_value = []
@@ -221,7 +223,9 @@ def test_apply_suppressions_to_sarif(mock_check, test_output_dir):
     assert result is not None
 
 
-@patch("automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions")
+@patch(
+    "automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker.check_for_expiring_suppressions"
+)
 def test_apply_suppressions_with_ignore_flag(mock_check):
     """Test applying suppressions when ignore_suppressions flag is set."""
     mock_check.return_value = []
@@ -245,7 +249,9 @@ def test_apply_suppressions_with_ignore_flag(mock_check):
     )
 
 
-@patch("automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions")
+@patch(
+    "automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker.check_for_expiring_suppressions"
+)
 @patch("automated_security_helper.utils.sarif_utils.should_suppress_finding")
 def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
     """Test applying suppressions with rule matching."""
@@ -271,7 +277,9 @@ def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
     assert len(result.runs[0].results[0].suppressions) > 0
 
 
-@patch("automated_security_helper.utils.sarif_utils.check_for_expiring_suppressions")
+@patch(
+    "automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker.check_for_expiring_suppressions"
+)
 def test_apply_suppressions_with_expiring_suppressions(mock_check):
     """Test applying suppressions with expiring suppressions."""
     # Mock expiring suppressions

@@ -43,10 +43,11 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters import (
     YamlReporter,
 )
 
-### Event Callbacks ###
+### Event Handlers ###
 
-from automated_security_helper.plugin_modules.ash_builtin.event_callbacks import (
+from automated_security_helper.plugin_modules.ash_builtin.event_handlers import (
     handle_scan_completion_logging,
+    handle_suppression_expiration_check,
 )
 from automated_security_helper.plugins.events import AshEventType
 
@@ -82,8 +83,11 @@ ASH_REPORTERS = [
     YamlReporter,
 ]
 
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [
         handle_scan_completion_logging,
+    ],
+    AshEventType.EXECUTION_START: [
+        handle_suppression_expiration_check,
     ],
 }

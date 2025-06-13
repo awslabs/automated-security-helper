@@ -87,7 +87,7 @@ class EnginePhase(ABC):
         self.initialize_progress()
 
         # Notify phase start
-        start_event = f"{self.phase_name.upper()}_START"
+        start_event = f"{self.phase_name.upper()}_PHASE_START"
         ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {start_event} event")
         self.notify_event(start_event, **kwargs)
 
@@ -115,7 +115,7 @@ class EnginePhase(ABC):
             self._update_summary_stats()
 
         # Notify phase complete
-        complete_event = f"{self.phase_name.upper()}_COMPLETE"
+        complete_event = f"{self.phase_name.upper()}_PHASE_COMPLETE"
         ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {complete_event} event")
         self.notify_event(complete_event, results=results, **kwargs)
 
@@ -202,7 +202,7 @@ class EnginePhase(ABC):
             )
 
             # Notify progress event
-            progress_event = f"{self.phase_name.upper()}_PROGRESS"
+            progress_event = f"{self.phase_name.upper()}_PHASE_PROGRESS"
             self.notify_event(
                 progress_event, completed=completed, description=description
             )

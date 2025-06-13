@@ -9,7 +9,7 @@ This example package includes:
 1. **ExampleConverter**: A simple converter plugin that logs the target and returns it unchanged
 2. **ExampleScanner**: A scanner plugin that returns a mock finding
 3. **ExampleReporter**: A reporter plugin that generates a simple text report
-4. **Event Subscribers**: Examples of subscribing to ASH events using the `ASH_EVENT_CALLBACKS` pattern
+4. **Event Subscribers**: Examples of subscribing to ASH events using the `ASH_EVENT_HANDLERS` pattern
 
 ## Installation
 
@@ -50,7 +50,7 @@ Each plugin implements the required methods from `IConverter`, `IScanner`, or `I
 
 ### 3. Event Subscription
 
-Event subscribers are registered using the `ASH_EVENT_CALLBACKS` dictionary:
+Event subscribers are registered using the `ASH_EVENT_HANDLERS` dictionary:
 
 ```python
 def handle_scan_complete(**kwargs):
@@ -61,7 +61,7 @@ def handle_scan_complete(**kwargs):
     return True
 
 # Event callback registry
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [handle_scan_complete],
     AshEventType.SCAN_START: [handle_scan_start],
 }
@@ -101,7 +101,7 @@ ASH automatically discovers plugins by:
 
 1. Loading modules specified in the `internal_modules` list (for built-in plugins)
 2. Loading additional modules specified in configuration via `ash_plugin_modules`
-3. Scanning for `ASH_CONVERTERS`, `ASH_SCANNERS`, `ASH_REPORTERS`, and `ASH_EVENT_CALLBACKS` constants
+3. Scanning for `ASH_CONVERTERS`, `ASH_SCANNERS`, `ASH_REPORTERS`, and `ASH_EVENT_HANDLERS` constants
 4. Registering discovered plugins and event subscribers with the plugin manager
 
 For more information, see the [ASH Plugin System documentation](https://github.com/awslabs/automated-security-helper/blob/main/AmazonQ.md).

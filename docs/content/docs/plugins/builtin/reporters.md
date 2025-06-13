@@ -238,7 +238,7 @@ reporters:
 
 **Use Cases**:
 - Jenkins test results
-- Azure DevOps test reporting
+- GitLab CI test reporting
 - GitHub Actions test summaries
 - Build pipeline gates
 

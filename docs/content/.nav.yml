@@ -14,7 +14,7 @@ nav:
     - Scanners: docs/plugins/builtin/scanners.md
     - Reporters: docs/plugins/builtin/reporters.md
     - Converters: docs/plugins/builtin/converters.md
-    - Event Callbacks: docs/plugins/builtin/event-callbacks.md
+    - Event Handlers: docs/plugins/builtin/event-handlers.md
   - Tutorials:
     - Running ASH Locally: tutorials/running-ash-locally.md
     - Running ASH in CI: tutorials/running-ash-in-ci.md

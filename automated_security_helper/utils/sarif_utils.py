@@ -23,7 +23,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
-    check_for_expiring_suppressions,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
@@ -319,23 +318,13 @@ def apply_suppressions_to_sarif(
         hasattr(plugin_context, "ignore_suppressions")
         and plugin_context.ignore_suppressions
     ):
-        ASH_LOGGER.info(
+        ASH_LOGGER.warning(
             "Ignoring all suppression rules as requested by --ignore-suppressions flag"
         )
         return sarif_report
 
-    # Check for expiring suppressions and warn the user
-    expiring_suppressions = check_for_expiring_suppressions(suppressions)
-    if expiring_suppressions:
-        ASH_LOGGER.warning("The following suppressions will expire within 30 days:")
-        for suppression in expiring_suppressions:
-            expiration_date = suppression.expiration
-            rule_id = suppression.rule_id
-            file_path = suppression.path
-            reason = suppression.reason or "No reason provided"
-            ASH_LOGGER.warning(
-                f"  - Rule '{rule_id}' for '{file_path}' expires on {expiration_date}. Reason: {reason}"
-            )
+    # Note: Suppression expiration check is now handled by the EXECUTION_START event callback
+    # in automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker
 
     if not sarif_report or not sarif_report.runs:
         return sarif_report
@@ -373,7 +362,7 @@ def apply_suppressions_to_sarif(
                             for ignore_path in ignore_paths:
                                 # Check if the URI matches the ignore path pattern
                                 if path_matches_pattern(uri, ignore_path.path):
-                                    ASH_LOGGER.debug(
+                                    ASH_LOGGER.verbose(
                                         f"Ignorning finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
                                     )
                                     is_in_ignorable_path = True

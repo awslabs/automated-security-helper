@@ -195,6 +195,22 @@ class ConvertPhase(EnginePhase):
 
                 # Call convert method directly - converters should handle finding their own targets
                 ASH_LOGGER.debug(f"Calling convert() on {display_name}")
+
+                # Notify converter start
+                try:
+                    from automated_security_helper.plugins.events import AshEventType
+
+                    self.notify_event(
+                        AshEventType.CONVERT_START,
+                        converter=display_name,
+                        converter_class=plugin_class.__name__,
+                        message=f"Starting converter: {display_name}",
+                    )
+                except Exception as event_error:
+                    ASH_LOGGER.error(
+                        f"Failed to notify converter start event: {str(event_error)}"
+                    )
+
                 # Pass the source directory as the target
                 convert_result_initial = plugin_instance.convert()
                 # Ensure all convert_result are strings in case some are Paths
@@ -223,6 +239,25 @@ class ConvertPhase(EnginePhase):
                         completed=100,
                         description=f"[green]({display_name}) Converted {len(convert_result)} files",
                     )
+
+                    # Notify converter complete
+                    try:
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
+
+                        self.notify_event(
+                            AshEventType.CONVERT_COMPLETE,
+                            converter=display_name,
+                            converter_class=plugin_class.__name__,
+                            converted_files=convert_result,
+                            file_count=len(convert_result),
+                            message=f"Converter {display_name} completed: {len(convert_result)} files converted",
+                        )
+                    except Exception as event_error:
+                        ASH_LOGGER.error(
+                            f"Failed to notify converter complete event: {str(event_error)}"
+                        )
                 else:
                     ASH_LOGGER.debug(
                         f"Converter {display_name} returned None or empty result"
@@ -236,6 +271,25 @@ class ConvertPhase(EnginePhase):
                         completed=100,
                         description=f"[yellow]({display_name}) No files to convert",
                     )
+
+                    # Notify converter complete (no files)
+                    try:
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
+
+                        self.notify_event(
+                            AshEventType.CONVERT_COMPLETE,
+                            converter=display_name,
+                            converter_class=plugin_class.__name__,
+                            converted_files=[],
+                            file_count=0,
+                            message=f"Converter {display_name} completed: no files to convert",
+                        )
+                    except Exception as event_error:
+                        ASH_LOGGER.error(
+                            f"Failed to notify converter complete event: {str(event_error)}"
+                        )
 
                 aggregated_results.converter_results[display_name] = (
                     ConverterStatusInfo(

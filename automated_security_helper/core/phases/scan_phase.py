@@ -85,6 +85,13 @@ class ScanPhase(EnginePhase):
             # Build queue of scanner tuples for execution
             self._queue = multiprocessing.Queue()
 
+            # Register queue for automatic cleanup to prevent hangs
+            from automated_security_helper.utils.multiprocessing_cleanup import (
+                register_multiprocessing_queue,
+            )
+
+            register_multiprocessing_queue(self._queue)
+
             # Get all scanner plugins
             scanner_classes = self.plugins
 
@@ -340,6 +347,15 @@ class ScanPhase(EnginePhase):
 
             ASH_LOGGER.error(f"Execution failed: {str(e)}")
             raise
+        finally:
+            # Clean up multiprocessing resources
+            if hasattr(self, "_queue") and self._queue is not None:
+                from automated_security_helper.utils.multiprocessing_cleanup import (
+                    cleanup_multiprocessing_queue,
+                )
+
+                cleanup_multiprocessing_queue(self._queue)
+                self._queue = None
 
     def _extract_metrics_from_sarif(self, sarif_report: SarifReport):
         """Extract severity metrics from a SARIF report.
@@ -680,6 +696,22 @@ class ScanPhase(EnginePhase):
 
                 # Log progress
                 ASH_LOGGER.info(f"Running scanner: {scanner_name}")
+
+                # Notify scanner start
+                try:
+                    from automated_security_helper.plugins.events import AshEventType
+
+                    self.notify_event(
+                        AshEventType.SCAN_START,
+                        scanner=scanner_name,
+                        scanner_class=scanner_plugin.__class__.__name__,
+                        scan_targets=scan_targets,
+                        message=f"Starting scanner: {scanner_name}",
+                    )
+                except Exception as event_error:
+                    ASH_LOGGER.error(
+                        f"Failed to notify scanner start event: {str(event_error)}"
+                    )
 
                 # Use the safe wrapper to execute the scanner
                 results_list = self._safe_execute_scanner(
@@ -1314,6 +1346,17 @@ class ScanPhase(EnginePhase):
         elif isinstance(results.raw_results, AshAggregatedResults):
             aggregated_results.merge_model(results.raw_results)
         else:
+            if scanner_name not in aggregated_results.additional_reports:
+                aggregated_results.additional_reports[scanner_name] = {}
+
+            if (
+                results.target_type
+                not in aggregated_results.additional_reports[scanner_name]
+            ):
+                aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ] = {}
+
             aggregated_results.additional_reports[scanner_name][results.target_type][
                 "raw_results"
             ] = results.raw_results

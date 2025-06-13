@@ -2,8 +2,7 @@
 
 import multiprocessing
 import os
-import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -110,7 +109,6 @@ class ScanExecutionEngine:
         ]
         self._enabled_scanners = []
         self._global_ignore_paths = global_ignore_paths
-        self._queue = multiprocessing.Queue()
         self._python_only = (
             python_based_plugins_only  # Store the python_based_plugins_only flag
         )
@@ -131,7 +129,7 @@ class ScanExecutionEngine:
         # Discover external plugins if enabled
         ash_plugin_manager.set_context(self._context)
 
-        # Load internal plugins first to ensure event callbacks are registered
+        # Load internal plugins first to ensure event handlers are registered
         from automated_security_helper.plugins.loader import load_internal_plugins
 
         load_internal_plugins()
@@ -379,8 +377,7 @@ class ScanExecutionEngine:
         ASH_LOGGER.info(f"Executing phases: {', '.join(ordered_phases)}")
 
         # Record the start time for calculating scan duration
-        scan_start_time = time.time()
-
+        scan_start_time = datetime.now(timezone.utc)
         # Start the progress display before executing any phases
         # Only start if it's not already started
         if (
@@ -405,6 +402,28 @@ class ScanExecutionEngine:
 
         # Start the progress display before executing any phases
         self.progress_display.start()
+
+        # Notify execution start
+        try:
+            from automated_security_helper.plugins.events import AshEventType
+            from automated_security_helper.plugins import ash_plugin_manager
+
+            ash_plugin_manager.notify(
+                AshEventType.EXECUTION_START,
+                phases=ordered_phases,
+                plugin_context=self._context,
+                source_dir=self._context.source_dir,
+                output_dir=self._context.output_dir,
+                enabled_scanners=self._init_enabled_scanners,
+                excluded_scanners=self._init_excluded_scanners,
+                python_based_plugins_only=self._python_only,
+                strategy=self._strategy,
+                message=f"Starting ASH execution with phases: {', '.join(ordered_phases)}",
+            )
+        except Exception as event_error:
+            ASH_LOGGER.error(
+                f"Failed to notify execution start event: {str(event_error)}"
+            )
 
         try:
             # Execute each phase in order using the new phase classes
@@ -504,53 +523,99 @@ class ScanExecutionEngine:
                     )
                     self._asharp_model = self._results
 
-            # Return the results
-            return self._results
-
         except Exception as e:
             ASH_LOGGER.error(f"Execution failed: {str(e)}")
             ASH_LOGGER.info(f"\n❌ Execution failed: {str(e)}")
+
+            # Notify execution error
+            try:
+                from automated_security_helper.plugins.events import AshEventType
+                from automated_security_helper.plugins import ash_plugin_manager
+
+                ash_plugin_manager.notify(
+                    AshEventType.ERROR,
+                    phase="execution",
+                    error=str(e),
+                    exception=e,
+                    message=f"ASH execution failed: {str(e)}",
+                )
+            except Exception as event_error:
+                ASH_LOGGER.error(
+                    f"Failed to notify execution error event: {str(event_error)}"
+                )
+
             raise
         finally:
-            if hasattr(self.progress_display, "live") and self.progress_display.live:
-                self.progress_display.stop()
+            # Notify execution complete (whether successful or not)
+            try:
+                from automated_security_helper.plugins.events import AshEventType
+                from automated_security_helper.plugins import ash_plugin_manager
 
-            # Display the final metrics table
-            if not self._simple_mode:
-                # Calculate scan duration
-                scan_duration = time.time() - scan_start_time
+                scan_end_time = datetime.now(timezone.utc)
+                scan_duration = (scan_end_time - scan_start_time).total_seconds()
                 minutes, seconds = divmod(int(scan_duration), 60)
                 hours, minutes = divmod(minutes, 60)
 
-                if hours > 0:
-                    duration_str = f"{hours}h {minutes}m {seconds}s"
-                elif minutes > 0:
-                    duration_str = f"{minutes}m {seconds}s"
-                else:
-                    duration_str = f"{seconds}s"
+                self._results.metadata.summary_stats.start = scan_start_time
+                self._results.metadata.summary_stats.end = scan_end_time
+                self._results.metadata.summary_stats.duration = scan_duration
 
-                ASH_LOGGER.info(
-                    f"===== ASH Security Scan Completed in {duration_str} ====="
+                ash_plugin_manager.notify(
+                    AshEventType.EXECUTION_COMPLETE,
+                    phases=ordered_phases,
+                    results=self._results,
+                    duration=scan_duration,
+                    completed_scanners=getattr(self, "_completed_scanners", []),
+                    message=f"ASH execution completed in {scan_duration:.1f}s",
                 )
-
-            if self._completed_scanners:
-                # Get color setting from progress display
-                use_color = True
-                if hasattr(self.progress_display, "console") and hasattr(
-                    self.progress_display.console, "color_system"
+            except Exception as event_error:
+                ASH_LOGGER.error(
+                    f"Failed to notify execution complete event: {str(event_error)}"
+                )
+            finally:
+                # Stop progress display
+                if (
+                    hasattr(self.progress_display, "live")
+                    and self.progress_display.live
                 ):
-                    use_color = self.progress_display.console.color_system is not None
+                    self.progress_display.stop()
 
-                # Always display the metrics table, even in simple mode
-                display_metrics_table(
-                    completed_scanners=self._completed_scanners,
-                    asharp_model=self._asharp_model,
-                    scan_results=self._scan_results,
-                    source_dir=os.environ.get(
-                        "ASH_ACTUAL_SOURCE_DIR", self._context.source_dir.as_posix()
-                    ),
-                    output_dir=os.environ.get(
-                        "ASH_ACTUAL_OUTPUT_DIR", self._context.output_dir.as_posix()
-                    ),
-                    use_color=use_color,
-                )
+                # Display the final metrics table
+                if not self._simple_mode:
+                    if hours > 0:
+                        duration_str = f"{hours}h {minutes}m {seconds}s"
+                    elif minutes > 0:
+                        duration_str = f"{minutes}m {seconds}s"
+                    else:
+                        duration_str = f"{seconds}s"
+
+                    ASH_LOGGER.info(
+                        f"===== ASH Security Scan Completed in {duration_str} ====="
+                    )
+
+                if self._completed_scanners:
+                    # Get color setting from progress display
+                    use_color = True
+                    if hasattr(self.progress_display, "console") and hasattr(
+                        self.progress_display.console, "color_system"
+                    ):
+                        use_color = (
+                            self.progress_display.console.color_system is not None
+                        )
+
+                    # Always display the metrics table, even in simple mode
+                    display_metrics_table(
+                        completed_scanners=self._completed_scanners,
+                        asharp_model=self._asharp_model,
+                        scan_results=self._scan_results,
+                        source_dir=os.environ.get(
+                            "ASH_ACTUAL_SOURCE_DIR", self._context.source_dir.as_posix()
+                        ),
+                        output_dir=os.environ.get(
+                            "ASH_ACTUAL_OUTPUT_DIR", self._context.output_dir.as_posix()
+                        ),
+                        use_color=use_color,
+                    )
+
+                # Return the results
+                return self._results

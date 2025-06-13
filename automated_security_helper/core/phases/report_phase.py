@@ -200,6 +200,24 @@ class ReportPhase(EnginePhase):
 
                     # Call report method directly
                     ASH_LOGGER.debug(f"Calling report() on {display_name}")
+
+                    # Notify reporter start
+                    try:
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
+
+                        self.notify_event(
+                            AshEventType.REPORT_START,
+                            reporter=display_name,
+                            reporter_class=plugin_class.__name__,
+                            message=f"Starting reporter: {display_name}",
+                        )
+                    except Exception as event_error:
+                        ASH_LOGGER.error(
+                            f"Failed to notify reporter start event: {str(event_error)}"
+                        )
+
                     report_result = plugin_instance.report(aggregated_results)
 
                     if report_result:
@@ -230,6 +248,25 @@ class ReportPhase(EnginePhase):
                             completed=100,
                             description=f"[green]({display_name}) Generated report: {output_filename}",
                         )
+
+                        # Notify reporter complete
+                        try:
+                            from automated_security_helper.plugins.events import (
+                                AshEventType,
+                            )
+
+                            self.notify_event(
+                                AshEventType.REPORT_COMPLETE,
+                                reporter=display_name,
+                                reporter_class=plugin_class.__name__,
+                                output_file=str(output_file),
+                                output_filename=output_filename,
+                                message=f"Reporter {display_name} completed: {output_filename}",
+                            )
+                        except Exception as event_error:
+                            ASH_LOGGER.error(
+                                f"Failed to notify reporter complete event: {str(event_error)}"
+                            )
                     else:
                         ASH_LOGGER.debug(
                             f"Reporter {display_name} returned None or empty report"
@@ -242,6 +279,25 @@ class ReportPhase(EnginePhase):
                             completed=100,
                             description=f"[yellow]({display_name}) No report generated",
                         )
+
+                        # Notify reporter complete (no report)
+                        try:
+                            from automated_security_helper.plugins.events import (
+                                AshEventType,
+                            )
+
+                            self.notify_event(
+                                AshEventType.REPORT_COMPLETE,
+                                reporter=display_name,
+                                reporter_class=plugin_class.__name__,
+                                output_file=None,
+                                output_filename=None,
+                                message=f"Reporter {display_name} completed: no report generated",
+                            )
+                        except Exception as event_error:
+                            ASH_LOGGER.error(
+                                f"Failed to notify reporter complete event: {str(event_error)}"
+                            )
 
                     # Increment completed count
                     completed += 1

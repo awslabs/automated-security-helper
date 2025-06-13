@@ -12837,6 +12837,8 @@
           "default": {
             "actionable": 0,
             "critical": 0,
+            "duration": 0.0,
+            "end": null,
             "failed": 0,
             "high": 0,
             "info": 0,
@@ -12845,6 +12847,7 @@
             "missing": 0,
             "passed": 0,
             "skipped": 0,
+            "start": null,
             "suppressed": 0,
             "total": 0
           },
@@ -16961,6 +16964,23 @@
           "title": "Critical",
           "type": "integer"
         },
+        "duration": {
+          "default": 0.0,
+          "title": "Duration",
+          "type": "number"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
         "failed": {
           "default": 0,
           "title": "Failed",
@@ -17000,6 +17020,18 @@
           "default": 0,
           "title": "Skipped",
           "type": "integer"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start"
         },
         "suppressed": {
           "default": 0,

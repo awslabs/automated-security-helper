@@ -67,10 +67,7 @@ rich = "^13.5.3"
 pathspec = "^0.12.1"
 defusedxml = "^0.7.1"
 junitparser = "^3.2.0"
-regex = "^2024.5.15"
-sarif-tools = "^3.0.4"
 textual = "^3.2.0"
-streamlit = "^1.45.1"
 
 # Scanner dependencies with compatible versions
 bandit = {extras = ["baseline", "sarif", "toml"], version = "^1.8.3"}

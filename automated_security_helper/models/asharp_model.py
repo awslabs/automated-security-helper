@@ -49,6 +49,9 @@ class ScannerSeverityCount(BaseModel):
 class SummaryStats(ScannerSeverityCount):
     """Summary statistics for the final report"""
 
+    start: str | None = None
+    end: str | None = None
+    duration: float = 0.0
     total: int = 0
     actionable: int = 0
     passed: int = 0
@@ -60,6 +63,9 @@ class SummaryStats(ScannerSeverityCount):
     def bump(self, key: str, amount: int = 1) -> int:
         setattr(self, key, getattr(self, key) + amount)
         return getattr(self, key)
+
+    def model_post_init(self, context):
+        return super().model_post_init(context)
 
 
 class ScannerTargetStatusInfo(BaseModel):
@@ -605,12 +611,12 @@ class AshAggregatedResults(BaseModel):
                         line_end=line_end,
                         code_snippet=code_snippet,
                         tags=json.dumps(tags, default=str) if tags else None,
-                        properties=json.dumps(properties, default=str)
-                        if properties
-                        else None,
-                        references=json.dumps(references, default=str)
-                        if references
-                        else None,
+                        properties=(
+                            json.dumps(properties, default=str) if properties else None
+                        ),
+                        references=(
+                            json.dumps(references, default=str) if references else None
+                        ),
                         detected_at=datetime.now(timezone.utc).isoformat(),
                         raw_data=result.model_dump_json(exclude_none=True),
                     )

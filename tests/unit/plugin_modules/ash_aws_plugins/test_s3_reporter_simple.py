@@ -30,10 +30,10 @@ def test_s3_reporter_config_options_defaults_without_env():
             del os.environ["AWS_REGION"]
         if "AWS_DEFAULT_REGION" in os.environ:
             del os.environ["AWS_DEFAULT_REGION"]
-            if "AWS_PROFILE" in os.environ:
-                del os.environ["AWS_PROFILE"]
-            if "ASH_S3_BUCKET_NAME" in os.environ:
-                del os.environ["ASH_S3_BUCKET_NAME"]
+        if "AWS_PROFILE" in os.environ:
+            del os.environ["AWS_PROFILE"]
+        if "ASH_S3_BUCKET_NAME" in os.environ:
+            del os.environ["ASH_S3_BUCKET_NAME"]
 
         # Create config options
         options = S3ReporterConfigOptions()
@@ -91,33 +91,60 @@ def test_s3_reporter_validate_success(mock_boto3):
     # Create mock context
     mock_context = MagicMock(spec=PluginContext)
 
-    # Create mock boto3 session and clients
-    mock_session = MagicMock()
-    mock_boto3.Session.return_value = mock_session
+    # Save original environment variables
+    original_aws_region = os.environ.get("AWS_REGION")
+    original_aws_default_region = os.environ.get("AWS_DEFAULT_REGION")
+    original_aws_profile = os.environ.get("AWS_PROFILE")
+    original_bucket_name = os.environ.get("ASH_S3_BUCKET_NAME")
+    try:
+        # Clear environment variables
+        if "AWS_REGION" in os.environ:
+            del os.environ["AWS_REGION"]
+        if "AWS_DEFAULT_REGION" in os.environ:
+            del os.environ["AWS_DEFAULT_REGION"]
+        if "AWS_PROFILE" in os.environ:
+            del os.environ["AWS_PROFILE"]
+        if "ASH_S3_BUCKET_NAME" in os.environ:
+            del os.environ["ASH_S3_BUCKET_NAME"]
 
-    mock_sts_client = MagicMock()
-    mock_session.client.side_effect = lambda service: {
-        "sts": mock_sts_client,
-        "s3": MagicMock(),
-    }[service]
+        # Create mock boto3 session and clients
+        mock_session = MagicMock()
+        mock_boto3.Session.return_value = mock_session
 
-    mock_sts_client.get_caller_identity.return_value = {"Account": "123456789012"}
+        mock_sts_client = MagicMock()
+        mock_session.client.side_effect = lambda service: {
+            "sts": mock_sts_client,
+            "s3": MagicMock(),
+        }[service]
 
-    # Create reporter
-    reporter = S3Reporter(context=mock_context)
-    reporter.config = S3ReporterConfig(
-        options=S3ReporterConfigOptions(
-            aws_region="us-west-2", bucket_name="test-bucket"
+        mock_sts_client.get_caller_identity.return_value = {"Account": "123456789012"}
+
+        # Create reporter
+        reporter = S3Reporter(context=mock_context)
+        reporter.config = S3ReporterConfig(
+            options=S3ReporterConfigOptions(
+                aws_region="us-west-2", bucket_name="test-bucket"
+            )
         )
-    )
 
-    # Validate
-    result = reporter.validate()
+        # Validate
+        result = reporter.validate()
 
-    # Verify result
-    assert result is True
-    assert reporter.dependencies_satisfied is True
-    mock_boto3.Session.assert_called_once_with(
-        profile_name=None, region_name="us-west-2"
-    )
-    mock_sts_client.get_caller_identity.assert_called_once()
+        # Verify result
+        assert result is True
+        assert reporter.dependencies_satisfied is True
+        mock_boto3.Session.assert_called_once_with(
+            profile_name=None, region_name="us-west-2"
+        )
+        mock_sts_client.get_caller_identity.assert_called_once()
+
+    finally:
+        # Restore environment variables
+        if original_aws_region is not None:
+            os.environ["AWS_REGION"] = original_aws_region
+        if original_aws_default_region is not None:
+            os.environ["AWS_DEFAULT_REGION"] = original_aws_default_region
+        if original_aws_profile is not None:
+            os.environ["AWS_PROFILE"] = original_aws_profile
+        if original_bucket_name is not None:
+            os.environ["ASH_S3_BUCKET_NAME"] = original_bucket_name

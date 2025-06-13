@@ -229,10 +229,6 @@ Build an offline image with `ash --mode container --offline --offline-semgrep-ru
 ASH uses CDK Nag underneath to apply NagPack rules to *CloudFormation templates* via the `CfnInclude` CDK construct. This is purely a mechanism to ingest a bare CloudFormation template and apply CDK NagPacks to it; doing this against a template emitted by another CDK application causes a collision in the `CfnInclude` construct due to the presence of the `BootstrapVersion` parameter on the template added by CDK. For CDK applications, we recommend integrating CDK Nag directly in your CDK code. ASH will still apply other CloudFormation scanners (cfn-nag, checkov) against templates synthesized via CDK, but the CDK Nag scanner will not scan those templates.
 </details>
 
-## Documentation
-
-For complete documentation, visit the [ASH Documentation](https://awslabs.github.io/automated-security-helper/).
-
 ## Feedback and Contributing
 
 - Create an issue [here](https://github.com/awslabs/automated-security-helper/issues)

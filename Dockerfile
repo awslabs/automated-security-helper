@@ -145,16 +145,9 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
     fi
 
-# Setting PYTHONPATH so Jinja2 can resolve correctly
-# IMPORTANT: This is predicated on the Python version that is installed!
-#            Changing the BASE_IMAGE may result in this breaking.
-ENV PYTHONPATH='/opt/bitnami/python/lib/python3.10/site-packages'
-
-#
-# Prerequisite installation complete, finishing up
-#
 #
 # Setting default WORKDIR to /src
+#
 WORKDIR /src
 
 #

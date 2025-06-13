@@ -8,7 +8,7 @@ This directory contains all the built-in plugins that ship with the Automated Se
 Security scanners that analyze code and infrastructure for vulnerabilities:
 
 - **Bandit** - Python security linter
-- **CDK-Nag** - AWS CDK security checker  
+- **CDK-Nag** - AWS CDK security checker
 - **CFN-Nag** - CloudFormation template security scanner
 - **Checkov** - Infrastructure-as-Code security scanner
 - **Detect-Secrets** - Secret detection scanner
@@ -40,7 +40,7 @@ File processors that prepare source code for scanning:
 - **Archive Converter** - Extracts compressed archives (zip, tar, etc.)
 - **Jupyter Converter** - Processes Jupyter notebooks
 
-### 📡 **Event Callbacks** (`event_callbacks/`)
+### 📡 **Event Handlers** (`event_handlers/`)
 Event handlers that respond to scan lifecycle events:
 
 - **Scan Completion Logger** - Logs remaining scanner information during scan execution

@@ -2,6 +2,7 @@
 
 from importlib.metadata import version
 import json
+import os
 from pathlib import Path
 from typing import Annotated, List, Literal
 
@@ -106,7 +107,7 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Run in offline mode, disabling policy downloads",
         ),
-    ] = False
+    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
     frameworks: Annotated[
         List[CheckFrameworks],
         Field(
@@ -195,7 +196,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         if self.config.options.offline:
             self.args.extra_args.append(
                 ToolExtraArg(
-                    key="--no-download",
+                    key="--skip-download",
                     value="",
                 )
             )

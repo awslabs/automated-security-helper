@@ -4,7 +4,7 @@ ASH provides a comprehensive event system that allows plugins to react to variou
 
 ## Overview
 
-The event system uses a discovery-based pattern similar to how ASH discovers scanners, converters, and reporters. Event subscribers are registered using the `ASH_EVENT_CALLBACKS` dictionary in your plugin module.
+The event system uses a discovery-based pattern similar to how ASH discovers scanners, converters, and reporters. Event subscribers are registered using the `ASH_EVENT_HANDLERS` dictionary in your plugin module.
 
 ## Basic Event Subscriber
 
@@ -28,7 +28,7 @@ def handle_scan_complete(**kwargs):
     return True
 
 # Event callback registry
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [handle_scan_complete],
 }
 ```
@@ -93,7 +93,7 @@ def notify_scan_completion(**kwargs):
     # Send notification logic here
     return True
 
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [
         log_scan_completion,
         notify_scan_completion,
@@ -118,7 +118,7 @@ def handle_phase_complete(**kwargs):
     print(f"Phase '{phase}' completed")
     return True
 
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_START: [handle_phase_start],
     AshEventType.SCAN_COMPLETE: [handle_scan_completion],
     AshEventType.CONVERT_START: [handle_phase_start],
@@ -173,7 +173,7 @@ def notify_slack_on_completion(**kwargs):
 
     return True
 
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.EXECUTION_COMPLETE: [notify_slack_on_completion],
 }
 ```
@@ -201,7 +201,7 @@ def track_scan_metrics(**kwargs):
 
     return True
 
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [track_scan_metrics],
 }
 ```
@@ -252,7 +252,7 @@ def send_to_monitoring_system(**kwargs):
 
     return True
 
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [send_to_monitoring_system],
 }
 ```
@@ -313,7 +313,7 @@ def log_to_database(**kwargs):
 
     return True
 
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [log_to_database],
 }
 ```
@@ -324,7 +324,7 @@ ASH automatically discovers event subscribers by:
 
 1. Loading modules specified in the `internal_modules` list (for built-in plugins)
 2. Loading additional modules specified in configuration via `ash_plugin_modules`
-3. Scanning for `ASH_EVENT_CALLBACKS` constants in loaded modules
+3. Scanning for `ASH_EVENT_HANDLERS` constants in loaded modules
 4. Registering discovered event subscribers with the plugin manager
 
 The event subscribers are called in the order they appear in the callback list for each event type.
@@ -412,7 +412,7 @@ class ScanProgressTracker:
 # Create tracker instance
 tracker = ScanProgressTracker()
 
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_START: [tracker.handle_scan_start],
     AshEventType.SCAN_COMPLETE: [tracker.handle_scan_complete],
 }

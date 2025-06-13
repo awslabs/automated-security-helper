@@ -44,7 +44,7 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Run in offline mode, disabling database updates and validation",
         ),
-    ] = False
+    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
 
 
 class GrypeScannerConfig(ScannerPluginConfigBase):
@@ -140,6 +140,14 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             os.environ["GRYPE_DB_VALIDATE_AGE"] = "false"
             os.environ["GRYPE_DB_AUTO_UPDATE"] = "false"
             os.environ["GRYPE_CHECK_FOR_APP_UPDATE"] = "false"
+
+            # Validate offline mode requirements
+            from automated_security_helper.utils.offline_mode_validator import (
+                validate_grype_offline_mode,
+            )
+
+            offline_valid, offline_messages = validate_grype_offline_mode()
+
             ASH_LOGGER.info(
                 "Running Grype in offline mode - database updates and validation disabled"
             )
