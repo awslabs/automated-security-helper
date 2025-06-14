@@ -1,78 +1,63 @@
 """Module for generating metrics tables for ASH scan results."""
 
 from pathlib import Path
-import shutil
 from typing import Dict, List, Any
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
 
-from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
-from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.core.unified_metrics import (
+    get_unified_scanner_metrics,
+    format_duration,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
+import platform
 
 
-def format_duration(duration_seconds: float) -> str:
-    """Format duration in seconds to a human-readable string.
-
-    Args:
-        duration_seconds: Duration in seconds
-
-    Returns:
-        Formatted duration string (e.g., "1.2s", "1m 30s")
-    """
-    if duration_seconds is None:
-        return "N/A"
-
-    if duration_seconds < 0.001:  # Less than 1 millisecond
-        return "<1ms"
-    elif duration_seconds < 1:  # Less than 1 second
-        return f"{int(duration_seconds * 1000)}ms"
-    elif duration_seconds < 60:  # Less than 1 minute
-        return f"{duration_seconds:.1f}s"
-    else:
-        minutes = int(duration_seconds // 60)
-        seconds = int(duration_seconds % 60)
-        return f"{minutes}m {seconds}s"
-
-
-def generate_metrics_table(
-    completed_scanners: List[ScannerPluginBase],
+def generate_metrics_table_from_unified_data(
     asharp_model: AshAggregatedResults,
     source_dir: str | Path | None = None,
     output_dir: str | Path | None = None,
-    scan_results: Dict[str, Any] = None,
     console: Console = None,
 ) -> Table:
-    """Generate a Rich table with metrics for each scanner.
+    """Generate a Rich table with metrics using unified data source.
 
     Args:
-        completed_scanners: List of completed scanner plugins
         asharp_model: The AshAggregatedResults with scan results
-        scan_results: Optional dictionary of additional scan results
+        source_dir: Source directory path for display
+        output_dir: Output directory path for display
+        console: Rich console for responsive formatting
 
     Returns:
         Table: Rich table with scanner metrics
     """
+    # Get unified metrics data
+    scanner_metrics = get_unified_scanner_metrics(asharp_model)
+
+    # Format directory paths for display
     source_dir_rel = (
         Path(source_dir).relative_to(Path.cwd())
-        if Path(source_dir).is_relative_to(Path.cwd())
+        if source_dir and Path(source_dir).is_relative_to(Path.cwd())
         else source_dir
     )
     output_dir_rel = (
         Path(output_dir).relative_to(Path.cwd())
-        if Path(output_dir).is_relative_to(Path.cwd())
+        if output_dir and Path(output_dir).is_relative_to(Path.cwd())
         else output_dir
     )
+
     # Create a table
     table = Table(
         title="ASH Scan Results Summary",
         expand=False,
-        caption=f"source-dir: '{Path(source_dir_rel).as_posix()}'\noutput-dir: '{Path(output_dir_rel).as_posix()}'",
+        caption=(
+            f"source-dir: '{Path(source_dir_rel).as_posix()}'\noutput-dir: '{Path(output_dir_rel).as_posix()}'"
+            if source_dir_rel and output_dir_rel
+            else None
+        ),
     )
 
     # Determine if we should use shortened headers based on terminal width
@@ -90,333 +75,21 @@ def generate_metrics_table(
     table.add_column("L" if use_short_headers else "Low", style="green")
     table.add_column("I" if use_short_headers else "Info", style="blue")
     table.add_column("Time" if use_short_headers else "Duration", style="magenta")
-    table.add_column(
-        "Action" if use_short_headers else "Actionable", style="bold"
-    )  # Remove white style to allow per-cell coloring
+    table.add_column("Action" if use_short_headers else "Actionable", style="bold")
     table.add_column("Result", style="bold")
     table.add_column("Thresh" if use_short_headers else "Threshold")
 
-    # Get global severity threshold from config
-    global_threshold = ASH_DEFAULT_SEVERITY_LEVEL
-
-    try:
-        ash_conf = asharp_model.ash_config
-    except Exception as e:
-        ASH_LOGGER.error(f"Error loading config, using default: {e}")
-        ash_conf = get_default_config()
-
-    # Check for global_settings.severity_threshold first (new structure)
-    if (
-        ash_conf
-        and hasattr(ash_conf, "global_settings")
-        and hasattr(ash_conf.global_settings, "severity_threshold")
-    ):
-        global_threshold = ash_conf.global_settings.severity_threshold
-        ASH_LOGGER.debug(
-            f"Using global severity threshold from global_settings: {global_threshold}"
-        )
-    # Fall back to global_settings.severity_threshold (legacy structure)
-    elif (
-        ash_conf
-        and hasattr(ash_conf, "global_settings")
-        and hasattr(ash_conf.global_settings, "severity_threshold")
-    ):
-        global_threshold = ash_conf.global_settings.severity_threshold
-        ASH_LOGGER.debug(
-            f"Using global severity threshold from global_settings: {global_threshold}"
-        )
-    else:
-        ASH_LOGGER.debug(
-            f"No global severity threshold found in config, using default: {ASH_DEFAULT_SEVERITY_LEVEL}"
-        )
-
-    # Sort the completed_scanners by name for better readability
-    sorted_scanners = sorted(
-        completed_scanners,
-        key=lambda scanner: scanner.config.name
-        if hasattr(scanner.config, "name") and scanner.config.name
-        else scanner.__class__.__name__,
-    )
-
-    # Process each scanner's results
-    for scanner in sorted_scanners:
-        scanner_name = (
-            scanner.config.name
-            if hasattr(scanner.config, "name") and scanner.config.name
-            else scanner.__class__.__name__
-        )
-        # Initialize counters
-        suppressed = (
-            asharp_model.scanner_results[scanner_name].source.severity_counts.suppressed
-            + asharp_model.scanner_results[
-                scanner_name
-            ].converted.severity_counts.suppressed
-        )
-        critical = (
-            asharp_model.scanner_results[scanner_name].source.severity_counts.critical
-            + asharp_model.scanner_results[
-                scanner_name
-            ].converted.severity_counts.critical
-        )
-        high = (
-            asharp_model.scanner_results[scanner_name].source.severity_counts.high
-            + asharp_model.scanner_results[scanner_name].converted.severity_counts.high
-        )
-        medium = (
-            asharp_model.scanner_results[scanner_name].source.severity_counts.medium
-            + asharp_model.scanner_results[
-                scanner_name
-            ].converted.severity_counts.medium
-        )
-        low = (
-            asharp_model.scanner_results[scanner_name].source.severity_counts.low
-            + asharp_model.scanner_results[scanner_name].converted.severity_counts.low
-        )
-        info = (
-            asharp_model.scanner_results[scanner_name].source.severity_counts.info
-            + asharp_model.scanner_results[scanner_name].converted.severity_counts.info
-        )
-        # exit_code = max(
-        #     asharp_model.scanner_results[scanner_name].source.exit_code,
-        #     asharp_model.scanner_results[scanner_name].converted.exit_code,
-        # )
-
-        # Get scanner-specific configuration
-        ASH_LOGGER.debug(f"Looking up config for scanner: {scanner_name}")
-        scanner_config_entry = ash_conf.get_plugin_config(
-            plugin_type="scanner",
-            plugin_name=scanner_name,
-        )
-        ASH_LOGGER.debug(f"Scanner {scanner_name} config entry: {scanner_config_entry}")
-
-        # Initialize scanner_threshold to None
-        scanner_threshold = None
-        scanner_threshold_def = "global"
-
-        # Check for scanner-specific defaults at the scanner implementation level
-        if (
-            hasattr(scanner, "config")
-            and hasattr(scanner.config, "options")
-            and hasattr(scanner.config.options, "severity_threshold")
-            and scanner.config.options.severity_threshold is not None
-        ):
-            scanner_threshold = scanner.config.options.severity_threshold
-            scanner_threshold_def = "scanner"
-            ASH_LOGGER.debug(
-                f"Scanner {scanner_name} has scanner-level default threshold defined: {scanner_threshold}"
-            )
-
-        # Check for scanner-specific configuration overrides
-        if (
-            scanner_config_entry
-            and isinstance(scanner_config_entry, dict)
-            and "options" in scanner_config_entry
-        ):
-            options = scanner_config_entry["options"]
-            ASH_LOGGER.debug(
-                f"Scanner {scanner_name} config entry has options: {options}"
-            )
-            if (
-                "severity_threshold" in options
-                and options["severity_threshold"] is not None
-            ):
-                scanner_threshold = options["severity_threshold"]
-                scanner_threshold_def = "config"
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} has threshold overridden at the scanner-level in the ASH config: {scanner_threshold}"
-                )
-        elif scanner_config_entry and hasattr(scanner_config_entry, "options"):
-            ASH_LOGGER.debug(
-                f"Scanner {scanner_name} config entry has options object: {scanner_config_entry.options}"
-            )
-            if hasattr(scanner_config_entry.options, "severity_threshold"):
-                scanner_threshold_from_config = (
-                    scanner_config_entry.options.severity_threshold
-                )
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} config has severity_threshold: {scanner_threshold_from_config}"
-                )
-                if scanner_threshold_from_config is not None:
-                    scanner_threshold = scanner_threshold_from_config
-                    ASH_LOGGER.debug(
-                        f"Scanner {scanner_name} has threshold overridden at the scanner-level in the ASH config: {scanner_threshold}"
-                    )
-            else:
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} config options does not have severity_threshold attribute"
-                )
-
-        # # Try to get results from additional_reports
-        # if scanner_name in asharp_model.additional_reports:
-        #     scanner_results = asharp_model.additional_reports[scanner_name]
-
-        #     # Extract metrics from scanner results
-        #     for target_type, results in scanner_results.items():
-        #         if isinstance(results, dict):
-        #             # Try to extract severity counts
-        #             if "severity_counts" in results:
-        #                 severity_counts = results["severity_counts"]
-        #                 critical += severity_counts.get("critical", 0)
-        #                 high += severity_counts.get("high", 0)
-        #                 medium += severity_counts.get("medium", 0)
-        #                 low += severity_counts.get("low", 0)
-        #                 info += severity_counts.get("info", 0)
-
-        #             # Try to extract exit code
-        #             if "exit_code" in results:
-        #                 exit_code = max(exit_code, results["exit_code"])
-
-        # Use scanner-specific threshold for evaluation if available, otherwise use global
-        evaluation_threshold = (
-            scanner_threshold if scanner_threshold is not None else global_threshold
-        )
-        ASH_LOGGER.debug(
-            f"Scanner {scanner_name} using evaluation threshold: {evaluation_threshold} (scanner_threshold={scanner_threshold}, global_threshold={global_threshold})"
-        )
-        # Calculate total findings
-
-        # total = (
-        #     asharp_model.scanner_results[scanner_name].source.finding_count
-        #     + asharp_model.scanner_results[scanner_name].converted.finding_count
-        # )
-
-        # Calculate actionable findings based on threshold
-        actionable = (
-            asharp_model.scanner_results[scanner_name].source.actionable_finding_count
-            + asharp_model.scanner_results[
-                scanner_name
-            ].converted.actionable_finding_count
-        )
-
-        # Determine status based on dependencies, exclusion, and findings
-        status = "[bold green]PASSED[/bold green]"
-        status_text = Text("PASSED", style="green bold")
-
-        # Check if scanner was excluded or has missing dependencies
-        scanner_excluded = False
-        dependencies_missing = False
-
-        # First check if scanner status is in metadata (most accurate)
-        if (
-            hasattr(asharp_model, "scanner_results")
-            and scanner_name in asharp_model.scanner_results
-        ):
-            scanner_status_info = asharp_model.scanner_results[scanner_name]
-            ASH_LOGGER.debug(
-                f"Found scanner status in metadata for {scanner_name}: {scanner_status_info}"
-            )
-
-            if scanner_status_info.status == ScannerStatus.SKIPPED:
-                scanner_excluded = True
-                status = "[bold blue]SKIPPED[/bold blue]"
-                status_text = Text("SKIPPED", style="blue bold")
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} marked as SKIPPED from metadata"
-                )
-            elif scanner_status_info.status == ScannerStatus.MISSING:
-                dependencies_missing = True
-                status = "[bold yellow]MISSING[/bold yellow]"
-                status_text = Text("MISSING", style="yellow bold")
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} marked as MISSING from metadata"
-                )
-            elif scanner_status_info.status == ScannerStatus.FAILED:
-                status = "[bold red]FAILED[/bold red]"
-                status_text = Text("FAILED", style="red bold")
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} marked as FAILED from metadata"
-                )
-        # Then check in additional_reports if not found in metadata
-        elif scanner_name in asharp_model.additional_reports:
-            scanner_results = asharp_model.additional_reports[scanner_name]
-            ASH_LOGGER.debug(f"Checking additional_reports for {scanner_name} status")
-
-            # Check for excluded status or missing dependencies
-            for target_type, results in scanner_results.items():
-                if isinstance(results, dict):
-                    if results.get("excluded", False):
-                        scanner_excluded = True
-                        status = "[bold blue]SKIPPED[/bold blue]"
-                        status_text = Text("SKIPPED", style="blue bold")
-                        ASH_LOGGER.debug(
-                            f"Scanner {scanner_name} marked as SKIPPED from additional_reports"
-                        )
-                        break
-                    if not results.get("dependencies_satisfied", True):
-                        dependencies_missing = True
-                        status = "[bold yellow]MISSING[/bold yellow]"
-                        status_text = Text("MISSING", style="yellow bold")
-                        ASH_LOGGER.debug(
-                            f"Scanner {scanner_name} marked as MISSING from additional_reports"
-                        )
-                        break
-                    if "scanner_status" in results:
-                        scanner_status = results["scanner_status"]
-                        if scanner_status == ScannerStatus.SKIPPED:
-                            scanner_excluded = True
-                            status = "[bold blue]SKIPPED[/bold blue]"
-                            status_text = Text("SKIPPED", style="blue bold")
-                            ASH_LOGGER.debug(
-                                f"Scanner {scanner_name} marked as SKIPPED from scanner_status in results"
-                            )
-                            break
-                        elif scanner_status == ScannerStatus.MISSING:
-                            dependencies_missing = True
-                            status = "[bold yellow]MISSING[/bold yellow]"
-                            status_text = Text("MISSING", style="yellow bold")
-                            ASH_LOGGER.debug(
-                                f"Scanner {scanner_name} marked as MISSING from scanner_status in results"
-                            )
-                            break
-
-        # Finally, check if scanner has dependencies_satisfied attribute directly
-        if (
-            not scanner_excluded
-            and not dependencies_missing
-            and hasattr(scanner, "dependencies_satisfied")
-        ):
-            if not scanner.dependencies_satisfied:
-                dependencies_missing = True
-                status = "[bold yellow]MISSING[/bold yellow]"
-                status_text = Text("MISSING", style="yellow bold")
-                ASH_LOGGER.debug(
-                    f"Scanner {scanner_name} marked as MISSING from scanner.dependencies_satisfied"
-                )
-
-        # If not excluded or missing dependencies, check for actionable findings
-        if not scanner_excluded and not dependencies_missing and actionable > 0:
-            status = "[bold red]FAILED[/bold red]"
-            status_text = Text("FAILED", style="red bold")
-            ASH_LOGGER.debug(
-                f"Scanner {scanner_name} marked as FAILED due to actionable findings"
-            )
-        elif dependencies_missing:
-            status = "[bold yellow]MISSING[/bold yellow]"
-            status_text = Text("MISSING", style="yellow bold")
-        elif actionable > 0:
-            status = "[bold red]FAILED[/bold red]"
-            status_text = Text("FAILED", style="red bold")
-            ASH_LOGGER.debug(
-                f"Scanner {scanner_name} failed with {evaluation_threshold} threshold: {actionable} actionable findings"
-            )
-
-        ASH_LOGGER.debug(f"Scanner {scanner_name} final status: {status}")
-
+    # Add rows for each scanner
+    for metrics in scanner_metrics:
         # Format the threshold for display based on terminal width
-        # Get terminal width
-        if console:
-            terminal_width = console.width if hasattr(console, "width") else 100
-        else:
-            terminal_width = 100
-
-        if terminal_width < 100:
+        if use_short_headers:
             # Use shortened format for small terminals
             threshold_display = (
                 "MED"
-                if evaluation_threshold == "MEDIUM"
-                else evaluation_threshold[:4].upper()
-            )  # First 4 chars of severity level
-            threshold_location = scanner_threshold_def[
+                if metrics.threshold == "MEDIUM"
+                else metrics.threshold[:4].upper()
+            )
+            threshold_location = metrics.threshold_source[
                 0
             ].lower()  # First char of location (g, c, s)
             threshold_text = Text(
@@ -425,57 +98,54 @@ def generate_metrics_table(
         else:
             # Full format for larger terminals
             threshold_text = Text(
-                f"{evaluation_threshold} ({scanner_threshold_def})", style="cyan"
+                f"{metrics.threshold} ({metrics.threshold_source})", style="cyan"
             )
 
         # Format the result status based on terminal width
-        if console:
-            terminal_width = console.width if hasattr(console, "width") else 100
-        else:
-            terminal_width = shutil.get_terminal_size().columns
-
-        if terminal_width < 100:
+        if use_short_headers:
             # Use text-only format with color for small terminals
-            status_text = status_text  # Already set above
+            if metrics.status == "PASSED":
+                status_text = Text("PASSED", style="green bold")
+            elif metrics.status == "FAILED":
+                status_text = Text("FAILED", style="red bold")
+            elif metrics.status == "SKIPPED":
+                status_text = Text("SKIPPED", style="blue bold")
+            elif metrics.status == "MISSING":
+                status_text = Text("MISSING", style="yellow bold")
+            else:
+                status_text = Text(metrics.status, style="white bold")
         else:
             # Use emoji format for larger terminals
-            status_text = status
+            if metrics.status == "PASSED":
+                status_text = "[bold green]PASSED[/bold green]"
+            elif metrics.status == "FAILED":
+                status_text = "[bold red]FAILED[/bold red]"
+            elif metrics.status == "SKIPPED":
+                status_text = "[bold blue]SKIPPED[/bold blue]"
+            elif metrics.status == "MISSING":
+                status_text = "[bold yellow]MISSING[/bold yellow]"
+            else:
+                status_text = f"[bold white]{metrics.status}[/bold white]"
 
         # Format the actionable count with color based on value
-        if actionable > 0:
-            actionable_text = Text(str(actionable), style="red bold")
+        if metrics.actionable > 0:
+            actionable_text = Text(str(metrics.actionable), style="red bold")
         else:
-            actionable_text = Text(str(actionable), style="green bold")
-
-        # Extract duration from additional_reports if available
-        duration_seconds = (
-            asharp_model.scanner_results[scanner_name].source.duration or 0
-        ) + (asharp_model.scanner_results[scanner_name].converted.duration or 0)
-        # if scanner_name in asharp_model.additional_reports:
-        #     for target_type, results in asharp_model.additional_reports[
-        #         scanner_name
-        #     ].items():
-        #         if "duration" in results and results["duration"] is not None:
-        #             # If we have multiple target types, use the maximum duration
-        #             if (
-        #                 duration_seconds is None
-        #                 or results["duration"] > duration_seconds
-        #             ):
-        #                 duration_seconds = results["duration"]
+            actionable_text = Text(str(metrics.actionable), style="green bold")
 
         # Format the duration
-        formatted_duration = format_duration(duration_seconds)
+        formatted_duration = format_duration(metrics.duration)
 
         # Add row to table
         table.add_row(
-            scanner_name,
-            str(suppressed),
-            str(critical),
-            str(high),
-            str(medium),
-            str(low),
-            str(info),
-            formatted_duration,  # Add formatted duration
+            metrics.scanner_name,
+            str(metrics.suppressed),
+            str(metrics.critical),
+            str(metrics.high),
+            str(metrics.medium),
+            str(metrics.low),
+            str(metrics.info),
+            formatted_duration,
             actionable_text,
             status_text,
             threshold_text,
@@ -484,10 +154,41 @@ def generate_metrics_table(
     return table
 
 
-def display_metrics_table(
+def generate_metrics_table(
     completed_scanners: List[ScannerPluginBase],
     asharp_model: AshAggregatedResults,
+    source_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
     scan_results: Dict[str, Any] = None,
+    console: Console = None,
+) -> Table:
+    """Generate a Rich table with metrics for each scanner.
+
+    This is the legacy function that maintains backward compatibility.
+    New code should use generate_metrics_table_from_unified_data().
+
+    Args:
+        completed_scanners: List of completed scanner plugins (DEPRECATED - not used)
+        asharp_model: The AshAggregatedResults with scan results
+        source_dir: Source directory path for display
+        output_dir: Output directory path for display
+        scan_results: Optional dictionary of additional scan results (DEPRECATED - not used)
+        console: Rich console for responsive formatting
+
+    Returns:
+        Table: Rich table with scanner metrics
+    """
+    # Use the new unified approach, ignoring the legacy parameters
+    return generate_metrics_table_from_unified_data(
+        asharp_model=asharp_model,
+        source_dir=source_dir,
+        output_dir=output_dir,
+        console=console,
+    )
+
+
+def display_metrics_table(
+    asharp_model: AshAggregatedResults,
     source_dir: str | Path | None = None,
     output_dir: str | Path | None = None,
     use_color: bool = True,
@@ -495,52 +196,77 @@ def display_metrics_table(
     """Display a Rich table with metrics for each scanner.
 
     Args:
-        completed_scanners: List of completed scanner plugins
         asharp_model: The AshAggregatedResults with scan results
-        scan_results: Optional dictionary of additional scan results
+        source_dir: Source directory path for display
+        output_dir: Output directory path for display
         use_color: Whether to use color in the output (respects --no-color flag)
     """
     try:
         # Create a console with color settings that respect the --no-color flag
         console = Console(
-            color_system="auto" if use_color else None, force_terminal=use_color
+            color_system=(
+                "windows"
+                if platform.system() == "Windows"
+                else "auto"
+                if use_color
+                else None
+            ),
+            force_terminal=use_color,
         )
 
-        # Generate the metrics table
-        table = generate_metrics_table(
-            completed_scanners=completed_scanners,
+        # Generate the metrics table using unified data
+        table = generate_metrics_table_from_unified_data(
             asharp_model=asharp_model,
             source_dir=source_dir,
             output_dir=output_dir,
-            scan_results=scan_results,
             console=console,
         )
 
         # Create a help panel with instructions
         help_text = (
             "How to read this table:\n"
-            "- [bold]*Severity levels*[/bold]: Suppressed (S), Critical (C), High (H), Medium (M), Low (L), Info (I)\n"
+            "- [bold]*Severity levels*[/bold]:\n"
+            "  - [bold]Suppressed (S)[/bold]: Findings that have been explicitly suppressed and don't affect scanner status\n"
+            "  - [bold]Critical (C)[/bold]: Highest severity findings that require immediate attention\n"
+            "  - [bold]High (H)[/bold]: Serious findings that should be addressed soon\n"
+            "  - [bold]Medium (M)[/bold]: Moderate risk findings\n"
+            "  - [bold]Low (L)[/bold]: Lower risk findings\n"
+            "  - [bold]Info (I)[/bold]: Informational findings with minimal risk\n"
             "- [bold]*Duration (Time)*[/bold]: Time taken by the scanner to complete its execution\n"
-            "- [bold]*Actionable (Action)*[/bold]: Number of findings at or above the threshold severity level\n"
+            "- [bold]*Actionable (Action)*[/bold]: Number of findings at or above the threshold severity level that require attention\n"
             "- [bold]*Result*[/bold]: \n"
             "  - [bold green]PASSED[/bold green] = No findings at or above threshold\n"
             "  - [bold red]FAILED[/bold red] = Findings at or above threshold\n"
             "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
             "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
-            "- [bold]*Threshold (Thresh)*[/bold]: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL) and where it is set (config, scanner or global default)\n"
-            "- [bold]*Example*[/bold]: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure\n"
-            "- [bold]*Note*[/bold]: Suppressed findings are counted separately and do not contribute to actionable findings"
+            "- [bold]*Threshold (Thresh)*[/bold]: The minimum severity level that will cause a scanner to fail\n"
+            "  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL\n"
+            "  - Source: (g)lobal, (c)onfig, (s)canner\n"
+            "  - Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure\n"
+            "- [bold]*Statistics calculation*[/bold]:\n"
+            "  - All statistics are calculated from the final aggregated SARIF report\n"
+            "  - Suppressed findings are counted separately and do not contribute to actionable findings\n"
+            "  - Scanner status is determined by comparing actionable findings to the threshold\n"
         )
+
         help_panel = Panel(
             help_text,
-            title="Results Guide",
+            title="📊 ASH Scan Results Help",
             border_style="blue",
             expand=False,
         )
 
-        # Print everything with some spacing
+        # Display the help panel first, then the table
+        console.print()
         console.print(help_panel)
+        console.print()
         console.print(table)
+        console.print()
 
     except Exception as e:
         ASH_LOGGER.error(f"Error displaying metrics table: {e}")
+        # Fallback to simple text output
+        print("ASH Scan Results Summary")
+        print("=" * 50)
+        print(f"Error displaying detailed table: {e}")
+        print("Please check the output files for detailed results.")

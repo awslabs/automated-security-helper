@@ -99,14 +99,26 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             md_parts.append(
                 "The table below shows findings by scanner, with status based on severity thresholds and dependencies:\n"
             )
+            md_parts.append("- **Severity levels**:")
             md_parts.append(
-                "- **Severity levels**: Suppressed (S), Critical (C), High (H), Medium (M), Low (L), Info (I)"
+                "  - **Suppressed (S)**: Findings that have been explicitly suppressed and don't affect scanner status"
+            )
+            md_parts.append(
+                "  - **Critical (C)**: Highest severity findings that require immediate attention"
+            )
+            md_parts.append(
+                "  - **High (H)**: Serious findings that should be addressed soon"
+            )
+            md_parts.append("  - **Medium (M)**: Moderate risk findings")
+            md_parts.append("  - **Low (L)**: Lower risk findings")
+            md_parts.append(
+                "  - **Info (I)**: Informational findings with minimal risk"
             )
             md_parts.append(
                 "- **Duration (Time)**: Time taken by the scanner to complete its execution"
             )
             md_parts.append(
-                "- **Actionable**: Number of findings at or above the threshold severity level"
+                "- **Actionable**: Number of findings at or above the threshold severity level that require attention"
             )
             md_parts.append("- **Result**:")
             md_parts.append("  - ✅ **PASSED** = No findings at or above threshold")
@@ -114,23 +126,30 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             md_parts.append("  - ⚠️ **MISSING** = Required dependencies not available")
             md_parts.append("  - ⏭️ **SKIPPED** = Scanner explicitly disabled")
             md_parts.append(
-                "- **Threshold**: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL)"
+                "- **Threshold**: The minimum severity level that will cause a scanner to fail"
+            )
+            md_parts.append("  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL")
+            md_parts.append(
+                "  - Source: Values in parentheses indicate where the threshold is set:"
             )
             md_parts.append(
-                "  - Values in parentheses indicate where the threshold is set in order of precedence:"
+                "    - `global` (global_settings section in the ASH_CONFIG used)"
             )
-            md_parts.append("    - `env` (ASH_SEVERITY_THRESHOLD environment variable)")
             md_parts.append(
                 "    - `config` (scanner config section in the ASH_CONFIG used)"
             )
             md_parts.append(
                 "    - `scanner` (default configuration in the plugin, if explicitly set)"
             )
+            md_parts.append("- **Statistics calculation**:")
             md_parts.append(
-                "    - `global` (global_settings section in the ASH_CONFIG used)"
+                "  - All statistics are calculated from the final aggregated SARIF report"
             )
             md_parts.append(
-                "- **Note**: Suppressed findings are counted separately and do not contribute to actionable findings\n"
+                "  - Suppressed findings are counted separately and do not contribute to actionable findings"
+            )
+            md_parts.append(
+                "  - Scanner status is determined by comparing actionable findings to the threshold\n"
             )
 
             md_parts.append(
@@ -144,20 +163,17 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             scanner_results = emitter.get_scanner_results()
             for result in scanner_results:
                 # Determine status text and emoji based on status field
-                if "status" in result:
-                    status = result["status"]
-                    if status == "PASSED":
-                        status_text = "✅ Passed"
-                    elif status == "FAILED":
-                        status_text = "❌ Failed"
-                    elif status == "MISSING":
-                        status_text = "⚠️ Missing"
-                    elif status == "SKIPPED":
-                        status_text = "⏭️ Skipped"
-                    else:
-                        status_text = status
+                status = result["status"]
+                if status == "PASSED":
+                    status_text = "✅ PASSED"
+                elif status == "FAILED":
+                    status_text = "❌ FAILED"
+                elif status == "MISSING":
+                    status_text = "⚠️ MISSING"
+                elif status == "SKIPPED":
+                    status_text = "⏭️ SKIPPED"
                 else:
-                    status_text = "✅ Passed" if result["passed"] else "❌ Failed"
+                    status_text = status
 
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 

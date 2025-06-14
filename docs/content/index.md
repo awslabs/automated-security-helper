@@ -231,7 +231,7 @@ ASH uses CDK Nag underneath to apply NagPack rules to *CloudFormation templates*
 
 ## Feedback and Contributing
 
-- Create an issue [here](https://github.com/awslabs/automated-security-helper/issues)
+- Create an issue [in the GitHub repository](https://github.com/awslabs/automated-security-helper/issues)
 - See [CONTRIBUTING](contributing.md) for contribution guidelines
 
 ## Security
@@ -240,4 +240,4 @@ See [CONTRIBUTING](contributing.md#security-issue-notifications) for security is
 
 ## License
 
-This library is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file.
+This library is licensed under the Apache 2.0 License. See the [LICENSE](https://github.com/awslabs/automated-security-helper/blob/main/LICENSE) file.

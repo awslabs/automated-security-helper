@@ -1,9 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from datetime import timedelta
+# Removed unused import
 import logging
 import os
+import platform
 import time
 from typing import List
 from pydantic import BaseModel
@@ -26,14 +27,15 @@ from automated_security_helper.interactions.run_ash_container import (
     run_ash_container,
 )
 from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.core.unified_metrics import (
+    get_unified_scanner_metrics,
+)
 
 
 def format_duration(seconds):
     """Format duration in seconds to a human-readable string."""
-    duration = timedelta(seconds=seconds)
-
     # Extract hours, minutes, seconds
-    hours, remainder = divmod(duration.seconds, 3600)
+    hours, remainder = divmod(int(seconds), 3600)
     minutes, seconds = divmod(remainder, 60)
 
     # Format the duration string
@@ -380,7 +382,13 @@ def run_ash_scan(
                 output_formats=output_formats,
                 show_progress=final_show_progress,
                 simple_mode=simple,
-                color_system="auto" if color else None,
+                color_system=(
+                    "windows"
+                    if platform.system() == "Windows"
+                    else "auto"
+                    if color
+                    else None
+                ),
                 offline=(
                     offline
                     if offline is not None
@@ -470,8 +478,11 @@ def run_ash_scan(
         )
     )
 
-    # Get the count of actionable findings from summary_stats
-    actionable_findings = results.metadata.summary_stats.actionable if results else None
+    # Get the count of actionable findings from unified metrics
+    scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
+    actionable_findings = 0
+    for item in scanner_metrics:
+        actionable_findings += item.actionable
     # Only display the final metrics and guidance if show_summary is True
     if show_summary:
         # Calculate scan duration
@@ -500,7 +511,6 @@ def run_ash_scan(
             )
 
         # If there are actionable findings, provide guidance
-
         if actionable_findings is not None and actionable_findings > 0:
             print("\n[magenta]=== Actionable findings detected! ===[/magenta]")
             print("To investigate...")

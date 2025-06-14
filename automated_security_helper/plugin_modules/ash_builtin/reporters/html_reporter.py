@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import html
-from typing import Dict, List, Literal, TYPE_CHECKING
+from typing import Dict, List, Literal, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -13,6 +13,10 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    ReportContentEmitter,
+)
+from automated_security_helper.core.unified_metrics import format_duration
 
 
 class HTMLReporterConfigOptions(ReporterOptionsBase):
@@ -37,28 +41,38 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model as HTML string with comprehensive styling and organization."""
+        # Use the content emitter to get report data
+        emitter = ReportContentEmitter(model)
 
-        # Get results from SARIF report
+        # Get metadata and scanner results
+        metadata = emitter.get_metadata()
+        scanner_results = emitter.get_scanner_results()
+
+        # Get results from SARIF report for backward compatibility
         results = (
             model.sarif.runs[0].results if model.sarif and model.sarif.runs else []
         )
-
-        # Don't add dummy results - let the formatter handle empty results
 
         # Group results by severity and rule
         findings_by_severity = self._group_results_by_severity(results)
         findings_by_type = self._group_results_by_rule(results)
 
+        # Generate HTML sections
         findings_table = self._format_findings_table(results)
         severity_summary = self._format_severity_summary(findings_by_severity)
         type_summary = self._format_type_summary(findings_by_type)
         metadata_section = self._format_metadata(model.metadata)
+        scanner_results_table = self._format_scanner_results_table(scanner_results)
+
+        # Get top hotspots
+        top_hotspots = emitter.get_top_hotspots(10)
+        hotspots_section = self._format_hotspots_section(top_hotspots)
 
         template = f"""
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ASH Results</title>
+    <title>ASH Security Scan Results</title>
     <style>
         body {{
             font-family: Arial, sans-serif;
@@ -90,6 +104,10 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         .severity-warning {{ color: #fd7e14; }}
         .severity-note {{ color: #ffc107; }}
         .severity-none {{ color: #28a745; }}
+        .status-passed {{ color: #28a745; font-weight: bold; }}
+        .status-failed {{ color: #dc3545; font-weight: bold; }}
+        .status-skipped {{ color: #6c757d; font-weight: bold; }}
+        .status-missing {{ color: #fd7e14; font-weight: bold; }}
         table {{
             width: 100%;
             border-collapse: collapse;
@@ -113,16 +131,75 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             background: #f8f9fa;
             border-radius: 4px;
         }}
+        .help-text {{
+            background: #e9f5ff;
+            border: 1px solid #b8daff;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+            font-size: 0.9em;
+        }}
+        .help-text h4 {{
+            margin-top: 0;
+            color: #0056b3;
+        }}
+        .help-text ul {{
+            margin-bottom: 0;
+        }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Security Scan Results</h1>
+        <h1>ASH Security Scan Results</h1>
+
+        <div class="metadata-section">
+            <p><strong>Project:</strong> {html.escape(metadata["project"])}</p>
+            <p><strong>Scan executed:</strong> {html.escape(metadata["scan_time"])}</p>
+            <p><strong>Report generated:</strong> {html.escape(metadata["report_time"])}</p>
+            <p><strong>ASH version:</strong> {html.escape(metadata["tool_version"])}</p>
+        </div>
+
+        <h2>Scanner Results</h2>
+        <div class="help-text">
+            <h4>How to read scanner results</h4>
+            <ul>
+                <li><strong>Severity levels:</strong>
+                    <ul>
+                        <li><strong>Suppressed (S):</strong> Findings that have been explicitly suppressed and don't affect scanner status</li>
+                        <li><strong>Critical (C):</strong> Highest severity findings that require immediate attention</li>
+                        <li><strong>High (H):</strong> Serious findings that should be addressed soon</li>
+                        <li><strong>Medium (M):</strong> Moderate risk findings</li>
+                        <li><strong>Low (L):</strong> Lower risk findings</li>
+                        <li><strong>Info (I):</strong> Informational findings with minimal risk</li>
+                    </ul>
+                </li>
+                <li><strong>Duration:</strong> Time taken by the scanner to complete its execution</li>
+                <li><strong>Actionable:</strong> Number of findings at or above the threshold severity level that require attention</li>
+                <li><strong>Result:</strong>
+                    <ul>
+                        <li class="status-passed">PASSED = No findings at or above threshold</li>
+                        <li class="status-failed">FAILED = Findings at or above threshold</li>
+                        <li class="status-missing">MISSING = Required dependencies not available</li>
+                        <li class="status-skipped">SKIPPED = Scanner explicitly disabled</li>
+                    </ul>
+                </li>
+                <li><strong>Threshold:</strong> The minimum severity level that will cause a scanner to fail</li>
+                <li><strong>Statistics calculation:</strong>
+                    <ul>
+                        <li>All statistics are calculated from the final aggregated SARIF report</li>
+                        <li>Suppressed findings are counted separately and do not contribute to actionable findings</li>
+                        <li>Scanner status is determined by comparing actionable findings to the threshold</li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+        {scanner_results_table}
 
         <h2>Summary</h2>
         <div class="summary-box">
             {severity_summary}
             {type_summary}
+            {hotspots_section}
         </div>
 
         <h2>Detailed Findings</h2>
@@ -136,6 +213,90 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 """
 
         return template
+
+    def _format_scanner_results_table(
+        self, scanner_results: List[Dict[str, Any]]
+    ) -> str:
+        """Format the scanner results table."""
+        if not scanner_results:
+            return "<p>No scanner results available.</p>"
+
+        table = """
+        <table>
+            <tr>
+                <th>Scanner</th>
+                <th>S</th>
+                <th>C</th>
+                <th>H</th>
+                <th>M</th>
+                <th>L</th>
+                <th>I</th>
+                <th>Duration</th>
+                <th>Actionable</th>
+                <th>Result</th>
+                <th>Threshold</th>
+            </tr>
+        """
+
+        for result in scanner_results:
+            # Format duration
+            duration = format_duration(result.get("duration", 0))
+
+            # Format status with appropriate CSS class
+            status = result.get("status", "UNKNOWN")
+            status_class = f"status-{status.lower()}"
+
+            # Format threshold
+            threshold = f"{result.get('threshold', 'UNKNOWN')} ({result.get('threshold_source', 'unknown')})"
+
+            # Format actionable count with color
+            actionable = result.get("actionable", 0)
+            actionable_class = "status-failed" if actionable > 0 else "status-passed"
+
+            table += f"""
+            <tr>
+                <td>{html.escape(result.get("scanner_name", "Unknown"))}</td>
+                <td>{result.get("suppressed", 0)}</td>
+                <td>{result.get("critical", 0)}</td>
+                <td>{result.get("high", 0)}</td>
+                <td>{result.get("medium", 0)}</td>
+                <td>{result.get("low", 0)}</td>
+                <td>{result.get("info", 0)}</td>
+                <td>{duration}</td>
+                <td class="{actionable_class}">{actionable}</td>
+                <td class="{status_class}">{status}</td>
+                <td>{html.escape(threshold)}</td>
+            </tr>
+            """
+
+        table += "</table>"
+        return table
+
+    def _format_hotspots_section(self, hotspots: List[Dict[str, Any]]) -> str:
+        """Format the hotspots section."""
+        if not hotspots:
+            return ""
+
+        section = f"<h3>Top {len(hotspots)} Hotspots</h3>"
+        section += "<p>Files with the highest number of security findings:</p>"
+        section += """
+        <table>
+            <tr>
+                <th>Finding Count</th>
+                <th>File Location</th>
+            </tr>
+        """
+
+        for hotspot in hotspots:
+            section += f"""
+            <tr>
+                <td>{hotspot.get("count", 0)}</td>
+                <td>{html.escape(hotspot.get("location", "Unknown"))}</td>
+            </tr>
+            """
+
+        section += "</table>"
+        return section
 
     def _group_results_by_severity(
         self, results: List[Result]
@@ -168,9 +329,14 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     def _format_severity_summary(self, findings_by_severity: dict) -> str:
         """Format the severity summary section."""
-        summary = "<h3>Findings by Severity</h3><ul>"
+        summary = "<h3>Findings by Severity</h3>"
+        summary += (
+            "<p>Statistics are calculated from the final aggregated SARIF report:</p>"
+        )
+        summary += "<ul>"
         for severity, findings in findings_by_severity.items():
-            summary += f'<li class="severity-{severity.lower()}">{severity}: {len(findings)} finding(s)</li>'
+            severity_class = f"severity-{severity.lower()}"
+            summary += f'<li class="{severity_class}"><strong>{severity}</strong>: {len(findings)} finding(s)</li>'
         summary += "</ul>"
         return summary
 

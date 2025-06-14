@@ -13,6 +13,7 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
+    Tool,
     ToolComponent,
     PropertyBag,
 )
@@ -182,8 +183,6 @@ def attach_scanner_details(
     for run in sarif_report.runs:
         # Create or update tool.driver information
         if not run.tool:
-            from automated_security_helper.schemas.sarif_schema_model import Tool
-
             run.tool = Tool()
 
         if not run.tool.driver:

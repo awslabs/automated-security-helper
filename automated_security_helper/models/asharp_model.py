@@ -268,6 +268,20 @@ class AshAggregatedResults(BaseModel):
             self.scanner_results = {}
         return super().model_post_init(context)
 
+    def metadata_only(self) -> dict:
+        """Produces a simplified version of the aggregated results without the
+            sarif or cyclonedx properties.
+
+        Returns:
+            dict: A simple dictionary representation of the AshAggregatedResults
+        """
+        return self.metadata.model_dump(
+            by_alias=True,
+            exclude=["sarif", "cyclonedx"],
+            exclude_unset=True,
+            mode="json",
+        )
+
     def to_simple_dict(self) -> dict:
         """Convert the AshAggregatedResults to a simple dictionary representation.
 

@@ -385,7 +385,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             if len(scannable) == 0:
                 self._plugin_log(
-                    f"No package lock files found in {target_type} directory to scan. Exiting.",
+                    f"No package lock files found in {target_type} directory to scan. Returning.",
                     target_type=target_type,
                     level=logging.INFO,
                     append_to_stream="stderr",
@@ -428,7 +428,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # Add offline mode if enabled
                         if self.config.options.offline:
                             cmd.append("--offline")
-                            ASH_LOGGER.info(f"Running {binary} audit in offline mode")
+                            ASH_LOGGER.info(
+                                f"🔄 Running {binary} audit in offline mode"
+                            )
 
                             # Validate offline mode requirements
                             from automated_security_helper.utils.offline_mode_validator import (
@@ -440,7 +442,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             )
                             if not offline_valid:
                                 ASH_LOGGER.warning(
-                                    "npm audit offline mode validation failed, but continuing with scan"
+                                    "⚠️ npm audit offline mode validation failed, but continuing with scan"
                                 )
 
                         result = self._run_subprocess(

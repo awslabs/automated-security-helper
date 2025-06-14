@@ -75,6 +75,11 @@ class ScanPhase(EnginePhase):
         ]
         self._include_work_dir = len(work_dir_contents) > 0
 
+        # Debug logging for scanner filtering parameters
+        ASH_LOGGER.debug(f"Enabled scanners parameter: {enabled_scanners}")
+        ASH_LOGGER.debug(f"Excluded scanners parameter: {excluded_scanners}")
+        ASH_LOGGER.debug(f"Python-based plugins only: {python_based_plugins_only}")
+
         try:
             # Update progress to show we're starting
             self.update_progress(10, "Building scanner queue...")
@@ -101,11 +106,13 @@ class ScanPhase(EnginePhase):
 
             # Process scanners
             if scanner_classes:
+                ASH_LOGGER.debug(f"Processing {len(scanner_classes)} scanner classes")
                 for plugin_class in scanner_classes:
                     try:
                         plugin_name = getattr(
                             plugin_class, "__name__", "Unknown"
                         ).lower()
+                        ASH_LOGGER.debug(f"Processing scanner class: {plugin_name}")
 
                         # Create scanner instance
                         plugin_instance = plugin_class(
@@ -119,6 +126,7 @@ class ScanPhase(EnginePhase):
                             ),
                             context=self.plugin_context,
                         )
+                        ASH_LOGGER.debug(f"Created scanner instance for: {plugin_name}")
 
                         # Use the configured name if available
                         display_name = plugin_name
@@ -126,6 +134,7 @@ class ScanPhase(EnginePhase):
                             plugin_instance.config, "name"
                         ):
                             display_name = plugin_instance.config.name
+                        ASH_LOGGER.debug(f"Scanner display name: {display_name}")
 
                         # Check if scanner is in the excluded list
                         is_excluded = (
@@ -164,6 +173,7 @@ class ScanPhase(EnginePhase):
                             continue
 
                         # Check dependencies early
+                        ASH_LOGGER.debug(f"Validating dependencies for: {display_name}")
                         plugin_instance.dependencies_satisfied = (
                             plugin_instance.validate()
                         )
@@ -203,7 +213,12 @@ class ScanPhase(EnginePhase):
                         ) and bool(plugin_instance.config.enabled)
                         is_in_enabled_scanners = (
                             not enabled_scanners
-                            or display_name.lower().strip() in enabled_scanners
+                            or display_name.lower().strip()
+                            in [s.lower().strip() for s in enabled_scanners]
+                        )
+
+                        ASH_LOGGER.debug(
+                            f"Scanner {display_name}: enabled={is_enabled}, in_enabled_list={is_in_enabled_scanners}"
                         )
 
                         # Add debug logging for python_based_plugins_only check
@@ -214,13 +229,18 @@ class ScanPhase(EnginePhase):
                                 f"Scanner {display_name}: Python-only check result: {is_python_only_scanner}"
                             )
 
-                        if (
+                        final_check = (
                             is_enabled
                             and is_in_enabled_scanners
                             and (
                                 not python_based_plugins_only or is_python_only_scanner
                             )
-                        ):
+                        )
+                        ASH_LOGGER.debug(
+                            f"Scanner {display_name}: final check result: {final_check}"
+                        )
+
+                        if final_check:
                             # Add a single task per scanner that will handle both source and converted directories
                             task_list = [
                                 {
@@ -244,10 +264,23 @@ class ScanPhase(EnginePhase):
                             )
                             enabled_scanner_classes.append(plugin_class)
                             enabled_scanner_names.append(display_name)
+                            ASH_LOGGER.debug(
+                                f"Added scanner {display_name} to execution queue"
+                            )
+                        else:
+                            ASH_LOGGER.debug(
+                                f"Scanner {display_name} did not pass final checks, skipping"
+                            )
                     except Exception as e:
                         ASH_LOGGER.error(
                             f"Error checking scanner {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
                         )
+                        # Add stack trace for debugging
+                        import traceback
+
+                        ASH_LOGGER.debug(f"Stack trace: {traceback.format_exc()}")
+            else:
+                ASH_LOGGER.warning("No scanner classes found!")
 
             ASH_LOGGER.verbose(
                 f"Prepared {len(enabled_scanner_names)} enabled scanners: {enabled_scanner_names}"
@@ -365,40 +398,37 @@ class ScanPhase(EnginePhase):
 
         Returns:
             Tuple[Dict[str, int], int]: Severity counts and total finding count
-        """
-        severity_counts = {
-            "suppressed": 0,
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 0,
-        }
-        total_findings = 0
 
-        if hasattr(sarif_report, "runs") and sarif_report.runs:
-            for run in sarif_report.runs:
-                if hasattr(run, "results") and run.results:
-                    for result in run.results:
-                        total_findings += 1
-                        # Map SARIF level to our severity levels
-                        if (
-                            hasattr(result, "suppressions")
-                            and result.suppressions
-                            and len(result.suppressions) > 0
-                        ):
-                            severity_counts["suppressed"] += 1
-                        elif hasattr(result, "level"):
-                            if result.level == "error":
-                                severity_counts["high"] += 1
-                            elif result.level == "warning":
-                                severity_counts["medium"] += 1
-                            elif result.level == "note":
-                                severity_counts["low"] += 1
-                            else:
-                                severity_counts["info"] += 1
-                        else:
-                            severity_counts["info"] += 1
+        Note:
+            This method is kept for backward compatibility. For new code, use
+            ScannerStatisticsCalculator.extract_sarif_counts_for_scanner instead.
+        """
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.core.scanner_statistics_calculator import (
+            ScannerStatisticsCalculator,
+        )
+
+        # Create a temporary AshAggregatedResults with the SARIF report
+        temp_model = AshAggregatedResults()
+        temp_model.sarif = sarif_report
+
+        # Use the centralized calculator to extract counts for a generic scanner
+        suppressed, critical, high, medium, low, info = (
+            ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
+                temp_model, "generic"
+            )
+        )
+
+        # Format the results to match the expected return format
+        severity_counts = {
+            "suppressed": suppressed,
+            "critical": critical,
+            "high": high,
+            "medium": medium,
+            "low": low,
+            "info": info,
+        }
+        total_findings = critical + high + medium + low + info + suppressed
 
         return severity_counts, total_findings
 
@@ -1221,61 +1251,10 @@ class ScanPhase(EnginePhase):
             )
 
             # Apply suppressions based on global ignore paths
-            ASH_LOGGER.trace(
-                f"Ignoring paths: {self.plugin_context.config.global_settings.ignore_paths}"
-            )
             sanitized_sarif = apply_suppressions_to_sarif(
                 sarif_report=sanitized_sarif,
                 plugin_context=self.plugin_context,
             )
-
-            # Count suppressed findings after suppressions have been applied
-            # and adjust severity counts to avoid double-counting
-            suppressed_count = max(
-                0,
-                aggregated_results.scanner_results[
-                    scanner_name
-                ].source.severity_counts.suppressed
-                + aggregated_results.scanner_results[
-                    scanner_name
-                ].converted.severity_counts.suppressed,
-            )
-            # if sanitized_sarif and sanitized_sarif.runs:
-            #     for run in sanitized_sarif.runs:
-            #         if run.results:
-            #             for result in run.results:
-            #                 if result.suppressions and len(result.suppressions) > 0:
-            #                     suppressed_count += 1
-            #                     # Determine the original severity level to decrement it
-            #                     if result.level:
-            #                         level = str(result.level).lower()
-            #                         if level == "error":
-            #                             # Decrement critical count to avoid double counting
-            #                             aggregated_results.scanner_results[scanner_name].source.severity_counts.critical = max(
-            #                                 0, aggregated_results.scanner_results[scanner_name].source.severity_counts.critical - 1
-            #                             )
-            #                         elif level == "warning":
-            #                             # Decrement high/medium count to avoid double counting
-            #                             aggregated_results.scanner_results[scanner_name].source.severity_counts.medium = max(
-            #                                 0, aggregated_results.scanner_results[scanner_name].source.severity_counts.medium - 1
-            #                             )
-            #                         elif level == "note":
-            #                             # Decrement low count to avoid double counting
-            #                             aggregated_results.scanner_results[scanner_name].source.severity_counts.low = max(
-            #                                 0, aggregated_results.scanner_results[scanner_name].source.severity_counts.low - 1
-            #                             )
-            #                         elif level == "none":
-            #                             # Decrement info count to avoid double counting
-            #                             aggregated_results.scanner_results[scanner_name].source.severity_counts.info = max(
-            #                                 0, aggregated_results.scanner_results[scanner_name].source.severity_counts.info - 1
-            #                             )
-
-            # Update the suppressed count in the scanner results
-            if suppressed_count > 0:
-                ASH_LOGGER.debug(
-                    f"Found {suppressed_count} suppressed findings for scanner {scanner_name}"
-                )
-                # aggregated_results.scanner_results[scanner_name].source.severity_counts.suppressed += suppressed_count
 
             # Attach scanner details to the SARIF report
             scanner_version = None

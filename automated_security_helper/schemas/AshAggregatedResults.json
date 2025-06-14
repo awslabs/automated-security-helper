@@ -1357,7 +1357,11 @@
               "enabled": true,
               "extension": "flat.json",
               "name": "flat-json",
-              "options": {}
+              "options": {
+                "include_metadata": true,
+                "include_scanner_metrics": true,
+                "include_summary_metrics": true
+              }
             },
             "gitlab-sast": {
               "enabled": true,
@@ -7080,6 +7084,7 @@
     },
     "FlatJSONReporterConfig": {
       "additionalProperties": true,
+      "description": "Configuration for the Flat JSON reporter.",
       "properties": {
         "enabled": {
           "default": true,
@@ -7099,7 +7104,11 @@
         },
         "options": {
           "$ref": "#/$defs/FlatJSONReporterConfigOptions",
-          "default": {}
+          "default": {
+            "include_metadata": true,
+            "include_scanner_metrics": true,
+            "include_summary_metrics": true
+          }
         }
       },
       "title": "FlatJSONReporterConfig",
@@ -7107,7 +7116,24 @@
     },
     "FlatJSONReporterConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "description": "Configuration options for the Flat JSON reporter.",
+      "properties": {
+        "include_metadata": {
+          "default": true,
+          "title": "Include Metadata",
+          "type": "boolean"
+        },
+        "include_scanner_metrics": {
+          "default": true,
+          "title": "Include Scanner Metrics",
+          "type": "boolean"
+        },
+        "include_summary_metrics": {
+          "default": true,
+          "title": "Include Summary Metrics",
+          "type": "boolean"
+        }
+      },
       "title": "FlatJSONReporterConfigOptions",
       "type": "object"
     },
@@ -12900,7 +12926,11 @@
             "enabled": true,
             "extension": "flat.json",
             "name": "flat-json",
-            "options": {}
+            "options": {
+              "include_metadata": true,
+              "include_scanner_metrics": true,
+              "include_summary_metrics": true
+            }
           },
           "description": "Configure the options for the Flat JSON reporter"
         },

@@ -1,266 +1,306 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Offline mode validation utilities for ASH scanners."""
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Tuple
+from datetime import datetime, timedelta
+
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class OfflineModeValidator:
-    """Helper class for validating offline mode requirements for scanners."""
-
-    def __init__(self, scanner_name: str):
-        """Initialize the validator for a specific scanner.
-
-        Args:
-            scanner_name: Name of the scanner (e.g., 'semgrep', 'grype', etc.)
-        """
-        self.scanner_name = scanner_name
-
-    def validate_cache_directory(
-        self,
-        env_var_name: str,
-        expected_file_patterns: Optional[List[str]] = None,
-        min_files: int = 1,
-    ) -> Tuple[bool, str, Dict[str, any]]:
-        """Validate that a cache directory exists and contains expected files.
-
-        Args:
-            env_var_name: Environment variable name for the cache directory
-            expected_file_patterns: List of file patterns to look for (e.g., ['*.yaml', '*.yml'])
-            min_files: Minimum number of files expected in the cache
-
-        Returns:
-            Tuple of (is_valid, message, metadata)
-        """
-        cache_dir = os.environ.get(env_var_name)
-        metadata = {
-            "env_var": env_var_name,
-            "cache_dir": cache_dir,
-            "files_found": 0,
-            "file_patterns": expected_file_patterns or [],
-        }
-
-        if not cache_dir:
-            message = f"🔴 {self.scanner_name} offline mode: {env_var_name} environment variable not set"
-            ASH_LOGGER.warning(message)
-            return False, message, metadata
-
-        cache_path = Path(cache_dir)
-        if not cache_path.exists():
-            message = f"🔴 {self.scanner_name} offline mode: Cache directory does not exist: {cache_dir}"
-            ASH_LOGGER.warning(message)
-            return False, message, metadata
-
-        if not cache_path.is_dir():
-            message = f"🔴 {self.scanner_name} offline mode: Cache path is not a directory: {cache_dir}"
-            ASH_LOGGER.warning(message)
-            return False, message, metadata
-
-        # Count files matching patterns
-        files_found = []
-        if expected_file_patterns:
-            for pattern in expected_file_patterns:
-                files_found.extend(list(cache_path.glob(f"**/{pattern}")))
-        else:
-            # Count all files if no patterns specified
-            files_found = list(cache_path.glob("**/*"))
-            files_found = [f for f in files_found if f.is_file()]
-
-        metadata["files_found"] = len(files_found)
-        metadata["sample_files"] = [
-            str(f.relative_to(cache_path)) for f in files_found[:5]
-        ]
-
-        if len(files_found) < min_files:
-            message = f"🔴 {self.scanner_name} offline mode: Insufficient files in cache directory. Found {len(files_found)}, expected at least {min_files}"
-            ASH_LOGGER.warning(message)
-            return False, message, metadata
-
-        message = f"✅ {self.scanner_name} offline mode: Cache directory validated with {len(files_found)} files"
-        ASH_LOGGER.info(message)
-        return True, message, metadata
-
-    def validate_database_age(
-        self, db_path: str, max_age_days: int = 30
-    ) -> Tuple[bool, str, Dict[str, any]]:
-        """Validate that a database file exists and is not too old.
-
-        Args:
-            db_path: Path to the database file
-            max_age_days: Maximum age in days before warning
-
-        Returns:
-            Tuple of (is_valid, message, metadata)
-        """
-        from datetime import datetime
-
-        metadata = {
-            "db_path": db_path,
-            "max_age_days": max_age_days,
-            "exists": False,
-            "age_days": None,
-            "last_modified": None,
-        }
-
-        db_file = Path(db_path)
-        if not db_file.exists():
-            message = f"🔴 {self.scanner_name} offline mode: Database file does not exist: {db_path}"
-            ASH_LOGGER.warning(message)
-            return False, message, metadata
-
-        metadata["exists"] = True
-
-        # Check file age
-        stat = db_file.stat()
-        last_modified = datetime.fromtimestamp(stat.st_mtime)
-        age = datetime.now() - last_modified
-        age_days = age.days
-
-        metadata["last_modified"] = last_modified.isoformat()
-        metadata["age_days"] = age_days
-
-        if age_days > max_age_days:
-            message = f"⚠️ {self.scanner_name} offline mode: Database is {age_days} days old (last modified: {last_modified.strftime('%Y-%m-%d')}). Consider updating for latest vulnerability data."
-            ASH_LOGGER.warning(message)
-            return True, message, metadata  # Still valid, just old
-
-        message = f"✅ {self.scanner_name} offline mode: Database is current ({age_days} days old)"
-        ASH_LOGGER.info(message)
-        return True, message, metadata
-
-    def log_offline_mode_status(
-        self, is_offline: bool, validations: List[Tuple[bool, str, Dict[str, any]]]
-    ):
-        """Log a comprehensive offline mode status for the scanner.
-
-        Args:
-            is_offline: Whether offline mode is enabled
-            validations: List of validation results from validate_* methods
-        """
-        if not is_offline:
-            ASH_LOGGER.info(f"🌐 {self.scanner_name}: Running in online mode")
-            return
-
-        ASH_LOGGER.info(f"📴 {self.scanner_name}: Running in offline mode")
-
-        all_valid = True
-        for is_valid, message, metadata in validations:
-            if not is_valid:
-                all_valid = False
-
-        if all_valid:
-            ASH_LOGGER.info(
-                f"✅ {self.scanner_name}: All offline mode requirements satisfied"
-            )
-        else:
-            ASH_LOGGER.warning(
-                f"⚠️ {self.scanner_name}: Some offline mode requirements not met - scanner may fall back to defaults"
-            )
-
-
 def validate_semgrep_offline_mode() -> Tuple[bool, List[str]]:
-    """Validate Semgrep offline mode requirements.
+    """
+    Validate that Semgrep offline mode requirements are met.
 
     Returns:
-        Tuple of (all_requirements_met, list_of_messages)
+        Tuple of (is_valid, list_of_messages)
     """
-    validator = OfflineModeValidator("Semgrep")
+    messages = []
+    is_valid = True
 
-    # Check for rules cache directory
-    is_valid, message, metadata = validator.validate_cache_directory(
-        "SEMGREP_RULES_CACHE_DIR",
-        expected_file_patterns=["*.yaml", "*.yml"],
-        min_files=1,
-    )
+    # Check for SEMGREP_RULES_CACHE_DIR environment variable
+    cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
+    if not cache_dir:
+        ASH_LOGGER.warning("⚠️ Semgrep offline mode: SEMGREP_RULES_CACHE_DIR not set")
+        messages.append("SEMGREP_RULES_CACHE_DIR environment variable not set")
+        is_valid = False
+        return is_valid, messages
 
-    validator.log_offline_mode_status(True, [(is_valid, message, metadata)])
-
-    return is_valid, [message]
-
-
-def validate_grype_offline_mode() -> Tuple[bool, List[str]]:
-    """Validate Grype offline mode requirements.
-
-    Returns:
-        Tuple of (all_requirements_met, list_of_messages)
-    """
-    validator = OfflineModeValidator("Grype")
-
-    # Check for database cache directory
-    db_cache_valid, db_message, db_metadata = validator.validate_cache_directory(
-        "GRYPE_DB_CACHE_DIR", min_files=1
-    )
-
-    validations = [(db_cache_valid, db_message, db_metadata)]
-
-    # If cache directory exists, check database age
-    if db_cache_valid and db_metadata.get("cache_dir"):
-        cache_dir = Path(db_metadata["cache_dir"])
-        # Look for database files
-        db_files = list(cache_dir.glob("**/*.db")) + list(
-            cache_dir.glob("**/*vulnerability*")
+    cache_path = Path(cache_dir)
+    if not cache_path.exists():
+        ASH_LOGGER.warning(
+            f"⚠️ Semgrep offline mode: Cache directory does not exist: {cache_dir}"
         )
-        if db_files:
-            # Check the newest database file
-            newest_db = max(db_files, key=lambda f: f.stat().st_mtime)
-            age_valid, age_message, age_metadata = validator.validate_database_age(
-                str(newest_db)
-            )
-            validations.append((age_valid, age_message, age_metadata))
+        messages.append(f"Cache directory does not exist: {cache_dir}")
+        is_valid = False
+        return is_valid, messages
 
-    validator.log_offline_mode_status(True, validations)
+    # Check for rule files in cache directory
+    rule_files = [
+        item
+        for item in cache_path.glob("**/*")
+        if item.is_file()
+        and (item.name.endswith(".yaml") or item.name.endswith(".yml"))
+    ]
 
-    all_valid = all(valid for valid, _, _ in validations)
-    messages = [msg for _, msg, _ in validations]
+    if not rule_files:
+        ASH_LOGGER.warning(
+            f"⚠️ Semgrep offline mode: No rule files found in cache directory: {cache_dir}"
+        )
+        messages.append(f"No rule files found in cache directory: {cache_dir}")
+        is_valid = False
+        return is_valid, messages
 
-    return all_valid, messages
+    ASH_LOGGER.info(
+        f"✅ Semgrep offline mode: Found {len(rule_files)} rule files in cache"
+    )
+    messages.append(f"Found {len(rule_files)} rule files in cache directory")
 
-
-def validate_npm_audit_offline_mode() -> Tuple[bool, List[str]]:
-    """Validate npm audit offline mode requirements.
-
-    Returns:
-        Tuple of (all_requirements_met, list_of_messages)
-    """
-    validator = OfflineModeValidator("npm-audit")
-
-    # Check for npm cache
-    npm_cache = os.environ.get("npm_config_cache") or os.path.expanduser("~/.npm")
-
-    metadata = {
-        "npm_cache": npm_cache,
-        "cache_exists": Path(npm_cache).exists() if npm_cache else False,
-    }
-
-    if not npm_cache or not Path(npm_cache).exists():
-        message = f"⚠️ npm-audit offline mode: npm cache directory not found at {npm_cache}. Offline mode may not work properly."
-        ASH_LOGGER.warning(message)
-        validator.log_offline_mode_status(True, [(False, message, metadata)])
-        return False, [message]
-
-    message = f"✅ npm-audit offline mode: npm cache directory found at {npm_cache}"
-    ASH_LOGGER.info(message)
-    validator.log_offline_mode_status(True, [(True, message, metadata)])
-
-    return True, [message]
+    return is_valid, messages
 
 
 def validate_opengrep_offline_mode() -> Tuple[bool, List[str]]:
-    """Validate Opengrep offline mode requirements.
+    """
+    Validate that Opengrep offline mode requirements are met.
 
     Returns:
-        Tuple of (all_requirements_met, list_of_messages)
+        Tuple of (is_valid, list_of_messages)
     """
-    validator = OfflineModeValidator("Opengrep")
+    messages = []
+    is_valid = True
 
-    # Check for rules cache directory
-    is_valid, message, metadata = validator.validate_cache_directory(
-        "OPENGREP_RULES_CACHE_DIR",
-        expected_file_patterns=["*.yaml", "*.yml"],
-        min_files=1,
+    # Check for OPENGREP_RULES_CACHE_DIR environment variable
+    cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
+    if not cache_dir:
+        ASH_LOGGER.warning("⚠️ Opengrep offline mode: OPENGREP_RULES_CACHE_DIR not set")
+        messages.append("OPENGREP_RULES_CACHE_DIR environment variable not set")
+        is_valid = False
+        return is_valid, messages
+
+    cache_path = Path(cache_dir)
+    if not cache_path.exists():
+        ASH_LOGGER.warning(
+            f"⚠️ Opengrep offline mode: Cache directory does not exist: {cache_dir}"
+        )
+        messages.append(f"Cache directory does not exist: {cache_dir}")
+        is_valid = False
+        return is_valid, messages
+
+    # Check for rule files in cache directory
+    rule_files = [
+        item
+        for item in cache_path.glob("**/*")
+        if item.is_file()
+        and (item.name.endswith(".yaml") or item.name.endswith(".yml"))
+    ]
+
+    if not rule_files:
+        ASH_LOGGER.warning(
+            f"⚠️ Opengrep offline mode: No rule files found in cache directory: {cache_dir}"
+        )
+        messages.append(f"No rule files found in cache directory: {cache_dir}")
+        is_valid = False
+        return is_valid, messages
+
+    ASH_LOGGER.info(
+        f"✅ Opengrep offline mode: Found {len(rule_files)} rule files in cache"
     )
+    messages.append(f"Found {len(rule_files)} rule files in cache directory")
 
-    validator.log_offline_mode_status(True, [(is_valid, message, metadata)])
+    return is_valid, messages
 
-    return is_valid, [message]
+
+def validate_grype_offline_mode() -> Tuple[bool, List[str]]:
+    """
+    Validate that Grype offline mode requirements are met.
+
+    Returns:
+        Tuple of (is_valid, list_of_messages)
+    """
+    messages = []
+    is_valid = True
+
+    # Check for GRYPE_DB_CACHE_DIR environment variable
+    cache_dir = os.environ.get("GRYPE_DB_CACHE_DIR")
+    if not cache_dir:
+        ASH_LOGGER.warning("⚠️ Grype offline mode: GRYPE_DB_CACHE_DIR not set")
+        messages.append("GRYPE_DB_CACHE_DIR environment variable not set")
+        is_valid = False
+        return is_valid, messages
+
+    cache_path = Path(cache_dir)
+    if not cache_path.exists():
+        ASH_LOGGER.warning(
+            f"⚠️ Grype offline mode: Cache directory does not exist: {cache_dir}"
+        )
+        messages.append(f"Cache directory does not exist: {cache_dir}")
+        is_valid = False
+        return is_valid, messages
+
+    # Check for database files in cache directory
+    db_files = [
+        item
+        for item in cache_path.glob("**/*")
+        if item.is_file()
+        and (
+            item.name.endswith(".db")
+            or item.name.endswith(".sqlite")
+            or "vulnerability" in item.name.lower()
+        )
+    ]
+
+    if not db_files:
+        ASH_LOGGER.warning(
+            f"⚠️ Grype offline mode: No database files found in cache directory: {cache_dir}"
+        )
+        messages.append(f"No database files found in cache directory: {cache_dir}")
+        is_valid = False
+        return is_valid, messages
+
+    # Check database age (warn if older than 7 days)
+    newest_db = max(db_files, key=lambda f: f.stat().st_mtime)
+    db_age = datetime.now() - datetime.fromtimestamp(newest_db.stat().st_mtime)
+
+    if db_age > timedelta(days=7):
+        ASH_LOGGER.warning(
+            f"⚠️ Grype offline mode: Database is {db_age.days} days old, consider updating"
+        )
+        messages.append(f"Database is {db_age.days} days old, consider updating")
+    else:
+        ASH_LOGGER.info(
+            f"✅ Grype offline mode: Found {len(db_files)} database files, newest is {db_age.days} days old"
+        )
+        messages.append(
+            f"Found {len(db_files)} database files, newest is {db_age.days} days old"
+        )
+
+    return is_valid, messages
+
+
+def validate_npm_audit_offline_mode() -> Tuple[bool, List[str]]:
+    """
+    Validate that npm audit offline mode requirements are met.
+
+    Returns:
+        Tuple of (is_valid, list_of_messages)
+    """
+    messages = []
+    is_valid = True
+
+    # Check for npm cache directory
+    npm_cache_dirs = [
+        os.environ.get("NPM_CONFIG_CACHE"),
+        os.path.expanduser("~/.npm"),
+        os.path.expanduser("~/AppData/Roaming/npm-cache"),  # Windows
+        os.path.expanduser("~/Library/Caches/npm"),  # macOS
+    ]
+
+    cache_found = False
+    for cache_dir in npm_cache_dirs:
+        if cache_dir and Path(cache_dir).exists():
+            cache_found = True
+            ASH_LOGGER.info(
+                f"✅ npm audit offline mode: Found npm cache at {cache_dir}"
+            )
+            messages.append(f"Found npm cache at {cache_dir}")
+            break
+
+    if not cache_found:
+        ASH_LOGGER.warning("⚠️ npm audit offline mode: No npm cache directory found")
+        messages.append("No npm cache directory found")
+        is_valid = False
+
+    # Check for yarn cache if yarn is being used
+    yarn_cache_dirs = [
+        os.environ.get("YARN_CACHE_FOLDER"),
+        os.path.expanduser("~/.yarn/cache"),
+        os.path.expanduser("~/Library/Caches/Yarn"),  # macOS
+        os.path.expanduser("~/AppData/Local/Yarn/Cache"),  # Windows
+    ]
+
+    for cache_dir in yarn_cache_dirs:
+        if cache_dir and Path(cache_dir).exists():
+            ASH_LOGGER.info(
+                f"✅ npm audit offline mode: Found yarn cache at {cache_dir}"
+            )
+            messages.append(f"Found yarn cache at {cache_dir}")
+            break
+
+    return is_valid, messages
+
+
+class OfflineModeValidator:
+    """Helper class for consistent offline mode validation across scanners."""
+
+    @staticmethod
+    def validate_cache_directory(
+        cache_dir: str, file_extensions: List[str], scanner_name: str
+    ) -> Tuple[bool, List[str]]:
+        """
+        Generic cache directory validation.
+
+        Args:
+            cache_dir: Path to cache directory
+            file_extensions: List of file extensions to look for
+            scanner_name: Name of the scanner for logging
+
+        Returns:
+            Tuple of (is_valid, list_of_messages)
+        """
+        messages = []
+        is_valid = True
+
+        if not cache_dir:
+            ASH_LOGGER.warning(
+                f"⚠️ {scanner_name} offline mode: Cache directory not specified"
+            )
+            messages.append(f"{scanner_name} cache directory not specified")
+            return False, messages
+
+        cache_path = Path(cache_dir)
+        if not cache_path.exists():
+            ASH_LOGGER.warning(
+                f"⚠️ {scanner_name} offline mode: Cache directory does not exist: {cache_dir}"
+            )
+            messages.append(f"Cache directory does not exist: {cache_dir}")
+            return False, messages
+
+        # Check for files with specified extensions
+        cache_files = []
+        for ext in file_extensions:
+            cache_files.extend(cache_path.glob(f"**/*{ext}"))
+
+        if not cache_files:
+            ASH_LOGGER.warning(
+                f"⚠️ {scanner_name} offline mode: No cache files found with extensions {file_extensions}"
+            )
+            messages.append(f"No cache files found with extensions {file_extensions}")
+            return False, messages
+
+        ASH_LOGGER.info(
+            f"✅ {scanner_name} offline mode: Found {len(cache_files)} cache files"
+        )
+        messages.append(f"Found {len(cache_files)} cache files")
+
+        return is_valid, messages
+
+    @staticmethod
+    def log_validation_results(scanner_name: str, is_valid: bool, messages: List[str]):
+        """
+        Log validation results in a consistent format.
+
+        Args:
+            scanner_name: Name of the scanner
+            is_valid: Whether validation passed
+            messages: List of validation messages
+        """
+        if is_valid:
+            ASH_LOGGER.info(f"✅ {scanner_name} offline mode validation passed")
+        else:
+            ASH_LOGGER.warning(f"⚠️ {scanner_name} offline mode validation failed")
+
+        for message in messages:
+            ASH_LOGGER.info(f"  - {message}")

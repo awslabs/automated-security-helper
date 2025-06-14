@@ -28,6 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
@@ -375,6 +376,26 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     sarif_report: SarifReport = SarifReport.model_validate(
                         semgrep_results
                     )
+
+                    # Attach scanner details for proper identification
+                    sarif_report = attach_scanner_details(
+                        sarif_report=sarif_report,
+                        scanner_name=self.config.name,
+                        scanner_version=getattr(self, "tool_version", None),
+                        invocation_details={
+                            "command_line": " ".join(final_args),
+                            "arguments": final_args[1:],
+                            "working_directory": get_shortest_name(input=target),
+                            "start_time": self.start_time.isoformat()
+                            if self.start_time
+                            else None,
+                            "end_time": self.end_time.isoformat()
+                            if self.end_time
+                            else None,
+                            "exit_code": self.exit_code,
+                        },
+                    )
+
                     sarif_report.runs[0].invocations = [
                         Invocation(
                             commandLine=" ".join(final_args),

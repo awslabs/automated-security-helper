@@ -4,6 +4,7 @@ import multiprocessing
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+import platform
 from typing import List, Optional
 
 
@@ -108,6 +109,15 @@ class ScanExecutionEngine:
             for subitem in item.split(",")
         ]
         self._enabled_scanners = []
+
+        ASH_LOGGER.debug(f"Raw enabled_scanners: {enabled_scanners}")
+        ASH_LOGGER.debug(
+            f"Processed _init_enabled_scanners: {self._init_enabled_scanners}"
+        )
+        ASH_LOGGER.debug(f"Raw excluded_scanners: {excluded_scanners}")
+        ASH_LOGGER.debug(
+            f"Processed _init_excluded_scanners: {self._init_excluded_scanners}"
+        )
         self._global_ignore_paths = global_ignore_paths
         self._python_only = (
             python_based_plugins_only  # Store the python_based_plugins_only flag
@@ -180,7 +190,9 @@ class ScanExecutionEngine:
         # Initialize progress display with debug/verbose flags
         self.progress_display = LiveProgressDisplay(
             show_progress=show_progress,
-            color_system=color_system,
+            color_system=(
+                "windows" if platform.system() == "Windows" else color_system
+            ),
             verbose=verbose_flag,
             debug=debug_flag,
         )
@@ -605,9 +617,7 @@ class ScanExecutionEngine:
 
                     # Always display the metrics table, even in simple mode
                     display_metrics_table(
-                        completed_scanners=self._completed_scanners,
                         asharp_model=self._asharp_model,
-                        scan_results=self._scan_results,
                         source_dir=os.environ.get(
                             "ASH_ACTUAL_SOURCE_DIR", self._context.source_dir.as_posix()
                         ),
