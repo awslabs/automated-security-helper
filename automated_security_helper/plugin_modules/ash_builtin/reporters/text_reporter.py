@@ -15,6 +15,7 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
+from automated_security_helper.core.unified_metrics import format_duration
 
 
 class TextReporterConfigOptions(ReporterOptionsBase):
@@ -103,7 +104,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 "- Severity levels: Suppressed (S), Critical (C), High (H), Medium (M), Low (L), Info (I)"
             )
             text_parts.append(
-                "- Duration (Time): Time taken by the scanner to complete its execution"
+                "- Duration: Time taken by the scanner to complete its execution"
             )
             text_parts.append(
                 "- Actionable: Number of findings at or above the threshold severity level"
@@ -113,6 +114,9 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             text_parts.append("  - FAILED = Findings at or above threshold")
             text_parts.append("  - MISSING = Required dependencies not available")
             text_parts.append("  - SKIPPED = Scanner explicitly disabled")
+            text_parts.append(
+                "- Note: All statistics are calculated from the final aggregated SARIF report"
+            )
             text_parts.append(
                 "- Threshold: The minimum severity level that will cause a scanner to fail (ALL, LOW, MEDIUM, HIGH, CRITICAL)"
             )
@@ -144,19 +148,19 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
             # Create header row with proper spacing
             text_parts.append(
-                f"{'Scanner':<18} {'Suppressed':>10} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Actionable':>10} {'Result':<8} {'Threshold':<15}"
+                f"{'Scanner':<18} {'Suppressed':>10} {'Critical':>8} {'High':>8} {'Medium':>8} {'Low':>8} {'Info':>8} {'Duration':>10} {'Actionable':>10} {'Result':<8} {'Threshold':<15}"
             )
             text_parts.append(
-                f"{'-' * 18} {'-' * 10} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 8} {'-' * 15}"
+                f"{'-' * 18} {'-' * 10} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 10} {'-' * 10} {'-' * 8} {'-' * 15}"
             )
 
             # Add scanner result rows
             for result in scanner_results:
-                # Determine status text based on status field
-                if "status" in result:
-                    status = result["status"]
-                else:
-                    status = "PASS" if result["passed"] else "FAIL"
+                # Use the status field directly from the unified metrics
+                status = result["status"]
+
+                # Format duration using the unified format_duration function
+                duration = format_duration(result.get("duration", 0))
 
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 
@@ -168,6 +172,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                     f"{result['medium']:>8} "
                     f"{result['low']:>8} "
                     f"{result['info']:>8} "
+                    f"{duration:>10} "
                     f"{result['actionable']:>10} "
                     f"{status:<8} "
                     f"{threshold_text:<15}"

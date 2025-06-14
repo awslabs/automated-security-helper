@@ -95,7 +95,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             self.config = S3ReporterConfig.model_validate(self.config)
 
         # Create a unique key for the S3 object
-        timestamp = model.scan_metadata.scan_time.strftime("%Y%m%d-%H%M%S")
+        timestamp = model.metadata.summary_stats.start
         file_extension = "json" if self.config.options.file_format == "json" else "yaml"
         s3_key = (
             f"{self.config.options.key_prefix}ash-report-{timestamp}.{file_extension}"

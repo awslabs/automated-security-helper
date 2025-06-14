@@ -129,6 +129,9 @@ def test_run_ash_scan_with_actionable_findings(
     Path(source_dir).mkdir(parents=True, exist_ok=True)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+    # Mock scanner metrics with actionable findings
+    mock_scanner_metrics = [MagicMock(scanner_name="test-scanner", actionable=5)]
+
     with (
         patch(
             "pathlib.Path.exists",
@@ -144,6 +147,10 @@ def test_run_ash_scan_with_actionable_findings(
             "automated_security_helper.models.asharp_model.AshAggregatedResults"
         ) as mock_results,
         patch("sys.exit") as mock_exit,
+        patch(
+            "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
+            return_value=mock_scanner_metrics,
+        ),
     ):
         mock_results.model_dump_json.return_value = "{}"
         mock_orchestrator.execute_scan.return_value.metadata.summary_stats.actionable = 5

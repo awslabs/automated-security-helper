@@ -4,8 +4,8 @@ source = automated_security_helper
 [report]
 # Show missing lines in reports
 show_missing = True
-# Fail if total coverage is below 64%
-fail_under = 64
+# Fail if total coverage is below x%
+fail_under = 65
 
 [html]
 directory = test-results/coverage_html

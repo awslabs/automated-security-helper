@@ -9,11 +9,6 @@ from my_ash_plugins.converter import ExampleConverter
 from my_ash_plugins.scanner import ExampleScanner
 from my_ash_plugins.reporter import ExampleReporter
 
-# Make plugins discoverable
-ASH_CONVERTERS = [ExampleConverter]
-ASH_SCANNERS = [ExampleScanner]
-ASH_REPORTERS = [ExampleReporter]
-
 
 def handle_scan_complete(**kwargs):
     """Example event handler for scan complete event."""
@@ -38,8 +33,13 @@ def handle_scan_start(**kwargs):
     return True
 
 
+# Make plugins discoverable
+ASH_CONVERTERS = [ExampleConverter]
+ASH_SCANNERS = [ExampleScanner]
+ASH_REPORTERS = [ExampleReporter]
+
 # Event callback registry following the same pattern as ASH_SCANNERS, ASH_REPORTERS, etc.
-ASH_EVENT_CALLBACKS = {
+ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [handle_scan_complete],
     AshEventType.SCAN_START: [handle_scan_start],
 }

@@ -21,7 +21,7 @@ ASH_BIN_PATH = (
     if os.environ.get("ASH_BIN_PATH", None) is not None
     else Path.home().joinpath(".ash", "bin")
 )
-ASH_DEFAULT_SEVERITY_LEVEL = "MEDIUM"
+ASH_DEFAULT_SEVERITY_LEVEL = os.environ.get("ASH_DEFAULT_SEVERITY_LEVEL", "MEDIUM")
 
 ASH_CONFIG_FILE_NAMES = [
     ".ash.yml",
@@ -48,6 +48,12 @@ KNOWN_LOCKFILE_NAMES = [
     "requirements.txt",
     "Pipfile",
     "Pipfile.lock",
+]
+
+KNOWN_IGNORE_PATHS = [
+    ".venv/",
+    "venv/",
+    "node_modules/",
 ]
 
 KNOWN_SCANNABLE_EXTENSIONS = [

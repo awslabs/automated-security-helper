@@ -40,13 +40,13 @@ def load_internal_plugins():
                 )
                 loaded_plugins["reporters"].extend(module.ASH_REPORTERS)
 
-            # Register event callbacks
-            if hasattr(module, "ASH_EVENT_CALLBACKS"):
+            # Register event handlers
+            if hasattr(module, "ASH_EVENT_HANDLERS"):
                 ASH_LOGGER.debug(
-                    f"Found event callbacks in {module_name}: {list(module.ASH_EVENT_CALLBACKS.keys())}"
+                    f"Found event handlers in {module_name}: {list(module.ASH_EVENT_HANDLERS.keys())}"
                 )
-                for event_type, callbacks in module.ASH_EVENT_CALLBACKS.items():
-                    for callback in callbacks:
+                for event_type, handlers in module.ASH_EVENT_HANDLERS.items():
+                    for callback in handlers:
                         ASH_LOGGER.debug(
                             f"Registering event callback {callback.__name__} for {event_type}"
                         )
@@ -82,13 +82,13 @@ def load_additional_plugin_modules(plugin_modules: List[str] = []) -> dict:
             if hasattr(module, "ASH_REPORTERS"):
                 discovered["reporters"].extend(module.ASH_REPORTERS)
 
-            # Register event callbacks from external modules
-            if hasattr(module, "ASH_EVENT_CALLBACKS"):
+            # Register event handlers from external modules
+            if hasattr(module, "ASH_EVENT_HANDLERS"):
                 ASH_LOGGER.debug(
-                    f"Found event callbacks in {module_path}: {list(module.ASH_EVENT_CALLBACKS.keys())}"
+                    f"Found event handlers in {module_path}: {list(module.ASH_EVENT_HANDLERS.keys())}"
                 )
-                for event_type, callbacks in module.ASH_EVENT_CALLBACKS.items():
-                    for callback in callbacks:
+                for event_type, handlers in module.ASH_EVENT_HANDLERS.items():
+                    for callback in handlers:
                         ASH_LOGGER.debug(
                             f"Registering event callback {callback.__name__} for {event_type}"
                         )

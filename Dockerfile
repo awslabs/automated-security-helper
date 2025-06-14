@@ -30,6 +30,8 @@ COPY automated_security_helper*/ automated_security_helper/
 RUN tree .
 RUN git status --short || true
 RUN poetry build
+RUN python -m pip install poetry-plugin-export
+RUN poetry export --without-hashes --format=requirements.txt > requirements.txt
 
 # Second stage: Core ASH image
 FROM ${BASE_IMAGE} AS core
@@ -101,16 +103,16 @@ RUN set -uex; \
 RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py
 RUN python3 -m pip install --no-cache-dir --upgrade pip
 
-#
-# Git (git-secrets)
-#
-RUN git clone https://github.com/awslabs/git-secrets.git && \
-    cd git-secrets && \
-    make install
+# #
+# # Git (git-secrets)
+# #
+# RUN git clone https://github.com/awslabs/git-secrets.git && \
+#     cd git-secrets && \
+#     make install
 
 
 #
-# YAML (Checkov, cfn-nag)
+# cfn-nag
 #
 RUN echo "gem: --no-document" >> /etc/gemrc && \
     gem install cfn-nag
@@ -143,16 +145,9 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
     fi
 
-# Setting PYTHONPATH so Jinja2 can resolve correctly
-# IMPORTANT: This is predicated on the Python version that is installed!
-#            Changing the BASE_IMAGE may result in this breaking.
-ENV PYTHONPATH='/opt/bitnami/python/lib/python3.10/site-packages'
-
-#
-# Prerequisite installation complete, finishing up
-#
 #
 # Setting default WORKDIR to /src
+#
 WORKDIR /src
 
 #
@@ -170,12 +165,10 @@ ENV NODE_OPTIONS=--max_old_space_size=512
 # COPY ASH source to /ash instead of / to isolate
 #
 COPY --from=poetry-reqs /src/dist/*.whl .
-RUN python3 -m pip install *.whl && rm *.whl
-
-# These aren't needed anymore, the Python package now handles
-# the /utils script logic as well as the shell entrypoint.
-# COPY ./utils/*.* /ash/utils/
-# COPY ./ash-multi /ash/ash
+COPY --from=poetry-reqs /src/requirements.txt .
+RUN python -m pip install -r requirements.txt && \
+    python -m pip install *.whl --no-deps && \
+    rm -rf *.whl requirements.txt
 
 #
 # Make sure the ash script is executable

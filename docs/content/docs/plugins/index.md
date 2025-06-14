@@ -10,7 +10,7 @@ ASH ships with a comprehensive set of built-in plugins that provide core functio
 - **[Security Scanners](./builtin/scanners.md)**: 10 built-in security scanners (Bandit, Semgrep, Checkov, etc.)
 - **[Report Formats](./builtin/reporters.md)**: 12 output formats (SARIF, HTML, CSV, etc.)
 - **[File Converters](./builtin/converters.md)**: Archive extraction and Jupyter notebook processing
-- **[Event Callbacks](./builtin/event-callbacks.md)**: Scan lifecycle event handling
+- **[Event Handlers](./builtin/event-handlers.md)**: Scan lifecycle event handling
 
 ## Plugin Types
 

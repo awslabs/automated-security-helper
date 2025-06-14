@@ -8,6 +8,7 @@ from typing import Annotated, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -198,8 +199,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     self.args.extra_args.extend(extra_arg_list)
                     break
 
-        for item in ['--exclude="/venv/"', '--exclude="/.venv/"']:
-            self.args.extra_args.append(ToolExtraArg(key=item, value=None))
         self.args.extra_args.append(
             ToolExtraArg(
                 key="--confidence-level", value=self.config.options.confidence_level
@@ -210,13 +209,20 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             self.args.extra_args.append(ToolExtraArg(key="--format", value=fmt))
         if self.config.options.ignore_nosec:
             self.args.extra_args.append(ToolExtraArg(key="--ignore-nosec", value=None))
+
+        bandit_excludes = []
+        for item in KNOWN_IGNORE_PATHS:
+            bandit_excludes.append(str(Path(item).joinpath("**")))
+            bandit_excludes.append(str(Path("**").joinpath(item, "**")))
         for item in self.config.options.excluded_paths:
             ASH_LOGGER.debug(
                 f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
             )
-            self.args.extra_args.append(
-                ToolExtraArg(key=f'--exclude="{item.path}"', value=None)
-            )
+            bandit_excludes.append(str(Path("**").joinpath(item.path, "**")))
+
+        self.args.extra_args.append(
+            ToolExtraArg(key=f'--exclude="{",".join(bandit_excludes)}"', value=None)
+        )
 
         return super()._process_config_options()
 

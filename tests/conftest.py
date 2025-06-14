@@ -259,13 +259,18 @@ def sample_ash_model():
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
     # Create a real model instead of a mock
-    model = AshAggregatedResults(
-        findings=[],
-        metadata={
-            "scanner_name": "test_scanner",
-            "scan_id": "test_scan_id",
-        },
-    )
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.config.ash_config import AshConfig
+
+    # First define AshConfig and rebuild the model
+    AshConfig.model_rebuild()
+    AshAggregatedResults.model_rebuild()
+
+    # Now create the model
+    model = AshAggregatedResults()
+    model.metadata.scanner_name = "test_scanner"
+    model.metadata.scan_id = "test_scan_id"
+    model.ash_config = get_default_config()
 
     return model
 

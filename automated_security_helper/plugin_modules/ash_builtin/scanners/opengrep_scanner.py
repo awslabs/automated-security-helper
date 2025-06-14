@@ -28,6 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.download_utils import (
     create_url_download_command,
@@ -77,7 +78,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Run in offline mode, using locally cached rules.",
         ),
-    ] = False
+    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
 
     patterns: Annotated[
         List[str],
@@ -220,6 +221,14 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                     value="off",
                 )
             )
+
+            # Validate offline mode requirements
+            from automated_security_helper.utils.offline_mode_validator import (
+                validate_opengrep_offline_mode,
+            )
+
+            offline_valid, offline_messages = validate_opengrep_offline_mode()
+
             # Check if OPENGREP_RULES_CACHE_DIR is set in environment
             opengrep_rules_cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
             if opengrep_rules_cache_dir:
@@ -232,6 +241,9 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                     if (item.name.endswith(".yaml") or item.name.endswith(".yml"))
                 ]
                 if opengrep_rules:
+                    ASH_LOGGER.info(
+                        f"✅ Opengrep offline mode: Found {len(opengrep_rules)} rule files in cache"
+                    )
                     self.args.extra_args.extend(
                         [
                             ToolExtraArg(
@@ -243,7 +255,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                     )
                 else:
                     self._plugin_log(
-                        "No Opengrep rules found in cache directory, falling back to p/ci",
+                        "🔴 Opengrep offline mode: No rules found in cache directory, falling back to p/ci",
                         level=logging.WARNING,
                     )
                     self.args.extra_args.append(
@@ -254,7 +266,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                     )
             else:
                 self._plugin_log(
-                    "OPENGREP_RULES_CACHE_DIR not set but offline mode enabled, falling back to p/ci",
+                    "🔴 Opengrep offline mode: OPENGREP_RULES_CACHE_DIR not set, falling back to p/ci",
                     level=logging.WARNING,
                 )
                 self.args.extra_args.append(
@@ -501,6 +513,26 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                         sarif_report: SarifReport = SarifReport.model_validate(
                             opengrep_results
                         )
+
+                        # Attach scanner details for proper identification
+                        sarif_report = attach_scanner_details(
+                            sarif_report=sarif_report,
+                            scanner_name=self.config.name,
+                            scanner_version=getattr(self, "tool_version", None),
+                            invocation_details={
+                                "command_line": " ".join(final_args),
+                                "arguments": final_args[1:],
+                                "working_directory": get_shortest_name(input=target),
+                                "start_time": self.start_time.isoformat()
+                                if self.start_time
+                                else None,
+                                "end_time": self.end_time.isoformat()
+                                if self.end_time
+                                else None,
+                                "exit_code": self.exit_code,
+                            },
+                        )
+
                         sarif_report.runs[0].invocations = [
                             Invocation(
                                 commandLine=" ".join(final_args),

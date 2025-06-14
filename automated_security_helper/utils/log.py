@@ -1,7 +1,9 @@
 import json
 import logging
 import os
-from typing import Literal
+import platform
+import sys
+from typing import Dict, Literal
 from rich.logging import RichHandler
 from rich.console import Console
 from rich.theme import Theme
@@ -183,7 +185,158 @@ class ASHLogger(logging.getLoggerClass()):
         self._log(logging._nameToLevel.get("TRACE", 5), msg, args, **kws)
 
 
-# logging.setLoggerClass(ASHLogger)
+def _is_windows_with_encoding_issues() -> bool:
+    """Check if we're running on Windows with potential encoding issues."""
+    if platform.system().lower() != "windows":
+        return False
+
+    # Check if we're in a CI environment where encoding might be problematic
+    ci_indicators = [
+        "CI",
+        "GITHUB_ACTIONS",
+        "AZURE_PIPELINES",
+        "JENKINS_URL",
+        "BUILDKITE",
+        "CIRCLECI",
+        "TRAVIS",
+        "APPVEYOR",
+    ]
+
+    is_ci = any(indicator in os.environ for indicator in ci_indicators)
+
+    # Check console encoding
+    try:
+        console_encoding = sys.stdout.encoding or "unknown"
+        # CP1252 is the problematic encoding on Windows
+        has_encoding_issues = console_encoding.lower() in ["cp1252", "windows-1252"]
+    except (AttributeError, TypeError):
+        has_encoding_issues = True  # Assume issues if we can't determine encoding
+
+    return is_ci or has_encoding_issues
+
+
+def _get_default_emoji_fallback_map() -> Dict[str, str]:
+    """Get the default emoji fallback mapping for Windows."""
+    return {
+        "✅": "[OK]",
+        "🔴": "[ERROR]",
+        "⚠️": "[WARNING]",
+        "🚀": "[INFO]",
+        "📁": "[FOLDER]",
+        "📄": "[FILE]",
+        "🔍": "[SEARCH]",
+        "💾": "[SAVE]",
+        "🔧": "[CONFIG]",
+        "📊": "[STATS]",
+        "🎯": "[TARGET]",
+        "⏱️": "[TIME]",
+        "🔒": "[SECURE]",
+        "🔓": "[INSECURE]",
+        "📝": "[NOTE]",
+        "❌": "[FAIL]",
+        "✨": "[SUCCESS]",
+        "🛡️": "[SECURITY]",
+        "🔎": "[SCAN]",
+        "📋": "[LIST]",
+        "⭐": "[STAR]",
+        "🎉": "[CELEBRATE]",
+        "🚨": "[ALERT]",
+        "💡": "[TIP]",
+        "🔄": "[REFRESH]",
+        "📈": "[PROGRESS]",
+        "🏁": "[FINISH]",
+        "🎪": "[DEMO]",
+        "🔗": "[LINK]",
+        "📦": "[PACKAGE]",
+        "🌟": "[FEATURE]",
+        "🎨": "[STYLE]",
+        "🧪": "[TEST]",
+        "🔥": "[HOT]",
+        "❄️": "[COLD]",
+        "🌈": "[RAINBOW]",
+        "🎭": "[MASK]",
+        "🎲": "[DICE]",
+        "🎮": "[GAME]",
+        "🎸": "[MUSIC]",
+        "🎤": "[MIC]",
+        "🎬": "[MOVIE]",
+        # Unicode warning symbol specifically (the one causing the error)
+        "\u26a0": "[WARNING]",
+        # Other common Unicode symbols
+        "\u2713": "[CHECK]",  # ✓
+        "\u2717": "[X]",  # ✗
+        "\u2192": "->",  # →
+        "\u2190": "<-",  # ←
+        "\u2191": "^",  # ↑
+        "\u2193": "v",  # ↓
+    }
+
+
+def _make_message_windows_safe(message: str, emoji_fallback_map: Dict[str, str]) -> str:
+    """Convert a message with Unicode characters to a Windows-safe version."""
+    # Replace Unicode characters with ASCII alternatives
+    safe_message = message
+    for unicode_char, ascii_replacement in emoji_fallback_map.items():
+        safe_message = safe_message.replace(unicode_char, ascii_replacement)
+
+    return safe_message
+
+
+def configure_windows_safe_logging():
+    """
+    Configure logging to be Windows-safe by setting appropriate encoding.
+    This should be called early in the application startup.
+    """
+    if platform.system().lower() != "windows":
+        return
+
+    # Check if we're in a CI environment where encoding might be problematic
+    ci_indicators = [
+        "CI",
+        "GITHUB_ACTIONS",
+        "AZURE_PIPELINES",
+        "JENKINS_URL",
+        "BUILDKITE",
+        "CIRCLECI",
+        "TRAVIS",
+        "APPVEYOR",
+    ]
+
+    is_ci = any(indicator in os.environ for indicator in ci_indicators)
+
+    # Check console encoding
+    try:
+        console_encoding = sys.stdout.encoding or "unknown"
+        has_encoding_issues = console_encoding.lower() in ["cp1252", "windows-1252"]
+    except (AttributeError, TypeError):
+        has_encoding_issues = True
+
+    if not (is_ci or has_encoding_issues):
+        return
+
+    # Try to set UTF-8 encoding for stdout/stderr on Windows
+    try:
+        import locale
+
+        # Try to set console to UTF-8 if possible
+        if hasattr(sys.stdout, "reconfigure"):
+            try:
+                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+                sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError):
+                pass
+
+        # Set locale to UTF-8 if possible
+        try:
+            locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
+        except locale.Error:
+            try:
+                locale.setlocale(locale.LC_ALL, "C.UTF-8")
+            except locale.Error:
+                pass  # Keep default locale
+
+    except ImportError:
+        pass  # codecs/locale not available
 
 
 class Color:
@@ -252,11 +405,46 @@ def get_logger(
     show_progress: bool = True,
     use_color: bool = True,
     simple_format: bool = False,
-) -> ASHLogger:
+) -> logging.Logger:
+    # Configure Windows-safe logging early
+    configure_windows_safe_logging()
+
     # VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
     # DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
 
-    logger: ASHLogger = logging.getLogger(name)
+    logger: logging.Logger = logging.getLogger(name)
+
+    # If this is the main ASH logger, enhance it with Windows-safe functionality
+    if name == "ash" and not hasattr(logger, "_windows_safe_mode"):
+        # Monkey patch the logger with Windows-safe functionality
+        logger._windows_safe_mode = _is_windows_with_encoding_issues()
+        logger._emoji_fallback_map = _get_default_emoji_fallback_map()
+
+        # Store original _log method
+        original_log = logger._log
+
+        def _safe_log(level, msg, args, **kwargs):
+            if logger._windows_safe_mode and isinstance(msg, str):
+                msg = _make_message_windows_safe(msg, logger._emoji_fallback_map)
+
+            try:
+                original_log(level, msg, args, **kwargs)
+            except UnicodeEncodeError:
+                # Fallback: strip all non-ASCII characters
+                if isinstance(msg, str):
+                    ascii_msg = msg.encode("ascii", errors="ignore").decode("ascii")
+                    original_log(level, f"[ENCODING_ISSUE] {ascii_msg}", args, **kwargs)
+                else:
+                    original_log(
+                        level,
+                        "[ENCODING_ISSUE] Message contained non-ASCII characters",
+                        args,
+                        **kwargs,
+                    )
+
+        # Replace the _log method
+        logger._log = _safe_log
+
     # Explicit set the root logger level to TRACE/5
     # (root logger sets the lowest level depth for all attached handlers)
     logger.setLevel(logging._nameToLevel.get("TRACE", 5))
@@ -290,7 +478,13 @@ def get_logger(
                     }
                 ),
                 highlight=use_color,
-                color_system="auto" if use_color else None,
+                color_system=(
+                    "windows"
+                    if platform.system() == "Windows"
+                    else "auto"
+                    if use_color
+                    else None
+                ),
             )
         }
         if os.environ.get("ASH_IN_CONTAINER", "NO").upper() in ["YES", "1", "TRUE"]
@@ -304,7 +498,13 @@ def get_logger(
                     }
                 ),
                 highlight=use_color,
-                color_system="auto" if use_color else None,
+                color_system=(
+                    "windows"
+                    if platform.system() == "Windows"
+                    else "auto"
+                    if use_color
+                    else None
+                ),
             )
         }
     )
@@ -412,6 +612,50 @@ def get_logger(
     return logger
 
 
-ASH_LOGGER = logging.getLogger(
-    name="ash",
-)
+ASH_LOGGER = logging.getLogger("ash")
+
+# Enhance the main ASH logger with Windows-safe functionality
+if not hasattr(ASH_LOGGER, "_windows_safe_mode"):
+    # Add Windows-safe functionality to the main ASH logger
+    ASH_LOGGER._windows_safe_mode = _is_windows_with_encoding_issues()
+    ASH_LOGGER._emoji_fallback_map = _get_default_emoji_fallback_map()
+
+    # Store original _log method
+    original_log = ASH_LOGGER._log
+
+    def _safe_log(level, msg, args, **kwargs):
+        if ASH_LOGGER._windows_safe_mode and isinstance(msg, str):
+            msg = _make_message_windows_safe(msg, ASH_LOGGER._emoji_fallback_map)
+
+        try:
+            original_log(level, msg, args, **kwargs)
+        except UnicodeEncodeError:
+            # Fallback: strip all non-ASCII characters
+            if isinstance(msg, str):
+                ascii_msg = msg.encode("ascii", errors="ignore").decode("ascii")
+                original_log(level, f"[ENCODING_ISSUE] {ascii_msg}", args, **kwargs)
+            else:
+                original_log(
+                    level,
+                    "[ENCODING_ISSUE] Message contained non-ASCII characters",
+                    args,
+                    **kwargs,
+                )
+
+    # Replace the _log method
+    ASH_LOGGER._log = _safe_log
+
+    # Add verbose and trace methods if they don't exist
+    if not hasattr(ASH_LOGGER, "verbose"):
+
+        def verbose(msg, *args, **kws):
+            ASH_LOGGER._log(logging._nameToLevel.get("VERBOSE", 15), msg, args, **kws)
+
+        ASH_LOGGER.verbose = verbose
+
+    if not hasattr(ASH_LOGGER, "trace"):
+
+        def trace(msg, *args, **kws):
+            ASH_LOGGER._log(logging._nameToLevel.get("TRACE", 5), msg, args, **kws)
+
+        ASH_LOGGER.trace = trace

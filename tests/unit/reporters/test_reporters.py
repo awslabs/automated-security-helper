@@ -23,8 +23,8 @@ class TestJSONFormatter:
         result = formatter.report(sample_ash_model)
         assert result is not None
         assert isinstance(result, str)
-        assert result.startswith("[")
-        assert result.endswith("]")
+        assert result.startswith("{")
+        assert result.endswith("}")
         assert "id" in result
         assert "severity" in result
 

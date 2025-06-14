@@ -23,6 +23,10 @@ class TestHTMLReporter:
     ):
         """Test that the HTML reporter correctly formats SARIF results."""
         # Create a test AshAggregatedResults with SARIF results
+        # Ensure we have a valid ash_config to avoid NoneType errors
+        from automated_security_helper.config.default_config import get_default_config
+
+        sample_ash_model.ash_config = get_default_config()
 
         # Add some test results to the SARIF report
         sample_ash_model.sarif.runs[0].results = [

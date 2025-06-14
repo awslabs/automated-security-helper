@@ -56,10 +56,10 @@ class AshPluginLibrary(BaseModel):
             description="A dictionary of scanners to register with the plugin manager"
         ),
     ] = {}
-    event_callbacks: Annotated[
+    event_handlers: Annotated[
         Dict[AshEventType, List[Callable]],
         Field(
-            description="A dictionary of event callbacks to register with the plugin manager"
+            description="A dictionary of event handlers to register with the plugin manager"
         ),
     ] = {}
 
@@ -79,32 +79,32 @@ class AshPluginManager(BaseModel):
 
     def subscribe(self, event_type, callback):
         """Subscribe a callback to a specific event type"""
-        if event_type not in self.plugin_library.event_callbacks:
-            self.plugin_library.event_callbacks[event_type] = []
+        if event_type not in self.plugin_library.event_handlers:
+            self.plugin_library.event_handlers[event_type] = []
 
-        self.plugin_library.event_callbacks[event_type].append(callback)
+        self.plugin_library.event_handlers[event_type].append(callback)
         ASH_LOGGER.debug(
-            f"Subscribed callback to event {event_type}. Total subscribers for this event: {len(self.plugin_library.event_callbacks[event_type])}"
+            f"Subscribed callback to event {event_type}. Total subscribers for this event: {len(self.plugin_library.event_handlers[event_type])}"
         )
         return callback  # Return for decorator usage
 
     def notify(self, event_type, *args, **kwargs):
         """Notify all subscribers of an event"""
-        if not hasattr(self.plugin_library, "event_callbacks"):
+        if not hasattr(self.plugin_library, "event_handlers"):
             ASH_LOGGER.debug(
-                f"No event callbacks dictionary exists for event {event_type}"
+                f"No event handlers dictionary exists for event {event_type}"
             )
             return []
 
-        if event_type not in self.plugin_library.event_callbacks:
+        if event_type not in self.plugin_library.event_handlers:
             ASH_LOGGER.debug(f"No subscribers for event {event_type}")
             return []
 
         ASH_LOGGER.debug(
-            f"Notifying {len(self.plugin_library.event_callbacks[event_type])} subscribers of event {event_type}"
+            f"Notifying {len(self.plugin_library.event_handlers[event_type])} subscribers of event {event_type}"
         )
         results = []
-        for callback in self.plugin_library.event_callbacks[event_type]:
+        for callback in self.plugin_library.event_handlers[event_type]:
             ASH_LOGGER.debug(
                 f"Calling subscriber callback {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}"
             )

@@ -11,7 +11,7 @@ Built-in plugins are organized into four main categories:
 | **[Scanners](scanners.md)**               | Analyze code and infrastructure for security vulnerabilities | 10    | `scanners/`        |
 | **[Reporters](reporters.md)**             | Generate scan results in various output formats              | 13    | `reporters/`       |
 | **[Converters](converters.md)**           | Process and prepare files for scanning                       | 2     | `converters/`      |
-| **[Event Callbacks](event-callbacks.md)** | Handle scan lifecycle events and notifications               | 1     | `event_callbacks/` |
+| **[Event Handlers](event-handlers.md)** | Handle scan lifecycle events and notifications               | 1     | `event_handlers/` |
 
 ## Quick Start
 

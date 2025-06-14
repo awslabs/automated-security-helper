@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Annotated, Dict, List, Literal, Any
 
@@ -45,7 +46,7 @@ class NpmAuditScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Run in offline mode, using locally cached data",
         ),
-    ] = False
+    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
 
 
 class NpmAuditScannerConfig(ScannerPluginConfigBase):
@@ -384,7 +385,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             if len(scannable) == 0:
                 self._plugin_log(
-                    f"No package lock files found in {target_type} directory to scan. Exiting.",
+                    f"No package lock files found in {target_type} directory to scan. Returning.",
                     target_type=target_type,
                     level=logging.INFO,
                     append_to_stream="stderr",
@@ -427,7 +428,22 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # Add offline mode if enabled
                         if self.config.options.offline:
                             cmd.append("--offline")
-                            ASH_LOGGER.info(f"Running {binary} audit in offline mode")
+                            ASH_LOGGER.info(
+                                f"🔄 Running {binary} audit in offline mode"
+                            )
+
+                            # Validate offline mode requirements
+                            from automated_security_helper.utils.offline_mode_validator import (
+                                validate_npm_audit_offline_mode,
+                            )
+
+                            offline_valid, offline_messages = (
+                                validate_npm_audit_offline_mode()
+                            )
+                            if not offline_valid:
+                                ASH_LOGGER.warning(
+                                    "⚠️ npm audit offline mode validation failed, but continuing with scan"
+                                )
 
                         result = self._run_subprocess(
                             command=cmd,

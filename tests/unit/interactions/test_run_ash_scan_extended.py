@@ -183,19 +183,27 @@ def test_run_ash_scan_with_actionable_findings(
     mock_results.metadata.summary_stats.actionable = 5  # 5 actionable findings
     mock_orchestrator.execute_scan.return_value = mock_results
 
+    # Mock scanner metrics with actionable findings
+    mock_scanner_metrics = [MagicMock(scanner_name="test-scanner", actionable=5)]
+
     # Mock the open function
     with patch("builtins.open", mock_open()):
         with patch("os.chdir"):
             # Mock sys.exit to prevent test from exiting
             with patch("sys.exit") as mock_exit:
-                # Call the function with fail_on_findings=True
-                run_ash_scan(
-                    mode=RunMode.local,
-                    source_dir="/test/source",
-                    output_dir="/test/output",
-                    fail_on_findings=True,
-                    show_summary=True,
-                )
-                # Verify sys.exit was called
-                mock_exit.assert_called_once()
-                mock_exit.assert_called_with(2)
+                # Mock the unified metrics function
+                with patch(
+                    "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
+                    return_value=mock_scanner_metrics,
+                ):
+                    # Call the function with fail_on_findings=True
+                    run_ash_scan(
+                        mode=RunMode.local,
+                        source_dir="/test/source",
+                        output_dir="/test/output",
+                        fail_on_findings=True,
+                        show_summary=True,
+                    )
+                    # Verify sys.exit was called
+                    mock_exit.assert_called_once()
+                    mock_exit.assert_called_with(2)

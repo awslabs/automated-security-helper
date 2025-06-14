@@ -9,6 +9,10 @@ on:
   workflow_dispatch: {}
 env:
   PYTHON_VERSION: "3.12"
+
+permissions:
+  contents: read
+
 jobs:
   ash:
     uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.0.0-beta-20250526151056

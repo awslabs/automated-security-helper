@@ -14,12 +14,12 @@ AWS plugins provide:
 
 ## Available Plugins
 
-| Plugin | Purpose | Key Features | Use Cases |
-|--------|---------|--------------|-----------|
-| **[Security Hub Reporter](security-hub-reporter.md)** | AWS Security Hub integration | ASFF format, batch processing, compliance mapping | Centralized security monitoring, compliance reporting |
-| **[Bedrock Summary Reporter](bedrock-summary-reporter.md)** | AI-powered summaries | Executive summaries, technical analysis, multiple models | Management reporting, risk assessment |
-| **[CloudWatch Logs Reporter](cloudwatch-logs-reporter.md)** | Real-time logging | Structured logging, metric filters, alarms | Real-time monitoring, automated alerting |
-| **[S3 Reporter](s3-reporter.md)** | Cloud storage for reports | Multiple formats, lifecycle management, analytics integration | Long-term archival, data analytics |
+| Plugin                                                      | Purpose                      | Key Features                                                  | Use Cases                                             |
+|-------------------------------------------------------------|------------------------------|---------------------------------------------------------------|-------------------------------------------------------|
+| **[Security Hub Reporter](security-hub-reporter.md)**       | AWS Security Hub integration | ASFF format, batch processing, compliance mapping             | Centralized security monitoring, compliance reporting |
+| **[Bedrock Summary Reporter](bedrock-summary-reporter.md)** | AI-powered summaries         | Executive summaries, technical analysis, multiple models      | Management reporting, risk assessment                 |
+| **[CloudWatch Logs Reporter](cloudwatch-logs-reporter.md)** | Real-time logging            | Structured logging, metric filters, alarms                    | Real-time monitoring, automated alerting              |
+| **[S3 Reporter](s3-reporter.md)**                           | Cloud storage for reports    | Multiple formats, lifecycle management, analytics integration | Long-term archival, data analytics                    |
 
 ## Quick Start
 
@@ -39,7 +39,7 @@ AWS plugins provide:
        enabled: true
        options:
          aws_region: "us-east-1"
-     
+
      s3-reporter:
        enabled: true
        options:
@@ -63,20 +63,20 @@ reporters:
     enabled: true
     options:
       aws_region: "us-east-1"
-  
+
   bedrock-summary-reporter:
     enabled: true
     options:
       model_id: "anthropic.claude-3-sonnet-20240229-v1:0"
       aws_region: "us-east-1"
       summary_style: "executive"
-  
+
   cloudwatch-logs:
     enabled: true
     options:
       log_group_name: "/aws/ash/security-scans"
       aws_region: "us-east-1"
-  
+
   s3-reporter:
     enabled: true
     options:
@@ -96,12 +96,12 @@ reporters:
 
 ### Required AWS Services
 
-| Plugin | Required Services | Optional Services |
-|--------|------------------|-------------------|
-| Security Hub Reporter | AWS Security Hub | AWS Config, AWS Inspector |
-| Bedrock Summary Reporter | Amazon Bedrock | - |
+| Plugin                   | Required Services      | Optional Services              |
+|--------------------------|------------------------|--------------------------------|
+| Security Hub Reporter    | AWS Security Hub       | AWS Config, AWS Inspector      |
+| Bedrock Summary Reporter | Amazon Bedrock         | -                              |
 | CloudWatch Logs Reporter | Amazon CloudWatch Logs | CloudWatch Alarms, EventBridge |
-| S3 Reporter | Amazon S3 | Amazon Athena, QuickSight |
+| S3 Reporter              | Amazon S3              | Amazon Athena, QuickSight      |
 
 ### IAM Permissions
 
@@ -172,20 +172,20 @@ jobs:
     permissions:
       id-token: write  # For OIDC
       contents: read
-    
+
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v2
       with:
         role-to-assume: arn:aws:iam::123456789012:role/GitHubActions-ASH
         aws-region: us-east-1
-    
+
     - name: Run ASH Security Scan
       run: |
         ash scan . --reporters aws-security-hub,bedrock-summary-reporter,s3-reporter
-    
+
     - name: Post AI Summary to PR
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v6
@@ -211,7 +211,7 @@ pipeline {
         AWS_REGION = 'us-east-1'
         ASH_S3_BUCKET = 'jenkins-security-reports'
     }
-    
+
     stages {
         stage('Security Scan') {
             steps {
@@ -224,7 +224,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Process Results') {
             steps {
                 script {
@@ -252,26 +252,26 @@ def lambda_handler(event, context):
     # Download code from S3 or CodeCommit
     # Run ASH scan
     # Results automatically go to configured AWS services
-    
+
     try:
         # Example: Scan code from S3 trigger
         bucket = event['Records'][0]['s3']['bucket']['name']
         key = event['Records'][0]['s3']['object']['key']
-        
+
         # Download and extract code
         s3 = boto3.client('s3')
         s3.download_file(bucket, key, '/tmp/code.zip')
-        
+
         # Extract and scan
         subprocess.run(['unzip', '/tmp/code.zip', '-d', '/tmp/code'])
-        
+
         # Run ASH with AWS reporters
         result = subprocess.run([
             'ash', 'scan', '/tmp/code',
             '--reporters', 'aws-security-hub,cloudwatch-logs',
             '--config', '/opt/ash-lambda-config.yml'
         ], capture_output=True, text=True)
-        
+
         return {
             'statusCode': 200,
             'body': json.dumps({
@@ -279,7 +279,7 @@ def lambda_handler(event, context):
                 'findings_count': result.stdout.count('finding')
             })
         }
-        
+
     except Exception as e:
         return {
             'statusCode': 500,
@@ -364,12 +364,12 @@ Automate responses to security findings:
 
 ### Cost Estimation
 
-| Plugin | Primary Cost Factors | Estimated Monthly Cost* |
-|--------|---------------------|------------------------|
-| Security Hub Reporter | $0.0003 per finding | $10-50 |
-| Bedrock Summary Reporter | Model invocation tokens | $5-100 |
-| CloudWatch Logs Reporter | Log ingestion (GB) | $5-25 |
-| S3 Reporter | Storage and requests | $1-10 |
+| Plugin                   | Primary Cost Factors    | Estimated Monthly Cost* |
+|--------------------------|-------------------------|-------------------------|
+| Security Hub Reporter    | $0.0003 per finding     | $10-50                  |
+| Bedrock Summary Reporter | Model invocation tokens | $5-100                  |
+| CloudWatch Logs Reporter | Log ingestion (GB)      | $5-25                   |
+| S3 Reporter              | Storage and requests    | $1-10                   |
 
 *Estimates based on typical usage patterns
 
@@ -479,7 +479,7 @@ reporters:
   sarif:
     enabled: true
     output_file: "results.sarif"
-  
+
   html:
     enabled: true
     output_file: "report.html"
@@ -490,13 +490,13 @@ reporters:
     enabled: true
     options:
       aws_region: "us-east-1"
-  
+
   s3-reporter:
     enabled: true
     options:
       bucket_name: "security-reports"
       formats: ["sarif", "html"]
-  
+
   bedrock-summary-reporter:
     enabled: true
     options:

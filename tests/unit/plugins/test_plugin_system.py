@@ -17,7 +17,7 @@ PluginContext.model_rebuild()
 def test_event_subscription():
     """Test that events can be subscribed to and triggered."""
     # Clear any existing subscribers
-    ash_plugin_manager.plugin_library.event_callbacks.clear()
+    ash_plugin_manager.plugin_library.event_handlers.clear()
 
     results = []
 
@@ -64,25 +64,18 @@ def test_plugin_registration():
 def test_convert_phase_events(mock_plugin_context):
     """Test that convert phase events are properly triggered."""
     # Clear any existing subscribers
-    ash_plugin_manager.plugin_library.event_callbacks.clear()
+    ash_plugin_manager.plugin_library.event_handlers.clear()
 
     # Create tracking variables for event handlers
     start_called = False
-    target_called = False
     progress_called = False
     complete_called = False
-    target_args = None
     complete_args = None
 
     # Define event handlers
     def on_start(**kwargs):
         nonlocal start_called
         start_called = True
-
-    def on_target(target, **kwargs):
-        nonlocal target_called, target_args
-        target_called = True
-        target_args = {"target": target, **kwargs}
 
     def on_progress(**kwargs):
         nonlocal progress_called
@@ -95,8 +88,7 @@ def test_convert_phase_events(mock_plugin_context):
 
     # Subscribe to events
     ash_plugin_manager.subscribe(AshEventType.CONVERT_START, on_start)
-    ash_plugin_manager.subscribe(AshEventType.CONVERT_TARGET, on_target)
-    ash_plugin_manager.subscribe(AshEventType.CONVERT_PROGRESS, on_progress)
+    ash_plugin_manager.subscribe(AshEventType.CONVERT_PHASE_PROGRESS, on_progress)
     ash_plugin_manager.subscribe(AshEventType.CONVERT_COMPLETE, on_complete)
 
     # Simulate a convert phase execution
@@ -104,12 +96,9 @@ def test_convert_phase_events(mock_plugin_context):
         AshEventType.CONVERT_START, plugin_context=mock_plugin_context
     )
     ash_plugin_manager.notify(
-        AshEventType.CONVERT_TARGET,
-        target=Path("/test/file.py"),
+        AshEventType.CONVERT_PHASE_PROGRESS,
+        completed=50,
         plugin_context=mock_plugin_context,
-    )
-    ash_plugin_manager.notify(
-        AshEventType.CONVERT_PROGRESS, completed=50, plugin_context=mock_plugin_context
     )
     ash_plugin_manager.notify(
         AshEventType.CONVERT_COMPLETE,
@@ -119,13 +108,8 @@ def test_convert_phase_events(mock_plugin_context):
 
     # Check that all handlers were called
     assert start_called
-    assert target_called
     assert progress_called
     assert complete_called
-
-    # Check that the target handler was called with the correct arguments
-    assert target_args["target"] == Path("/test/file.py")
-    assert target_args["plugin_context"] == mock_plugin_context
 
     # Check that the complete handler was called with the correct arguments
     assert complete_args["results"] == ["converted_file.py"]
@@ -135,25 +119,18 @@ def test_convert_phase_events(mock_plugin_context):
 def test_scan_phase_events(mock_plugin_context):
     """Test that scan phase events are properly triggered."""
     # Clear any existing subscribers
-    ash_plugin_manager.plugin_library.event_callbacks.clear()
+    ash_plugin_manager.plugin_library.event_handlers.clear()
 
     # Create tracking variables for event handlers
     start_called = False
-    target_called = False
     progress_called = False
     complete_called = False
-    target_args = None
     complete_args = None
 
     # Define event handlers
     def on_start(**kwargs):
         nonlocal start_called
         start_called = True
-
-    def on_target(target, target_type, **kwargs):
-        nonlocal target_called, target_args
-        target_called = True
-        target_args = {"target": target, "target_type": target_type, **kwargs}
 
     def on_progress(**kwargs):
         nonlocal progress_called
@@ -166,8 +143,7 @@ def test_scan_phase_events(mock_plugin_context):
 
     # Subscribe to events
     ash_plugin_manager.subscribe(AshEventType.SCAN_START, on_start)
-    ash_plugin_manager.subscribe(AshEventType.SCAN_TARGET, on_target)
-    ash_plugin_manager.subscribe(AshEventType.SCAN_PROGRESS, on_progress)
+    ash_plugin_manager.subscribe(AshEventType.SCAN_PHASE_PROGRESS, on_progress)
     ash_plugin_manager.subscribe(AshEventType.SCAN_COMPLETE, on_complete)
 
     # Simulate a scan phase execution
@@ -175,13 +151,9 @@ def test_scan_phase_events(mock_plugin_context):
         AshEventType.SCAN_START, plugin_context=mock_plugin_context
     )
     ash_plugin_manager.notify(
-        AshEventType.SCAN_TARGET,
-        target=Path("/test/file.py"),
-        target_type="source",
+        AshEventType.SCAN_PHASE_PROGRESS,
+        completed=50,
         plugin_context=mock_plugin_context,
-    )
-    ash_plugin_manager.notify(
-        AshEventType.SCAN_PROGRESS, completed=50, plugin_context=mock_plugin_context
     )
     ash_plugin_manager.notify(
         AshEventType.SCAN_COMPLETE,
@@ -191,14 +163,8 @@ def test_scan_phase_events(mock_plugin_context):
 
     # Check that all handlers were called
     assert start_called
-    assert target_called
     assert progress_called
     assert complete_called
-
-    # Check that the target handler was called with the correct arguments
-    assert target_args["target"] == Path("/test/file.py")
-    assert target_args["target_type"] == "source"
-    assert target_args["plugin_context"] == mock_plugin_context
 
     # Check that the complete handler was called with the correct arguments
     assert complete_args["results"] == [{"findings": []}]
@@ -208,28 +174,18 @@ def test_scan_phase_events(mock_plugin_context):
 def test_report_phase_events(mock_plugin_context):
     """Test that report phase events are properly triggered."""
     # Clear any existing subscribers
-    ash_plugin_manager.plugin_library.event_callbacks.clear()
+    ash_plugin_manager.plugin_library.event_handlers.clear()
 
     # Create tracking variables for event handlers
     start_called = False
-    generate_called = False
     progress_called = False
     complete_called = False
-    generate_args = None
     complete_args = None
-
-    # Create a mock model
-    mock_model = {"data": "test"}
 
     # Define event handlers
     def on_start(**kwargs):
         nonlocal start_called
         start_called = True
-
-    def on_generate(model, **kwargs):
-        nonlocal generate_called, generate_args
-        generate_called = True
-        generate_args = {"model": model, **kwargs}
 
     def on_progress(**kwargs):
         nonlocal progress_called
@@ -242,8 +198,7 @@ def test_report_phase_events(mock_plugin_context):
 
     # Subscribe to events
     ash_plugin_manager.subscribe(AshEventType.REPORT_START, on_start)
-    ash_plugin_manager.subscribe(AshEventType.REPORT_GENERATE, on_generate)
-    ash_plugin_manager.subscribe(AshEventType.REPORT_PROGRESS, on_progress)
+    ash_plugin_manager.subscribe(AshEventType.REPORT_PHASE_PROGRESS, on_progress)
     ash_plugin_manager.subscribe(AshEventType.REPORT_COMPLETE, on_complete)
 
     # Simulate a report phase execution
@@ -251,12 +206,9 @@ def test_report_phase_events(mock_plugin_context):
         AshEventType.REPORT_START, plugin_context=mock_plugin_context
     )
     ash_plugin_manager.notify(
-        AshEventType.REPORT_GENERATE,
-        model=mock_model,
+        AshEventType.REPORT_PHASE_PROGRESS,
+        completed=50,
         plugin_context=mock_plugin_context,
-    )
-    ash_plugin_manager.notify(
-        AshEventType.REPORT_PROGRESS, completed=50, plugin_context=mock_plugin_context
     )
     ash_plugin_manager.notify(
         AshEventType.REPORT_COMPLETE,
@@ -266,13 +218,8 @@ def test_report_phase_events(mock_plugin_context):
 
     # Check that all handlers were called
     assert start_called
-    assert generate_called
     assert progress_called
     assert complete_called
-
-    # Check that the generate handler was called with the correct arguments
-    assert generate_args["model"] == mock_model
-    assert generate_args["plugin_context"] == mock_plugin_context
 
     # Check that the complete handler was called with the correct arguments
     assert complete_args["results"] == ["report.txt"]

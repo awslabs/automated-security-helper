@@ -28,6 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
@@ -73,7 +74,7 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Run in offline mode, using locally cached rules.",
         ),
-    ] = False
+    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
 
 
 class SemgrepScannerConfig(ScannerPluginConfigBase):
@@ -142,6 +143,13 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 )
             )
 
+            # Validate offline mode requirements
+            from automated_security_helper.utils.offline_mode_validator import (
+                validate_semgrep_offline_mode,
+            )
+
+            offline_valid, offline_messages = validate_semgrep_offline_mode()
+
             # Check if SEMGREP_RULES_CACHE_DIR is set in environment
             semgrep_rules_cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
             if semgrep_rules_cache_dir:
@@ -151,6 +159,9 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     if (item.name.endswith(".yaml") or item.name.endswith(".yml"))
                 ]
                 if semgrep_rules:
+                    ASH_LOGGER.info(
+                        f"✅ Semgrep offline mode: Found {len(semgrep_rules)} rule files in cache"
+                    )
                     self.args.extra_args.extend(
                         [
                             ToolExtraArg(
@@ -162,7 +173,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     )
                 else:
                     self._plugin_log(
-                        "No Semgrep rules found in cache directory, falling back to p/ci",
+                        "🔴 Semgrep offline mode: No rules found in cache directory, falling back to p/ci",
                         level=logging.WARNING,
                     )
                     self.args.extra_args.append(
@@ -173,7 +184,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     )
             else:
                 self._plugin_log(
-                    "SEMGREP_RULES_CACHE_DIR not set but offline mode enabled, falling back to p/ci",
+                    "🔴 Semgrep offline mode: SEMGREP_RULES_CACHE_DIR not set, falling back to p/ci",
                     level=logging.WARNING,
                 )
                 self.args.extra_args.append(
@@ -365,6 +376,26 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     sarif_report: SarifReport = SarifReport.model_validate(
                         semgrep_results
                     )
+
+                    # Attach scanner details for proper identification
+                    sarif_report = attach_scanner_details(
+                        sarif_report=sarif_report,
+                        scanner_name=self.config.name,
+                        scanner_version=getattr(self, "tool_version", None),
+                        invocation_details={
+                            "command_line": " ".join(final_args),
+                            "arguments": final_args[1:],
+                            "working_directory": get_shortest_name(input=target),
+                            "start_time": self.start_time.isoformat()
+                            if self.start_time
+                            else None,
+                            "end_time": self.end_time.isoformat()
+                            if self.end_time
+                            else None,
+                            "exit_code": self.exit_code,
+                        },
+                    )
+
                     sarif_report.runs[0].invocations = [
                         Invocation(
                             commandLine=" ".join(final_args),

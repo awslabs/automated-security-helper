@@ -2,12 +2,14 @@
 
 from importlib.metadata import version
 import json
+import os
 from pathlib import Path
 from typing import Annotated, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -105,7 +107,7 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Run in offline mode, disabling policy downloads",
         ),
-    ] = False
+    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
     frameworks: Annotated[
         List[CheckFrameworks],
         Field(
@@ -194,7 +196,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         if self.config.options.offline:
             self.args.extra_args.append(
                 ToolExtraArg(
-                    key="--no-download",
+                    key="--skip-download",
                     value="",
                 )
             )
@@ -210,14 +212,20 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             self.args.extra_args.append(
                 ToolExtraArg(key="--skip-framework", value=item)
             )
+
+        for item in KNOWN_IGNORE_PATHS:
+            self.args.extra_args.append(
+                ToolExtraArg(key=f'--skip-path="{item}"', value=None)
+            )
+
         for item in self.config.options.skip_path:
             ASH_LOGGER.debug(
                 f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
             )
             self.args.extra_args.append(
                 ToolExtraArg(
-                    key="--skip-path",
-                    value=item.path,
+                    key=f'--skip-path="{item.path}"',
+                    value=None,
                 )
             )
 

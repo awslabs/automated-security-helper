@@ -22,7 +22,7 @@ def environment_variables(**kwargs) -> Generator[None, None, None]:
         None
 
     Example:
-        >>> with environment_variables(API_KEY="test_key", DEBUG="true"):
+        >>> with environment_variables(ASH_CONFIG_PATH=".ash/ash.yaml", DEBUG="true"):
         ...     # Code that uses these environment variables
         ...     pass
     """

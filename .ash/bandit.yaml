@@ -2,9 +2,7 @@
 # the still in the scan. These are excluded to decrease scan time
 # on code that shouldn't be included in scan the first place.
 exclude_dirs:
-  - .venv
   - test-results
-  - .ash
   - .mypy_cache
   - .pytest_cache
   - .ruff_cache
