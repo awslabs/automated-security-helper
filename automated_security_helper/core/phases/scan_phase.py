@@ -584,14 +584,16 @@ class ScanPhase(EnginePhase):
                             raw_results, self.plugin_context.source_dir
                         )
 
-                        # Apply suppressions based on global ignore paths
-                        ASH_LOGGER.trace(
-                            f"Ignoring paths: {self.plugin_context.config.global_settings.ignore_paths}"
-                        )
-                        raw_results = apply_suppressions_to_sarif(
-                            sarif_report=raw_results,
-                            plugin_context=self.plugin_context,
-                        )
+                        if not self.plugin_context.ignore_suppressions:
+                            # Apply suppressions based on global ignore paths
+                            ASH_LOGGER.trace(
+                                f"Ignoring paths: {self.plugin_context.config.global_settings.ignore_paths}"
+                            )
+                            raw_results = apply_suppressions_to_sarif(
+                                sarif_report=raw_results,
+                                plugin_context=self.plugin_context,
+                            )
+
                         severity_counts, finding_count = (
                             self._extract_metrics_from_sarif(raw_results)
                         )
@@ -1250,11 +1252,12 @@ class ScanPhase(EnginePhase):
                 results.raw_results, self.plugin_context.source_dir
             )
 
-            # Apply suppressions based on global ignore paths
-            sanitized_sarif = apply_suppressions_to_sarif(
-                sarif_report=sanitized_sarif,
-                plugin_context=self.plugin_context,
-            )
+            if not self.plugin_context.ignore_suppressions:
+                # Apply suppressions based on global ignore paths
+                sanitized_sarif = apply_suppressions_to_sarif(
+                    sarif_report=sanitized_sarif,
+                    plugin_context=self.plugin_context,
+                )
 
             # Attach scanner details to the SARIF report
             scanner_version = None
