@@ -801,7 +801,7 @@ class ScanPhase(EnginePhase):
                     )
 
                     # Log completion
-                    ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
+                    # ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
 
                     # Remove from remaining scanners and notify about completion
                     if scanner_name in remaining_scanners:
@@ -1026,7 +1026,7 @@ class ScanPhase(EnginePhase):
                             )
 
                         # Log completion
-                        ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
+                        # ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
 
                         # Remove from remaining scanners and notify about completion
                         with remaining_scanners_lock:

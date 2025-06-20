@@ -29,8 +29,12 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
         ),
     ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
     aws_profile: str | None = os.environ.get("AWS_PROFILE", None)
-    model_id: str = "us.amazon.nova-pro-v1:0"
-    temperature: float = 0.5
+    model_id: str = os.environ.get(
+        "ASH_BEDROCK_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0"
+    )
+    temperature: float = float(os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5"))
+    max_tokens: int = int(os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000"))
+    top_p: float = 0.9
     max_findings_to_analyze: int = 10
     max_findings_per_severity: int = 5
     group_by_severity: bool = True
@@ -39,14 +43,39 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     enable_caching: bool = True
     output_markdown: bool = True
     output_file: str = "ash.bedrock.summary.md"
+    # Output additional files with specific content
+    output_executive_file: str = "bedrock-executive.md"
+    output_technical_file: str = "bedrock-technical.md"
+    # Include code snippets in the report
+    include_code_snippets: bool = False
+    # Summary style: executive, technical, or detailed
+    summary_style: Literal["executive", "technical", "detailed"] = "executive"
+    # Custom prompt to guide the AI analysis
+    custom_prompt: str | None = None
     # List of scanner types to exclude from detailed analysis
     exclude_scanner_types: List[str] = ["SECRET"]
     # Include only actionable findings (not suppressed, above severity threshold)
     actionable_only: bool = True
+    # Sections to include or exclude
+    include_sections: List[str] = [
+        "executive_summary",
+        "risk_assessment",
+        "technical_analysis",
+        "remediation_guide",
+        "compliance_impact",
+    ]
+    exclude_sections: List[str] = []
+    # Industry-specific analysis
+    industry_context: str | None = None
+    compliance_frameworks: List[str] = []
+    custom_context: str | None = None
+    # Performance optimization
+    summarize_findings: bool = False
+    batch_processing: bool = False
 
 
 class BedrockSummaryReporterConfig(ReporterPluginConfigBase):
-    name: Literal["bedrock-summary"] = "bedrock-summary"
+    name: Literal["bedrock-summary-reporter"] = "bedrock-summary-reporter"
     extension: str = "bedrock.summary.md"
     enabled: bool = True
     options: BedrockSummaryReporterConfigOptions = BedrockSummaryReporterConfigOptions()
@@ -228,17 +257,47 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         # Write summary to file if output_markdown is enabled
         if self.config.options.output_markdown:
-            output_path = (
-                Path(self.context.output_dir)
-                / "reports"
-                / self.config.options.output_file
-            )
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            # Create reports directory
+            reports_dir = Path(self.context.output_dir) / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
 
+            # Write main summary file
+            output_path = reports_dir / self.config.options.output_file
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(summary)
-
             ASH_LOGGER.info(f"Bedrock summary written to {output_path}")
+
+            # Extract and write executive summary if configured
+            if (
+                "executive_summary" in self.config.options.include_sections
+                and "executive_summary" not in self.config.options.exclude_sections
+            ):
+                exec_summary = self._get_cached_or_generate(
+                    "executive_summary_only",
+                    lambda: self._generate_executive_summary(
+                        bedrock_runtime, model, all_findings, secret_findings
+                    ),
+                )
+                exec_path = reports_dir / self.config.options.output_executive_file
+                with open(exec_path, "w", encoding="utf-8") as f:
+                    f.write(f"# Executive Security Summary\n\n{exec_summary}")
+                ASH_LOGGER.info(f"Executive summary written to {exec_path}")
+
+            # Extract and write technical details if configured
+            if (
+                "technical_analysis" in self.config.options.include_sections
+                and "technical_analysis" not in self.config.options.exclude_sections
+            ):
+                tech_summary = self._get_cached_or_generate(
+                    "technical_summary_only",
+                    lambda: self._generate_technical_analysis(
+                        bedrock_runtime, model, all_findings
+                    ),
+                )
+                tech_path = reports_dir / self.config.options.output_technical_file
+                with open(tech_path, "w", encoding="utf-8") as f:
+                    f.write(f"# Technical Security Analysis\n\n{tech_summary}")
+                ASH_LOGGER.info(f"Technical analysis written to {tech_path}")
 
         return summary
 
@@ -251,83 +310,175 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         indexed_findings: List[Dict[str, Any]],
     ) -> str:
         """Generate a report with section headers for better organization."""
+        # Apply summarization if configured
+        if self.config.options.summarize_findings:
+            ASH_LOGGER.info("Summarizing findings to reduce token usage")
+            findings = self._summarize_findings(findings)
+
         # Start with a header and overview
         report = "# Security Scan Summary Report\n\n"
 
         # Add table of contents if configured
         if self.config.options.add_table_of_contents:
             report += "## Table of Contents\n\n"
-            report += "1. [Executive Summary](#executive-summary)\n"
-            report += "2. [Findings by Severity](#findings-by-severity)\n"
-            if self.config.options.group_by_severity:
-                severity_order = ["error", "warning", "note", "none"]
-                for severity in severity_order:
-                    if any(finding.get("level") == severity for finding in findings):
-                        report += f"   - [{severity.capitalize()} Level Findings](#{severity.lower()}-level-findings)\n"
-            if self._secret_findings_exist:
-                report += "3. [Secret Findings](#secret-findings)\n"
-                report += "4. [Recommendations](#recommendations)\n"
-                report += "5. [Finding Details](#finding-details)\n\n"
-            else:
-                report += "3. [Recommendations](#recommendations)\n"
-                report += "4. [Finding Details](#finding-details)\n\n"
+            toc_items = []
+            toc_counter = 1
 
-        # Generate executive summary
-        ASH_LOGGER.info("Generating executive summary")
-        report += "## Executive Summary\n\n"
-        exec_summary = self._get_cached_or_generate(
-            "executive_summary",
-            lambda: self._generate_executive_summary(
-                bedrock_runtime, model, findings, secret_findings
-            ),
-        )
-        report += exec_summary + "\n\n"
+            # Executive Summary
+            if (
+                "executive_summary" in self.config.options.include_sections
+                and "executive_summary" not in self.config.options.exclude_sections
+            ):
+                toc_items.append(
+                    f"{toc_counter}. [Executive Summary](#executive-summary)"
+                )
+                toc_counter += 1
 
-        # Group findings by severity if configured
-        report += "## Findings by Severity\n\n"
+            # Findings by Severity
+            if (
+                "technical_analysis" in self.config.options.include_sections
+                and "technical_analysis" not in self.config.options.exclude_sections
+            ):
+                toc_items.append(
+                    f"{toc_counter}. [Findings by Severity](#findings-by-severity)"
+                )
+                if self.config.options.group_by_severity:
+                    severity_order = ["error", "warning", "note", "none"]
+                    for severity in severity_order:
+                        if any(
+                            finding.get("level") == severity for finding in findings
+                        ):
+                            toc_items.append(
+                                f"   - [{severity.capitalize()} Level Findings](#{severity.lower()}-level-findings)"
+                            )
+                toc_counter += 1
 
-        if self.config.options.group_by_severity:
-            severity_groups = defaultdict(list)
-            for finding in findings:
-                severity = finding.get("severity", "none")
-                severity_groups[severity].append(finding)
+            # Secret Findings
+            if (
+                self._secret_findings_exist
+                and "secret_findings" in self.config.options.include_sections
+                and "secret_findings" not in self.config.options.exclude_sections
+            ):
+                toc_items.append(f"{toc_counter}. [Secret Findings](#secret-findings)")
+                toc_counter += 1
 
-            # Sort severities in order of importance
-            severity_order = ["error", "warning", "note", "none"]
+            # Recommendations
+            if (
+                "remediation_guide" in self.config.options.include_sections
+                and "remediation_guide" not in self.config.options.exclude_sections
+            ):
+                toc_items.append(f"{toc_counter}. [Recommendations](#recommendations)")
+                toc_counter += 1
 
-            # Generate section for each severity level
-            for severity in severity_order:
-                if severity in severity_groups:
-                    severity_findings = severity_groups[severity]
-                    # Limit findings per severity to avoid overwhelming the model
-                    limited_findings = severity_findings[
-                        : self.config.options.max_findings_per_severity
-                    ]
+            # Risk Assessment
+            if (
+                "risk_assessment" in self.config.options.include_sections
+                and "risk_assessment" not in self.config.options.exclude_sections
+            ):
+                toc_items.append(f"{toc_counter}. [Risk Assessment](#risk-assessment)")
+                toc_counter += 1
 
-                    ASH_LOGGER.info(
-                        f"Analyzing {len(limited_findings)} {severity} level findings"
-                    )
-                    report += f"### {severity.capitalize()} Level Findings\n\n"
-                    severity_analysis = self._get_cached_or_generate(
-                        f"severity_{severity}",
-                        lambda: self._generate_severity_analysis(
-                            bedrock_runtime, model, limited_findings, severity
-                        ),
-                    )
-                    report += severity_analysis + "\n\n"
-        else:
-            # Simple list of findings without grouping
-            limited_findings = findings[: self.config.options.max_findings_to_analyze]
-            findings_summary = self._get_cached_or_generate(
-                "findings_summary",
-                lambda: self._generate_findings_summary(
-                    bedrock_runtime, model, limited_findings
+            # Compliance Impact
+            if (
+                "compliance_impact" in self.config.options.include_sections
+                and "compliance_impact" not in self.config.options.exclude_sections
+                and self.config.options.compliance_frameworks
+            ):
+                toc_items.append(
+                    f"{toc_counter}. [Compliance Impact](#compliance-impact)"
+                )
+                toc_counter += 1
+
+            # Finding Details
+            if "detailed_findings" not in self.config.options.exclude_sections:
+                toc_items.append(f"{toc_counter}. [Finding Details](#finding-details)")
+
+            # Add all TOC items to the report
+            report += "\n".join(toc_items) + "\n\n"
+
+        # Generate executive summary if included
+        if (
+            "executive_summary" in self.config.options.include_sections
+            and "executive_summary" not in self.config.options.exclude_sections
+        ):
+            ASH_LOGGER.info("Generating executive summary")
+            report += "## Executive Summary\n\n"
+            exec_summary = self._get_cached_or_generate(
+                "executive_summary",
+                lambda: self._generate_executive_summary(
+                    bedrock_runtime, model, findings, secret_findings
                 ),
             )
-            report += findings_summary + "\n\n"
+            report += exec_summary + "\n\n"
 
-        # Add section for secret findings if they exist
-        if self._secret_findings_exist:
+        # Group findings by severity if configured and included
+        if (
+            "technical_analysis" in self.config.options.include_sections
+            and "technical_analysis" not in self.config.options.exclude_sections
+        ):
+            report += "## Findings by Severity\n\n"
+
+            if self.config.options.group_by_severity:
+                severity_groups = defaultdict(list)
+                for finding in findings:
+                    severity = finding.get("severity", "none")
+                    severity_groups[severity].append(finding)
+
+                # Sort severities in order of importance
+                severity_order = ["error", "warning", "note", "none"]
+
+                # Generate section for each severity level
+                for severity in severity_order:
+                    if severity in severity_groups:
+                        severity_findings = severity_groups[severity]
+                        # Limit findings per severity to avoid overwhelming the model
+                        limited_findings = severity_findings[
+                            : self.config.options.max_findings_per_severity
+                        ]
+
+                        ASH_LOGGER.info(
+                            f"Analyzing {len(limited_findings)} {severity} level findings"
+                        )
+                        report += f"### {severity.capitalize()} Level Findings\n\n"
+                        severity_analysis = self._get_cached_or_generate(
+                            f"severity_{severity}",
+                            lambda: self._generate_severity_analysis(
+                                bedrock_runtime, model, limited_findings, severity
+                            ),
+                        )
+                        report += severity_analysis + "\n\n"
+            else:
+                # Process findings in batches if configured
+                if (
+                    self.config.options.batch_processing
+                    and len(findings) > self.config.options.max_findings_to_analyze
+                ):
+                    ASH_LOGGER.info("Processing findings in batches")
+                    findings_summary = self._get_cached_or_generate(
+                        "findings_summary_batched",
+                        lambda: self._process_findings_by_batch(
+                            bedrock_runtime, model, findings
+                        ),
+                    )
+                else:
+                    # Simple list of findings without grouping
+                    limited_findings = findings[
+                        : self.config.options.max_findings_to_analyze
+                    ]
+                    findings_summary = self._get_cached_or_generate(
+                        "findings_summary",
+                        lambda: self._generate_findings_summary(
+                            bedrock_runtime, model, limited_findings
+                        ),
+                    )
+                report += findings_summary + "\n\n"
+
+        # Add section for secret findings if they exist and included
+        if (
+            self._secret_findings_exist
+            and "secret_findings" in self.config.options.include_sections
+            and "secret_findings" not in self.config.options.exclude_sections
+        ):
             report += "## Secret Findings\n\n"
             secret_advice = self._get_cached_or_generate(
                 "secret_advice",
@@ -335,97 +486,158 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             )
             report += secret_advice + "\n\n"
 
-        # Generate recommendations section
-        ASH_LOGGER.info("Generating recommendations")
-        report += "## Recommendations\n\n"
-        recommendations = self._get_cached_or_generate(
-            "recommendations",
-            lambda: self._generate_recommendations(bedrock_runtime, model, findings),
-        )
-        report += recommendations + "\n\n"
+        # Generate recommendations section if included
+        if (
+            "remediation_guide" in self.config.options.include_sections
+            and "remediation_guide" not in self.config.options.exclude_sections
+        ):
+            ASH_LOGGER.info("Generating recommendations")
+            report += "## Recommendations\n\n"
+            recommendations = self._get_cached_or_generate(
+                "recommendations",
+                lambda: self._generate_recommendations(
+                    bedrock_runtime, model, findings
+                ),
+            )
+            report += recommendations + "\n\n"
 
-        # Add detailed findings section with collapsible JSON
-        report += "## Finding Details\n\n"
-        report += "This section contains detailed information about each finding referenced in the report.\n\n"
+        # Generate risk assessment if included
+        if (
+            "risk_assessment" in self.config.options.include_sections
+            and "risk_assessment" not in self.config.options.exclude_sections
+        ):
+            ASH_LOGGER.info("Generating risk assessment")
+            report += "## Risk Assessment\n\n"
+            risk_assessment = self._get_cached_or_generate(
+                "risk_assessment",
+                lambda: self._generate_risk_assessment(
+                    bedrock_runtime, model, findings
+                ),
+            )
+            report += risk_assessment + "\n\n"
 
-        # Add indexed findings table
-        report += "### Finding Index Reference\n\n"
-        report += "| Index | Rule ID | Severity | File | Line Range | Description |\n"
-        report += "|-------|---------|----------|------|------------|-------------|\n"
+        # Generate compliance impact if included
+        if (
+            "compliance_impact" in self.config.options.include_sections
+            and "compliance_impact" not in self.config.options.exclude_sections
+            and self.config.options.compliance_frameworks
+        ):
+            ASH_LOGGER.info("Generating compliance impact analysis")
+            report += "## Compliance Impact\n\n"
+            compliance_impact = self._get_cached_or_generate(
+                "compliance_impact",
+                lambda: self._generate_compliance_impact(
+                    bedrock_runtime, model, findings
+                ),
+            )
+            report += compliance_impact + "\n\n"
 
-        for finding in indexed_findings:
-            index = finding.get("index", "")
-            rule_id = finding.get("rule_id", "Unknown")
-            level = finding.get("severity", "none").capitalize()
+        # Add detailed findings section with collapsible JSON if not excluded
+        if "detailed_findings" not in self.config.options.exclude_sections:
+            report += "## Finding Details\n\n"
+            report += "This section contains detailed information about each finding referenced in the report.\n\n"
 
-            # Get location info
-            file_path = "Unknown"
-            line_range = "Unknown"
-            if finding.get("locations") and len(finding["locations"]) > 0:
-                location = finding["locations"][0]
-                file_path = location.get("file", "Unknown")
-                start_line = location.get("startLine", "?")
-                end_line = location.get("endLine", start_line)
-                line_range = (
-                    f"{start_line}-{end_line}"
-                    if start_line != end_line
-                    else str(start_line)
-                )
+            # Add indexed findings table
+            report += "### Finding Index Reference\n\n"
+            report += (
+                "| Index | Rule ID | Severity | File | Line Range | Description |\n"
+            )
+            report += (
+                "|-------|---------|----------|------|------------|-------------|\n"
+            )
 
-            # Truncate message if too long
-            message = finding.get("message", "No description available")
-            if len(message) > 50:
-                message = message[:47] + "..."
+            for finding in indexed_findings:
+                index = finding.get("index", "")
+                rule_id = finding.get("rule_id", "Unknown")
+                level = finding.get("severity", "none").capitalize()
 
-            report += f"| {index} | {rule_id} | {level} | {file_path} | {line_range} | {message} |\n"
+                # Get location info
+                file_path = "Unknown"
+                line_range = "Unknown"
+                if finding.get("locations") and len(finding["locations"]) > 0:
+                    location = finding["locations"][0]
+                    file_path = location.get("file", "Unknown")
+                    start_line = location.get("startLine", "?")
+                    end_line = location.get("endLine", start_line)
+                    line_range = (
+                        f"{start_line}-{end_line}"
+                        if start_line != end_line
+                        else str(start_line)
+                    )
 
-        report += "\n\n"
+                # Truncate message if too long
+                message = finding.get("message", "No description available")
+                if len(message) > 50:
+                    message = message[:47] + "..."
 
-        # Add collapsible JSON for each finding
-        report += "### Full Finding Details\n\n"
-        report += (
-            "<details>\n<summary>Click to expand full finding details</summary>\n\n"
-        )
+                report += f"| {index} | {rule_id} | {level} | {file_path} | {line_range} | {message} |\n"
 
-        for finding in indexed_findings:
-            index = finding.get("index", "")
-            rule_id = finding.get("rule_id", "Unknown")
-            level = finding.get("level", "none").capitalize()
+            report += "\n\n"
 
-            report += f"#### Finding {index}: {rule_id} ({level})\n\n"
+            # Add collapsible JSON for each finding
+            report += "### Full Finding Details\n\n"
+            report += (
+                "<details>\n<summary>Click to expand full finding details</summary>\n\n"
+            )
 
-            # Get location info
-            if finding.get("locations") and len(finding["locations"]) > 0:
-                location = finding["locations"][0]
-                file_path = location.get("file", "Unknown")
-                start_line = location.get("startLine", "?")
-                end_line = location.get("endLine", start_line)
-                report += (
-                    f"**Location**: {file_path} (lines {start_line}-{end_line})\n\n"
-                )
+            for finding in indexed_findings:
+                index = finding.get("index", "")
+                rule_id = finding.get("rule_id", "Unknown")
+                level = finding.get("level", "none").capitalize()
 
-            # Add the message
-            report += f"**Description**: {finding.get('message', 'No description available')}\n\n"
+                report += f"#### Finding {index}: {rule_id} ({level})\n\n"
 
-            # Add collapsible JSON
-            import json
+                # Get location info
+                if finding.get("locations") and len(finding["locations"]) > 0:
+                    location = finding["locations"][0]
+                    file_path = location.get("file", "Unknown")
+                    start_line = location.get("startLine", "?")
+                    end_line = location.get("endLine", start_line)
+                    report += (
+                        f"**Location**: {file_path} (lines {start_line}-{end_line})\n\n"
+                    )
 
-            # Get the original finding from findings or secret_findings
-            original_finding = None
-            for f in findings + secret_findings:
-                if f.get("index") == index:
-                    original_finding = f
-                    break
+                # Add the message
+                report += f"**Description**: {finding.get('message', 'No description available')}\n\n"
 
-            if original_finding:
-                report += "<details>\n<summary>Raw JSON</summary>\n\n```json\n"
-                report += json.dumps(original_finding, indent=2)
-            # else:
-            #     report += json.dumps(finding, indent=2)
+                # Add code snippets if available and configured
+                if self.config.options.include_code_snippets:
+                    # Get the original finding from findings or secret_findings
+                    original_finding = None
+                    for f in findings + secret_findings:
+                        if f.get("index") == index:
+                            original_finding = f
+                            break
 
-            report += "\n```\n</details>\n\n"
+                    if original_finding and "locations" in original_finding:
+                        for loc in original_finding["locations"]:
+                            if (
+                                "physicalLocation" in loc
+                                and "region" in loc["physicalLocation"]
+                            ):
+                                region = loc["physicalLocation"]["region"]
+                                if "snippet" in region and "text" in region["snippet"]:
+                                    report += f"**Code Snippet**:\n```\n{region['snippet']['text']}\n```\n\n"
 
-        report += "</details>\n\n"
+                # Add collapsible JSON
+                import json
+
+                # Get the original finding from findings or secret_findings
+                original_finding = None
+                for f in findings + secret_findings:
+                    if f.get("index") == index:
+                        original_finding = f
+                        break
+
+                if original_finding:
+                    report += "<details>\n<summary>Raw JSON</summary>\n\n```json\n"
+                    report += json.dumps(original_finding, indent=2)
+                # else:
+                #     report += json.dumps(finding, indent=2)
+
+                report += "\n```\n</details>\n\n"
+
+            report += "</details>\n\n"
 
         return report
 
@@ -724,6 +936,26 @@ Provide actionable recommendations for addressing these security issues, includi
     ) -> str:
         """Make a call to Amazon Bedrock with error handling."""
         try:
+            # Apply custom prompt if provided
+            if self.config.options.custom_prompt:
+                user_message = f"{self.config.options.custom_prompt}\n\n{user_message}"
+
+            # Add industry context if provided
+            if (
+                self.config.options.industry_context
+                or self.config.options.compliance_frameworks
+            ):
+                context_info = "\nADDITIONAL CONTEXT:\n"
+                if self.config.options.industry_context:
+                    context_info += (
+                        f"- Industry: {self.config.options.industry_context}\n"
+                    )
+                if self.config.options.compliance_frameworks:
+                    context_info += f"- Compliance frameworks: {', '.join(self.config.options.compliance_frameworks)}\n"
+                if self.config.options.custom_context:
+                    context_info += f"\n{self.config.options.custom_context}"
+                user_message += context_info
+
             # Create messages array for the conversation
             messages = [{"role": "user", "content": [{"text": user_message}]}]
 
@@ -731,7 +963,11 @@ Provide actionable recommendations for addressing these security issues, includi
             system = [{"text": system_prompt}]
 
             # Inference parameters
-            inference_config = {"temperature": self.config.options.temperature}
+            inference_config = {
+                "temperature": self.config.options.temperature,
+                "maxTokens": self.config.options.max_tokens,
+                "topP": self.config.options.top_p,
+            }
 
             # Additional model fields - customize based on model type
             additional_model_fields = {}
@@ -851,4 +1087,319 @@ Format your response in markdown.
             bedrock_runtime,
             user_message_content,
             "You are a security expert specializing in code security analysis. Your task is to analyze security findings from the Automated Security Helper (ASH) tool and provide a concise, actionable summary report.",
+        )
+
+    def _generate_technical_analysis(
+        self,
+        bedrock_runtime: Any,
+        model: "AshAggregatedResults",
+        findings: List[Dict[str, Any]],
+    ) -> str:
+        """Generate a detailed technical analysis of findings."""
+        if not findings:
+            return "No findings to analyze."
+
+        # Create a prompt for technical analysis
+        user_message_content = """Generate a detailed technical analysis of the following security findings:
+
+"""
+        # Add findings details to the prompt
+        for i, finding in enumerate(
+            findings[: self.config.options.max_findings_to_analyze]
+        ):
+            message = finding.get("message", {})
+            message_text = (
+                message.get("text", "No description available")
+                if isinstance(message, dict)
+                else "No description available"
+            )
+
+            rule_id = ""
+            if "rule" in finding and finding["rule"] and "id" in finding["rule"]:
+                rule_id = finding["rule"]["id"]
+
+            level = finding.get("level", "none")
+
+            locations = []
+            code_snippets = []
+            if "locations" in finding and finding["locations"]:
+                for loc in finding["locations"]:
+                    if (
+                        "physicalLocation" in loc
+                        and "artifactLocation" in loc["physicalLocation"]
+                    ):
+                        uri = loc["physicalLocation"]["artifactLocation"].get(
+                            "uri", "Unknown"
+                        )
+                        locations.append(uri)
+
+                        # Extract code snippets if available and configured
+                        if (
+                            self.config.options.include_code_snippets
+                            and "region" in loc["physicalLocation"]
+                        ):
+                            region = loc["physicalLocation"]["region"]
+                            if "snippet" in region and "text" in region["snippet"]:
+                                code_snippets.append(region["snippet"]["text"])
+
+            user_message_content += f"""
+FINDING {i + 1}:
+- Rule ID: {rule_id}
+- Level: {level}
+- Message: {message_text}
+- Locations: {", ".join(locations) if locations else "Unknown"}
+"""
+            if code_snippets and self.config.options.include_code_snippets:
+                user_message_content += (
+                    "- Code Snippet:\n```\n" + "\n".join(code_snippets[:3]) + "\n```\n"
+                )
+
+        user_message_content += """
+Provide a detailed technical analysis including:
+1. Root cause analysis for each finding
+2. Specific remediation steps with code examples where appropriate
+3. Testing recommendations to verify fixes
+4. Security best practices related to these issues
+"""
+
+        return self._call_bedrock(
+            bedrock_runtime,
+            user_message_content,
+            "You are a security expert providing detailed technical analysis of security findings.",
+        )
+
+    def _generate_risk_assessment(
+        self,
+        bedrock_runtime: Any,
+        model: "AshAggregatedResults",
+        findings: List[Dict[str, Any]],
+    ) -> str:
+        """Generate a risk assessment based on findings."""
+        if not findings:
+            return "No findings to assess risk."
+
+        # Count findings by severity
+        severity_counts = defaultdict(int)
+        for finding in findings:
+            severity = finding.get("level", "none")
+            severity_counts[severity] += 1
+
+        # Create a prompt for risk assessment
+        user_message_content = f"""Generate a risk assessment based on the following security scan results:
+
+FINDINGS BY SEVERITY:
+{", ".join([f"{severity}: {count}" for severity, count in severity_counts.items()])}
+
+Sample findings:
+"""
+
+        # Add sample findings to the prompt
+        for i, finding in enumerate(findings[:5]):
+            message = finding.get("message", {})
+            message_text = (
+                message.get("text", "No description available")
+                if isinstance(message, dict)
+                else "No description available"
+            )
+
+            rule_id = ""
+            if "rule" in finding and finding["rule"] and "id" in finding["rule"]:
+                rule_id = finding["rule"]["id"]
+
+            level = finding.get("level", "none")
+
+            user_message_content += f"""
+FINDING {i + 1}:
+- Rule ID: {rule_id}
+- Level: {level}
+- Message: {message_text}
+"""
+
+        user_message_content += """
+Provide a risk assessment including:
+1. Overall risk score (LOW/MEDIUM/HIGH/CRITICAL)
+2. Risk breakdown by severity
+3. Compliance impact assessment
+4. Business impact analysis
+"""
+
+        # Add compliance frameworks if specified
+        if self.config.options.compliance_frameworks:
+            user_message_content += f"\nSpecifically address compliance impact for: {', '.join(self.config.options.compliance_frameworks)}"
+
+        return self._call_bedrock(
+            bedrock_runtime,
+            user_message_content,
+            "You are a security expert providing risk assessment based on security scan findings.",
+        )
+
+    def _summarize_findings(
+        self,
+        findings: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Summarize findings to reduce token usage."""
+        if not self.config.options.summarize_findings or not findings:
+            return findings
+
+        # Group findings by rule ID
+        grouped_findings = defaultdict(list)
+        for finding in findings:
+            rule_id = "unknown"
+            if "rule" in finding and finding["rule"] and "id" in finding["rule"]:
+                rule_id = finding["rule"]["id"]
+            grouped_findings[rule_id].append(finding)
+
+        # Create summarized findings
+        summarized = []
+        for rule_id, rule_findings in grouped_findings.items():
+            if len(rule_findings) == 1:
+                summarized.append(rule_findings[0])
+            else:
+                # Create a summary finding
+                base_finding = rule_findings[0].copy()
+                locations = []
+
+                # Collect all locations
+                for finding in rule_findings:
+                    if "locations" in finding and finding["locations"]:
+                        for loc in finding["locations"]:
+                            if (
+                                "physicalLocation" in loc
+                                and "artifactLocation" in loc["physicalLocation"]
+                            ):
+                                uri = loc["physicalLocation"]["artifactLocation"].get(
+                                    "uri", "Unknown"
+                                )
+                                if uri not in [loc.get("uri") for loc in locations]:
+                                    locations.append({"uri": uri})
+
+                # Update the base finding
+                if "message" in base_finding and isinstance(
+                    base_finding["message"], dict
+                ):
+                    base_finding["message"]["text"] = (
+                        f"Found {len(rule_findings)} instances of this issue"
+                    )
+
+                # Add a note about summarization
+                if "properties" not in base_finding:
+                    base_finding["properties"] = {}
+                base_finding["properties"]["summarized"] = True
+                base_finding["properties"]["original_count"] = len(rule_findings)
+
+                summarized.append(base_finding)
+
+        return summarized
+
+    def _process_findings_by_batch(
+        self,
+        bedrock_runtime: Any,
+        model: "AshAggregatedResults",
+        findings: List[Dict[str, Any]],
+    ) -> str:
+        """Process findings in batches to optimize token usage."""
+        if (
+            not self.config.options.batch_processing
+            or len(findings) <= self.config.options.max_findings_to_analyze
+        ):
+            # If batch processing is disabled or not needed, use the standard method
+            return self._generate_findings_summary(
+                bedrock_runtime,
+                model,
+                findings[: self.config.options.max_findings_to_analyze],
+            )
+
+        # Process in batches
+        batch_size = self.config.options.max_findings_to_analyze
+        batches = [
+            findings[i : i + batch_size] for i in range(0, len(findings), batch_size)
+        ]
+
+        batch_results = []
+        for i, batch in enumerate(batches):
+            ASH_LOGGER.info(f"Processing batch {i + 1} of {len(batches)}")
+            batch_summary = self._generate_findings_summary(
+                bedrock_runtime, model, batch
+            )
+            batch_results.append(batch_summary)
+
+        # Combine batch results
+        combined_prompt = f"""Synthesize the following batch summaries into a cohesive overall summary:
+
+{chr(10).join([f"BATCH {i + 1}:\n{summary}" for i, summary in enumerate(batch_results)])}
+
+Provide a unified summary that captures the key insights from all batches.
+"""
+
+        return self._call_bedrock(
+            bedrock_runtime,
+            combined_prompt,
+            "You are a security expert synthesizing multiple security scan batch summaries.",
+        )
+
+    def _generate_compliance_impact(
+        self,
+        bedrock_runtime: Any,
+        model: "AshAggregatedResults",
+        findings: List[Dict[str, Any]],
+    ) -> str:
+        """Generate compliance impact analysis based on findings."""
+        if not findings or not self.config.options.compliance_frameworks:
+            return "No compliance frameworks specified for analysis."
+
+        # Count findings by severity
+        severity_counts = defaultdict(int)
+        for finding in findings:
+            severity = finding.get("level", "none")
+            severity_counts[severity] += 1
+
+        # Create a prompt for compliance impact analysis
+        user_message_content = f"""Generate a compliance impact analysis for the following security scan results:
+
+FINDINGS BY SEVERITY:
+{", ".join([f"{severity}: {count}" for severity, count in severity_counts.items()])}
+
+COMPLIANCE FRAMEWORKS TO ANALYZE:
+{", ".join(self.config.options.compliance_frameworks)}
+
+Sample findings:
+"""
+
+        # Add sample findings to the prompt
+        for i, finding in enumerate(findings[:5]):
+            message = finding.get("message", {})
+            message_text = (
+                message.get("text", "No description available")
+                if isinstance(message, dict)
+                else "No description available"
+            )
+
+            rule_id = ""
+            if "rule" in finding and finding["rule"] and "id" in finding["rule"]:
+                rule_id = finding["rule"]["id"]
+
+            level = finding.get("level", "none")
+
+            user_message_content += f"""
+FINDING {i + 1}:
+- Rule ID: {rule_id}
+- Level: {level}
+- Message: {message_text}
+"""
+
+        user_message_content += f"""
+Provide a compliance impact analysis including:
+1. How these findings may impact compliance with each framework ({", ".join(self.config.options.compliance_frameworks)})
+2. Specific compliance requirements that may be violated
+3. Recommended actions to maintain or restore compliance
+"""
+
+        # Add industry context if provided
+        if self.config.options.industry_context:
+            user_message_content += f"\nConsider the industry context: {self.config.options.industry_context}"
+
+        return self._call_bedrock(
+            bedrock_runtime,
+            user_message_content,
+            "You are a compliance expert analyzing security findings against regulatory frameworks.",
         )

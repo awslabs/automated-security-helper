@@ -9,7 +9,7 @@ from automated_security_helper.utils.suppression_matcher import (
 )
 
 
-def handle_suppression_expiration_check(**kwargs) -> bool:
+def handle_suppression_expiration_check(*args, **kwargs) -> bool:
     """
     Event subscriber that checks for expiring suppressions at execution start.
 

@@ -1379,7 +1379,9 @@
               "enabled": true,
               "extension": "junit.xml",
               "name": "junitxml",
-              "options": {}
+              "options": {
+                "respect_severity_threshold": true
+              }
             },
             "markdown": {
               "enabled": true,
@@ -9071,7 +9073,9 @@
         },
         "options": {
           "$ref": "#/$defs/JUnitXMLReporterConfigOptions",
-          "default": {}
+          "default": {
+            "respect_severity_threshold": true
+          }
         }
       },
       "title": "JUnitXMLReporterConfig",
@@ -9079,7 +9083,13 @@
     },
     "JUnitXMLReporterConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "properties": {
+        "respect_severity_threshold": {
+          "default": true,
+          "title": "Respect Severity Threshold",
+          "type": "boolean"
+        }
+      },
       "title": "JUnitXMLReporterConfigOptions",
       "type": "object"
     },
@@ -12960,7 +12970,9 @@
             "enabled": true,
             "extension": "junit.xml",
             "name": "junitxml",
-            "options": {}
+            "options": {
+              "respect_severity_threshold": true
+            }
           },
           "description": "Configure the options for the JUnit XML reporter"
         },
