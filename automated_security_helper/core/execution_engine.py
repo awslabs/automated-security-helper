@@ -605,7 +605,7 @@ class ScanExecutionEngine:
                         f"===== ASH Security Scan Completed in {duration_str} ====="
                     )
 
-                if self._completed_scanners:
+                if self._asharp_model:
                     # Get color setting from progress display
                     use_color = True
                     if hasattr(self.progress_display, "console") and hasattr(

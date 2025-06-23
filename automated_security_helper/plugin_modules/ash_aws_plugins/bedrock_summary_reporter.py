@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, Dict, List, Literal, Any, TYPE_CHECKING
 
 import boto3
+import botocore.exceptions
 from pydantic import Field
 
 from automated_security_helper.base.options import ReporterOptionsBase
@@ -16,6 +17,11 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    retry_with_backoff,
+    get_fallback_model,
+    validate_bedrock_model,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -30,7 +36,7 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
     aws_profile: str | None = os.environ.get("AWS_PROFILE", None)
     model_id: str = os.environ.get(
-        "ASH_BEDROCK_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0"
+        "ASH_BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
     )
     temperature: float = float(os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5"))
     max_tokens: int = int(os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000"))
@@ -43,6 +49,12 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     enable_caching: bool = True
     output_markdown: bool = True
     output_file: str = "ash.bedrock.summary.md"
+    # Retry configuration
+    max_retries: int = 3
+    base_delay: float = 1.0
+    max_delay: float = 60.0
+    # Fallback model configuration
+    enable_fallback_models: bool = True
     # Output additional files with specific content
     output_executive_file: str = "bedrock-executive.md"
     output_technical_file: str = "bedrock-technical.md"
@@ -98,30 +110,105 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     def validate(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
+
+        # Check if AWS region is configured
         if self.config.options.aws_region is None:
-            return self.dependencies_satisfied
-        try:
-            session = boto3.Session(
-                profile_name=self.config.options.aws_profile,
-                region_name=self.config.options.aws_region,
-            )
-            sts_client = session.client("sts")
-            caller_id = sts_client.get_caller_identity()
-
-            # Check if Bedrock is available
-            bedrock_client = session.client("bedrock")
-            bedrock_client.list_foundation_models(maxResults=1)
-
-            self.dependencies_satisfied = "Account" in caller_id
-        except Exception as e:
             self._plugin_log(
-                f"Error when validating Bedrock access: {e}",
+                "AWS region is not configured. Set AWS_REGION environment variable or specify in config.",
                 level=logging.WARNING,
                 target_type="source",
                 append_to_stream="stderr",
             )
-        finally:
             return self.dependencies_satisfied
+
+        try:
+            # Create AWS session
+            session_params = {}
+            if self.config.options.aws_profile:
+                session_params["profile_name"] = self.config.options.aws_profile
+            if self.config.options.aws_region:
+                session_params["region_name"] = self.config.options.aws_region
+            session = boto3.Session(**session_params)
+
+            # Verify AWS credentials
+            sts_client = session.client("sts")
+            caller_id = sts_client.get_caller_identity()
+            if "Account" not in caller_id:
+                self._plugin_log(
+                    "Invalid AWS credentials. Unable to get caller identity.",
+                    level=logging.WARNING,
+                    target_type="source",
+                    append_to_stream="stderr",
+                )
+                return self.dependencies_satisfied
+
+            # Check if Bedrock is available
+            bedrock_client = session.client("bedrock")
+
+            # Check if we can list models
+            try:
+                bedrock_client.list_foundation_models(maxResults=1)
+            except botocore.exceptions.ClientError as e:
+                error_code = e.response.get("Error", {}).get("Code")
+                error_message = e.response.get("Error", {}).get("Message")
+                self._plugin_log(
+                    f"Error accessing Bedrock service: {error_code}: {error_message}",
+                    level=logging.WARNING,
+                    target_type="source",
+                    append_to_stream="stderr",
+                )
+                return self.dependencies_satisfied
+
+            # Validate the configured model
+            model_id = self.config.options.model_id
+            is_valid, error_message = validate_bedrock_model(bedrock_client, model_id)
+
+            if not is_valid:
+                self._plugin_log(
+                    f"Configured model '{model_id}' is not valid: {error_message}",
+                    level=logging.WARNING,
+                    target_type="source",
+                    append_to_stream="stderr",
+                )
+
+                # Check if fallback models are available
+                if self.config.options.enable_fallback_models:
+                    fallback_model = get_fallback_model(model_id)
+                    if fallback_model and fallback_model != model_id:
+                        is_valid, error_message = validate_bedrock_model(
+                            bedrock_client, fallback_model
+                        )
+                        if is_valid:
+                            self._plugin_log(
+                                f"Fallback model '{fallback_model}' is available and will be used",
+                                level=logging.INFO,
+                                target_type="source",
+                                append_to_stream="stderr",
+                            )
+                            # We can proceed with the fallback model
+                            self.dependencies_satisfied = True
+            else:
+                # Primary model is valid
+                self.dependencies_satisfied = True
+
+        except botocore.exceptions.ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code")
+            error_message = e.response.get("Error", {}).get("Message")
+            self._plugin_log(
+                f"AWS API error when validating Bedrock access: {error_code}: {error_message}",
+                level=logging.WARNING,
+                target_type="source",
+                append_to_stream="stderr",
+            )
+        except Exception as e:
+            self._plugin_log(
+                f"Error when validating Bedrock access: {type(e).__name__}: {str(e)}",
+                level=logging.WARNING,
+                target_type="source",
+                append_to_stream="stderr",
+            )
+
+        return self.dependencies_satisfied
 
     def report(self, model: "AshAggregatedResults") -> str:
         """Generate a summary report of findings using Amazon Bedrock."""
@@ -129,10 +216,12 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             self.config = BedrockSummaryReporterConfig.model_validate(self.config)
 
         # Initialize Bedrock client
-        session = boto3.Session(
-            profile_name=self.config.options.aws_profile,
-            region_name=self.config.options.aws_region,
-        )
+        session_params = {}
+        if self.config.options.aws_profile:
+            session_params["profile_name"] = self.config.options.aws_profile
+        if self.config.options.aws_region:
+            session_params["region_name"] = self.config.options.aws_region
+        session = boto3.Session(**session_params)
         bedrock_runtime = session.client("bedrock-runtime")
 
         # Get findings from the SARIF model
@@ -934,49 +1023,171 @@ Provide actionable recommendations for addressing these security issues, includi
     def _call_bedrock(
         self, bedrock_runtime: Any, user_message: str, system_prompt: str
     ) -> str:
-        """Make a call to Amazon Bedrock with error handling."""
+        """Make a call to Amazon Bedrock with error handling, retry logic, and fallback models."""
+        # Prepare the prompt
+        prepared_message = self._prepare_prompt(user_message)
+
+        # Create messages array for the conversation
+        messages = [{"role": "user", "content": [{"text": prepared_message}]}]
+
+        # System prompt
+        system = [{"text": system_prompt}]
+
+        # Inference parameters
+        inference_config = {
+            "temperature": self.config.options.temperature,
+            "maxTokens": self.config.options.max_tokens,
+            "topP": self.config.options.top_p,
+        }
+
+        # Try with the primary model first
+        model_id = self.config.options.model_id
+        ASH_LOGGER.verbose(f"Attempting to use primary model: {model_id}")
+
+        # Validate the model before trying to use it
+        bedrock_client = boto3.client(
+            "bedrock",
+            region_name=self.config.options.aws_region,
+        )
+        is_valid, error_message = validate_bedrock_model(bedrock_client, model_id)
+
+        if not is_valid:
+            ASH_LOGGER.warning(
+                f"Primary model {model_id} validation failed: {error_message}"
+            )
+            if self.config.options.enable_fallback_models:
+                # Try fallback models
+                return self._try_fallback_models(
+                    bedrock_runtime,
+                    bedrock_client,
+                    model_id,
+                    messages,
+                    system,
+                    inference_config,
+                )
+            else:
+                return f"*Error: Primary model {model_id} validation failed: {error_message}*"
+
+        # Try the primary model
+        result = self._try_model_call(
+            bedrock_runtime, model_id, messages, system, inference_config
+        )
+
+        # If the primary model failed and fallback is enabled, try fallback models
+        if result.startswith("*Error") and self.config.options.enable_fallback_models:
+            ASH_LOGGER.warning(
+                f"Primary model {model_id} failed, trying fallback models"
+            )
+            return self._try_fallback_models(
+                bedrock_runtime,
+                bedrock_client,
+                model_id,
+                messages,
+                system,
+                inference_config,
+            )
+
+        return result
+
+    def _try_fallback_models(
+        self,
+        bedrock_runtime: Any,
+        bedrock_client: Any,
+        failed_model_id: str,
+        messages: List[Dict],
+        system: List[Dict],
+        inference_config: Dict,
+    ) -> str:
+        """Try fallback models when the primary model fails."""
+        # Get a fallback model
+        fallback_model = get_fallback_model(failed_model_id)
+        if not fallback_model or fallback_model == failed_model_id:
+            return f"*Error: No suitable fallback model found for {failed_model_id}*"
+
+        ASH_LOGGER.info(f"Trying fallback model: {fallback_model}")
+
+        # Validate the fallback model
+        is_valid, error_message = validate_bedrock_model(bedrock_client, fallback_model)
+        if not is_valid:
+            ASH_LOGGER.warning(
+                f"Fallback model {fallback_model} validation failed: {error_message}"
+            )
+            # Try another fallback model recursively
+            return self._try_fallback_models(
+                bedrock_runtime,
+                bedrock_client,
+                fallback_model,
+                messages,
+                system,
+                inference_config,
+            )
+
+        # Try the fallback model
+        fallback_result = self._try_model_call(
+            bedrock_runtime, fallback_model, messages, system, inference_config
+        )
+
+        # If the fallback succeeded, use its result
+        if not fallback_result.startswith("*Error"):
+            ASH_LOGGER.info(f"Fallback model {fallback_model} succeeded")
+            return fallback_result
+        else:
+            ASH_LOGGER.warning(f"Fallback model {fallback_model} also failed")
+            # Try another fallback model recursively
+            return self._try_fallback_models(
+                bedrock_runtime,
+                bedrock_client,
+                fallback_model,
+                messages,
+                system,
+                inference_config,
+            )
+
+    def _prepare_prompt(self, user_message: str) -> str:
+        """Prepare the prompt with custom context and industry information."""
+        # Apply custom prompt if provided
+        if self.config.options.custom_prompt:
+            user_message = f"{self.config.options.custom_prompt}\n\n{user_message}"
+
+        # Add industry context if provided
+        if (
+            self.config.options.industry_context
+            or self.config.options.compliance_frameworks
+        ):
+            context_info = "\nADDITIONAL CONTEXT:\n"
+            if self.config.options.industry_context:
+                context_info += f"- Industry: {self.config.options.industry_context}\n"
+            if self.config.options.compliance_frameworks:
+                context_info += f"- Compliance frameworks: {', '.join(self.config.options.compliance_frameworks)}\n"
+            if self.config.options.custom_context:
+                context_info += f"\n{self.config.options.custom_context}"
+            user_message += context_info
+
+        return user_message
+
+    @retry_with_backoff()
+    def _invoke_bedrock_model(self, bedrock_runtime: Any, **converse_args) -> dict:
+        """Invoke the Bedrock model with retry logic."""
+        return bedrock_runtime.converse(**converse_args)
+
+    def _try_model_call(
+        self,
+        bedrock_runtime: Any,
+        model_id: str,
+        messages: List[Dict],
+        system: List[Dict],
+        inference_config: Dict,
+    ) -> str:
+        """Try to call a specific model with error handling."""
         try:
-            # Apply custom prompt if provided
-            if self.config.options.custom_prompt:
-                user_message = f"{self.config.options.custom_prompt}\n\n{user_message}"
-
-            # Add industry context if provided
-            if (
-                self.config.options.industry_context
-                or self.config.options.compliance_frameworks
-            ):
-                context_info = "\nADDITIONAL CONTEXT:\n"
-                if self.config.options.industry_context:
-                    context_info += (
-                        f"- Industry: {self.config.options.industry_context}\n"
-                    )
-                if self.config.options.compliance_frameworks:
-                    context_info += f"- Compliance frameworks: {', '.join(self.config.options.compliance_frameworks)}\n"
-                if self.config.options.custom_context:
-                    context_info += f"\n{self.config.options.custom_context}"
-                user_message += context_info
-
-            # Create messages array for the conversation
-            messages = [{"role": "user", "content": [{"text": user_message}]}]
-
-            # System prompt
-            system = [{"text": system_prompt}]
-
-            # Inference parameters
-            inference_config = {
-                "temperature": self.config.options.temperature,
-                "maxTokens": self.config.options.max_tokens,
-                "topP": self.config.options.top_p,
-            }
-
             # Additional model fields - customize based on model type
             additional_model_fields = {}
-            if "claude" in self.config.options.model_id.lower():
+            if "claude" in model_id.lower():
                 additional_model_fields["top_k"] = 200
 
             # Prepare the converse API call
             converse_args = {
-                "modelId": self.config.options.model_id,
+                "modelId": model_id,
                 "messages": messages,
                 "system": system,
                 "inferenceConfig": inference_config,
@@ -986,8 +1197,10 @@ Provide actionable recommendations for addressing these security issues, includi
             if additional_model_fields:
                 converse_args["additionalModelRequestFields"] = additional_model_fields
 
-            # Use the converse API
-            response = bedrock_runtime.converse(**converse_args)
+            ASH_LOGGER.debug(f"Invoking Bedrock model {model_id}")
+
+            # Use the converse API with retry logic
+            response = self._invoke_bedrock_model(bedrock_runtime, **converse_args)
 
             # Extract the response content
             if response and "output" in response and "message" in response["output"]:
@@ -999,16 +1212,52 @@ Provide actionable recommendations for addressing these security issues, includi
                     for content_item in content_list:
                         if "text" in content_item:
                             full_text += content_item["text"]
+                    ASH_LOGGER.debug(
+                        f"Successfully generated content with model {model_id}"
+                    )
                     return full_text
+                else:
+                    ASH_LOGGER.warning(f"No content in message from model {model_id}")
+            else:
+                ASH_LOGGER.warning(
+                    f"Invalid response structure from model {model_id}: {response}"
+                )
 
             return "*Error: Unable to generate content from Bedrock response.*"
-        except Exception as e:
+        except botocore.exceptions.ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code")
+            error_message = e.response.get("Error", {}).get("Message")
+
             self._plugin_log(
-                f"Error calling Bedrock: {e}",
+                f"Bedrock API error ({error_code}) with model {model_id}: {error_message}",
                 level=logging.WARNING,
                 append_to_stream="stderr",
             )
-            return f"*Error generating content: {str(e)}*"
+
+            # Provide more specific error messages based on error code
+            if error_code == "AccessDeniedException":
+                return f"*Error: Access denied to model {model_id}. Check IAM permissions.*"
+            elif error_code == "ResourceNotFoundException":
+                return f"*Error: Model {model_id} not found. Check if the model ID is correct and available in your region.*"
+            elif error_code == "ValidationException":
+                return (
+                    f"*Error: Validation error with model {model_id}: {error_message}*"
+                )
+            elif (
+                error_code == "ThrottlingException"
+                or error_code == "TooManyRequestsException"
+            ):
+                return f"*Error: Rate limit exceeded for model {model_id}. Try again later.*"
+            else:
+                return f"*Error: {error_message}*"
+        except Exception as e:
+            error_type = type(e).__name__
+            self._plugin_log(
+                f"Error calling Bedrock model {model_id}: {error_type}: {str(e)}",
+                level=logging.WARNING,
+                append_to_stream="stderr",
+            )
+            return f"*Error generating content with model {model_id}: {error_type}: {str(e)}*"
 
     def _generate_summary(
         self,

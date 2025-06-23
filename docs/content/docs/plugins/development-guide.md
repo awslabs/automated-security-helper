@@ -36,17 +36,17 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase, Sca
 
 class MyCustomScannerConfig(ScannerPluginConfigBase):
     """Configuration for MyCustomScanner."""
-    
+
     # Define configuration options
     custom_option: str = "default_value"
-    
+
 class MyCustomScanner(ScannerPluginBase):
     """Custom scanner implementation."""
-    
+
     def __init__(self, config: MyCustomScannerConfig):
         super().__init__(config)
         # Initialize scanner-specific resources
-        
+
     def scan(self, target_path: str) -> dict:
         """Perform the scan operation."""
         # Implement scanning logic
@@ -54,7 +54,7 @@ class MyCustomScanner(ScannerPluginBase):
             "findings": [],
             "status": "success"
         }
-        
+
     def cleanup(self):
         """Clean up resources."""
         # Implement cleanup logic
@@ -84,12 +84,12 @@ Scanner plugins analyze code and infrastructure for security issues.
 ```python
 class ScannerPluginBase(ABC):
     """Base class for all scanner plugins."""
-    
+
     @abstractmethod
     def scan(self, target_path: str) -> dict:
         """Scan the target path and return findings."""
         pass
-        
+
     @abstractmethod
     def cleanup(self):
         """Clean up resources."""
@@ -104,26 +104,26 @@ from automated_security_helper.core.enums import ScannerStatus
 
 class CustomRegexScannerConfig(ScannerPluginConfigBase):
     """Configuration for CustomRegexScanner."""
-    
+
     name: str = "custom-regex"
     enabled: bool = True
     patterns: List[str] = ["password\\s*=\\s*['\"]([^'\"]+)['\"]"]
-    
+
 class CustomRegexScanner(ScannerPluginBase):
     """Scanner that uses regex patterns to find security issues."""
-    
+
     def __init__(self, config: CustomRegexScannerConfig):
         super().__init__(config)
         self.patterns = [re.compile(p) for p in config.patterns]
-        
+
     def scan(self, target_path: str) -> dict:
         """Scan files for regex patterns."""
         findings = []
-        
+
         for file_path in self._get_files(target_path):
             with open(file_path, 'r') as f:
                 content = f.read()
-                
+
             for i, line in enumerate(content.splitlines()):
                 for pattern in self.patterns:
                     if match := pattern.search(line):
@@ -134,26 +134,26 @@ class CustomRegexScanner(ScannerPluginBase):
                             "match": match.group(0),
                             "severity": "HIGH"
                         })
-        
+
         return {
             "findings": findings,
             "status": ScannerStatus.FAILED if findings else ScannerStatus.PASSED
         }
-        
+
     def cleanup(self):
         """Clean up resources."""
         self.patterns = []
-        
+
     def _get_files(self, path: str) -> List[str]:
         """Get all files in the path."""
         if os.path.isfile(path):
             return [path]
-            
+
         files = []
         for root, _, filenames in os.walk(path):
             for filename in filenames:
                 files.append(os.path.join(root, filename))
-                
+
         return files
 ```
 
@@ -166,7 +166,7 @@ Reporter plugins generate reports in various formats.
 ```python
 class ReporterPluginBase(ABC):
     """Base class for all reporter plugins."""
-    
+
     @abstractmethod
     def generate_report(self, results: AshAggregatedResults) -> str:
         """Generate a report from the scan results."""
@@ -181,18 +181,18 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 class CustomJSONReporterConfig(ReporterPluginConfigBase):
     """Configuration for CustomJSONReporter."""
-    
+
     name: str = "custom-json"
     enabled: bool = True
     pretty_print: bool = True
-    
+
 class CustomJSONReporter(ReporterPluginBase):
     """Reporter that generates a custom JSON report."""
-    
+
     def __init__(self, config: CustomJSONReporterConfig):
         super().__init__(config)
         self.pretty_print = config.pretty_print
-        
+
     def generate_report(self, results: AshAggregatedResults) -> str:
         """Generate a custom JSON report."""
         report_data = {
@@ -208,7 +208,7 @@ class CustomJSONReporter(ReporterPluginBase):
             },
             "findings": []
         }
-        
+
         # Extract findings from SARIF
         if results.sarif and results.sarif.runs:
             for run in results.sarif.runs:
@@ -220,7 +220,7 @@ class CustomJSONReporter(ReporterPluginBase):
                             "message": result.message.text if result.message else "No message",
                         }
                         report_data["findings"].append(finding)
-        
+
         # Generate JSON
         indent = 2 if self.pretty_print else None
         return json.dumps(report_data, indent=indent)
@@ -235,7 +235,7 @@ Converter plugins process files before scanning.
 ```python
 class ConverterPluginBase(ABC):
     """Base class for all converter plugins."""
-    
+
     @abstractmethod
     def convert(self, source_path: str, target_path: str) -> List[str]:
         """Convert files from source_path to target_path."""
@@ -249,42 +249,42 @@ from automated_security_helper.base.converter_plugin import ConverterPluginBase,
 
 class CustomYAMLConverterConfig(ConverterPluginConfigBase):
     """Configuration for CustomYAMLConverter."""
-    
+
     name: str = "custom-yaml"
     enabled: bool = True
     file_extensions: List[str] = [".yaml", ".yml"]
-    
+
 class CustomYAMLConverter(ConverterPluginBase):
     """Converter that processes YAML files."""
-    
+
     def __init__(self, config: CustomYAMLConverterConfig):
         super().__init__(config)
         self.file_extensions = config.file_extensions
-        
+
     def convert(self, source_path: str, target_path: str) -> List[str]:
         """Convert YAML files to a format suitable for scanning."""
         converted_files = []
-        
+
         for root, _, files in os.walk(source_path):
             for file in files:
                 if any(file.endswith(ext) for ext in self.file_extensions):
                     source_file = os.path.join(root, file)
                     rel_path = os.path.relpath(source_file, source_path)
                     target_file = os.path.join(target_path, rel_path)
-                    
+
                     # Create target directory if it doesn't exist
                     os.makedirs(os.path.dirname(target_file), exist_ok=True)
-                    
+
                     # Process the YAML file
                     with open(source_file, 'r') as f:
                         yaml_content = yaml.safe_load(f)
-                        
+
                     # Write processed content to target file
                     with open(target_file, 'w') as f:
                         yaml.dump(yaml_content, f)
-                        
+
                     converted_files.append(target_file)
-        
+
         return converted_files
 ```
 
@@ -318,9 +318,9 @@ def scan_complete_handler(**kwargs):
     """Handle scan completion events."""
     scanner = kwargs.get('scanner', 'unknown')
     remaining = kwargs.get('remaining_count', 0)
-    
+
     print(f"Scanner {scanner} completed. {remaining} scanners remaining.")
-    
+
     # Return True to indicate successful handling
     return True
 
@@ -388,7 +388,7 @@ def register_plugins():
         scanner_class=CustomRegexScanner,
         config_class=CustomRegexScannerConfig
     )
-    
+
     ash_plugin_manager.register_reporter(
         name="custom-json",
         reporter_class=CustomJSONReporter,
@@ -412,7 +412,7 @@ ash_plugin_modules:
 Or specify via command line:
 
 ```bash
-ash scan --plugin-modules my_ash_plugins
+ash --plugin-modules my_ash_plugins
 ```
 
 ## Best Practices
@@ -437,16 +437,16 @@ def test_custom_regex_scanner():
         test_file = os.path.join(tmpdir, "test.py")
         with open(test_file, "w") as f:
             f.write('password = "secret123"')
-        
+
         # Configure scanner
         config = CustomRegexScannerConfig(
             patterns=["password\\s*=\\s*['\"]([^'\"]+)['\"]"]
         )
         scanner = CustomRegexScanner(config)
-        
+
         # Run scan
         result = scanner.scan(tmpdir)
-        
+
         # Verify results
         assert len(result["findings"]) == 1
         assert result["findings"][0]["file"] == test_file
@@ -468,7 +468,7 @@ def test_custom_regex_scanner():
 Enable debug logging to troubleshoot plugin issues:
 
 ```bash
-ash scan --debug
+ash --debug
 ```
 
 ## Next Steps

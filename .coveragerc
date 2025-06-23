@@ -1,5 +1,9 @@
 [run]
 source = automated_security_helper
+omit =
+    */tests/*
+    */test_*
+    automated_security_helper/identifiers/*
 
 [report]
 # Show missing lines in reports

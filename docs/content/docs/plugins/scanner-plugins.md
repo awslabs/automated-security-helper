@@ -2,6 +2,8 @@
 
 Scanner plugins perform security scans on files and generate findings. They are the core of ASH's security scanning functionality.
 
+> For detailed visual diagrams of scanner plugin architecture and workflow, see [Scanner Plugin Diagrams](scanner-plugins-diagrams.md).
+
 ## Scanner Plugin Interface
 
 Scanner plugins must implement the `ScannerPluginBase` interface:

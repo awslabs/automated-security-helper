@@ -5,13 +5,13 @@ ASH supports runtime configuration overrides through the `--config-overrides` CL
 ## Basic Usage
 
 ```bash
-ash scan --config-overrides 'reporters.markdown.options.include_detailed_findings=true'
+ash --config-overrides 'reporters.markdown.options.include_detailed_findings=true'
 ```
 
 You can specify multiple overrides by using the parameter multiple times:
 
 ```bash
-ash scan \
+ash \
   --config-overrides 'reporters.cloudwatch-logs.options.aws_region=us-west-2' \
   --config-overrides 'global_settings.severity_threshold=LOW'
 ```
@@ -35,7 +35,7 @@ You can append to existing lists by adding a `+` at the end of the key path:
 
 ```bash
 # Add a new plugin module without replacing existing ones
-ash scan --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
+ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
 ```
 
 ### Complex Structures
@@ -44,39 +44,39 @@ For complex structures, you can use JSON syntax:
 
 ```bash
 # Add a new ignore path
-ash scan --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
 ### Examples
 
 1. Change severity threshold:
    ```bash
-   ash scan --config-overrides 'global_settings.severity_threshold=LOW'
+   ash --config-overrides 'global_settings.severity_threshold=LOW'
    ```
 
 2. Enable a specific scanner:
    ```bash
-   ash scan --config-overrides 'scanners.bandit.enabled=true'
+   ash --config-overrides 'scanners.bandit.enabled=true'
    ```
 
 3. Configure AWS region for CloudWatch Logs reporter:
    ```bash
-   ash scan --config-overrides 'reporters.cloudwatch-logs.options.aws_region=us-west-2'
+   ash --config-overrides 'reporters.cloudwatch-logs.options.aws_region=us-west-2'
    ```
 
 4. Replace the list of plugin modules:
    ```bash
-   ash scan --config-overrides 'ash_plugin_modules=["automated_security_helper.plugin_modules.ash_aws_plugins"]'
+   ash --config-overrides 'ash_plugin_modules=["automated_security_helper.plugin_modules.ash_aws_plugins"]'
    ```
 
 5. Add a plugin module to the existing list:
    ```bash
-   ash scan --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.custom_plugin"]'
+   ash --config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.custom_plugin"]'
    ```
 
 6. Configure multiple scanner options:
    ```bash
-   ash scan \
+   ash \
      --config-overrides 'scanners.bandit.options.confidence_level=HIGH' \
      --config-overrides 'scanners.bandit.options.ignore_nosec=true'
    ```
@@ -191,7 +191,7 @@ ash_plugin_modules:
 Or using the override:
 
 ```bash
-ash scan --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
+ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
 ```
 
 ## Notes

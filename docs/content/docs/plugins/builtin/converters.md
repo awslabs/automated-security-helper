@@ -2,6 +2,8 @@
 
 ASH includes 2 built-in converters that preprocess files to make them suitable for security scanning. Converters handle file format transformations and archive extraction automatically.
 
+> For detailed visual diagrams of the built-in converter architecture and workflows, see [Built-in Converter Diagrams](converters-diagrams.md).
+
 ## Converter Overview
 
 | Converter                                   | Purpose                     | Input Formats    | Output                                        |
@@ -135,10 +137,10 @@ Converters automatically prepare files for scanner consumption:
 
 ```bash
 # Archives are extracted, then contents scanned
-ash scan project.zip --scanners bandit,semgrep
+ash project.zip --scanners bandit,semgrep
 
 # Jupyter notebooks converted to Python, then scanned
-ash scan analysis.ipynb --scanners bandit,detect-secrets
+ash analysis.ipynb --scanners bandit,detect-secrets
 ```
 
 ## Troubleshooting

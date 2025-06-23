@@ -2,6 +2,8 @@
 
 Streams ASH scan results to Amazon CloudWatch Logs for real-time monitoring and analysis.
 
+> For detailed visual diagrams of the CloudWatch Logs Reporter architecture and workflow, see [CloudWatch Logs Reporter Diagrams](cloudwatch-logs-reporter-diagrams.md).
+
 ## Overview
 
 The CloudWatch Logs Reporter publishes security scan results directly to Amazon CloudWatch Logs, enabling:
@@ -144,7 +146,7 @@ Results are published as structured JSON logs:
 
 ```bash
 # Run scan with CloudWatch Logs reporting
-ash scan /path/to/code --reporters cloudwatch-logs
+ash /path/to/code --reporters cloudwatch-logs
 ```
 
 ### With Custom Configuration
@@ -152,7 +154,7 @@ ash scan /path/to/code --reporters cloudwatch-logs
 ```bash
 # Set log group via environment variable
 export ASH_CLOUDWATCH_LOG_GROUP_NAME="/security/ash-scans"
-ash scan /path/to/code --reporters cloudwatch-logs
+ash /path/to/code --reporters cloudwatch-logs
 ```
 
 ### CI/CD Integration
@@ -164,7 +166,7 @@ ash scan /path/to/code --reporters cloudwatch-logs
     AWS_REGION: us-east-1
     ASH_CLOUDWATCH_LOG_GROUP_NAME: "/ci-cd/security-scans"
   run: |
-    ash scan . --reporters cloudwatch-logs,sarif
+    ash . --reporters cloudwatch-logs,sarif
 ```
 
 ## CloudWatch Insights Queries
@@ -254,7 +256,34 @@ Enable debug logging to troubleshoot issues:
 
 ```bash
 # Run with debug output
-ash scan /path/to/code --reporters cloudwatch-logs --log-level DEBUG
+ash /path/to/code --reporters cloudwatch-logs --log-level DEBUG
+```
+
+### Retry Configuration
+
+Configure retry behavior for API calls:
+
+```yaml
+reporters:
+  cloudwatch-logs:
+    enabled: true
+    options:
+      aws_region: "us-east-1"
+      log_group_name: "/aws/ash/scan-results"
+      log_stream_name: "ASHScanResults"
+      # Retry configuration
+      max_retries: 5  # Increase max retries
+      base_delay: 2.0  # Increase base delay
+      max_delay: 120.0  # Increase max delay
+``````
+
+### Debug Mode
+
+Enable debug logging to troubleshoot issues:
+
+```bash
+# Run with debug output
+ash /path/to/code --reporters cloudwatch-logs --log-level DEBUG
 ```
 
 ## Cost Considerations

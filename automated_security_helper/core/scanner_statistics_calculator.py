@@ -220,22 +220,51 @@ class ScannerStatisticsCalculator:
 
                         # Only count in severity bucket if not suppressed
                         if not is_suppressed:
-                            # Map SARIF level to severity
-                            if result.level:
-                                level = str(result.level).lower()
-                                if level == "error":
+                            # Check if scanner provides issue_severity in properties (e.g., Bandit)
+                            properties = result.properties or {}
+                            issue_severity = (
+                                properties.get("issue_severity", "").upper()
+                                if hasattr(properties, "get")
+                                else ""
+                            )
+
+                            # If issue_severity is provided, use it as the primary severity indicator
+                            if issue_severity and issue_severity in [
+                                "CRITICAL",
+                                "HIGH",
+                                "MEDIUM",
+                                "LOW",
+                                "INFO",
+                            ]:
+                                if issue_severity == "CRITICAL":
                                     critical += 1
-                                elif level == "warning":
-                                    medium += 1  # Most scanners map warning to medium
-                                elif level == "note":
+                                elif issue_severity == "HIGH":
+                                    high += 1
+                                elif issue_severity == "MEDIUM":
+                                    medium += 1
+                                elif issue_severity == "LOW":
                                     low += 1
-                                elif level == "none":
-                                    info += 1
-                                else:
+                                elif issue_severity == "INFO":
                                     info += 1
                             else:
-                                # Default to info if no level specified
-                                info += 1
+                                # Fall back to SARIF level mapping for scanners that don't use issue_severity
+                                if result.level:
+                                    level = str(result.level).lower()
+                                    if level == "error":
+                                        critical += 1
+                                    elif level == "warning":
+                                        medium += (
+                                            1  # Most scanners map warning to medium
+                                        )
+                                    elif level == "note":
+                                        low += 1
+                                    elif level == "none":
+                                        info += 1
+                                    else:
+                                        info += 1
+                                else:
+                                    # Default to info if no level specified
+                                    info += 1
 
         # Verify that the total number of findings matches what we expect
         total_findings = critical + high + medium + low + info + suppressed

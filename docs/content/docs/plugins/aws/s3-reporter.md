@@ -2,6 +2,8 @@
 
 Stores ASH security scan reports in Amazon S3 for centralized storage, archival, and integration with other AWS services.
 
+> For detailed visual diagrams of the S3 Reporter architecture and workflow, see [S3 Reporter Diagrams](s3-reporter-diagrams.md).
+
 ## Overview
 
 The S3 Reporter provides:
@@ -196,7 +198,7 @@ options:
 
 ```bash
 # Store reports in S3
-ash scan /path/to/code --reporters s3-reporter
+ash /path/to/code --reporters s3-reporter
 ```
 
 ### With Custom Configuration
@@ -205,7 +207,7 @@ ash scan /path/to/code --reporters s3-reporter
 # Set bucket via environment variable
 export ASH_S3_BUCKET_NAME="security-reports-prod"
 export ASH_S3_KEY_PREFIX="applications/web-app"
-ash scan /path/to/code --reporters s3-reporter,sarif
+ash /path/to/code --reporters s3-reporter,sarif
 ```
 
 ### CI/CD Integration
@@ -220,8 +222,8 @@ ash scan /path/to/code --reporters s3-reporter,sarif
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   run: |
-    ash scan . --reporters s3-reporter,sarif
-    
+    ash . --reporters s3-reporter,sarif
+
 - name: Generate Report URL
   run: |
     echo "Report available at: https://s3.console.aws.amazon.com/s3/buckets/ci-security-reports"
@@ -240,7 +242,7 @@ pipeline {
     stages {
         stage('Security Scan') {
             steps {
-                sh 'ash scan . --reporters s3-reporter,html'
+                sh 'ash . --reporters s3-reporter,html'
             }
         }
         stage('Archive Results') {
@@ -296,21 +298,21 @@ import boto3
 
 def lambda_handler(event, context):
     s3 = boto3.client('s3')
-    
+
     # Triggered by S3 event
     bucket = event['Records'][0]['s3']['bucket']['name']
     key = event['Records'][0]['s3']['object']['key']
-    
+
     # Download and process report
     response = s3.get_object(Bucket=bucket, Key=key)
     report_data = json.loads(response['Body'].read())
-    
+
     # Process findings (e.g., send alerts for critical issues)
     critical_findings = [
         finding for finding in report_data.get('findings', [])
         if finding.get('severity') == 'CRITICAL'
     ]
-    
+
     if critical_findings:
         # Send alert via SNS
         sns = boto3.client('sns')
@@ -319,7 +321,7 @@ def lambda_handler(event, context):
             Message=f'Critical security findings detected: {len(critical_findings)} issues',
             Subject='Security Alert: Critical Findings'
         )
-    
+
     return {'statusCode': 200}
 ```
 
@@ -379,13 +381,13 @@ from datetime import datetime, timedelta
 def cleanup_old_reports(event, context):
     s3 = boto3.client('s3')
     bucket_name = 'my-security-reports'
-    
+
     # Delete reports older than 90 days
     cutoff_date = datetime.now() - timedelta(days=90)
-    
+
     paginator = s3.get_paginator('list_objects_v2')
     pages = paginator.paginate(Bucket=bucket_name, Prefix='ash-reports/')
-    
+
     for page in pages:
         for obj in page.get('Contents', []):
             if obj['LastModified'].replace(tzinfo=None) < cutoff_date:
@@ -524,7 +526,24 @@ aws logs filter-log-events \
 Enable debug logging:
 
 ```bash
-ash scan /path/to/code --reporters s3-reporter --log-level DEBUG
+ash /path/to/code --reporters s3-reporter --log-level DEBUG
+```
+
+### Retry Configuration
+
+Configure retry behavior for API calls:
+
+```yaml
+reporters:
+  s3-reporter:
+    enabled: true
+    options:
+      bucket_name: "my-security-reports"
+      aws_region: "us-east-1"
+      # Retry configuration
+      max_retries: 5  # Increase max retries
+      base_delay: 2.0  # Increase base delay
+      max_delay: 120.0  # Increase max delay
 ```
 
 ## Best Practices

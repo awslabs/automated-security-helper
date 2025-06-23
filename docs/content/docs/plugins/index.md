@@ -102,7 +102,7 @@ You can find these plugins in the ASH source code:
 
 ## Next Steps
 
-- Review the [ASH Orchestrator Workflow](./workflow.md)
+- Review the [ASH Plugin Architecture](./architecture.md)
 - Learn how to create [Scanner Plugins](./scanner-plugins.md)
 - Learn how to create [Reporter Plugins](./reporter-plugins.md)
 - Learn how to create [Converter Plugins](./converter-plugins.md)

@@ -27,7 +27,7 @@
 - id: ash
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs various code scanners from Python directly
-  entry: ashv3
+  entry: ashv3 --mode=precommit
   language: python
   pass_filenames: false
   args: []

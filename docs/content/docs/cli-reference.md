@@ -26,18 +26,18 @@ The `--config-overrides` parameter allows you to modify configuration values wit
 
 ```bash
 # Basic usage
-ash scan --config-overrides 'scanners.bandit.enabled=true'
+ash --config-overrides 'scanners.bandit.enabled=true'
 
 # Multiple overrides
-ash scan \
+ash \
   --config-overrides 'scanners.bandit.enabled=true' \
   --config-overrides 'global_settings.severity_threshold=MEDIUM'
 
 # Append to lists
-ash scan --config-overrides 'ash_plugin_modules+=["my_custom_plugin"]'
+ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin"]'
 
 # Complex values using JSON syntax
-ash scan --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
 ## Core Commands
@@ -65,7 +65,7 @@ ash [command] [options]
 The `scan` command is the primary command for running security scans. If no command is specified, ASH defaults to the `scan` command.
 
 ```bash
-ash scan [options]
+ash [options]
 ```
 
 ### Scan Options
@@ -101,25 +101,25 @@ ash scan [options]
 
 ```bash
 # Basic scan in local mode (default)
-ash scan
+ash
 
 # Scan with container mode
-ash scan --mode container
+ash --mode container
 
 # Scan with specific source and output directories
-ash scan --source-dir ./my-project --output-dir ./scan-results
+ash --source-dir ./my-project --output-dir ./scan-results
 
 # Scan with configuration overrides
-ash scan --config-overrides 'scanners.bandit.enabled=true' --config-overrides 'global_settings.severity_threshold=MEDIUM'
+ash --config-overrides 'scanners.bandit.enabled=true' --config-overrides 'global_settings.severity_threshold=MEDIUM'
 
 # Scan with specific output formats
-ash scan --output-formats json,sarif,html,markdown
+ash --output-formats json,sarif,html,markdown
 
 # Scan in precommit mode (faster)
-ash scan --mode precommit
+ash --mode precommit
 
 # Scan with custom plugins
-ash scan --ash-plugin-modules my_custom_plugin_module
+ash --ash-plugin-modules my_custom_plugin_module
 ```
 
 ## Config Command

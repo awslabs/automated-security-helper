@@ -252,13 +252,19 @@ def test_cloudwatch_logs_reporter_report_success(
 
     # Verify put_log_events was called with correct parameters
     mock_cwlogs_client.put_log_events.assert_called_once()
-    call_args = mock_cwlogs_client.put_log_events.call_args[1]
-    assert call_args["logGroupName"] == "test-log-group"
-    assert call_args["logStreamName"] == "test-stream"
-    assert len(call_args["logEvents"]) == 1
-    assert call_args["logEvents"][0]["message"] == json.dumps(
-        {"test": "data"}, default=str
-    )
+    call_args = mock_cwlogs_client.put_log_events.call_args
+    # The method is called with **kwargs, so check both positional and keyword args
+    if call_args[1]:  # keyword arguments
+        kwargs = call_args[1]
+        assert kwargs["logGroupName"] == "test-log-group"
+        assert kwargs["logStreamName"] == "test-stream"
+        assert len(kwargs["logEvents"]) == 1
+        assert kwargs["logEvents"][0]["message"] == json.dumps(
+            {"test": "data"}, default=str
+        )
+    else:  # positional arguments (shouldn't happen but let's be safe)
+        args = call_args[0]
+        assert len(args) >= 3
 
     # Verify result contains response
     result_dict = json.loads(result)

@@ -23,6 +23,8 @@ from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
     apply_suppressions_to_sarif,
 )
+from automated_security_helper.core.unified_metrics import get_unified_scanner_metrics
+from automated_security_helper.models.asharp_model import SummaryStats
 
 
 """Implementation of the Scan phase."""
@@ -350,6 +352,12 @@ class ScanPhase(EnginePhase):
                     f"Saving AshAggregatedResults to {self.plugin_context.output_dir}"
                 )
                 aggregated_results.save_model(self.plugin_context.output_dir)
+
+            # Finalize scanner metrics using unified system for consistency
+            self._finalize_scanner_metrics(aggregated_results)
+
+            # Validate metrics consistency (optional - logs warnings if inconsistent)
+            self._validate_metrics_consistency(aggregated_results)
 
             # Update progress to 100%
             self.update_progress(
@@ -1405,3 +1413,177 @@ class ScanPhase(EnginePhase):
 
             # Return a list with the failure container
             return [failure_container]
+
+    def _finalize_scanner_metrics(self, aggregated_results: AshAggregatedResults):
+        """Recalculate all scanner metrics using unified system for consistency.
+
+        This method ensures that the scanner_results field contains metrics that
+        align with the metadata.summary_stats totals by using the unified metrics
+        system as the single source of truth.
+
+        Args:
+            aggregated_results: The AshAggregatedResults to update with consistent metrics
+        """
+        ASH_LOGGER.debug("Finalizing scanner metrics using unified system")
+
+        try:
+            # Get unified metrics from the final SARIF report
+            unified_metrics = get_unified_scanner_metrics(
+                asharp_model=aggregated_results
+            )
+
+            # Reset summary stats to recalculate from unified metrics
+            aggregated_results.metadata.summary_stats = SummaryStats()
+
+            # Update both scanner_results and summary_stats from unified metrics
+            for metric in unified_metrics:
+                scanner_name = metric.scanner_name
+
+                # Update individual scanner results if they exist
+                if scanner_name in aggregated_results.scanner_results:
+                    scanner_info = aggregated_results.scanner_results[scanner_name]
+
+                    # For now, we'll update the source target info with the unified metrics
+                    # In the future, we might want to separate source vs converted metrics
+                    target_info = scanner_info.source
+                    target_info.severity_counts = ScannerSeverityCount(
+                        suppressed=metric.suppressed,
+                        critical=metric.critical,
+                        high=metric.high,
+                        medium=metric.medium,
+                        low=metric.low,
+                        info=metric.info,
+                    )
+                    target_info.finding_count = metric.total
+                    target_info.actionable_finding_count = metric.actionable
+                    target_info.suppressed_finding_count = metric.suppressed
+                    target_info.duration = metric.duration
+
+                    # Update scanner status based on unified metrics
+                    if metric.status == "PASSED":
+                        target_info.status = ScannerStatus.PASSED
+                    elif metric.status == "FAILED":
+                        target_info.status = ScannerStatus.FAILED
+                    elif metric.status == "SKIPPED":
+                        target_info.status = ScannerStatus.SKIPPED
+                    elif metric.status == "MISSING":
+                        target_info.status = ScannerStatus.MISSING
+
+                    # Update overall scanner status
+                    scanner_info.status = target_info.status
+                    scanner_info.dependencies_satisfied = (
+                        not metric.dependencies_missing
+                    )
+                    scanner_info.excluded = metric.excluded
+                    scanner_info.severity_threshold = metric.threshold
+
+                # Update summary stats (aggregate across all scanners)
+                aggregated_results.metadata.summary_stats.suppressed += (
+                    metric.suppressed
+                )
+                aggregated_results.metadata.summary_stats.critical += metric.critical
+                aggregated_results.metadata.summary_stats.high += metric.high
+                aggregated_results.metadata.summary_stats.medium += metric.medium
+                aggregated_results.metadata.summary_stats.low += metric.low
+                aggregated_results.metadata.summary_stats.info += metric.info
+                aggregated_results.metadata.summary_stats.total += metric.total
+                aggregated_results.metadata.summary_stats.actionable += (
+                    metric.actionable
+                )
+
+                # Update scanner status counts in summary stats
+                if metric.status == "PASSED":
+                    aggregated_results.metadata.summary_stats.passed += 1
+                elif metric.status == "FAILED":
+                    aggregated_results.metadata.summary_stats.failed += 1
+                elif metric.status == "SKIPPED":
+                    aggregated_results.metadata.summary_stats.skipped += 1
+                elif metric.status == "MISSING":
+                    aggregated_results.metadata.summary_stats.missing += 1
+
+            ASH_LOGGER.debug(f"Finalized metrics for {len(unified_metrics)} scanners")
+
+        except Exception as e:
+            ASH_LOGGER.error(f"Error finalizing scanner metrics: {str(e)}")
+            # Don't raise the exception to avoid breaking the scan, just log it
+            import traceback
+
+            ASH_LOGGER.debug(f"Stack trace: {traceback.format_exc()}")
+
+    def _validate_metrics_consistency(self, aggregated_results: AshAggregatedResults):
+        """Validate that scanner_results totals match summary_stats.
+
+        This method performs a consistency check to ensure that the individual
+        scanner metrics add up to the summary stats totals. It logs warnings
+        if any discrepancies are found.
+
+        Args:
+            aggregated_results: The AshAggregatedResults to validate
+        """
+        try:
+            # Calculate totals from individual scanner results
+            scanner_totals = {
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "info": 0,
+                "suppressed": 0,
+                "total": 0,
+                "actionable": 0,
+            }
+
+            for (
+                scanner_name,
+                scanner_info,
+            ) in aggregated_results.scanner_results.items():
+                # Add counts from both source and converted targets
+                for target_info in [scanner_info.source, scanner_info.converted]:
+                    if target_info and target_info.severity_counts:
+                        scanner_totals["critical"] += (
+                            target_info.severity_counts.critical
+                        )
+                        scanner_totals["high"] += target_info.severity_counts.high
+                        scanner_totals["medium"] += target_info.severity_counts.medium
+                        scanner_totals["low"] += target_info.severity_counts.low
+                        scanner_totals["info"] += target_info.severity_counts.info
+                        scanner_totals["suppressed"] += (
+                            target_info.severity_counts.suppressed
+                        )
+                        scanner_totals["total"] += target_info.finding_count or 0
+                        scanner_totals["actionable"] += (
+                            target_info.actionable_finding_count or 0
+                        )
+
+            # Compare with summary stats
+            summary_stats = aggregated_results.metadata.summary_stats
+            actual_totals = {
+                "critical": summary_stats.critical,
+                "high": summary_stats.high,
+                "medium": summary_stats.medium,
+                "low": summary_stats.low,
+                "info": summary_stats.info,
+                "suppressed": summary_stats.suppressed,
+                "total": summary_stats.total,
+                "actionable": summary_stats.actionable,
+            }
+
+            # Check for discrepancies
+            discrepancies_found = False
+            for metric, expected in scanner_totals.items():
+                actual = actual_totals[metric]
+                if expected != actual:
+                    ASH_LOGGER.warning(
+                        f"Metrics consistency check failed for {metric}: "
+                        f"scanner_results total={expected}, summary_stats={actual}"
+                    )
+                    discrepancies_found = True
+
+            if not discrepancies_found:
+                ASH_LOGGER.debug("Metrics consistency check passed - all totals match")
+
+        except Exception as e:
+            ASH_LOGGER.error(f"Error validating metrics consistency: {str(e)}")
+            import traceback
+
+            ASH_LOGGER.debug(f"Stack trace: {traceback.format_exc()}")
