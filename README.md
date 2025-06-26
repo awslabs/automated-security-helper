@@ -18,6 +18,10 @@
     - [Clone the Repository](#clone-the-repository)
 - [Basic Usage](#basic-usage)
   - [Sample Output](#sample-output)
+- [AI Integration with MCP](#ai-integration-with-mcp)
+  - [MCP Server Configuration](#mcp-server-configuration)
+  - [Supported AI Clients](#supported-ai-clients)
+  - [Usage Examples](#usage-examples)
 - [Configuration](#configuration)
 - [Using ASH with pre-commit](#using-ash-with-pre-commit)
 - [Output Files](#output-files)
@@ -167,6 +171,71 @@ To investigate...
   2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
 ERROR (2) Exiting due to 122 actionable findings found in ASH scan
 ```
+
+## AI Integration with MCP
+
+ASH includes a Model Context Protocol (MCP) server that enables AI assistants to perform security scans and analyze results through a standardized interface. This allows you to integrate ASH with AI development tools like Amazon Q CLI, Claude Desktop, and Cline (VS Code).
+
+### MCP Server Configuration
+
+The ASH MCP server exposes security scanning capabilities to AI applications:
+
+#### Prerequisites
+
+1. **Install ASH** (if not already installed):
+   ```bash
+   pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+   ```
+
+2. **Install MCP Python SDK**:
+   ```bash
+   pip install "mcp[cli]"
+   ```
+
+#### Client Configuration
+
+**Amazon Q CLI** - Add to `~/.aws/amazonq/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "ash-security": {
+      "command": "python",
+      "args": ["/path/to/ash_mcp_server.py"],
+      "description": "Automated Security Helper (ASH) Security Scanner"
+    }
+  }
+}
+```
+
+**Claude Desktop** - Add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "ash-security": {
+      "command": "python",
+      "args": ["/path/to/ash_mcp_server.py"]
+    }
+  }
+}
+```
+
+### Usage Examples
+
+Once configured, you can interact with ASH through natural language:
+
+**Security Scanning:**
+```
+"Can you scan this project directory for security vulnerabilities?"
+"Please run ASH on the ./src folder and analyze the results"
+```
+
+**Analysis & Reporting:**
+```
+"Perform a comprehensive security audit and create a prioritized action plan"
+"Scan this code and help me fix any critical security issues"
+"Generate a security report with remediation recommendations"
+```
+
 
 ## Configuration
 
