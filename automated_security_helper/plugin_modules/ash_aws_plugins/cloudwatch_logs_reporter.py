@@ -36,7 +36,7 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
             description="AWS region for CloudWatch Logs",
         ),
-    ] = None
+    ]
     log_group_name: Annotated[
         str | None,
         Field(
@@ -45,7 +45,7 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
             ),
             description="CloudWatch Logs group name to publish results to",
         ),
-    ] = None
+    ]
     log_stream_name: Annotated[
         str,
         Field(
@@ -102,7 +102,6 @@ class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
     options: Annotated[
         CloudWatchLogsReporterConfigOptions,
         Field(
-            default_factory=CloudWatchLogsReporterConfigOptions,
             description="Configuration options for CloudWatch Logs reporter",
         ),
     ] = CloudWatchLogsReporterConfigOptions()

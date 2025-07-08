@@ -24,21 +24,16 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         str | None,
         Field(
-            default=None,
-            default_factory=lambda: os.environ.get(
-                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
-            ),
             description="AWS Region for Security Hub integration",
         ),
-    ] = None
+    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None))
     aws_profile: Annotated[
         str | None,
         Field(
             default=None,
-            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
             description="AWS Profile to use for authentication",
         ),
-    ] = None
+    ] = os.environ.get("AWS_PROFILE", None)
     account_id: Annotated[
         str | None,
         Field(
@@ -67,7 +62,6 @@ class SecurityHubReporterConfig(ReporterPluginConfigBase):
     options: Annotated[
         SecurityHubReporterConfigOptions,
         Field(
-            default_factory=SecurityHubReporterConfigOptions,
             description="Configuration options for Security Hub reporter",
         ),
     ] = SecurityHubReporterConfigOptions()

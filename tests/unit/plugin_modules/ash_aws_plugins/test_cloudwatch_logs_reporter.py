@@ -118,7 +118,7 @@ def test_cloudwatch_logs_reporter_validate_success(mock_boto3, ash_temp_path):
     assert reporter.dependencies_satisfied is True
 
     # Verify boto3 calls
-    mock_boto3.client.assert_called_once_with("sts", region="us-west-2")
+    mock_boto3.client.assert_called_once_with("sts", region_name="us-west-2")
     mock_sts_client.get_caller_identity.assert_called_once()
 
 

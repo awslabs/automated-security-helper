@@ -35,21 +35,21 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
             description="AWS region to use for S3 operations",
         ),
-    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None))
+    ]
     aws_profile: Annotated[
         Optional[str],
         Field(
             default_factory=lambda: os.environ.get("AWS_PROFILE", None),
             description="AWS profile to use for authentication",
         ),
-    ] = os.environ.get("AWS_PROFILE", None)
+    ]
     bucket_name: Annotated[
-        str | None,
+        Optional[str],
         Field(
             default_factory=lambda: os.environ.get("ASH_S3_BUCKET_NAME", None),
             description="Name of the S3 bucket to store reports",
         ),
-    ] = os.environ.get("ASH_S3_BUCKET_NAME", None)
+    ]
     key_prefix: Annotated[
         str,
         Field(
