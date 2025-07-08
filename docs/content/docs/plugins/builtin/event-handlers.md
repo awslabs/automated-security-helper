@@ -2,6 +2,8 @@
 
 ASH includes built-in event handlers that respond to scan lifecycle events.
 
+> For detailed visual diagrams of the built-in event handler architecture and workflows, see [Built-in Event Handler Diagrams](event-handlers-diagrams.md).
+
 ## Event Handler Overview
 
 | Handler | Purpose | Events | Key Features |

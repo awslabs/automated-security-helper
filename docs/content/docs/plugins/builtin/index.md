@@ -19,13 +19,13 @@ All built-in plugins are enabled by default and require no additional configurat
 
 ```bash
 # Run with default built-in scanners
-ash scan /path/to/code
+ash /path/to/code
 
 # Use specific built-in scanners only
-ash scan /path/to/code --scanners bandit,semgrep
+ash /path/to/code --scanners bandit,semgrep
 
 # Generate reports in multiple formats
-ash scan /path/to/code --reporters sarif,html,csv
+ash /path/to/code --reporters sarif,html,csv
 ```
 
 ## Configuration
@@ -121,13 +121,13 @@ Control which plugins run:
 
 ```bash
 # Run only infrastructure scanners
-ash scan --scanners cdk-nag,cfn-nag,checkov
+ash --scanners cdk-nag,cfn-nag,checkov
 
 # Exclude specific scanners
-ash scan --exclude-scanners grype,syft
+ash --exclude-scanners grype,syft
 
 # Generate only compliance reports
-ash scan --reporters spdx,cyclonedx
+ash --reporters spdx,cyclonedx
 ```
 
 ### Integration with External Tools
@@ -164,13 +164,13 @@ ash config --show
 ### Performance Optimization
 ```bash
 # Run scanners in parallel (default)
-ash scan --parallel
+ash --parallel
 
 # Limit concurrent scanners
-ash scan --max-workers 2
+ash --max-workers 2
 
 # Skip time-intensive scanners for quick feedback
-ash scan --exclude-scanners grype,syft
+ash --exclude-scanners grype,syft
 ```
 
 ## Next Steps

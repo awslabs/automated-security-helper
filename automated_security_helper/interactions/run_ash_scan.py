@@ -48,10 +48,10 @@ def format_duration(seconds):
 
 
 def run_ash_scan(
-    source_dir: str = Path.cwd().as_posix(),
-    output_dir: str = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
-    config: str = None,
-    config_overrides: List[str] = None,
+    source_dir: str | Path = Path.cwd().as_posix(),
+    output_dir: str | Path = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    config: str | None = None,
+    config_overrides: List[str] = [],
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
     scanners: List[str] = [],
@@ -65,7 +65,7 @@ def run_ash_scan(
         Phases.report,
     ],
     inspect: bool = False,
-    existing_results: str = None,
+    existing_results: str | None = None,
     python_based_plugins_only: bool = False,
     quiet: bool = False,
     simple: bool = False,
@@ -81,7 +81,7 @@ def run_ash_scan(
     build: bool = True,
     run: bool = True,
     force: bool = False,
-    oci_runner: str = None,
+    oci_runner: str | None = None,
     build_target: BuildTarget | None = None,
     offline_semgrep_rulesets: str = "p/ci",
     container_uid: str | None = None,
@@ -98,8 +98,8 @@ def run_ash_scan(
     # Record the start time for calculating scan duration
     scan_start_time = time.time()
 
-    source_dir = Path(source_dir).absolute().as_posix()
-    output_dir = Path(output_dir).absolute().as_posix()
+    source_dir = Path(source_dir).absolute()
+    output_dir = Path(output_dir).absolute()
 
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
     from automated_security_helper.core.enums import ExecutionStrategy

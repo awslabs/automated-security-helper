@@ -114,23 +114,28 @@ jobs:
 
       # Call the appropriate workflow based on matrix.method
       ############ Python #########
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        if: contains(matrix.method, 'python')
+        with:
+          enable-cache: true
       - name: Set up Python
         if: contains(matrix.method, 'python')
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-      - name: Install ASH Python package at commit SHA
-        if: contains(matrix.method, 'python')
+          cache: "pip"
+      - name: Install ASH Python package at commit SHA (shell)
+        if: contains(matrix.method, 'python') && !contains(matrix.os, 'windows')
         run: |
           echo "Installing ASH using Python on ${{ matrix.os }} (${{ matrix.platform }})"
-          python -m pip install --upgrade pip
-          python -m pip install git+https://github.com/awslabs/automated-security-helper@${{ github.sha }}
+          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
 
       - name: Update GITHUB_PATH with Python scripts path on Windows
         if: contains(matrix.method, 'python') && matrix.os == 'windows-latest'
         shell: pwsh
         run: |
+          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
           echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
 
       - name: Validate ASH using Python + Container
@@ -147,7 +152,7 @@ jobs:
           echo "ASH Help:"
           ash --help
           echo "ASH Scan Output:"
-          ash scan --mode container --build-target ci --verbose --no-progress  --config ./.ash/.ash_no_ignore.yaml
+          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'
@@ -166,7 +171,7 @@ jobs:
           echo "ASH Config Get"
           ash config get
           echo "ASH Scan Output:"
-          ash scan --mode local --build-target ci --verbose --no-progress --config ./.ash/.ash_no_ignore.yaml
+          ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
 
       ############ PowerShell #########
 
@@ -181,7 +186,7 @@ jobs:
           Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
           . ./utils/ash_helpers.ps1
           Get-Help Invoke-ASH -Full
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -Config "./.ash/.ash_no_ignore.yaml"
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions
 
       ############ Bash #########
 
@@ -200,8 +205,7 @@ jobs:
           echo "ASH Help:"
           ./ash --help
           echo "ASH Scan Output:"
-          ./ash --build-target ci --verbose --config ./.ash/.ash_no_ignore.yaml
-
+          ./ash --build-target ci --verbose --ignore-suppressions
 
       - name: Verify scan completed
         shell: pwsh

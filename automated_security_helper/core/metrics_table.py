@@ -202,17 +202,24 @@ def display_metrics_table(
         use_color: Whether to use color in the output (respects --no-color flag)
     """
     try:
-        # Create a console with color settings that respect the --no-color flag
-        console = Console(
-            color_system=(
-                "windows"
-                if platform.system() == "Windows"
-                else "auto"
-                if use_color
-                else None
-            ),
-            force_terminal=use_color,
-        )
+        # Create a console with Windows-safe settings
+        console_kwargs = {
+            "force_terminal": use_color,
+            "legacy_windows": platform.system().lower() == "windows",
+            "safe_box": platform.system().lower() == "windows",
+            "_environ": {},  # Prevent environment variable issues
+        }
+
+        # Set color system based on platform and color preference
+        if use_color:
+            if platform.system().lower() == "windows":
+                console_kwargs["color_system"] = "windows"
+            else:
+                console_kwargs["color_system"] = "auto"
+        else:
+            console_kwargs["color_system"] = None
+
+        console = Console(**console_kwargs)
 
         # Generate the metrics table using unified data
         table = generate_metrics_table_from_unified_data(
@@ -249,9 +256,16 @@ def display_metrics_table(
             "  - Scanner status is determined by comparing actionable findings to the threshold\n"
         )
 
+        # Use Windows-safe title without emoji
+        help_title = (
+            "[STATS] ASH Scan Results Help"
+            if platform.system().lower() == "windows"
+            else "📊 ASH Scan Results Help"
+        )
+
         help_panel = Panel(
             help_text,
-            title="📊 ASH Scan Results Help",
+            title=help_title,
             border_style="blue",
             expand=False,
         )

@@ -11,7 +11,7 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
 
 from pydantic import Field
-from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
+from typing import Annotated, Any, Generic, List, Literal, Optional, TypeVar
 from abc import abstractmethod
 from pathlib import Path
 
@@ -37,7 +37,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     tool_type: ScannerToolType = ScannerToolType.UNKNOWN
 
     command: Annotated[
-        str,
+        str | None,
         Field(
             description="The command to invoke the scanner, typically the binary or path to a script"
         ),
@@ -61,6 +61,20 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             description="The path to the results file, if any. This is set by the scanner plugin after the scan is complete."
         ),
     ] = None
+
+    use_uv_tool: Annotated[
+        bool,
+        Field(
+            description="Flag to indicate whether this scanner should use UV tool execution instead of direct command execution"
+        ),
+    ] = False
+
+    uv_tool_install_commands: Annotated[
+        List[str],
+        Field(
+            description="List of UV tool install commands to execute for this scanner"
+        ),
+    ] = []
 
     def model_post_init(self, context):
         if self.config is None:
@@ -99,7 +113,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         pass
 
     def _resolve_arguments(
-        self, target: str | Path, results_file: str | Path = None
+        self, target: str | Path, results_file: str | Path | None = None
     ) -> List[str]:
         """Resolve any configured options into command line arguments.
 
@@ -235,68 +249,40 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             level=logging.INFO,
         )
 
-    def _run_subprocess(
-        self,
-        command: List[str],
-        results_dir: str | Path = None,
-        stdout_preference: Literal["return", "write", "both", "none"] = "write",
-        stderr_preference: Literal["return", "write", "both", "none"] = "write",
-        cwd: Path | str = None,
-    ) -> Dict[str, str]:
-        """Run a subprocess with the given command.
-
-        Args:
-            command: Command to run
-            results_dir: Directory to write output files to
-            stdout_preference: How to handle stdout
-            stderr_preference: How to handle stderr
-            cwd: Working directory for the command (defaults to context.source_dir)
-
-        Returns:
-            Dictionary with stdout and stderr if requested
-        """
-        from automated_security_helper.utils.subprocess_utils import (
-            run_command_with_output_handling,
-        )
-
-        try:
-            # Use provided cwd or fall back to context.source_dir
-            working_dir = cwd if cwd is not None else Path(self.context.source_dir)
-
-            # Run the command using the centralized utility
-            response = run_command_with_output_handling(
-                command=command,
-                results_dir=results_dir,
-                stdout_preference=stdout_preference,
-                stderr_preference=stderr_preference,
-                cwd=working_dir,
-                shell=False,
-                class_name=self.__class__.__name__,
-            )
-
-            # Process stdout and stderr for the scanner plugin
-            if "stdout" in response and response["stdout"]:
-                self.output.extend(response["stdout"].splitlines())
-
-            if "stderr" in response and response["stderr"]:
-                self.errors.extend(response["stderr"].splitlines())
-
-            # Set exit code (default to 1 if not available)
-            self.exit_code = response.get("returncode", 1)
-
-            return response
-
-        except Exception as e:
-            self.errors.append(str(e))
-            # show full stack trace in warning
-            ASH_LOGGER.trace(f"({self.config.name}) Error running {command}: {e}")
-            self.exit_code = 1
-            return {"error": str(e)}
-
     ### Methods that require implementation by plugins.
     def validate(self) -> bool:
         """Validate scanner configuration and requirements."""
-        return self.dependencies_satisfied
+        # Use enhanced validation that includes pre-installed tool detection
+        validation_result = self._validate_tool_availability_with_pre_installed()
+
+        # Log validation details
+        if validation_result["available"]:
+            self._plugin_log(
+                f"Tool validation successful via {validation_result['validation_method']}",
+                level=logging.INFO,
+            )
+
+            # Log any warnings
+            for warning in validation_result.get("warnings", []):
+                self._plugin_log(warning, level=logging.WARNING)
+
+            self.dependencies_satisfied = True
+            return True
+        else:
+            # Log validation errors
+            for error in validation_result.get("errors", []):
+                self._plugin_log(error, level=logging.ERROR)
+
+            # Provide helpful offline mode message if applicable
+            if self._is_offline_mode() and self.use_uv_tool:
+                self._plugin_log(
+                    f"Offline mode is enabled (ASH_OFFLINE=true) but tool '{self.command}' is not available. "
+                    f"In offline mode, tools must be pre-installed. Please install '{self.command}' manually or disable offline mode.",
+                    level=logging.ERROR,
+                )
+
+            self.dependencies_satisfied = False
+            return False
 
     @abstractmethod
     def scan(
@@ -304,7 +290,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
-        config: T | ScannerPluginConfigBase = None,
+        config: T | ScannerPluginConfigBase | None = None,
         *args,
         **kwargs,
     ) -> Any | SarifReport | CycloneDXReport:
@@ -327,7 +313,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
-        config: T | ScannerPluginConfigBase = None,
+        config: T | ScannerPluginConfigBase | None = None,
         *args,
         **kwargs,
     ) -> Any | SarifReport | CycloneDXReport:

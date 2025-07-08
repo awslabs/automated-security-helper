@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import zipfile
 import tarfile
-import nbformat
+import json
 
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverter,
@@ -162,13 +162,32 @@ class TestJupyterConverter:
     @pytest.fixture
     def sample_notebook(self, temp_dir):
         """Create a sample Jupyter notebook."""
-        nb = nbformat.v4.new_notebook()
-        code_cell = nbformat.v4.new_code_cell(source='print("Hello World")')
-        nb.cells.append(code_cell)
+        # Create a simple notebook structure manually
+        notebook_content = {
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": ['print("Hello World")'],
+                }
+            ],
+            "metadata": {
+                "kernelspec": {
+                    "display_name": "Python 3",
+                    "language": "python",
+                    "name": "python3",
+                },
+                "language_info": {"name": "python", "version": "3.8.0"},
+            },
+            "nbformat": 4,
+            "nbformat_minor": 4,
+        }
 
         notebook_path = temp_dir / "test.ipynb"
         with open(notebook_path, mode="w", encoding="utf-8") as f:
-            nbformat.write(nb, f)
+            json.dump(notebook_content, f, indent=2)
         return notebook_path
 
     def test_jupyter_converter_init(self, test_plugin_context):
@@ -192,21 +211,55 @@ class TestJupyterConverter:
         self, test_plugin_context, sample_notebook, monkeypatch
     ):
         """Test convert method."""
+        from unittest.mock import Mock
 
         # Mock scan_set to return our sample notebook
         def mock_scan_set(*args, **kwargs):
             return [str(sample_notebook)]
 
-        # Apply the monkeypatch
+        # Mock subprocess.run to simulate successful nbconvert execution
+        def mock_subprocess_run(*args, **kwargs):
+            # Create the expected output file
+            if len(args) > 0 and isinstance(args[0], list) and "nbconvert" in args[0]:
+                # Extract output path from command
+                cmd = args[0]
+                if "--output" in cmd:
+                    output_idx = cmd.index("--output") + 1
+                    if output_idx < len(cmd):
+                        output_path = Path(cmd[output_idx] + ".py")
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
+                        output_path.write_text(
+                            '#!/usr/bin/env python\n# coding: utf-8\n\nprint("Hello World")\n'
+                        )
+
+            # Return successful result
+            result = Mock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        # Apply the monkeypatches
         monkeypatch.setattr(
             "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.scan_set",
             mock_scan_set,
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.subprocess.run",
+            mock_subprocess_run,
         )
 
         converter = JupyterConverter(
             context=test_plugin_context,
             config=JupyterConverterConfig(),
         )
+
+        # Mock the validate method to return True (skip UV tool validation for test)
+        monkeypatch.setattr(converter, "validate", lambda: True)
+        monkeypatch.setattr(
+            converter, "use_uv_tool", False
+        )  # Use direct execution for test
+
         results = converter.convert()
         assert len(results) == 1
         converted_file = results[0]

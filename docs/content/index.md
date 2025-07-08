@@ -21,17 +21,18 @@ ASH (Automated Security Helper) is a security scanning tool designed to help you
 - **Improved Reporting**: Multiple report formats including JSON, Markdown, HTML, and CSV
 - **Pluggable Architecture**: Extend ASH with custom plugins, scanners, and reporters
 - **Unified Output Format**: Standardized output format that can be exported to multiple formats (SARIF, JSON, HTML, Markdown, CSV)
+- **UV Package Management**: ASH now uses UV for faster dependency resolution and tool isolation
 
 ## Built-In Scanners
 
-ASH v3 integrates multiple open-source security tools as scanners:
+ASH v3 integrates multiple open-source security tools as scanners. Tools like Bandit, Checkov, and Semgrep are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments without affecting your project dependencies:
 
 | Scanner                                                       | Type      | Languages/Frameworks                                                                         | Installation (Local Mode)                                               |
 |---------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| [Bandit](https://github.com/PyCQA/bandit)                     | SAST      | Python                                                                                       | Included with ASH                                                       |
-| [Semgrep](https://github.com/semgrep/semgrep)                 | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Included with ASH                                                       |
+| [Bandit](https://github.com/PyCQA/bandit)                     | SAST      | Python                                                                                       | Managed via UV tool isolation (auto-installed: `bandit>=1.7.0`)        |
+| [Semgrep](https://github.com/semgrep/semgrep)                 | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0`)     |
 | [detect-secrets](https://github.com/Yelp/detect-secrets)      | Secrets   | All text files                                                                               | Included with ASH                                                       |
-| [Checkov](https://github.com/bridgecrewio/checkov)            | IaC, SAST | Terraform, CloudFormation, Kubernetes, Dockerfile, ARM Templates, Serverless, Helm, and more | Included with ASH                                                       |
+| [Checkov](https://github.com/bridgecrewio/checkov)            | IaC, SAST | Terraform, CloudFormation, Kubernetes, Dockerfile, ARM Templates, Serverless, Helm, and more | Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`) |
 | [cfn_nag](https://github.com/stelligent/cfn_nag)              | IaC       | CloudFormation                                                                               | `gem install cfn-nag`                                                   |
 | [cdk-nag](https://github.com/cdklabs/cdk-nag)                 | IaC       | CloudFormation                                                                               | Included with ASH                                                       |
 | [npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit) | SCA       | JavaScript/Node.js                                                                           | Install Node.js/npm                                                     |
@@ -44,9 +45,9 @@ ASH v3 integrates multiple open-source security tools as scanners:
 
 | Mode      | Requirements                                                                                                                                                         | Notes                                                    |
 |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|
-| Local     | Python 3.10+                                                                                                                                                         | Some scanners require additional tools (see table above) |
+| Local     | Python 3.10+, UV package manager                                                                                                                                     | Some scanners require additional tools (see table above) |
 | Container | Any OCI-compatible container runtime ([Finch](https://github.com/runfinch/finch), [Docker](https://docs.docker.com/get-docker/), [Podman](https://podman.io/), etc.) | On Windows: WSL2 is typically required                   |
-| Precommit | Python 3.10+                                                                                                                                                         | Subset of scanners, optimized for speed                  |
+| Precommit | Python 3.10+, UV package manager                                                                                                                                     | Subset of scanners, optimized for speed                  |
 
 ## Installation Options
 
@@ -54,7 +55,7 @@ ASH v3 integrates multiple open-source security tools as scanners:
 
 ```bash
 # Install with pipx (isolated environment)
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 
 # Use as normal
 ash --help
@@ -70,23 +71,23 @@ ash --help
 ```bash
 # Linux/macOS
 curl -sSf https://astral.sh/uv/install.sh | sh
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
 
 # Windows PowerShell
 irm https://astral.sh/uv/install.ps1 | iex
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0 $args }
 ```
 
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.0-beta
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.0
 cd automated-security-helper
 pip install .
 ```
@@ -150,7 +151,7 @@ ERROR (2) Exiting due to 122 actionable findings found in ASH scan
 ASH v3 uses a YAML configuration file (`.ash/ash.yaml`) with support for JSON Schema validation:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 project_name: my-project
 global_settings:
   severity_threshold: MEDIUM
@@ -176,7 +177,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0-beta
+    rev: v3.0.0
     hooks:
       - id: ash-simple-scan
 ```

@@ -177,7 +177,7 @@ class AshPluginManager(BaseModel):
 
         ASH_LOGGER.verbose(f"Registered plugin module '{plugin_module_name}'")
 
-    def filter_plugin_modules(self, items: List, callback: callable, *args, **kwargs):
+    def filter_plugin_modules(self, items: List, callback: Callable, *args, **kwargs):
         filtered = []
         for item in items:
             if callback(item, *args, **kwargs):
@@ -186,8 +186,8 @@ class AshPluginManager(BaseModel):
 
     def plugin_modules(
         self,
-        plugin_type: type,
-        filter_callback: callable = lambda x: True,
+        plugin_type: type | Literal["converter", "scanner", "reporter"],
+        filter_callback: Callable = lambda x: True,
         *args,
         **kwargs,
     ):

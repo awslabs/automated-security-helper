@@ -16,6 +16,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Message,
     Location,
     PhysicalLocation,
+    PhysicalLocation1,
     ArtifactLocation,
     Region,
     PropertyBag,
@@ -67,7 +68,7 @@ class SarifReportFactory:
             locations=[
                 Location(
                     physicalLocation=PhysicalLocation(
-                        root=PhysicalLocation(
+                        root=PhysicalLocation1(
                             artifactLocation=ArtifactLocation(uri=file_path),
                             region=Region(
                                 startLine=start_line,

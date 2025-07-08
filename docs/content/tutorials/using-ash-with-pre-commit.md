@@ -22,7 +22,7 @@ To configure a git repository to use the `ash` hook, start with the following `p
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0-beta  # update with the latest tagged version in the repository
+    rev: v3.0.0  # update with the latest tagged version in the repository
     hooks:
       - id: ash-simple-scan
 ```

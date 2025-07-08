@@ -2,6 +2,8 @@
 
 Reporter plugins generate reports from scan results in various formats. They transform the ASH aggregated results model into human-readable or machine-readable formats.
 
+> For detailed visual diagrams of reporter plugin architecture and workflow, see [Reporter Plugin Diagrams](reporter-plugins-diagrams.md).
+
 ## Reporter Plugin Interface
 
 Reporter plugins must implement the `ReporterPluginBase` interface:

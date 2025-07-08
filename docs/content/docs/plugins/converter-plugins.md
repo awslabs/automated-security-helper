@@ -2,6 +2,8 @@
 
 Converter plugins transform files before scanning to make them compatible with security scanners. For example, converting Jupyter notebooks to Python files.
 
+> For detailed visual diagrams of converter plugin architecture and workflow, see [Converter Plugin Diagrams](converter-plugins-diagrams.md).
+
 ## Converter Plugin Interface
 
 Converter plugins must implement the `ConverterPluginBase` interface:

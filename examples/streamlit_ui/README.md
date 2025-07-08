@@ -34,7 +34,7 @@ pip install streamlit
 #### ...directly from GitHub...
 
 ```bash
-streamlit run https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/examples/streamlit_ui/ash_ui.py
+streamlit run https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/examples/streamlit_ui/ash_ui.py
 ```
 
 #### ...or clone and run from local

@@ -103,7 +103,7 @@ def install_binary_from_url(
 
 def create_url_download_command(
     url: str,
-    destination: str = None,
+    destination: str | None = None,
     rename_to: str | None = None,
 ) -> CustomCommand:
     """Create a CustomCommand to download and install a binary from a URL.

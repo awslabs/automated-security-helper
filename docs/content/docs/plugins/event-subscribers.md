@@ -2,6 +2,8 @@
 
 ASH provides a comprehensive event system that allows plugins to react to various events during the scanning process. This enables you to create custom logging, notifications, integrations, and other reactive behaviors.
 
+> For detailed visual diagrams of the event system architecture and workflow, see [Event Subscriber Diagrams](event-subscribers-diagrams.md).
+
 ## Overview
 
 The event system uses a discovery-based pattern similar to how ASH discovers scanners, converters, and reporters. Event subscribers are registered using the `ASH_EVENT_HANDLERS` dictionary in your plugin module.

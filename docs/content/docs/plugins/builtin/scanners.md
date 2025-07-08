@@ -2,6 +2,8 @@
 
 ASH includes 10 built-in security scanners that analyze different aspects of your code and infrastructure. Each scanner specializes in specific security domains and file types.
 
+> For detailed visual diagrams of the built-in scanner architecture and workflows, see [Built-in Scanner Diagrams](scanners-diagrams.md).
+
 ## Scanner Overview
 
 | Scanner                               | Purpose                         | Languages/Formats               | Key Features                               |
@@ -120,7 +122,7 @@ scanners:
 - Terraform module validation
 - Custom policy enforcement
 
-**Dependencies**: `checkov` Python package
+**Dependencies**: Managed via `uv tool run` (automatically downloaded when needed)
 
 ---
 
@@ -245,7 +247,7 @@ scanners:
 - Code quality and maintainability
 - Custom organizational rules
 
-**Dependencies**: `semgrep` Python package
+**Dependencies**: Managed via `uv tool run` (automatically downloaded when needed)
 
 ---
 
@@ -279,16 +281,16 @@ Choose scanners based on your technology stack:
 
 ```bash
 # Python projects
-ash scan --scanners bandit,detect-secrets,semgrep
+ash --scanners bandit,detect-secrets,semgrep
 
 # Infrastructure projects
-ash scan --scanners checkov,cfn-nag,cdk-nag
+ash --scanners checkov,cfn-nag,cdk-nag
 
 # Container projects
-ash scan --scanners grype,syft,checkov
+ash --scanners grype,syft,checkov
 
 # Node.js projects
-ash scan --scanners npm-audit,detect-secrets,semgrep
+ash --scanners npm-audit,detect-secrets,semgrep
 ```
 
 ### Performance Optimization
@@ -334,10 +336,10 @@ pip install bandit semgrep detect-secrets
 **Performance issues**:
 ```bash
 # Run with fewer concurrent scanners
-ash scan --max-workers 2
+ash --max-workers 2
 
 # Exclude resource-intensive scanners
-ash scan --exclude-scanners grype,syft
+ash --exclude-scanners grype,syft
 ```
 
 **False positives**:

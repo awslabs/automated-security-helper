@@ -79,7 +79,7 @@ When you submit a PR to add your plugin to this documentation, the ASH team will
 
   ```bash
   # Example command line usage
-  ash scan --plugins my-plugin
+  ash --plugins my-plugin
   ```
 
   ### Screenshots/Examples

@@ -31,7 +31,8 @@ class ReportContentEmitter:
         self.flat_vulns = model.to_flat_vulnerabilities()
         self.ash_conf = model.ash_config
 
-        # Get unified scanner metrics
+        # Get unified scanner metrics - always compute from the model to ensure consistency
+        # The scanner_results in the model contain ScannerStatusInfo objects, not ScannerMetrics
         self.scanner_metrics = get_unified_scanner_metrics(model)
 
         # Get global severity threshold

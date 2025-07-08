@@ -113,6 +113,9 @@ function Invoke-ASH {
         [string[]]
         $ExcludeScanners,
         [parameter()]
+        [switch]
+        $IgnoreSuppressions,
+        [parameter()]
         [string]
         $ContainerUID,
         [parameter()]
@@ -203,6 +206,9 @@ function Invoke-ASH {
                 $ashCmdArgs.Add("--exclude-scanners")
                 $ashCmdArgs.Add($scanner)
             }
+        }
+        if ($IgnoreSuppressions) {
+            $ashCmdArgs.Add("--ignore-suppressions")
         }
 
         # Resolve OCI runner

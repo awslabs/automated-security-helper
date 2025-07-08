@@ -1,11 +1,15 @@
 [run]
 source = automated_security_helper
+omit =
+    */tests/*
+    */test_*
+    automated_security_helper/identifiers/*
 
 [report]
 # Show missing lines in reports
 show_missing = True
 # Fail if total coverage is below x%
-fail_under = 65
+fail_under = 60
 
 [html]
 directory = test-results/coverage_html

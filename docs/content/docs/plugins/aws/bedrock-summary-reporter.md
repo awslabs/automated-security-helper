@@ -2,6 +2,10 @@
 
 Generates AI-powered executive summaries and detailed security analysis using Amazon Bedrock's foundation models, providing human-readable insights from ASH scan results.
 
+> For detailed visual diagrams of the Bedrock Summary Reporter architecture and workflow, see [Bedrock Summary Reporter Diagrams](bedrock-summary-reporter-diagrams.md).
+
+> **Note**: This reporter has been updated to match the documentation. All features described in this document are now implemented.
+
 ## Overview
 
 The Bedrock Summary Reporter leverages Amazon Bedrock to:
@@ -21,7 +25,7 @@ reporters:
   bedrock-summary-reporter:
     enabled: true
     options:
-      model_id: "anthropic.claude-3-sonnet-20240229-v1:0"
+      model_id: "anthropic.claude-v2"
       aws_region: "us-east-1"
 ```
 
@@ -32,7 +36,7 @@ reporters:
   bedrock-summary-reporter:
     enabled: true
     options:
-      model_id: "anthropic.claude-3-haiku-20240307-v1:0"
+      model_id: "anthropic.claude-instant-v1"
       aws_region: "us-west-2"
       max_tokens: 4000
       temperature: 0.1
@@ -40,6 +44,11 @@ reporters:
       include_code_snippets: true
       summary_style: "executive"  # executive, technical, or detailed
       custom_prompt: "Focus on business impact and compliance risks"
+      # Retry and fallback configuration
+      max_retries: 5      # Default: 3
+      base_delay: 2.0     # Default: 1.0 seconds
+      max_delay: 120.0    # Default: 60.0 seconds
+      enable_fallback_models: true
 ```
 
 ### Environment Variables
@@ -49,7 +58,7 @@ reporters:
 export AWS_REGION="us-east-1"
 
 # Bedrock model ID
-export ASH_BEDROCK_MODEL_ID="anthropic.claude-3-sonnet-20240229-v1:0"
+export ASH_BEDROCK_MODEL_ID="anthropic.claude-v2"
 
 # Custom configuration
 export ASH_BEDROCK_MAX_TOKENS="3000"
@@ -109,48 +118,33 @@ Ensure AWS credentials are configured using one of:
 
 ## Supported Models
 
-### Anthropic Claude Models
+The Bedrock Summary Reporter works with any text-based foundation model available in Amazon Bedrock. Best results have been observed with Amazon Nova and Anthropic Claude models due to their strong reasoning capabilities and context handling.
+
+### Model Selection Guidelines
 
 ```yaml
-# Claude 3 Sonnet (balanced performance and cost)
-model_id: "anthropic.claude-3-sonnet-20240229-v1:0"
-
-# Claude 3 Haiku (fastest, most cost-effective)
-model_id: "anthropic.claude-3-haiku-20240307-v1:0"
-
-# Claude 3 Opus (highest capability)
-model_id: "anthropic.claude-3-opus-20240229-v1:0"
+# Example configuration with Anthropic Claude model
+model_id: "anthropic.claude-v2"
 ```
 
-### Amazon Titan Models
+### Model Recommendations
 
-```yaml
-# Titan Text G1 - Express
-model_id: "amazon.titan-text-express-v1"
+| Use Case | Recommended Model Types | Considerations |
+|----------|------------------------|----------------|
+| Detailed Analysis | Claude, Nova | Best for comprehensive security analysis |
+| Quick Summaries | Lighter models | Faster response, more cost-effective |
+| CI/CD Integration | Optimized for speed | Choose models with lower latency |
 
-# Titan Text G1 - Lite
-model_id: "amazon.titan-text-lite-v1"
+### Checking Available Models
+
+To see which models are available in your AWS account:
+
+```bash
+# List available foundation models
+aws bedrock list-foundation-models --region us-east-1
 ```
 
-### AI21 Labs Jurassic Models
-
-```yaml
-# Jurassic-2 Mid
-model_id: "ai21.j2-mid-v1"
-
-# Jurassic-2 Ultra
-model_id: "ai21.j2-ultra-v1"
-```
-
-### Cohere Command Models
-
-```yaml
-# Command
-model_id: "cohere.command-text-v14"
-
-# Command Light
-model_id: "cohere.command-light-text-v14"
-```
+> **Note**: Model availability may vary by region and account. Ensure you have requested access to your preferred models in the Amazon Bedrock console.
 
 ## Features
 
@@ -192,7 +186,7 @@ Provides detailed technical insights:
 ### 1. Hardcoded API Keys (2 instances)
 **Location**: `src/config/database.py:15`, `src/utils/api_client.py:23`
 **Risk**: Direct exposure of authentication credentials
-**Remediation**: 
+**Remediation**:
 - Move credentials to environment variables
 - Implement AWS Secrets Manager integration
 - Add credential scanning to CI/CD pipeline
@@ -234,15 +228,15 @@ Provides contextual risk analysis:
 
 ```bash
 # Generate AI summary with default settings
-ash scan /path/to/code --reporters bedrock-summary-reporter
+ash /path/to/code --reporters bedrock-summary-reporter
 ```
 
 ### Custom Model and Style
 
 ```bash
-# Use Claude Haiku for faster, cost-effective summaries
-export ASH_BEDROCK_MODEL_ID="anthropic.claude-3-haiku-20240307-v1:0"
-ash scan /path/to/code --reporters bedrock-summary-reporter
+# Use a lighter model for faster, cost-effective summaries
+export ASH_BEDROCK_MODEL_ID="anthropic.claude-instant-v1"
+ash /path/to/code --reporters bedrock-summary-reporter
 ```
 
 ### CI/CD Integration
@@ -256,8 +250,8 @@ ash scan /path/to/code --reporters bedrock-summary-reporter
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   run: |
-    ash scan . --reporters sarif,bedrock-summary-reporter
-    
+    ash . --reporters sarif,bedrock-summary-reporter
+
 - name: Post Summary to PR
   uses: actions/github-script@v6
   with:
@@ -317,7 +311,7 @@ options:
       - Compliance implications
       - Strategic recommendations
       - Timeline for remediation
-    
+
     technical: |
       Provide technical analysis including:
       - Root cause analysis
@@ -345,11 +339,11 @@ options:
 
 Choose models based on your needs:
 
-| Model | Speed | Cost | Quality | Best For |
-|-------|-------|------|---------|----------|
-| Claude Haiku | Fast | Low | Good | Quick summaries, CI/CD |
-| Claude Sonnet | Medium | Medium | Excellent | Balanced analysis |
-| Claude Opus | Slow | High | Superior | Detailed reports |
+| Model Type | Speed | Cost | Quality | Best For |
+|------------|-------|------|---------|----------|
+| Lighter Models | Fast | Low | Good | Quick summaries, CI/CD |
+| Mid-tier Models | Medium | Medium | Excellent | Balanced analysis |
+| Advanced Models | Slow | High | Superior | Detailed reports |
 
 ### Token Management
 
@@ -402,8 +396,18 @@ options:
 ```yaml
 # Use more cost-effective model
 options:
-  model_id: "anthropic.claude-3-haiku-20240307-v1:0"
+  model_id: "anthropic.claude-instant-v1"
   max_tokens: 1000
+```
+
+**API Errors**
+```yaml
+# Configure retry behavior
+options:
+  max_retries: 5      # Default: 3
+  base_delay: 2.0     # Default: 1.0 seconds
+  max_delay: 120.0    # Default: 60.0 seconds
+  enable_fallback_models: true  # Enable fallback models
 ```
 
 ### Debug Mode
@@ -411,7 +415,7 @@ options:
 Enable debug logging:
 
 ```bash
-ash scan /path/to/code --reporters bedrock-summary-reporter --log-level DEBUG
+ash /path/to/code --reporters bedrock-summary-reporter --log-level DEBUG
 ```
 
 ## Best Practices
@@ -437,7 +441,7 @@ import json
 def post_to_slack(summary_file, webhook_url):
     with open(summary_file, 'r') as f:
         summary = f.read()
-    
+
     payload = {
         "text": "Security Scan Summary",
         "attachments": [{
@@ -445,7 +449,7 @@ def post_to_slack(summary_file, webhook_url):
             "text": summary[:1000] + "..." if len(summary) > 1000 else summary
         }]
     }
-    
+
     requests.post(webhook_url, json=payload)
 ```
 
@@ -460,17 +464,17 @@ from email.mime.multipart import MIMEMultipart
 
 def send_email_summary(summary_file, recipients):
     ses = boto3.client('ses')
-    
+
     with open(summary_file, 'r') as f:
         summary = f.read()
-    
+
     msg = MIMEMultipart()
     msg['Subject'] = 'Security Scan Executive Summary'
     msg['From'] = 'security@company.com'
     msg['To'] = ', '.join(recipients)
-    
+
     msg.attach(MIMEText(summary, 'plain'))
-    
+
     ses.send_raw_email(
         Source=msg['From'],
         Destinations=recipients,
