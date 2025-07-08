@@ -24,7 +24,6 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
-    PropertyBag,
     SarifReport,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -76,6 +75,18 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
 
+    tool_version: Annotated[
+        str | None,
+        Field(
+            description="Specific version constraint for semgrep installation (e.g., '>=1.125.0')"
+        ),
+    ] = None
+
+    install_timeout: Annotated[
+        int,
+        Field(description="Timeout in seconds for tool installation"),
+    ] = 300
+
 
 class SemgrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["semgrep"] = "semgrep"
@@ -94,8 +105,15 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         if self.config is None:
             self.config = SemgrepScannerConfig()
         self.command = "semgrep"
+        self.use_uv_tool = True  # Enable UV tool execution
         self.subcommands = ["scan"]
         self.tool_type = "SAST"
+
+        # Set up explicit UV tool installation commands
+        self._setup_uv_tool_install_commands()
+
+        # Update tool version detection to work with explicit installation
+        self.tool_version = self._get_uv_tool_version("semgrep")
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,
@@ -104,6 +122,19 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             extra_args=[],
         )
         super().model_post_init(context)
+
+    def _get_tool_version_constraint(self) -> str | None:
+        """Get version constraint for semgrep installation.
+
+        Returns:
+            Version constraint string for semgrep (e.g., ">=1.125.0") or None for latest
+        """
+        # Use configured tool version if available, otherwise use default
+        if self.config and self.config.options.tool_version:
+            return self.config.options.tool_version
+
+        # Use semgrep-specific version constraint - semgrep 1.125.0+ has improved stability
+        return ">=1.125.0,<2.0.0"
 
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -114,8 +145,75 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        found = find_executable(self.command)
-        return found is not None
+        # Check if running on Windows (Semgrep doesn't support Windows)
+        if platform.system().lower() == "windows":
+            self._plugin_log(
+                "Semgrep is not supported on Windows and will be skipped",
+                level=logging.INFO,
+            )
+            return False
+
+        # First validate UV tool availability if required
+        if not self._validate_uv_tool_availability():
+            # If UV tool is not available, try direct executable fallback
+            self._plugin_log(
+                "UV tool not available, attempting direct executable detection",
+                level=logging.WARNING,
+            )
+            found = find_executable(self.command)
+            if found is None:
+                return False
+            # If direct executable is found, disable UV tool for this instance
+            self.use_uv_tool = False
+            self._plugin_log(
+                f"Using direct semgrep execution at {found}",
+                level=logging.WARNING,
+            )
+            self.dependencies_satisfied = True
+            return True
+
+        # For UV tool-based scanners, attempt explicit installation if needed
+        if self.use_uv_tool:
+            # Check if tool is already installed
+            if not self._is_uv_tool_installed():
+                self._plugin_log(
+                    "Semgrep not found via UV tool, attempting explicit installation..."
+                )
+
+                # Attempt explicit tool installation with configured timeout
+                timeout = (
+                    getattr(self.config.options, "install_timeout", 300)
+                    if self.config
+                    else 300
+                )
+                if self._install_uv_tool(timeout=timeout):
+                    self._plugin_log("Successfully installed semgrep via UV tool")
+                    self.dependencies_satisfied = True
+                    return True
+                else:
+                    self._plugin_log(
+                        "UV tool installation failed for semgrep, trying direct executable detection",
+                        level=logging.WARNING,
+                    )
+                    # Enhanced fallback logic: try direct executable detection
+                    found = find_executable(self.command)
+                    if found is None:
+                        self._plugin_log(
+                            "Direct executable detection also failed for semgrep",
+                            level=logging.ERROR,
+                        )
+                        return False
+                    # If direct executable is found, disable UV tool for this instance
+                    self.use_uv_tool = False
+                    self._plugin_log(
+                        f"Using direct semgrep execution at {found} as fallback",
+                        level=logging.WARNING,
+                    )
+            else:
+                self._plugin_log("Semgrep already installed via UV tool")
+
+        self.dependencies_satisfied = True
+        return True
 
     def _process_config_options(self):
         ash_stargrep_rules = [
@@ -160,7 +258,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 ]
                 if semgrep_rules:
                     ASH_LOGGER.info(
-                        f"✅ Semgrep offline mode: Found {len(semgrep_rules)} rule files in cache"
+                        f"Semgrep offline mode: Found {len(semgrep_rules)} rule files in cache"
                     )
                     self.args.extra_args.extend(
                         [
@@ -251,7 +349,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
         config: SemgrepScannerConfig | None = None,
-    ) -> SarifReport | bool:
+    ) -> SarifReport | bool | None:
         """Execute Semgrep scan and return results.
 
         Args:
@@ -408,9 +506,6 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target),
                             ),
-                            properties=PropertyBag(
-                                tool=sarif_report.runs[0].tool,
-                            ),
                         )
                     ]
                     self._post_scan(
@@ -429,7 +524,6 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                         target=target,
                         target_type=target_type,
                     )
-                    return
             else:
                 self._plugin_log(
                     f"No results file found at {results_file}",
@@ -441,7 +535,6 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     target=target,
                     target_type=target_type,
                 )
-                return
 
         except Exception as e:
             # Check if there are useful error details

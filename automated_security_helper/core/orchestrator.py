@@ -49,7 +49,7 @@ class ASHScanOrchestrator(BaseModel):
         Path.cwd().joinpath(".ash", "ash_output")
     )
     work_dir: Annotated[
-        Path, Field(description="Working directory for scan operations")
+        Path | None, Field(description="Working directory for scan operations")
     ] = None
     config: Annotated[
         AshConfig | None, Field(description="The resolved ASH configuration")
@@ -150,7 +150,7 @@ class ASHScanOrchestrator(BaseModel):
             config_path=self.config_path,
             config_overrides=self.config_overrides
             if hasattr(self, "config_overrides")
-            else None,
+            else [],
         )
 
         ASH_LOGGER.verbose("Setting up working directories")
@@ -182,7 +182,7 @@ class ASHScanOrchestrator(BaseModel):
                     "ash_aggregated_results.json",
                     "ash-ignore-report.txt",
                     "ash-scan-set-files-list.txt",
-                    "ash.log",
+                    # "ash.log",
                 ]
             ]:
                 ASH_LOGGER.debug(f"Removing old file: {old_file}")
@@ -206,6 +206,7 @@ class ASHScanOrchestrator(BaseModel):
                 output_dir=self.output_dir,
                 work_dir=self.output_dir.joinpath(ASH_WORK_DIR_NAME),
                 config=self.config,
+                ignore_suppressions=self.ignore_suppressions,
             ),
             strategy=self.strategy,
             enabled_scanners=self.enabled_scanners,

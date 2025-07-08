@@ -20,6 +20,7 @@ class ScannerStatus(str, Enum):
 
     PASSED = "PASSED"
     FAILED = "FAILED"
+    ERROR = "ERROR"
     MISSING = "MISSING"
     SKIPPED = "SKIPPED"
 
@@ -55,6 +56,8 @@ class AshLogLevel(str, Enum):
 class PackageManager(str, Enum):
     APT = "apt"
     PIP = "pip"
+    UV = "uv"
+    CONDA = "conda"
     NPM = "npm"
     BREW = "brew"
     YUM = "yum"

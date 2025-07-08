@@ -65,6 +65,8 @@ def run_command(
     shell: bool = False,
     log_level: int = logging.INFO,
     timeout: Optional[float] = None,
+    encoding: Optional[str] = None,
+    errors: str = "replace",
 ) -> subprocess.CompletedProcess:
     """Run a command and return the completed process.
 
@@ -96,6 +98,10 @@ def run_command(
     cmd_str = " ".join(args) if isinstance(args, list) else args
     ASH_LOGGER.log(log_level, f"Running command: {cmd_str}")
 
+    # Set encoding for Windows compatibility
+    if encoding is None and platform.system().lower() == "windows":
+        encoding = "utf-8"
+
     try:
         result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
@@ -106,6 +112,8 @@ def run_command(
             check=check,
             shell=shell,
             timeout=timeout,
+            encoding=encoding,
+            errors=errors,
         )
 
         # Log command result
@@ -151,6 +159,8 @@ def run_command_with_output_handling(
     env: Optional[Dict[str, str]] = None,
     shell: bool = False,
     class_name: str = None,
+    encoding: Optional[str] = None,
+    errors: str = "replace",
 ) -> Dict[str, Any]:
     """Run a subprocess with the given command and handle output according to preferences.
 
@@ -177,6 +187,10 @@ def run_command_with_output_handling(
     cmd_str = " ".join(command) if isinstance(command, list) else command
     ASH_LOGGER.verbose(f"Running: {cmd_str}")
 
+    # Set encoding for Windows compatibility
+    if encoding is None and platform.system().lower() == "windows":
+        encoding = "utf-8"
+
     try:
         result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             command,
@@ -186,6 +200,8 @@ def run_command_with_output_handling(
             check=False,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=env,
+            encoding=encoding,
+            errors=errors,
         )
 
         # Use the actual returncode from the result
@@ -204,6 +220,8 @@ def run_command_with_output_handling(
                 with open(
                     results_dir_path.joinpath(stdout_filename),
                     "w",
+                    encoding="utf-8",
+                    errors="replace",
                 ) as stdout_file:
                     stdout_file.write(result.stdout)
 
@@ -221,6 +239,8 @@ def run_command_with_output_handling(
                 with open(
                     results_dir_path.joinpath(stderr_filename),
                     "w",
+                    encoding="utf-8",
+                    errors="replace",
                 ) as stderr_file:
                     stderr_file.write(result.stderr)
 
@@ -275,6 +295,8 @@ def run_command_stream_output(
     cwd: Optional[Union[str, Path]] = None,
     env: Optional[Dict[str, str]] = None,
     shell: bool = False,
+    encoding: Optional[str] = None,
+    errors: str = "replace",
 ) -> int:
     """Run a command and stream its output to the console.
 
@@ -297,6 +319,10 @@ def run_command_stream_output(
     cmd_str = " ".join(args) if isinstance(args, list) else args
     ASH_LOGGER.info(f"Running command: {cmd_str}")
 
+    # Set encoding for Windows compatibility
+    if encoding is None and platform.system().lower() == "windows":
+        encoding = "utf-8"
+
     try:
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
@@ -306,6 +332,8 @@ def run_command_stream_output(
             stderr=subprocess.STDOUT,
             text=True,
             shell=shell,
+            encoding=encoding,
+            errors=errors,
         )
 
         # Stream output
@@ -394,6 +422,8 @@ def create_process_with_pipes(
     text: bool = True,
     shell: bool = False,
     stderr_to_stdout: bool = False,
+    encoding: Optional[str] = None,
+    errors: str = "replace",
 ) -> subprocess.Popen:
     """Create a process with pipes for stdout and stderr.
 
@@ -420,6 +450,10 @@ def create_process_with_pipes(
 
     stderr = subprocess.STDOUT if stderr_to_stdout else subprocess.PIPE
 
+    # Set encoding for Windows compatibility
+    if encoding is None and platform.system().lower() == "windows":
+        encoding = "utf-8"
+
     try:
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
@@ -429,6 +463,8 @@ def create_process_with_pipes(
             stderr=stderr,
             text=text,
             shell=shell,
+            encoding=encoding,
+            errors=errors,
         )
         return process
     except Exception as e:

@@ -2,6 +2,8 @@
 
 ASH includes 13 built-in reporters that generate scan results in various formats to support different use cases, from human-readable reports to machine-processable data formats for CI/CD integration.
 
+> For detailed visual diagrams of the built-in reporter architecture and workflows, see [Built-in Reporter Diagrams](reporters-diagrams.md).
+
 ## Reporter Overview
 
 | Reporter                                          | Format     | Use Case                    | Key Features                               |
@@ -177,7 +179,7 @@ reporters:
 security_scan:
   stage: test
   script:
-    - ash scan . --reporters gitlab-sast
+    - ash . --reporters gitlab-sast
   artifacts:
     reports:
       sast: output/gl-sast-report.json
@@ -422,16 +424,16 @@ reporters:
 
 ```bash
 # Development workflow
-ash scan --reporters text,html,sarif
+ash --reporters text,html,sarif
 
 # CI/CD pipeline
-ash scan --reporters sarif,junitxml,gitlab-sast
+ash --reporters sarif,junitxml,gitlab-sast
 
 # Compliance reporting
-ash scan --reporters spdx,cyclonedx,ocsf
+ash --reporters spdx,cyclonedx,ocsf
 
 # Executive reporting
-ash scan --reporters html,markdown,csv
+ash --reporters html,markdown,csv
 ```
 
 ### Configuration Example
@@ -503,7 +505,7 @@ reporters:
 
 ```bash
 # Organize outputs by type
-ash scan --output-dir results/ \
+ash --output-dir results/ \
   --reporters sarif,html,csv \
   --output-format "{reporter}/{timestamp}"
 ```
@@ -514,7 +516,7 @@ ash scan --output-dir results/ \
 
 ```yaml
 - name: Security Scan
-  run: ash scan --reporters sarif,text
+  run: ash --reporters sarif,text
 
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v2
@@ -527,7 +529,7 @@ ash scan --output-dir results/ \
 ```yaml
 security_scan:
   script:
-    - ash scan --reporters gitlab-sast,text
+    - ash --reporters gitlab-sast,text
   artifacts:
     reports:
       sast: results/gitlab-sast/results.json
@@ -540,7 +542,7 @@ pipeline {
   stages {
     stage('Security Scan') {
       steps {
-        sh 'ash scan --reporters junitxml,html'
+        sh 'ash --reporters junitxml,html'
         publishTestResults testResultsPattern: 'results/junitxml/*.xml'
         publishHTML([
           allowMissing: false,
@@ -580,7 +582,7 @@ reporters:
 **CI/CD integration failures**:
 ```bash
 # Validate output format
-ash scan --reporters sarif --validate-output
+ash --reporters sarif --validate-output
 ```
 
 ## Next Steps

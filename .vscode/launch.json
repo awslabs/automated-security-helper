@@ -15,9 +15,24 @@
       ],
       "console": "internalConsole",
       "env": {
-        "PATH": "${workspaceFolder}/.venv/bin:/opt/homebrew/bin:~/.local/share/mise/installs/node/20.19.0/bin:${env.PATH}"
+        "PATH": "${workspaceFolder}/.venv/bin:/opt/homebrew/bin:~/.local/share/mise/installs/node/20.19.0/bin:${env.PATH}",
+        "COLUMNS": "160",
       },
       "name": "ASH: Test CLI",
+      "program": "./automated_security_helper/cli/main.py",
+      "request": "launch",
+      "type": "debugpy"
+    },
+    {
+      "args": [
+        "report"
+      ],
+      "console": "internalConsole",
+      "env": {
+        "PATH": "${workspaceFolder}/.venv/bin:/opt/homebrew/bin:~/.local/share/mise/installs/node/20.19.0/bin:${env.PATH}",
+        "COLUMNS": "160",
+      },
+      "name": "ASH: Test CLI Report",
       "program": "./automated_security_helper/cli/main.py",
       "request": "launch",
       "type": "debugpy"

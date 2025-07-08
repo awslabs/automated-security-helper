@@ -237,7 +237,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
@@ -253,7 +253,7 @@ jobs:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
     - ash --mode local
   artifacts:
     paths:
@@ -285,3 +285,16 @@ ash --verbose
 # Disable progress display
 ash --progress false
 ```
+
+### Scanner Validation
+
+ASH v3 includes comprehensive scanner validation that monitors scanner registration, enablement, and execution throughout the scan process. When debugging scanner issues:
+
+- Check logs for validation warnings about missing or disabled scanners
+- Use `--debug` to see detailed validation checkpoint information
+- Look for specific reasons why scanners might be disabled (dependencies, configuration, etc.)
+- Run the integration verification test: `python verify_integration.py` (if available in your installation)
+
+The validation system includes result completeness validation that ensures all originally registered scanners appear in the final scan results, even if they failed or were disabled. This provides complete visibility into scan coverage and helps identify any scanners that may have been silently dropped during the scan process.
+
+For detailed information about the scanner validation system, see the [Scanner Validation System](../developer-guide/scanner-validation-system.md) developer guide.

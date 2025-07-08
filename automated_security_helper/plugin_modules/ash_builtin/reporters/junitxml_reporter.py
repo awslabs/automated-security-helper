@@ -17,7 +17,8 @@ import warnings
 
 
 class JUnitXMLReporterConfigOptions(ReporterOptionsBase):
-    pass
+    # Consider findings as failures only if they're at or above the scanner's severity threshold
+    respect_severity_threshold: bool = True
 
 
 class JUnitXMLReporterConfig(ReporterPluginConfigBase):
@@ -79,14 +80,75 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                         )
                         for suppression in result.suppressions
                     ]
-                elif result.level == "error" or result.kind == "fail":
-                    test_case.result = [
-                        Error(message=result.message.root.text, type_="error")
-                    ]
-                elif result.level == "warning":
-                    test_case.result = [
-                        Error(message=result.message.root.text, type_="warning")
-                    ]
+                else:
+                    # Determine if finding is actionable based on severity threshold
+                    is_actionable = True
+
+                    # First check if the finding has a below_threshold property
+                    if self.config.options.respect_severity_threshold and hasattr(
+                        result, "properties"
+                    ):
+                        if result.properties and hasattr(
+                            result.properties, "below_threshold"
+                        ):
+                            is_actionable = not result.properties.below_threshold
+                        elif (
+                            result.properties
+                            and "below_threshold"
+                            in result.properties.__pydantic_extra__
+                        ):
+                            is_actionable = not result.properties.__pydantic_extra__[
+                                "below_threshold"
+                            ]
+
+                    # If no below_threshold property, check if we can determine it from the level
+                    # This is a fallback for cases where the below_threshold property isn't set
+                    if is_actionable and self.config.options.respect_severity_threshold:
+                        # Get the threshold from properties if available
+                        threshold = None
+                        if hasattr(result, "properties") and result.properties:
+                            if hasattr(result.properties, "severity_threshold"):
+                                threshold = result.properties.severity_threshold
+                            elif (
+                                "severity_threshold"
+                                in result.properties.__pydantic_extra__
+                            ):
+                                threshold = result.properties.__pydantic_extra__[
+                                    "severity_threshold"
+                                ]
+
+                        # If we have a threshold and level, check if the finding is actionable
+                        if threshold and result.level:
+                            level = result.level.lower()
+                            # Simple mapping of SARIF levels to severity thresholds
+                            if threshold == "CRITICAL" and level != "error":
+                                is_actionable = False
+                            elif threshold == "HIGH" and level not in ["error"]:
+                                is_actionable = False
+                            elif threshold == "MEDIUM" and level not in [
+                                "error",
+                                "warning",
+                            ]:
+                                is_actionable = False
+
+                    # Only mark as error if it's actionable
+                    if is_actionable:
+                        if result.level == "error" or result.kind == "fail":
+                            test_case.result = [
+                                Error(message=result.message.root.text, type_="error")
+                            ]
+                        elif result.level == "warning":
+                            test_case.result = [
+                                Error(message=result.message.root.text, type_="warning")
+                            ]
+                    else:
+                        # Mark as skipped if below threshold
+                        test_case.result = [
+                            Skipped(
+                                message="Finding is below configured severity threshold",
+                                type_="threshold",
+                            )
+                        ]
                 # elif result.kind not in ["notApplicable", "informational"]:
                 #     pass
 

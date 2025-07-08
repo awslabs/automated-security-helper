@@ -160,7 +160,7 @@ class TestScanCompletionLogger:
         assert result is True
         mock_logger.info.assert_called_once()
         call_args = mock_logger.info.call_args[0][0]
-        assert "Remaining scanners (2): semgrep, checkov" in call_args
+        assert "Remaining scanners (2): semgrep,checkov" in call_args
 
     @patch(
         "automated_security_helper.plugin_modules.ash_builtin.event_handlers.scan_completion_logger.ASH_LOGGER"

@@ -9,12 +9,12 @@ commands:
   - id: install
     exec:
       component: dev
-      commandLine: "pip install --user poetry && ~/.local/bin/poetry install"
+      commandLine: "curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.cargo/env && uv sync"
   - id: build
     exec:
       component: dev
-      commandLine: "~/.local/bin/poetry build"
+      commandLine: "uv build"
   - id: test
     exec:
       component: dev
-      commandLine: "~/.local/bin/poetry run pytest"
+      commandLine: "uv run pytest"

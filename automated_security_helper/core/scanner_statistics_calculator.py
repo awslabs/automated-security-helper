@@ -95,8 +95,48 @@ class ScannerStatisticsCalculator:
         """
         scanner_stats = {}
 
-        # Get all scanner names from scanner_results
-        scanner_names = list(asharp_model.scanner_results.keys())
+        # Get scanner names from multiple sources:
+        # 1. SARIF data (scanners that produced SARIF results)
+        # 2. Additional reports (scanners that produced non-SARIF results)
+        # 3. Scanner results (scanners that have status information)
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        sarif_scanner_names = ScannerStatisticsCalculator._get_scanner_names_from_sarif(
+            asharp_model
+        )
+        additional_reports_scanners = (
+            list(asharp_model.additional_reports.keys())
+            if asharp_model.additional_reports
+            else []
+        )
+        scanner_results_scanners = (
+            list(asharp_model.scanner_results.keys())
+            if asharp_model.scanner_results
+            else []
+        )
+
+        # Combine all sources
+        scanner_names = list(
+            set(
+                sarif_scanner_names
+                + additional_reports_scanners
+                + scanner_results_scanners
+            )
+        )
+
+        ASH_LOGGER.debug("Scanner Discovery Summary:")
+        ASH_LOGGER.debug(
+            f"   SARIF scanners: {len(sarif_scanner_names)} - {sorted(sarif_scanner_names)}"
+        )
+        ASH_LOGGER.debug(
+            f"   Additional reports scanners: {len(additional_reports_scanners)} - {sorted(additional_reports_scanners)}"
+        )
+        ASH_LOGGER.debug(
+            f"   Scanner results scanners: {len(scanner_results_scanners)} - {sorted(scanner_results_scanners)}"
+        )
+        ASH_LOGGER.debug(
+            f"   Combined unique scanners: {len(scanner_names)} - {sorted(scanner_names)}"
+        )
 
         # Extract statistics for each scanner
         for scanner_name in scanner_names:
@@ -125,13 +165,61 @@ class ScannerStatisticsCalculator:
                 critical, high, medium, low, info, threshold
             )
 
-            # Calculate duration from scanner_results
+            # Calculate duration from additional_reports (where container data is stored)
             duration = 0.0
-            if scanner_name in asharp_model.scanner_results:
+
+            # First try to get duration from additional_reports (where full container data is stored)
+            if (
+                scanner_name in asharp_model.additional_reports
+                and "source" in asharp_model.additional_reports[scanner_name]
+            ):
+                container_data = asharp_model.additional_reports[scanner_name]["source"]
+                if isinstance(container_data, dict) and "duration" in container_data:
+                    # Handle None duration (for skipped/missing scanners) by keeping it as None
+                    duration = (
+                        container_data["duration"]
+                        if container_data["duration"] is not None
+                        else None
+                    )
+                    ASH_LOGGER.debug(
+                        f"Got duration for {scanner_name} from additional_reports: {duration}"
+                    )
+
+            # Fallback to scanner_results if available (for backward compatibility)
+            elif scanner_name in asharp_model.scanner_results:
                 scanner_status_info = asharp_model.scanner_results[scanner_name]
-                source_duration = scanner_status_info.source.duration or 0
-                converted_duration = scanner_status_info.converted.duration or 0
-                duration = source_duration + converted_duration
+
+                # Debug logging
+                from automated_security_helper.utils.log import ASH_LOGGER
+
+                ASH_LOGGER.debug(
+                    f"Processing {scanner_name}: type={type(scanner_status_info)}"
+                )
+                ASH_LOGGER.debug(
+                    f"   Has 'source': {hasattr(scanner_status_info, 'source')}"
+                )
+                ASH_LOGGER.debug(
+                    f"   Has 'converted': {hasattr(scanner_status_info, 'converted')}"
+                )
+                ASH_LOGGER.debug(
+                    f"   Has 'duration': {hasattr(scanner_status_info, 'duration')}"
+                )
+
+                # Handle both old ScannerStatusInfo and new ScannerMetrics structures
+                if hasattr(scanner_status_info, "source") and hasattr(
+                    scanner_status_info, "converted"
+                ):
+                    # Old ScannerStatusInfo structure
+                    ASH_LOGGER.debug("   Using OLD ScannerStatusInfo structure")
+                    source_duration = scanner_status_info.source.duration or 0
+                    converted_duration = scanner_status_info.converted.duration or 0
+                    duration = source_duration + converted_duration
+                elif hasattr(scanner_status_info, "duration"):
+                    # New ScannerMetrics structure
+                    ASH_LOGGER.debug("   Using NEW ScannerMetrics structure")
+                    duration = scanner_status_info.duration or 0.0
+                else:
+                    ASH_LOGGER.debug("   Unknown structure, using default duration")
 
             # Store statistics for this scanner
             scanner_stats[scanner_name] = {
@@ -151,6 +239,59 @@ class ScannerStatisticsCalculator:
             }
 
         return scanner_stats
+
+    @staticmethod
+    def _get_scanner_names_from_sarif(asharp_model: AshAggregatedResults) -> list:
+        """Extract unique scanner names from SARIF data.
+
+        This method scans through the SARIF results to find all unique scanner names
+        that have produced findings. This is used when scanner_results is not yet
+        populated but we need to know which scanners ran.
+
+        Args:
+            asharp_model: The AshAggregatedResults model containing SARIF data
+
+        Returns:
+            List of unique scanner names found in the SARIF data
+        """
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        scanner_names = set()
+        total_results = 0
+        results_with_scanner_name = 0
+
+        if asharp_model.sarif and asharp_model.sarif.runs:
+            for run_idx, run in enumerate(asharp_model.sarif.runs):
+                if not run.results:
+                    ASH_LOGGER.debug(f"SARIF run {run_idx} has no results")
+                    continue
+
+                run_results = len(run.results)
+                total_results += run_results
+                ASH_LOGGER.debug(f"SARIF run {run_idx} has {run_results} results")
+
+                for result_idx, result in enumerate(run.results):
+                    scanner_name = (
+                        ScannerStatisticsCalculator._get_scanner_name_from_result(
+                            result
+                        )
+                    )
+                    if scanner_name:
+                        scanner_names.add(scanner_name)
+                        results_with_scanner_name += 1
+                    else:
+                        ASH_LOGGER.debug(
+                            f"Result {result_idx} in run {run_idx} has no scanner_name"
+                        )
+
+        scanner_list = list(scanner_names)
+        ASH_LOGGER.debug("SARIF Scanner Discovery:")
+        ASH_LOGGER.debug(f"   Total SARIF results: {total_results}")
+        ASH_LOGGER.debug(f"   Results with scanner_name: {results_with_scanner_name}")
+        ASH_LOGGER.debug(f"   Unique scanners found: {len(scanner_list)}")
+        ASH_LOGGER.debug(f"   Scanner names: {sorted(scanner_list)}")
+
+        return scanner_list
 
     @staticmethod
     def extract_sarif_counts_for_scanner(
@@ -220,22 +361,51 @@ class ScannerStatisticsCalculator:
 
                         # Only count in severity bucket if not suppressed
                         if not is_suppressed:
-                            # Map SARIF level to severity
-                            if result.level:
-                                level = str(result.level).lower()
-                                if level == "error":
+                            # Check if scanner provides issue_severity in properties (e.g., Bandit)
+                            properties = result.properties or {}
+                            issue_severity = (
+                                properties.get("issue_severity", "").upper()
+                                if hasattr(properties, "get")
+                                else ""
+                            )
+
+                            # If issue_severity is provided, use it as the primary severity indicator
+                            if issue_severity and issue_severity in [
+                                "CRITICAL",
+                                "HIGH",
+                                "MEDIUM",
+                                "LOW",
+                                "INFO",
+                            ]:
+                                if issue_severity == "CRITICAL":
                                     critical += 1
-                                elif level == "warning":
-                                    medium += 1  # Most scanners map warning to medium
-                                elif level == "note":
+                                elif issue_severity == "HIGH":
+                                    high += 1
+                                elif issue_severity == "MEDIUM":
+                                    medium += 1
+                                elif issue_severity == "LOW":
                                     low += 1
-                                elif level == "none":
-                                    info += 1
-                                else:
+                                elif issue_severity == "INFO":
                                     info += 1
                             else:
-                                # Default to info if no level specified
-                                info += 1
+                                # Fall back to SARIF level mapping for scanners that don't use issue_severity
+                                if result.level:
+                                    level = str(result.level).lower()
+                                    if level == "error":
+                                        critical += 1
+                                    elif level == "warning":
+                                        medium += (
+                                            1  # Most scanners map warning to medium
+                                        )
+                                    elif level == "note":
+                                        low += 1
+                                    elif level == "none":
+                                        info += 1
+                                    else:
+                                        info += 1
+                                else:
+                                    # Default to info if no level specified
+                                    info += 1
 
         # Verify that the total number of findings matches what we expect
         total_findings = critical + high + medium + low + info + suppressed
@@ -244,15 +414,45 @@ class ScannerStatisticsCalculator:
         if total_findings == 0:
             if scanner_name in asharp_model.scanner_results:
                 scanner_status_info = asharp_model.scanner_results[scanner_name]
-                source_counts = scanner_status_info.source.severity_counts
-                converted_counts = scanner_status_info.converted.severity_counts
 
-                suppressed = source_counts.suppressed + converted_counts.suppressed
-                critical = source_counts.critical + converted_counts.critical
-                high = source_counts.high + converted_counts.high
-                medium = source_counts.medium + converted_counts.medium
-                low = source_counts.low + converted_counts.low
-                info = source_counts.info + converted_counts.info
+                # Debug logging
+                from automated_security_helper.utils.log import ASH_LOGGER
+
+                ASH_LOGGER.debug(
+                    f"Fallback processing {scanner_name}: type={type(scanner_status_info)}"
+                )
+                ASH_LOGGER.debug(
+                    f"   Has 'source': {hasattr(scanner_status_info, 'source')}"
+                )
+                ASH_LOGGER.debug(
+                    f"   Has 'converted': {hasattr(scanner_status_info, 'converted')}"
+                )
+
+                # Handle both old ScannerStatusInfo and new ScannerMetrics structures
+                if hasattr(scanner_status_info, "source") and hasattr(
+                    scanner_status_info, "converted"
+                ):
+                    # Old ScannerStatusInfo structure
+                    ASH_LOGGER.debug(
+                        "   Using OLD ScannerStatusInfo structure for fallback"
+                    )
+                    source_counts = scanner_status_info.source.severity_counts
+                    converted_counts = scanner_status_info.converted.severity_counts
+
+                    suppressed = source_counts.suppressed + converted_counts.suppressed
+                    critical = source_counts.critical + converted_counts.critical
+                    high = source_counts.high + converted_counts.high
+                    medium = source_counts.medium + converted_counts.medium
+                    low = source_counts.low + converted_counts.low
+                    info = source_counts.info + converted_counts.info
+                elif hasattr(scanner_status_info, "suppressed"):
+                    # New ScannerMetrics structure - use the metrics directly
+                    suppressed = scanner_status_info.suppressed
+                    critical = scanner_status_info.critical
+                    high = scanner_status_info.high
+                    medium = scanner_status_info.medium
+                    low = scanner_status_info.low
+                    info = scanner_status_info.info
 
         return suppressed, critical, high, medium, low, info
 
@@ -453,8 +653,22 @@ class ScannerStatisticsCalculator:
         """
         if scanner_name in asharp_model.scanner_results:
             scanner_status_info = asharp_model.scanner_results[scanner_name]
-            excluded = scanner_status_info.excluded
-            dependencies_missing = not scanner_status_info.dependencies_satisfied
+
+            # Handle both old ScannerStatusInfo and new ScannerMetrics structures
+            if hasattr(scanner_status_info, "excluded"):
+                excluded = scanner_status_info.excluded
+            else:
+                excluded = False
+
+            if hasattr(scanner_status_info, "dependencies_satisfied"):
+                # Old ScannerStatusInfo structure
+                dependencies_missing = not scanner_status_info.dependencies_satisfied
+            elif hasattr(scanner_status_info, "dependencies_missing"):
+                # New ScannerMetrics structure
+                dependencies_missing = scanner_status_info.dependencies_missing
+            else:
+                dependencies_missing = False
+
             return excluded, dependencies_missing
 
         return False, False

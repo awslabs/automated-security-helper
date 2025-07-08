@@ -6,7 +6,7 @@
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-def handle_scan_completion_logging(**kwargs) -> bool:
+def handle_scan_completion_logging(*args, **kwargs) -> bool:
     """
     Event subscriber that handles logging remaining scanners when a scanner completes.
 
@@ -27,11 +27,13 @@ def handle_scan_completion_logging(**kwargs) -> bool:
     """
     remaining_count = kwargs.get("remaining_count", 0)
     remaining_scanners = kwargs.get("remaining_scanners", [])
-
+    message = kwargs.get(
+        "message",
+        f"Remaining scanners ({remaining_count}): {','.join(remaining_scanners)}",
+    )
     # Log information about remaining scanners
     if remaining_count > 0:
-        remaining_list = ", ".join(remaining_scanners)
-        ASH_LOGGER.info(f"Remaining scanners ({remaining_count}): {remaining_list}")
+        ASH_LOGGER.info(message)
     else:
         ASH_LOGGER.info("All scanners completed!")
 

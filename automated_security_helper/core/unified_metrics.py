@@ -29,7 +29,8 @@ Example usage:
     ```
 """
 
-from typing import Dict, List, Any, Optional, NamedTuple
+from typing import Dict, List, Any, Optional
+from pydantic import BaseModel
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.scanner_statistics_calculator import (
@@ -37,7 +38,7 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 )
 
 
-class ScannerMetrics(NamedTuple):
+class ScannerMetrics(BaseModel):
     """Unified scanner metrics data structure.
 
     This is the single source of truth for scanner metrics that should be used
@@ -58,7 +59,9 @@ class ScannerMetrics(NamedTuple):
     info: int  # Number of informational findings
     total: int  # Total number of non-suppressed findings
     actionable: int  # Number of findings at or above the threshold severity
-    duration: float  # Time taken by the scanner in seconds
+    duration: Optional[
+        float
+    ]  # Time taken by the scanner in seconds, None for skipped/missing scanners
     status: str  # Scanner status: "PASSED", "FAILED", "SKIPPED", or "MISSING"
     status_text: str  # Human-readable status text
     threshold: str  # Severity threshold used for this scanner
@@ -164,15 +167,14 @@ def get_unified_scanner_metrics(
     # Convert the statistics to ScannerMetrics objects
     for scanner_name, stats in scanner_stats.items():
         # Determine status text (same as status for now)
-        status = (
-            stats["excluded"]
-            and "SKIPPED"
-            or stats["dependencies_missing"]
-            and "MISSING"
-            or stats["actionable"] > 0
-            and "FAILED"
-            or "PASSED"
-        )
+        if stats["excluded"]:
+            status = "SKIPPED"
+        elif stats["dependencies_missing"]:
+            status = "MISSING"
+        elif stats["actionable"] > 0:
+            status = "FAILED"
+        else:
+            status = "PASSED"
         status_text = status
 
         # Determine if the scanner passed

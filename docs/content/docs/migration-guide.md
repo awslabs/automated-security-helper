@@ -19,7 +19,7 @@ This guide helps users migrate from ASH v2 to ASH v3.
    - **Recommendation**: Add `ash report` to your script after `ash` has completed to pretty-print the summary report in the terminal or job stdout.
 4. **Update Pre-commit Configuration**:
    - Change hook ID from `ash` to `ash-simple-scan`
-   - Update the revision to `v3.0.0-beta` or later
+   - Update the revision to `v3.0.0` or later
 5. **Test Your Migration**:
    ```bash
    ash --mode local
@@ -31,7 +31,8 @@ This guide helps users migrate from ASH v2 to ASH v3.
 2. **Multiple Execution Modes**: Run ASH in `local`, `container`, or `precommit` mode depending on your needs
 3. **Enhanced Configuration**: Support for YAML/JSON configuration files with overrides via CLI parameters
 4. **Improved Reporting**: Multiple report formats including JSON, Markdown, HTML, and CSV
-5. **Customizable**: Extend ASH with custom plugins, scanners, and reporters
+5. **UV Tool Management**: Automatic installation and isolation of scanner tools (Bandit, Checkov, Semgrep) via UV
+6. **Customizable**: Extend ASH with custom plugins, scanners, and reporters
 
 ## Installation Changes
 
@@ -47,14 +48,32 @@ export PATH="${PATH}:/path/to/automated-security-helper"
 
 ```bash
 # Option 1: Using uvx (recommended) -- add to shell profile
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
 
 # Option 2: Using pipx
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 
 # Option 3: Using pip
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 ```
+
+## Tool Management Changes
+
+### ASH v2
+- Required manual installation of all scanner tools
+- Tools needed to be available in system PATH
+- Version compatibility issues could occur
+
+### ASH v3
+- **Automatic Tool Management**: Tools like Bandit, Checkov, and Semgrep are automatically installed via UV tool isolation
+- **Flexible Version Constraints**: ASH uses sensible default version constraints (e.g., Bandit >=1.7.0 for enhanced SARIF support) with the ability to override through configuration
+- **Isolated Environments**: Tools run in isolated environments without affecting your project dependencies
+- **Fallback Support**: If UV tool installation fails, ASH falls back to system-installed tools when available
+
+### Migration Impact
+- **No Action Required**: Most users don't need to change anything - tools are installed automatically
+- **Offline Environments**: Set `ASH_OFFLINE=true` to skip automatic installations and use pre-installed tools
+- **Custom Tool Versions**: Pre-install specific versions using `uv tool install <tool>==<version>` if needed
 
 ## Command Line Changes
 
@@ -187,7 +206,7 @@ No formal configuration file. Settings controlled via command line parameters.
 YAML configuration file (`.ash/.ash.yaml`):
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 project_name: my-project
 global_settings:
   severity_threshold: MEDIUM
@@ -227,7 +246,7 @@ repos:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0-beta
+    rev: v3.0.0
     hooks:
       - id: ash-simple-scan
 ```

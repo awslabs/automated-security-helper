@@ -91,7 +91,9 @@ def run_ash_scan_cli_command(
     progress: Annotated[
         bool,
         typer.Option(
-            help="Show progress of each job live in the console. Defaults to True."
+            "--progress/--no-progress",
+            "-p/-P",
+            help="Show progress of each job live in the console. Defaults to True.",
         ),
     ] = True,
     output_formats: Annotated[
@@ -168,7 +170,7 @@ def run_ash_scan_cli_command(
         ),
     ] = AshLogLevel.INFO,
     config: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--config",
             "-c",
@@ -358,7 +360,7 @@ def run_ash_scan_cli_command(
         color=color,
         fail_on_findings=fail_on_findings,
         ignore_suppressions=ignore_suppressions,
-        mode=mode,
+        mode=mode or RunMode.local,
         show_summary=show_summary,
         simple=precommit_mode
         or log_level == AshLogLevel.SIMPLE

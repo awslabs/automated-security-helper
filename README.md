@@ -46,19 +46,22 @@ ASH (Automated Security Helper) is a security scanning tool designed to help you
 - **Multiple Execution Modes**: Run ASH in `local`, `container`, or `precommit` mode depending on your needs
 - **Enhanced Configuration**: Support for YAML/JSON configuration files with overrides via CLI parameters
 - **Improved Reporting**: Multiple report formats including JSON, Markdown, HTML, and CSV
+- **Scanner Validation System**: Comprehensive validation ensures all expected scanners are registered, enabled, queued, executed, and included in results
 - **Pluggable Architecture**: Extend ASH with custom plugins, scanners, and reporters
 - **Unified Output Format**: Standardized output format that can be exported to multiple formats (SARIF, JSON, HTML, Markdown, CSV)
+- **UV Package Management**: ASH now uses UV for faster dependency resolution and tool isolation
+- **Comprehensive Testing**: Extensive integration test suite validates UV migration functionality across platforms
 
 ## Built-In Scanners
 
-ASH v3 integrates multiple open-source security tools as scanners:
+ASH v3 integrates multiple open-source security tools as scanners. Tools like Bandit, Checkov, and Semgrep are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments without affecting your project dependencies:
 
 | Scanner                                                       | Type      | Languages/Frameworks                                                                         | Installation (Local Mode)                                               |
 |---------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| [Bandit](https://github.com/PyCQA/bandit)                     | SAST      | Python                                                                                       | Included with ASH                                                       |
-| [Semgrep](https://github.com/semgrep/semgrep)                 | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Included with ASH                                                       |
+| [Bandit](https://github.com/PyCQA/bandit)                     | SAST      | Python                                                                                       | Managed via UV tool isolation (auto-installed: `bandit>=1.7.0`)        |
+| [Semgrep](https://github.com/semgrep/semgrep)                 | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0`)     |
 | [detect-secrets](https://github.com/Yelp/detect-secrets)      | Secrets   | All text files                                                                               | Included with ASH                                                       |
-| [Checkov](https://github.com/bridgecrewio/checkov)            | IaC, SAST | Terraform, CloudFormation, Kubernetes, Dockerfile, ARM Templates, Serverless, Helm, and more | Included with ASH                                                       |
+| [Checkov](https://github.com/bridgecrewio/checkov)            | IaC, SAST | Terraform, CloudFormation, Kubernetes, Dockerfile, ARM Templates, Serverless, Helm, and more | Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`) |
 | [cfn_nag](https://github.com/stelligent/cfn_nag)              | IaC       | CloudFormation                                                                               | `gem install cfn-nag`                                                   |
 | [cdk-nag](https://github.com/cdklabs/cdk-nag)                 | IaC       | CloudFormation                                                                               | Included with ASH                                                       |
 | [npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit) | SCA       | JavaScript/Node.js                                                                           | Install Node.js/npm                                                     |
@@ -71,9 +74,9 @@ ASH v3 integrates multiple open-source security tools as scanners:
 
 | Mode      | Requirements                                                                                                                                                         | Notes                                                    |
 |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|
-| Local     | Python 3.10+                                                                                                                                                         | Some scanners require additional tools (see table above) |
+| Local     | Python 3.10+, UV package manager                                                                                                                                     | Some scanners require additional tools (see table above) |
 | Container | Any OCI-compatible container runtime ([Finch](https://github.com/runfinch/finch), [Docker](https://docs.docker.com/get-docker/), [Podman](https://podman.io/), etc.) | On Windows: WSL2 is typically required                   |
-| Precommit | Python 3.10+                                                                                                                                                         | Subset of scanners, optimized for speed                  |
+| Precommit | Python 3.10+, UV package manager                                                                                                                                     | Subset of scanners, optimized for speed                  |
 
 ## Installation Options
 
@@ -81,7 +84,7 @@ ASH v3 integrates multiple open-source security tools as scanners:
 
 ```bash
 # Install with pipx (isolated environment)
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 
 # Use as normal
 ash --help
@@ -97,23 +100,23 @@ ash --help
 ```bash
 # Linux/macOS
 curl -sSf https://astral.sh/uv/install.sh | sh
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
 
 # Windows PowerShell
 irm https://astral.sh/uv/install.ps1 | iex
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0 $args }
 ```
 
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.0-beta
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.0
 cd automated-security-helper
 pip install .
 ```
@@ -242,7 +245,7 @@ Once configured, you can interact with ASH through natural language:
 ASH v3 uses a YAML configuration file (`.ash/ash.yaml`) with support for JSON Schema validation:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 project_name: my-project
 global_settings:
   severity_threshold: MEDIUM
@@ -268,7 +271,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0-beta
+    rev: v3.0.0
     hooks:
       - id: ash-simple-scan
 ```
@@ -283,11 +286,13 @@ pre-commit run ash-simple-scan --all-files
 
 ASH v3 produces several output files in the `.ash/ash_output/` directory:
 
-- `ash_aggregated_results.json`: Complete machine-readable results
+- `ash_aggregated_results.json`: Complete machine-readable results including validation checkpoints
 - `reports/ash.summary.txt`: Human-readable text summary
 - `reports/ash.summary.md`: Markdown summary for GitHub PRs and other platforms
 - `reports/ash.html`: Interactive HTML report
 - `reports/ash.csv`: CSV report for filtering and sorting findings
+
+The `ash_aggregated_results.json` file includes comprehensive validation information that tracks scanner registration, enablement, execution, and result inclusion throughout the scan process. The Scanner Validation System can also generate detailed validation reports that provide comprehensive analysis of scanner states, validation checkpoints, dependency issues, and actionable recommendations for troubleshooting scan issues.
 
 ## FAQ
 
@@ -319,6 +324,52 @@ Build an offline image with `ash --mode container --offline --offline-semgrep-ru
 <summary>I am trying to scan a CDK application, but ASH does not show CDK Nag scan results -- why is that?</summary>
 
 ASH uses CDK Nag underneath to apply NagPack rules to *CloudFormation templates* via the `CfnInclude` CDK construct. This is purely a mechanism to ingest a bare CloudFormation template and apply CDK NagPacks to it; doing this against a template emitted by another CDK application causes a collision in the `CfnInclude` construct due to the presence of the `BootstrapVersion` parameter on the template added by CDK. For CDK applications, we recommend integrating CDK Nag directly in your CDK code. ASH will still apply other CloudFormation scanners (cfn-nag, checkov) against templates synthesized via CDK, but the CDK Nag scanner will not scan those templates.
+</details>
+
+<details>
+<summary>Why is ASH trying to install tools automatically? Can I use my own tool installations?</summary>
+
+ASH v3 uses UV's tool isolation system to automatically manage scanner dependencies like Bandit, Checkov, and Semgrep. This ensures consistent tool versions and avoids dependency conflicts. If you prefer to use your own tool installations:
+
+1. **Pre-install tools**: Install tools manually using `uv tool install <tool>` or your preferred method
+2. **Offline mode**: Set `ASH_OFFLINE=true` to skip automatic installations and use system-installed tools
+3. **Fallback behavior**: ASH automatically falls back to system-installed tools if UV tool installation fails
+
+The automatic installation uses sensible default version constraints to ensure compatibility:
+- **Bandit**: `>=1.7.0` (enhanced SARIF support and security fixes)
+- **Checkov**: `>=3.2.0,<4.0.0` (improved stability, avoiding potential breaking changes in 4.x)
+- **Semgrep**: `>=1.125.0` (comprehensive rule support and performance improvements)
+
+These constraints can be overridden through scanner configuration when needed.
+</details>
+
+<details>
+<summary>ASH is failing with UV tool installation errors. How do I fix this?</summary>
+
+If you're experiencing UV tool installation issues:
+
+1. **Check UV installation**: Ensure UV is installed and available: `uv --version`
+2. **Network connectivity**: UV tool installation requires internet access
+3. **Use offline mode**: Set `ASH_OFFLINE=true` to skip downloads and use pre-installed tools
+4. **Manual installation**: Pre-install tools manually:
+   ```bash
+   uv tool install bandit>=1.7.0
+   uv tool install checkov>=3.2.0,<4.0.0
+   uv tool install semgrep>=1.125.0
+   ```
+5. **Check logs**: Run ASH with `--verbose` to see detailed error messages including:
+   - UV availability status
+   - Tool installation attempts and retry logic
+   - Version detection information
+   - Fallback mechanism activation
+6. **Fallback to system tools**: ASH will automatically try to use system-installed tools if UV installation fails
+7. **Installation timeout**: Increase timeout in scanner configuration if needed:
+   ```yaml
+   scanners:
+     checkov:
+       options:
+         install_timeout: 600  # 10 minutes
+   ```
 </details>
 
 ## Documentation

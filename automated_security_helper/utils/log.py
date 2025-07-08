@@ -207,10 +207,23 @@ def _is_windows_with_encoding_issues() -> bool:
     # Check console encoding
     try:
         console_encoding = sys.stdout.encoding or "unknown"
-        # CP1252 is the problematic encoding on Windows
-        has_encoding_issues = console_encoding.lower() in ["cp1252", "windows-1252"]
+        # CP1252 and other problematic encodings on Windows
+        has_encoding_issues = console_encoding.lower() in [
+            "cp1252",
+            "windows-1252",
+            "cp850",
+            "cp437",
+            "ascii",
+        ]
     except (AttributeError, TypeError):
         has_encoding_issues = True  # Assume issues if we can't determine encoding
+
+    # Also check if we can't handle Unicode properly
+    try:
+        test_unicode = "✅🔴⚠️"
+        test_unicode.encode(console_encoding or "utf-8")
+    except (UnicodeEncodeError, LookupError):
+        has_encoding_issues = True
 
     return is_ci or has_encoding_issues
 
@@ -307,7 +320,13 @@ def configure_windows_safe_logging():
     # Check console encoding
     try:
         console_encoding = sys.stdout.encoding or "unknown"
-        has_encoding_issues = console_encoding.lower() in ["cp1252", "windows-1252"]
+        has_encoding_issues = console_encoding.lower() in [
+            "cp1252",
+            "windows-1252",
+            "cp850",
+            "cp437",
+            "ascii",
+        ]
     except (AttributeError, TypeError):
         has_encoding_issues = True
 
@@ -317,6 +336,7 @@ def configure_windows_safe_logging():
     # Try to set UTF-8 encoding for stdout/stderr on Windows
     try:
         import locale
+        import codecs
 
         # Try to set console to UTF-8 if possible
         if hasattr(sys.stdout, "reconfigure"):
@@ -324,7 +344,16 @@ def configure_windows_safe_logging():
                 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
                 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
             except (AttributeError, OSError):
-                pass
+                # Fallback: wrap stdout/stderr with UTF-8 codec
+                try:
+                    sys.stdout = codecs.getwriter("utf-8")(
+                        sys.stdout.detach(), errors="replace"
+                    )
+                    sys.stderr = codecs.getwriter("utf-8")(
+                        sys.stderr.detach(), errors="replace"
+                    )
+                except (AttributeError, OSError):
+                    pass
 
         # Set locale to UTF-8 if possible
         try:
@@ -334,6 +363,9 @@ def configure_windows_safe_logging():
                 locale.setlocale(locale.LC_ALL, "C.UTF-8")
             except locale.Error:
                 pass  # Keep default locale
+
+        # Set environment variable for subprocess encoding
+        os.environ.setdefault("PYTHONIOENCODING", "utf-8:replace")
 
     except ImportError:
         pass  # codecs/locale not available
@@ -466,56 +498,42 @@ def get_logger(
 
     SHOW_DEBUG_INFO = logging._levelToName[logger.getEffectiveLevel() or 0] != "INFO"
     logger.info("Show debug info: %s", SHOW_DEBUG_INFO)
-    custom_console_params = (
-        {
-            "console": Console(
-                width=150,
-                theme=Theme(
-                    {
-                        "logging.level.verbose": "magenta",
-                        "logging.level.warning": "yellow",
-                        "logging.level.trace": "green",
-                    }
-                ),
-                highlight=use_color,
-                color_system=(
-                    "windows"
-                    if platform.system() == "Windows"
-                    else "auto"
-                    if use_color
-                    else None
-                ),
-            )
-        }
-        if os.environ.get("ASH_IN_CONTAINER", "NO").upper() in ["YES", "1", "TRUE"]
-        else {
-            "console": Console(
-                theme=Theme(
-                    {
-                        "logging.level.verbose": "magenta",
-                        "logging.level.warning": "yellow",
-                        "logging.level.trace": "green",
-                    }
-                ),
-                highlight=use_color,
-                color_system=(
-                    "windows"
-                    if platform.system() == "Windows"
-                    else "auto"
-                    if use_color
-                    else None
-                ),
-            )
-        }
-    )
+    # Configure console parameters with Windows-safe settings
+    console_base_params = {
+        "theme": Theme(
+            {
+                "logging.level.verbose": "magenta",
+                "logging.level.warning": "yellow",
+                "logging.level.trace": "green",
+            }
+        ),
+        "highlight": use_color,
+        "legacy_windows": platform.system().lower() == "windows",
+        "safe_box": platform.system().lower() == "windows",
+        "_environ": {},  # Prevent environment variable issues
+    }
+
+    # Set color system based on platform and encoding capabilities
+    if use_color:
+        if platform.system().lower() == "windows":
+            console_base_params["color_system"] = "windows"
+        else:
+            console_base_params["color_system"] = "auto"
+    else:
+        console_base_params["color_system"] = None
+
+    # Add width constraint for container environments
+    if os.environ.get("ASH_IN_CONTAINER", "NO").upper() in ["YES", "1", "TRUE"]:
+        console_base_params["width"] = 150
+
+    custom_console_params = {"console": Console(**console_base_params)}
     if SHOW_DEBUG_INFO:
         handler = RichHandler(
             show_level=not simple_format,
             enable_link_path=not simple_format,
             rich_tracebacks=not simple_format,
-            show_path=not simple_format
-            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-            not in ["YES", "1", "TRUE"],
+            show_path=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
+            in ["YES", "1", "TRUE"],
             tracebacks_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
             in ["YES", "1", "TRUE"],
             markup=True,

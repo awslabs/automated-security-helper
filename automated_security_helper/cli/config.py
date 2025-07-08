@@ -84,7 +84,7 @@ def init(
         project_name=project_name,
     )
     config_strings = [
-        "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json",
+        "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json",
         yaml.dump(
             ash_config.model_dump(
                 by_alias=True,
@@ -263,7 +263,7 @@ def update(
     # If no schema reference was found, add the default one
     if not config_strings:
         config_strings.append(
-            "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json"
+            "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json"
         )
 
     # Add the updated config

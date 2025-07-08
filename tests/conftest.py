@@ -80,27 +80,6 @@ def pytest_collection_modifyitems(config, items):
             if "integration" in item.keywords:
                 item.add_marker(skip_integration)
 
-    # Run only tests for changed files if --run-changed-only is specified
-    if config.getoption("--run-changed-only"):
-        from tests.utils.test_selection import get_changed_files, get_related_test_files
-
-        base_branch = config.getoption("--base-branch")
-        changed_files = get_changed_files(base_branch)
-        related_test_files = get_related_test_files(changed_files)
-
-        if not related_test_files:
-            # If no related test files were found, don't skip any tests
-            return
-
-        # Skip tests that are not related to changed files
-        skip_not_changed = pytest.mark.skip(reason="Not related to changed files")
-        for item in items:
-            test_file = item.fspath.strpath
-            if not any(
-                test_file.endswith(related_file) for related_file in related_test_files
-            ):
-                item.add_marker(skip_not_changed)
-
 
 @pytest.fixture
 def ash_temp_path():
@@ -214,7 +193,6 @@ def test_plugin_context(ash_temp_path):
     source_dir = Path(f"{ash_temp_path}/test_source_dir")
     output_dir = Path(f"{ash_temp_path}/test_output_dir")
     work_dir = Path(f"{ash_temp_path}/test_work_dir")
-    config_dir = Path(f"{ash_temp_path}/test_config_dir")
 
     # Use a proper AshConfig object
     from automated_security_helper.config.default_config import get_default_config
@@ -226,7 +204,6 @@ def test_plugin_context(ash_temp_path):
         source_dir=source_dir,
         output_dir=output_dir,
         work_dir=work_dir,
-        config_dir=config_dir,
         config=config,
     )
 
@@ -374,7 +351,7 @@ def dummy_scanner(test_plugin_context, dummy_scanner_config):
             self,
             target: Path,
             target_type: Literal["source", "converted"],
-            global_ignore_paths: List = None,
+            global_ignore_paths: List | None = None,
             config=None,
             *args,
             **kwargs,

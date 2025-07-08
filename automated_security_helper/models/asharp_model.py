@@ -4,7 +4,7 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
@@ -49,8 +49,8 @@ class ScannerSeverityCount(BaseModel):
 class SummaryStats(ScannerSeverityCount):
     """Summary statistics for the final report"""
 
-    start: str | None = None
-    end: str | None = None
+    start: str | datetime | None = None
+    end: str | datetime | None = None
     duration: float = 0.0
     total: int = 0
     actionable: int = 0
@@ -135,27 +135,38 @@ class ReportMetadata(BaseModel):
     )
 
     report_id: Annotated[
-        str,
+        str | None,
         Field(
             min_length=1,
             pattern=r"^[A-Za-z][\/\.\w-]+$",
             description="Unique identifier for the report",
         ),
     ] = None
-    generated_at: Annotated[str, Field()] = None
+    generated_at: Annotated[str | None, Field()] = None
     project_name: Annotated[
-        str, Field(min_length=1, description="Name of the project being scanned")
+        str | None, Field(min_length=1, description="Name of the project being scanned")
     ] = None
     tool_version: Annotated[
-        str, Field(min_length=1, description="Version of the security tool")
+        str | None, Field(min_length=1, description="Version of the security tool")
     ] = None
     description: Annotated[
-        str, Field(min_length=1, description="Description of the tool/scan")
+        str | None, Field(min_length=1, description="Description of the tool/scan")
     ] = None
     summary_stats: Annotated[
         SummaryStats,
         Field(description="Summary statistics (e.g., count by severity)"),
     ] = SummaryStats()
+    validation_summary: Annotated[
+        Dict[str, Any],
+        Field(
+            default_factory=dict,
+            description="Summary of ASH component validation results for the report",
+        ),
+    ] = {}
+    execution_discrepancy_report: Annotated[
+        Dict[str, Any],
+        Field(default_factory=dict, description="Discrepancy report for ASH execution"),
+    ] = {}
 
     @field_validator("project_name")
     @classmethod
@@ -168,7 +179,7 @@ class ReportMetadata(BaseModel):
 
     @field_validator("generated_at")
     @classmethod
-    def validate_datetime(cls, v: Union[str, datetime] = None) -> str:
+    def validate_datetime(cls, v: Union[str, datetime, None] = None) -> str:
         """Validate that value is timestamp or, if empty, set to current datetime"""
         if not v:
             v = datetime.now(timezone.utc)
@@ -205,17 +216,17 @@ class AshAggregatedResults(BaseModel):
         default_factory=lambda: ReportMetadata(
             report_id="ASH-" + datetime.now(timezone.utc).strftime("%Y%M%d"),
             project_name="ASH",
-            tool_name="ASH",
+            # tool_name="ASH",
             tool_version=get_ash_version(),
             description="Automated Security Helper Aggregated Report Post-processor",
-            scanner_status={},
+            summary_stats=SummaryStats(),
         )
     )
     ash_config: Annotated[
-        "AshConfig",
+        Optional["AshConfig"],
         Field(description="The full ASH configuration used during this scan."),
     ] = None
-    scanner_results: Dict[str, ScannerStatusInfo] = Field(default_factory=dict)
+    scanner_results: Dict[str, ScannerTargetStatusInfo] = Field(default_factory=dict)
     converter_results: Dict[str, ConverterStatusInfo] = Field(default_factory=dict)
     sarif: Annotated[
         SarifReport | None,
@@ -230,8 +241,8 @@ class AshAggregatedResults(BaseModel):
                         fullName="awslabs/automated-security-helper",
                         version=get_ash_version(),
                         organization="Amazon Web Services",
-                        downloadUri=ASH_REPO_URL,
-                        informationUri=ASH_DOCS_URL,
+                        downloadUri=AnyUrl(ASH_REPO_URL),
+                        informationUri=AnyUrl(ASH_DOCS_URL),
                     ),
                     extensions=[],
                 ),
@@ -251,9 +262,16 @@ class AshAggregatedResults(BaseModel):
             description="Dictionary of additional reports where the keys are the scanner name and the values are the outputs of the scanner."
         ),
     ] = {}
+    validation_checkpoints: Annotated[
+        List[Dict[str, Any]],
+        Field(
+            description="List of validation checkpoints captured during the scan process for debugging and monitoring.",
+            default_factory=list,
+        ),
+    ] = []
 
     @field_validator("ash_config")
-    def validate_ash_config(cls, v: any):
+    def validate_ash_config(cls, v: Any):
         from automated_security_helper.config.ash_config import AshConfig
 
         try:
@@ -503,14 +521,14 @@ class AshAggregatedResults(BaseModel):
                             actual_scanner.lower() if actual_scanner else None
                         )
                         if scanner_name and scanner_name in self.scanner_results:
-                            target_type = "source"  # Default to source
-                            if file_path and "converted" in file_path.lower():
-                                target_type = "converted"
-
                             # Update suppressed finding count
-                            target_info = getattr(
-                                self.scanner_results[scanner_name], target_type
+                            target_info: ScannerTargetStatusInfo | dict = (
+                                self.scanner_results[scanner_name]
                             )
+                            if isinstance(target_info, dict):
+                                target_info = ScannerTargetStatusInfo.model_validate(
+                                    target_info
+                                )
                             if target_info:
                                 if target_info.suppressed_finding_count is None:
                                     target_info.suppressed_finding_count = 1
@@ -638,45 +656,45 @@ class AshAggregatedResults(BaseModel):
                     flat_vulns.append(flat_vuln)
 
         # Process additional reports if available
-        for scanner_name, report_data in self.additional_reports.items():
-            if report_data is None:
+        for scanner_name, results in self.additional_reports.items():
+            if results is None:
                 continue
-            for target_type, results in report_data.items():
-                if isinstance(results, dict) and "severity_counts" in results:
-                    # This is a summary report, not individual findings
-                    continue
 
-                # Try to extract findings from the report data
-                # This is a simplified approach - in a real implementation,
-                # you would need to handle different report formats
-                if isinstance(results, list):
-                    for finding in results:
-                        if not isinstance(finding, dict):
-                            continue
+            if isinstance(results, dict) and "severity_counts" in results:
+                # This is a summary report, not individual findings
+                continue
 
-                        flat_vuln = FlatVulnerability(
-                            id=f"{scanner_name}-{finding.get('id', hash(str(finding)) % 10000)}",
-                            title=finding.get("title", "Unknown Issue"),
-                            description=finding.get(
-                                "description", "No description available"
-                            ),
-                            severity=finding.get("severity", "MEDIUM").upper(),
-                            scanner=scanner_name,
-                            scanner_type=finding.get("type", "UNKNOWN"),
-                            rule_id=finding.get("rule_id"),
-                            file_path=finding.get("file_path"),
-                            line_start=finding.get("line_start"),
-                            line_end=finding.get("line_end"),
-                            cve_id=finding.get("cve_id"),
-                            cwe_id=finding.get("cwe_id"),
-                            fix_available=finding.get("fix_available"),
-                            detected_at=finding.get(
-                                "detected_at", datetime.now(timezone.utc).isoformat()
-                            ),
-                            raw_data=json.dumps(finding, default=str),
-                        )
+            # Try to extract findings from the report data
+            # This is a simplified approach - in a real implementation,
+            # you would need to handle different report formats
+            if isinstance(results, list):
+                for finding in results:
+                    if not isinstance(finding, dict):
+                        continue
 
-                        flat_vulns.append(flat_vuln)
+                    flat_vuln = FlatVulnerability(
+                        id=f"{scanner_name}-{finding.get('id', hash(str(finding)) % 10000)}",
+                        title=finding.get("title", "Unknown Issue"),
+                        description=finding.get(
+                            "description", "No description available"
+                        ),
+                        severity=finding.get("severity", "MEDIUM").upper(),
+                        scanner=scanner_name,
+                        scanner_type=finding.get("type", "UNKNOWN"),
+                        rule_id=finding.get("rule_id"),
+                        file_path=finding.get("file_path"),
+                        line_start=finding.get("line_start"),
+                        line_end=finding.get("line_end"),
+                        cve_id=finding.get("cve_id"),
+                        cwe_id=finding.get("cwe_id"),
+                        fix_available=finding.get("fix_available"),
+                        detected_at=finding.get(
+                            "detected_at", datetime.now(timezone.utc).isoformat()
+                        ),
+                        raw_data=json.dumps(finding, default=str),
+                    )
+
+                    flat_vulns.append(flat_vuln)
 
         return flat_vulns
 
@@ -699,7 +717,14 @@ class AshAggregatedResults(BaseModel):
         return cls.model_validate(json_data)
 
     def save_model(self, output_dir: Path) -> None:
-        """Save AshAggregatedResults as JSON alongside aggregated results."""
+        """Save AshAggregatedResults as JSON alongside aggregated results.
+
+        This method populates the final metrics right before saving to ensure
+        all metrics are aligned and based on the final processed SARIF data.
+        """
+        # Populate final metrics right before saving (if not already done)
+        if not self.scanner_results:
+            self._populate_final_metrics()
 
         report_dir = output_dir.joinpath("reports")
         report_dir.mkdir(parents=True, exist_ok=True)
@@ -712,6 +737,93 @@ class AshAggregatedResults(BaseModel):
                 exclude_unset=True,
                 exclude_none=True,
             )
+        )
+
+    def _populate_final_metrics(self) -> None:
+        """Populate scanner_results and summary_stats from final SARIF data.
+
+        This ensures all metrics are aligned and based on the final processed
+        SARIF data after all suppressions have been applied.
+        """
+        from automated_security_helper.core.unified_metrics import (
+            get_unified_scanner_metrics,
+        )
+
+        ASH_LOGGER.debug("Populating final metrics from unified scanner metrics")
+
+        try:
+            # Get unified metrics from the final SARIF data
+            unified_metrics = get_unified_scanner_metrics(self)
+            ASH_LOGGER.debug(f"Got {len(unified_metrics)} unified metrics")
+
+            # Note: scanner_results should remain as ScannerStatusInfo objects
+            # The unified metrics are computed separately when needed
+            ASH_LOGGER.debug(
+                f"Unified metrics computed for {len(unified_metrics)} scanners"
+            )
+
+            # Populate summary_stats from unified metrics
+            self._populate_summary_stats_from_unified_metrics(unified_metrics)
+
+            ASH_LOGGER.debug(
+                f"Populated final metrics for {len(unified_metrics)} scanners"
+            )
+
+        except Exception as e:
+            ASH_LOGGER.error(f"Error populating final metrics: {str(e)}")
+            import traceback
+
+            ASH_LOGGER.error(f"Stack trace: {traceback.format_exc()}")
+            # Don't raise to avoid breaking the save operation
+
+    def _populate_summary_stats_from_unified_metrics(
+        self, unified_metrics: list
+    ) -> None:
+        """Populate summary_stats from unified metrics."""
+        # Calculate totals from unified metrics
+        total_suppressed = sum(m.suppressed for m in unified_metrics)
+        total_critical = sum(m.critical for m in unified_metrics)
+        total_high = sum(m.high for m in unified_metrics)
+        total_medium = sum(m.medium for m in unified_metrics)
+        total_low = sum(m.low for m in unified_metrics)
+        total_info = sum(m.info for m in unified_metrics)
+        total_findings = sum(m.total for m in unified_metrics)
+        total_actionable = sum(m.actionable for m in unified_metrics)
+
+        # Count scanner statuses
+        passed_count = sum(1 for m in unified_metrics if m.status == "PASSED")
+        failed_count = sum(1 for m in unified_metrics if m.status == "FAILED")
+        skipped_count = sum(1 for m in unified_metrics if m.status == "SKIPPED")
+        missing_count = sum(1 for m in unified_metrics if m.status == "MISSING")
+
+        # Preserve timing information if it exists, ensuring they are strings
+        existing_start = self.metadata.summary_stats.start
+        existing_end = self.metadata.summary_stats.end
+        existing_duration = self.metadata.summary_stats.duration
+
+        # Convert datetime objects to strings if needed
+        if existing_start is not None and not isinstance(existing_start, str):
+            existing_start = str(existing_start)
+        if existing_end is not None and not isinstance(existing_end, str):
+            existing_end = str(existing_end)
+
+        # Update summary stats with unified metrics
+        self.metadata.summary_stats = SummaryStats(
+            start=existing_start,
+            end=existing_end,
+            duration=existing_duration,
+            suppressed=total_suppressed,
+            critical=total_critical,
+            high=total_high,
+            medium=total_medium,
+            low=total_low,
+            info=total_info,
+            total=total_findings,
+            actionable=total_actionable,
+            passed=passed_count,
+            failed=failed_count,
+            missing=missing_count,
+            skipped=skipped_count,
         )
 
     @classmethod

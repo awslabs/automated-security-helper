@@ -15,14 +15,14 @@ permissions:
 
 jobs:
   ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.0.0-beta-20250526151056
+    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.0.0
     permissions:
       contents: read # Required to read the repository contents in order to scan them with ASH
       checks: write # Required for writing CI check runs
       pull-requests: write # Required for writing comments with scan results to pull requests
       security-events: write # Required for collection of SARIF code scanning results for GitHub Advanced Security checks
     with:
-      ash-version: v3.0.0-beta-20250526151056
+      ash-version: v3.0.0
       fail-on-findings: true
       collect-junit-xml-report: true
       collect-sarif-report: true

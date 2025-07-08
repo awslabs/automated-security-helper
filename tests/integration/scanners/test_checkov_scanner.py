@@ -28,11 +28,60 @@ def test_checkov_scanner_init(test_plugin_context):
     assert scanner.config.name == "checkov"
     assert scanner.command == "checkov"
     assert scanner.tool_type == "IAC"
+    assert scanner.use_uv_tool is True  # Verify UV tool is enabled
 
 
 def test_checkov_scanner_validate(test_checkov_scanner):
     """Test CheckovScanner validation."""
     assert test_checkov_scanner.validate() is True
+
+
+def test_checkov_scanner_uv_tool_integration(test_plugin_context):
+    """Test CheckovScanner UV tool integration."""
+    import unittest.mock
+
+    scanner = CheckovScanner(
+        context=test_plugin_context,
+        config=CheckovScannerConfig(),
+    )
+
+    # Verify UV tool is enabled
+    assert scanner.use_uv_tool is True
+    assert scanner.command == "checkov"
+
+    # Test UV tool version detection
+    with unittest.mock.patch(
+        "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+    ) as mock_runner:
+        mock_runner_instance = unittest.mock.MagicMock()
+        mock_runner.return_value = mock_runner_instance
+        mock_runner_instance.is_uv_available.return_value = True
+        mock_runner_instance.get_tool_version.return_value = "3.2.0"
+
+        # Test version detection
+        version = scanner._get_uv_tool_version("checkov")
+        assert version == "3.2.0"
+        mock_runner_instance.get_tool_version.assert_called_with("checkov")
+
+    # Test validation with UV tool available
+    with unittest.mock.patch(
+        "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+    ) as mock_runner:
+        mock_runner_instance = unittest.mock.MagicMock()
+        mock_runner.return_value = mock_runner_instance
+        mock_runner_instance.is_uv_available.return_value = True
+
+        assert scanner.validate() is True
+
+    # Test validation with UV tool unavailable
+    with unittest.mock.patch(
+        "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+    ) as mock_runner:
+        mock_runner_instance = unittest.mock.MagicMock()
+        mock_runner.return_value = mock_runner_instance
+        mock_runner_instance.is_uv_available.return_value = False
+
+        assert scanner.validate() is False
 
 
 def test_checkov_scanner_configure(test_plugin_context):

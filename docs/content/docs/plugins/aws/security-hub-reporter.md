@@ -2,6 +2,8 @@
 
 Sends ASH security findings directly to AWS Security Hub in AWS Security Finding Format (ASFF), enabling centralized security monitoring and compliance reporting.
 
+> For detailed visual diagrams of the Security Hub Reporter architecture and workflow, see [Security Hub Reporter Diagrams](security-hub-reporter-diagrams.md).
+
 ## Overview
 
 The Security Hub Reporter integrates ASH scan results with AWS Security Hub by:
@@ -143,14 +145,14 @@ ASH findings are automatically converted to AWS Security Finding Format (ASFF):
 
 ```bash
 # Run scan with Security Hub reporting
-ash scan /path/to/code --reporters aws-security-hub
+ash /path/to/code --reporters aws-security-hub
 ```
 
 ### With Multiple Reporters
 
 ```bash
 # Generate both SARIF and Security Hub reports
-ash scan /path/to/code --reporters sarif,aws-security-hub
+ash /path/to/code --reporters sarif,aws-security-hub
 ```
 
 ### CI/CD Integration
@@ -163,7 +165,7 @@ ash scan /path/to/code --reporters sarif,aws-security-hub
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   run: |
-    ash scan . --reporters aws-security-hub,sarif
+    ash . --reporters aws-security-hub,sarif
 ```
 
 ## Security Hub Integration
@@ -258,7 +260,7 @@ Enable debug logging to troubleshoot issues:
 
 ```bash
 # Run with debug output
-ash scan /path/to/code --reporters aws-security-hub --log-level DEBUG
+ash /path/to/code --reporters aws-security-hub --log-level DEBUG
 ```
 
 ## Cost Considerations
@@ -319,12 +321,12 @@ import boto3
 def correlate_findings():
     securityhub = boto3.client('securityhub')
     config = boto3.client('config')
-    
+
     # Get ASH findings
     findings = securityhub.get_findings(
         Filters={'ProductName': [{'Value': 'ASH', 'Comparison': 'EQUALS'}]}
     )
-    
+
     # Correlate with Config rules
     for finding in findings['Findings']:
         # Implementation depends on your specific use case
