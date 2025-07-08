@@ -19,6 +19,11 @@ class CustomBuildHook(BuildHookInterface):
 
     def initialize(self, version, build_data):
         """Run the asset staging script."""
+        # Stage assets immediately during initialization
+        self._stage_assets()
+
+    def _stage_assets(self):
+        """Stage the build assets."""
         try:
             # Ensure assets directory exists
             ASH_ASSETS_PATH.mkdir(parents=True, exist_ok=True)

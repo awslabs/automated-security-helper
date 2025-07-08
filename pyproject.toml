@@ -99,19 +99,20 @@ workspace = { members = ["."] }
 [tool.hatch.build.targets.sdist.hooks.custom]
 path = "hatch_build.py"
 
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
 [tool.hatch.build.targets.wheel]
 include = [
     "automated_security_helper",
-    "automated_security_helper/assets/*",
 ]
-force-include = { "automated_security_helper/assets/Dockerfile" = "automated_security_helper/assets/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION" = "automated_security_helper/assets/ASH_INSTALLED_REVISION"}
+force-include = { "automated_security_helper/assets/Dockerfile" = "automated_security_helper/assets/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION" = "automated_security_helper/assets/ASH_INSTALLED_REVISION" }
 
 [tool.hatch.build.targets.sdist]
 include = [
     "automated_security_helper",
-    "automated_security_helper/assets/*",
 ]
-force-include = { "automated_security_helper/assets/Dockerfile" = "automated_security_helper/assets/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION" = "automated_security_helper/assets/ASH_INSTALLED_REVISION"}
+force-include = { "automated_security_helper/assets/Dockerfile" = "automated_security_helper/assets/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION" = "automated_security_helper/assets/ASH_INSTALLED_REVISION" }
 
 
 [build-system]
