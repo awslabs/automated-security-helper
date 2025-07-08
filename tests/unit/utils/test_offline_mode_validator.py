@@ -396,7 +396,14 @@ class TestOfflineModeValidator:
 
         OfflineModeValidator.log_validation_results("TestScanner", True, messages)
 
-        assert "✅ TestScanner offline mode validation passed" in caplog.text
+        # Check for either emoji or Windows-safe ASCII version
+        success_patterns = [
+            "✅ TestScanner offline mode validation passed",
+            "[OK] TestScanner offline mode validation passed",
+        ]
+        assert any(pattern in caplog.text for pattern in success_patterns), (
+            f"Expected success pattern not found in: {caplog.text}"
+        )
         assert "Found 5 cache files" in caplog.text
         assert "Database is up to date" in caplog.text
 

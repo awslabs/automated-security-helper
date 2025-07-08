@@ -4,7 +4,6 @@ from pathlib import Path
 import sys
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
@@ -56,10 +55,6 @@ def create_test_sarif():
     )
 
 
-@pytest.mark.skipif(
-    condition=sys.platform.lower().startswith("win"),
-    reason="Current issues with sanitization of URIs on Windows. Does not affect using ASH, only testing.",
-)
 def test_sanitize_sarif_paths():
     """Test sanitizing paths in SARIF report."""
     sarif = create_test_sarif()
@@ -76,8 +71,19 @@ def test_sanitize_sarif_paths():
         .physicalLocation.root.artifactLocation.uri
     )
 
-    # The path should be relative and use forward slashes
-    expected_path = "to/test.py"
+    # Test the parts that should be consistent across platforms
+    assert "to" in sanitized_uri
+    assert "test.py" in sanitized_uri
+    # Test that backslashes are converted to forward slashes
+    assert "\\" not in sanitized_uri
+
+    # On non-Windows platforms, we can test the exact expected path
+    if not sys.platform.lower().startswith("win"):
+        expected_path = "to/test.py"
+        assert sanitized_uri == expected_path
+    else:
+        # On Windows, just ensure forward slashes are used
+        assert "/" in sanitized_uri
     # Normalize both paths for comparison (handle Windows vs Unix differences)
     assert str(sanitized_uri).replace("\\", "/") == expected_path
 

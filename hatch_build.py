@@ -49,7 +49,7 @@ class CustomBuildHook(BuildHookInterface):
             commit_sha = self._get_commit_sha()
             ASH_INSTALLED_REVISION_PATH.write_text(commit_sha)
             print(
-                f"Successfully wrote commit SHA '{commit_sha}' to {ASH_INSTALLED_REVISION_PATH}"
+                f"Successfully wrote git details '{commit_sha}' to {ASH_INSTALLED_REVISION_PATH}"
             )
 
         except Exception as e:
@@ -68,18 +68,20 @@ class CustomBuildHook(BuildHookInterface):
             print("Warning: git command not found")
             return "no-git-available"
 
-        # Try to get commit SHA from current directory (source repo build)
+        # Try to get commit details from current directory (source repo build)
         try:
-            sha_result = subprocess.run(  # nosec B603 - This code is run during package build
-                [git_path, "rev-parse", "HEAD"],
+            git_result_full = subprocess.run(  # nosec B603 - This code is run during package build
+                # NOTE - This needs to be the branch, otherwise certain actions in the
+                # Dockerfile will not work as expected once distributed.
+                [git_path, "rev-parse", "--abbrev-ref", "HEAD"],
                 capture_output=True,
                 text=True,
                 cwd=ASH_REPO_ROOT.as_posix(),
                 check=True,
             )
-            commit_sha = sha_result.stdout.strip()
-            if commit_sha:
-                return commit_sha
+            git_result = git_result_full.stdout.strip()
+            if git_result:
+                return git_result
         except subprocess.CalledProcessError as e:
             print(f"Git command failed in current directory: {e}")
             if hasattr(e, "stderr") and e.stderr:
