@@ -24,12 +24,12 @@ class TestBedrockSummaryReporter:
     """Tests for the BedrockSummaryReporter class."""
 
     @pytest.fixture
-    def mock_context(self):
+    def mock_context(self, temp_project_dir, temp_output_dir):
         """Create a mock context for the reporter."""
         from automated_security_helper.base.plugin_context import PluginContext
 
         # Create a proper PluginContext instance instead of a MagicMock
-        context = PluginContext(output_dir="/tmp/ash_output", source_dir="/tmp/source")
+        context = PluginContext(output_dir=temp_output_dir, source_dir=temp_project_dir)
         return context
 
     @pytest.fixture
