@@ -295,7 +295,7 @@ class ScannerValidationManager:
         Returns:
             ValidationCheckpoint containing the validation results
         """
-        self.logger.info("Starting validation of registered scanner plugins")
+        self.logger.verbose("Starting validation of registered scanner plugins")
 
         # Extract scanner names and sort alphabetically
         scanner_names = []
@@ -316,9 +316,9 @@ class ScannerValidationManager:
 
         # Log registration summary
         total_count = len(scanner_names)
-        self.logger.info(f"Found {total_count} registered scanner plugins:")
+        self.logger.verbose(f"Found {total_count} registered scanner plugins:")
         for scanner_name in scanner_names:
-            self.logger.info(f"  - {scanner_name}")
+            self.logger.verbose(f"  - {scanner_name}")
 
         # Create validation checkpoint
         checkpoint = self.create_checkpoint(
@@ -354,7 +354,7 @@ class ScannerValidationManager:
         Returns:
             ValidationCheckpoint containing the enablement validation results
         """
-        self.logger.info("Starting validation of scanner enablement status")
+        self.logger.verbose("Starting validation of scanner enablement status")
 
         if dependency_errors is None:
             dependency_errors = {}
@@ -380,13 +380,13 @@ class ScannerValidationManager:
 
         if dependency_errors:
             dep_error_scanners = sorted(dependency_errors.keys())
-            self.logger.info(
+            self.logger.verbose(
                 f"  Scanners with dependency errors ({len(dep_error_scanners)}): {', '.join(dep_error_scanners)}"
             )
             for scanner_name, errors in dependency_errors.items():
                 self.logger.debug(f"    {scanner_name}: {', '.join(errors)}")
         else:
-            self.logger.info("  Scanners with dependency errors (0): None")
+            self.logger.verbose("  Scanners with dependency errors (0): None")
 
         # Update scanner states based on enablement status
         for scanner_name in all_registered:
@@ -446,7 +446,7 @@ class ScannerValidationManager:
         Returns:
             ValidationCheckpoint containing the execution completion validation results
         """
-        self.logger.info("Starting validation of scanner execution completion")
+        self.logger.verbose("Starting validation of scanner execution completion")
 
         # Sort completed scanners for consistent output
         completed_scanners = sorted(completed_scanners)
@@ -468,22 +468,21 @@ class ScannerValidationManager:
             if expected_scanners
             else 0.0
         )
-        self.logger.info("Scanner execution completion validation summary:")
-        self.logger.info(
-            f"  Expected to complete ({len(expected_scanners)}): {', '.join(expected_scanners) if expected_scanners else 'None'}"
-        )
-        self.logger.info(
-            f"  Actually completed ({len(completed_scanners)}): {', '.join(completed_scanners) if completed_scanners else 'None'}"
-        )
-        self.logger.info(
-            f"  Completion rate: {completion_rate:.1%} ({len(completed_scanners)}/{len(expected_scanners)})"
-        )
-
         # Log any scanners that didn't complete and mark them as failed
         missing_completions = [
             s for s in expected_scanners if s not in completed_scanners
         ]
+        self.logger.info("Scanner execution completion validation summary:")
         if missing_completions:
+            self.logger.info(
+                f"  Expected to complete ({len(expected_scanners)}): {', '.join(expected_scanners) if expected_scanners else 'None'}"
+            )
+            self.logger.info(
+                f"  Actually completed ({len(completed_scanners)}): {', '.join(completed_scanners) if completed_scanners else 'None'}"
+            )
+            self.logger.info(
+                f"  Completion rate: {completion_rate:.1%} ({len(completed_scanners)}/{len(expected_scanners)})"
+            )
             self.logger.warning(
                 f"  Scanners that didn't complete ({len(missing_completions)}): {', '.join(sorted(missing_completions))}"
             )
@@ -499,7 +498,7 @@ class ScannerValidationManager:
                     f"  ❌ Scanner '{scanner_name}' failed to complete execution"
                 )
         else:
-            self.logger.info("  ✅ All expected scanners completed execution")
+            self.logger.verbose("  ✅ All expected scanners completed execution")
 
         # Create validation checkpoint
         checkpoint = self.create_checkpoint(
@@ -532,7 +531,7 @@ class ScannerValidationManager:
         Returns:
             ValidationCheckpoint containing the result completeness validation results
         """
-        self.logger.info("Starting validation of result completeness")
+        self.logger.verbose("Starting validation of result completeness")
 
         # Import here to avoid circular imports
 
@@ -554,21 +553,21 @@ class ScannerValidationManager:
         )
 
         # Enhanced result completeness validation summary with accurate scanner states
-        self.logger.info("Result completeness validation summary:")
-        self.logger.info(
+        self.logger.verbose("Result completeness validation summary:")
+        self.logger.verbose(
             f"  Originally registered scanners ({len(all_registered)}): {', '.join(sorted(all_registered)) if all_registered else 'None'}"
         )
-        self.logger.info(
+        self.logger.verbose(
             f"  Scanners that executed successfully ({len(executed_scanners)}): {', '.join(sorted(executed_scanners)) if executed_scanners else 'None'}"
         )
 
         # Provide detailed breakdown of scanner states for better visibility
         scanner_state_summary = self._get_scanner_state_summary()
         if scanner_state_summary:
-            self.logger.info("  Scanner state breakdown:")
+            self.logger.verbose("  Scanner state breakdown:")
             for state, scanners in scanner_state_summary.items():
                 if scanners:
-                    self.logger.info(
+                    self.logger.verbose(
                         f"    {state.title()} ({len(scanners)}): {', '.join(sorted(scanners))}"
                     )
 
@@ -576,7 +575,7 @@ class ScannerValidationManager:
         completion_rate = (
             len(executed_scanners) / len(all_registered) if all_registered else 1.0
         )
-        self.logger.info(
+        self.logger.verbose(
             f"  Completion rate: {completion_rate:.1%} ({len(executed_scanners)}/{len(all_registered)})"
         )
 
@@ -597,7 +596,7 @@ class ScannerValidationManager:
         added_scanners = []
 
         if missing_scanners:
-            self.logger.info(
+            self.logger.verbose(
                 f"Found {len(missing_scanners)} scanners missing from results, adding them with appropriate status:"
             )
 
@@ -664,11 +663,11 @@ class ScannerValidationManager:
                         f"  + Added '{scanner_name}' with status {scanner_status_info.status.value} (Reason: {reason})"
                     )
                 else:
-                    self.logger.info(
+                    self.logger.verbose(
                         f"  + Added '{scanner_name}' with status {scanner_status_info.status.value} (Reason: {reason})"
                     )
         else:
-            self.logger.info(
+            self.logger.verbose(
                 "✅ All registered scanners are present in results - no missing scanners to add"
             )
 
@@ -716,19 +715,21 @@ class ScannerValidationManager:
             if aggregated_results.scanner_results
             else 0
         )
-        self.logger.info("Result completeness validation completed:")
-        self.logger.info(f"  Final scanner count in results: {final_scanner_count}")
-        self.logger.info(f"  Scanners added to results: {len(added_scanners)}")
+        self.logger.verbose("Result completeness validation completed:")
+        self.logger.verbose(f"  Final scanner count in results: {final_scanner_count}")
+        self.logger.verbose(f"  Scanners added to results: {len(added_scanners)}")
 
         if added_scanners:
-            self.logger.info(f"  Added scanners: {', '.join(sorted(added_scanners))}")
+            self.logger.verbose(
+                f"  Added scanners: {', '.join(sorted(added_scanners))}"
+            )
 
         if unexpected_scanners:
             filtered_unexpected = [
                 s for s in unexpected_scanners if s and not s.endswith("Scanner")
             ]
             if filtered_unexpected:
-                self.logger.info(
+                self.logger.verbose(
                     f"  Unexpected scanners found: {', '.join(sorted(filtered_unexpected))}"
                 )
 
@@ -738,7 +739,9 @@ class ScannerValidationManager:
                 f"Validation checkpoint has {len(checkpoint.discrepancies)} discrepancies and {len(checkpoint.errors)} errors"
             )
         else:
-            self.logger.info("✅ Result completeness validation passed without issues")
+            self.logger.verbose(
+                "✅ Result completeness validation passed without issues"
+            )
 
         return checkpoint
 
@@ -971,7 +974,7 @@ class ScannerValidationManager:
         elif status_info["status"] == "excluded":
             status = ScannerStatus.SKIPPED
         elif status_info["status"] == "missing_deps":
-            status = ScannerStatus.SKIPPED
+            status = ScannerStatus.MISSING  # Use MISSING for dependency issues
         elif status_info["status"] == "failed":
             status = ScannerStatus.ERROR  # Use ERROR for execution failures
         else:  # missing or unknown
@@ -995,7 +998,7 @@ class ScannerValidationManager:
         Returns:
             ValidationCheckpoint containing the queue validation results
         """
-        self.logger.info("Starting validation of scanner task queue")
+        self.logger.verbose("Starting validation of scanner task queue")
 
         # Extract scanner names from queue contents
         queued_scanner_names = []
@@ -1014,11 +1017,11 @@ class ScannerValidationManager:
         expected_scanners = self.get_scanners_by_status("enablement_status", "enabled")
 
         # Enhanced logging for task queue validation
-        self.logger.info("Task queue validation summary:")
-        self.logger.info(
+        self.logger.verbose("Task queue validation summary:")
+        self.logger.verbose(
             f"  Expected scanners to be queued ({len(expected_scanners)}): {', '.join(expected_scanners) if expected_scanners else 'None'}"
         )
-        self.logger.info(
+        self.logger.verbose(
             f"  Actually queued scanners ({len(queued_scanner_names)}): {', '.join(queued_scanner_names) if queued_scanner_names else 'None'}"
         )
 
@@ -1081,7 +1084,7 @@ class ScannerValidationManager:
         Returns:
             List of scanner names that were successfully re-enabled
         """
-        self.logger.info(
+        self.logger.verbose(
             f"Starting retry registration for {len(missing_scanners)} missing scanners"
         )
 
@@ -1100,7 +1103,7 @@ class ScannerValidationManager:
                 f"Attempted retry registration for scanner: {scanner_name}"
             )
 
-        self.logger.info(
+        self.logger.verbose(
             f"Retry registration completed. Successfully registered: {len(successfully_registered)} scanners"
         )
         return successfully_registered
@@ -1144,7 +1147,7 @@ class ScannerValidationManager:
             validation_checkpoint: The checkpoint containing validation results
             scan_results: Optional scan results object to add errors to
         """
-        self.logger.info(
+        self.logger.verbose(
             "Processing queue validation errors and ensuring scan continuity"
         )
 
@@ -1170,7 +1173,7 @@ class ScannerValidationManager:
             for error in validation_checkpoint.errors:
                 self.logger.error(f"Queue validation error: {error}")
 
-        self.logger.info("Queue validation error handling completed")
+        self.logger.verbose("Queue validation error handling completed")
 
     def report_execution_discrepancies(
         self, execution_checkpoint: ValidationCheckpoint

@@ -167,15 +167,14 @@ def get_unified_scanner_metrics(
     # Convert the statistics to ScannerMetrics objects
     for scanner_name, stats in scanner_stats.items():
         # Determine status text (same as status for now)
-        status = (
-            stats["excluded"]
-            and "SKIPPED"
-            or stats["dependencies_missing"]
-            and "MISSING"
-            or stats["actionable"] > 0
-            and "FAILED"
-            or "PASSED"
-        )
+        if stats["excluded"]:
+            status = "SKIPPED"
+        elif stats["dependencies_missing"]:
+            status = "MISSING"
+        elif stats["actionable"] > 0:
+            status = "FAILED"
+        else:
+            status = "PASSED"
         status_text = status
 
         # Determine if the scanner passed
