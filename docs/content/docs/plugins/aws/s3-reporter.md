@@ -1,18 +1,16 @@
 # S3 Reporter
 
-Stores ASH security scan reports in Amazon S3 for centralized storage, archival, and integration with other AWS services.
-
-> For detailed visual diagrams of the S3 Reporter architecture and workflow, see [S3 Reporter Diagrams](s3-reporter-diagrams.md).
+Uploads ASH security scan reports to Amazon S3 for centralized storage and archival.
 
 ## Overview
 
 The S3 Reporter provides:
 
-- **Centralized storage** of scan results across multiple environments
-- **Long-term archival** with configurable lifecycle policies
-- **Integration with AWS analytics** services like Athena and QuickSight
-- **Secure access control** using S3 bucket policies and IAM
-- **Cost-effective storage** with multiple storage classes
+- **Simple upload** of ASH scan results to S3 buckets
+- **JSON or YAML format** support for report files
+- **Configurable S3 key prefixes** for organization
+- **Retry logic** for reliable uploads
+- **Local backup** of uploaded reports
 
 ## Configuration
 
@@ -25,6 +23,8 @@ reporters:
     options:
       bucket_name: myorg-ash-reports
       aws_region: us-east-1
+      file_format: json  # or yaml
+      key_prefix: ash-reports/
 ```
 
 ### Advanced Configuration
@@ -34,22 +34,29 @@ reporters:
   s3:
     enabled: true
     options:
-      # use the environment variables to insert the bucket name
+      # Use environment variables to insert the bucket name
       bucket_name: !ENV ASH_S3_BUCKET_NAME
       aws_region: !ENV AWS_REGION
+      aws_profile: !ENV AWS_PROFILE
+      file_format: json
+      key_prefix: security-scans/
+      # Retry configuration
+      max_retries: 3
+      base_delay: 1.0
+      max_delay: 60.0
 ```
 
 ### Environment Variables
 
 ```bash
-# S3 bucket name
+# Required: S3 bucket name
 export ASH_S3_BUCKET_NAME="my-security-reports"
 
-# AWS region
+# Required: AWS region
 export AWS_REGION="us-east-1"
 
-# Optional: S3 key prefix
-export ASH_S3_KEY_PREFIX="security-scans"
+# Optional: AWS profile
+export AWS_PROFILE="my-profile"
 ```
 
 ## Prerequisites
@@ -100,14 +107,19 @@ The reporter requires the following IAM permissions:
       "Effect": "Allow",
       "Action": [
         "s3:PutObject",
-        "s3:PutObjectAcl",
-        "s3:GetObject",
-        "s3:ListBucket"
+        "s3:HeadBucket"
       ],
       "Resource": [
         "arn:aws:s3:::my-security-reports",
         "arn:aws:s3:::my-security-reports/*"
       ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
     }
   ]
 }
@@ -124,66 +136,18 @@ Ensure AWS credentials are configured using one of:
 
 ## Features
 
-### Flexible File Organization
+### File Format Support
 
-The reporter supports various file organization patterns:
-
-```
-s3://my-security-reports/
-├── ash-reports/
-│   ├── 2024/
-│   │   ├── 06/
-│   │   │   ├── 11/
-│   │   │   │   ├── scan-20240611-120000.sarif.json
-│   │   │   │   ├── scan-20240611-120000.html
-│   │   │   │   └── scan-20240611-120000.csv
-│   │   │   └── daily-summary-20240611.json
-│   │   └── monthly-summary-202406.json
-│   └── latest/
-│       ├── latest.sarif.json
-│       └── latest.html
-```
-
-### Multiple Format Support
-
-Store reports in various formats simultaneously:
+The S3 reporter supports two output formats:
 
 ```yaml
 options:
-  formats:
-    - "sarif"     # SARIF JSON format
-    - "html"      # HTML report
-    - "csv"       # CSV export
-    - "json"      # Raw JSON data
-    - "yaml"      # YAML format
+  file_format: json  # Default: JSON format
+  # OR
+  file_format: yaml  # YAML format
 ```
 
-### Metadata and Tagging
-
-Add metadata and tags for better organization:
-
-```yaml
-options:
-  metadata:
-    project: "web-application"
-    environment: "production"
-    scan_type: "security"
-    version: "1.2.3"
-  tags:
-    Team: "Security"
-    Project: "WebApp"
-    Environment: "Prod"
-    CostCenter: "Engineering"
-```
-
-### Storage Class Optimization
-
-Choose appropriate storage classes for cost optimization:
-
-```yaml
-options:
-  storage_class: "STANDARD_IA"  # Options: STANDARD, STANDARD_IA, ONEZONE_IA, GLACIER, DEEP_ARCHIVE
-```
+**Note**: Only one format can be selected per configuration. The reporter uploads the ASH aggregated results in the specified format.
 
 ## Usage Examples
 
@@ -191,16 +155,18 @@ options:
 
 ```bash
 # Store reports in S3
-ash /path/to/code --reporters s3-reporter
+export ASH_S3_BUCKET_NAME="my-security-reports"
+export AWS_REGION="us-east-1"
+ash /path/to/code --reporters s3
 ```
 
 ### With Custom Configuration
 
 ```bash
-# Set bucket via environment variable
+# Set bucket and prefix via environment variables
 export ASH_S3_BUCKET_NAME="security-reports-prod"
-export ASH_S3_KEY_PREFIX="applications/web-app"
-ash /path/to/code --reporters s3-reporter,sarif
+export AWS_REGION="us-east-1"
+ash /path/to/code --reporters s3,sarif
 ```
 
 ### CI/CD Integration
@@ -211,11 +177,10 @@ ash /path/to/code --reporters s3-reporter,sarif
   env:
     AWS_REGION: us-east-1
     ASH_S3_BUCKET_NAME: "ci-security-reports"
-    ASH_S3_KEY_PREFIX: "github-actions/${{ github.repository }}"
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   run: |
-    ash . --reporters s3-reporter,sarif
+    ash . --reporters s3,sarif
 
 - name: Generate Report URL
   run: |
@@ -230,18 +195,17 @@ pipeline {
     environment {
         AWS_REGION = 'us-east-1'
         ASH_S3_BUCKET_NAME = 'jenkins-security-reports'
-        ASH_S3_KEY_PREFIX = "jobs/${env.JOB_NAME}/${env.BUILD_NUMBER}"
     }
     stages {
         stage('Security Scan') {
             steps {
-                sh 'ash . --reporters s3-reporter,html'
+                sh 'ash . --reporters s3,html'
             }
         }
         stage('Archive Results') {
             steps {
                 script {
-                    def reportUrl = "https://s3.console.aws.amazon.com/s3/buckets/${env.ASH_S3_BUCKET_NAME}/${env.ASH_S3_KEY_PREFIX}/"
+                    def reportUrl = "https://s3.console.aws.amazon.com/s3/buckets/${env.ASH_S3_BUCKET_NAME}/"
                     currentBuild.description = "Security Report: ${reportUrl}"
                 }
             }
@@ -250,232 +214,31 @@ pipeline {
 }
 ```
 
-## Integration with AWS Services
+## Output Format
 
-### Amazon Athena
+The S3 reporter uploads ASH aggregated results in the specified format (JSON or YAML). The uploaded file contains:
 
-Query scan results using SQL:
+- **Metadata**: Scan information, timestamps, and configuration
+- **Findings**: Security issues discovered by scanners
+- **Summary statistics**: Counts by severity level
+- **Scanner details**: Information about which scanners were run
 
-```sql
--- Create external table for SARIF reports
-CREATE EXTERNAL TABLE security_scans (
-  scan_id string,
-  timestamp string,
-  findings array<struct<
-    rule_id: string,
-    severity: string,
-    message: string,
-    file_path: string
-  >>
-)
-STORED AS JSON
-LOCATION 's3://my-security-reports/ash-reports/'
+### File Naming
+
+Files are uploaded with the following naming pattern:
+```
+{key_prefix}ash-report-{timestamp}.{extension}
 ```
 
-### Amazon QuickSight
+For example:
+- `ash-reports/ash-report-2024-01-15T10:30:00Z.json`
+- `security-scans/ash-report-2024-01-15T10:30:00Z.yaml`
 
-Create dashboards from S3 data:
+### Local Backup
 
-1. **Connect to S3**: Use Athena as data source
-2. **Create datasets**: From security scan tables
-3. **Build visualizations**: Trend analysis, severity distribution
-4. **Share dashboards**: With security teams and management
-
-### AWS Lambda
-
-Process reports automatically:
-
-```python
-import json
-import boto3
-
-def lambda_handler(event, context):
-    s3 = boto3.client('s3')
-
-    # Triggered by S3 event
-    bucket = event['Records'][0]['s3']['bucket']['name']
-    key = event['Records'][0]['s3']['object']['key']
-
-    # Download and process report
-    response = s3.get_object(Bucket=bucket, Key=key)
-    report_data = json.loads(response['Body'].read())
-
-    # Process findings (e.g., send alerts for critical issues)
-    critical_findings = [
-        finding for finding in report_data.get('findings', [])
-        if finding.get('severity') == 'CRITICAL'
-    ]
-
-    if critical_findings:
-        # Send alert via SNS
-        sns = boto3.client('sns')
-        sns.publish(
-            TopicArn='arn:aws:sns:us-east-1:123456789012:security-alerts',
-            Message=f'Critical security findings detected: {len(critical_findings)} issues',
-            Subject='Security Alert: Critical Findings'
-        )
-
-    return {'statusCode': 200}
+The reporter also creates a local copy of the uploaded report in:
 ```
-
-## Lifecycle Management
-
-### S3 Lifecycle Policies
-
-Automatically manage report retention:
-
-```json
-{
-  "Rules": [
-    {
-      "ID": "ASH-Reports-Lifecycle",
-      "Status": "Enabled",
-      "Filter": {
-        "Prefix": "ash-reports/"
-      },
-      "Transitions": [
-        {
-          "Days": 30,
-          "StorageClass": "STANDARD_IA"
-        },
-        {
-          "Days": 90,
-          "StorageClass": "GLACIER"
-        },
-        {
-          "Days": 365,
-          "StorageClass": "DEEP_ARCHIVE"
-        }
-      ],
-      "Expiration": {
-        "Days": 2555  // 7 years retention
-      }
-    }
-  ]
-}
-```
-
-Apply lifecycle policy:
-
-```bash
-aws s3api put-bucket-lifecycle-configuration \
-  --bucket my-security-reports \
-  --lifecycle-configuration file://lifecycle-policy.json
-```
-
-### Automated Cleanup
-
-Clean up old reports with Lambda:
-
-```python
-import boto3
-from datetime import datetime, timedelta
-
-def cleanup_old_reports(event, context):
-    s3 = boto3.client('s3')
-    bucket_name = 'my-security-reports'
-
-    # Delete reports older than 90 days
-    cutoff_date = datetime.now() - timedelta(days=90)
-
-    paginator = s3.get_paginator('list_objects_v2')
-    pages = paginator.paginate(Bucket=bucket_name, Prefix='ash-reports/')
-
-    for page in pages:
-        for obj in page.get('Contents', []):
-            if obj['LastModified'].replace(tzinfo=None) < cutoff_date:
-                s3.delete_object(Bucket=bucket_name, Key=obj['Key'])
-                print(f"Deleted: {obj['Key']}")
-```
-
-## Security Best Practices
-
-### Bucket Security
-
-1. **Block public access**:
-   ```bash
-   aws s3api put-public-access-block \
-     --bucket my-security-reports \
-     --public-access-block-configuration \
-     BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
-   ```
-
-2. **Enable server-side encryption**:
-   ```bash
-   aws s3api put-bucket-encryption \
-     --bucket my-security-reports \
-     --server-side-encryption-configuration '{
-       "Rules": [{
-         "ApplyServerSideEncryptionByDefault": {
-           "SSEAlgorithm": "AES256"
-         }
-       }]
-     }'
-   ```
-
-3. **Enable access logging**:
-   ```bash
-   aws s3api put-bucket-logging \
-     --bucket my-security-reports \
-     --bucket-logging-status '{
-       "LoggingEnabled": {
-         "TargetBucket": "my-access-logs",
-         "TargetPrefix": "security-reports-access/"
-       }
-     }'
-   ```
-
-### Access Control
-
-Use IAM policies for fine-grained access:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::123456789012:role/SecurityTeam"
-      },
-      "Action": [
-        "s3:GetObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::my-security-reports",
-        "arn:aws:s3:::my-security-reports/*"
-      ]
-    }
-  ]
-}
-```
-
-## Cost Optimization
-
-### Storage Class Selection
-
-| Storage Class | Use Case | Cost | Retrieval Time |
-|---------------|----------|------|----------------|
-| STANDARD | Frequently accessed reports | Highest | Immediate |
-| STANDARD_IA | Monthly/quarterly reviews | Medium | Immediate |
-| GLACIER | Long-term archival | Low | Minutes to hours |
-| DEEP_ARCHIVE | Compliance archival | Lowest | 12+ hours |
-
-### Cost Monitoring
-
-Monitor S3 costs:
-
-```bash
-# Get storage metrics
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/S3 \
-  --metric-name BucketSizeBytes \
-  --dimensions Name=BucketName,Value=my-security-reports Name=StorageType,Value=StandardStorage \
-  --start-time 2024-06-01T00:00:00Z \
-  --end-time 2024-06-11T00:00:00Z \
-  --period 86400 \
-  --statistics Average
+{output_dir}/reports/s3-report.{extension}
 ```
 
 ## Troubleshooting
@@ -483,60 +246,43 @@ aws cloudwatch get-metric-statistics \
 ### Common Issues
 
 **Access Denied**
-```bash
-# Check bucket permissions
-aws s3api get-bucket-policy --bucket my-security-reports
-
-# Verify IAM permissions
-aws iam simulate-principal-policy \
-  --policy-source-arn arn:aws:iam::123456789012:user/ash-user \
-  --action-names s3:PutObject \
-  --resource-arns arn:aws:s3:::my-security-reports/test-object
-```
+- Verify that the AWS credentials have the required IAM permissions
+- Check that the bucket exists and is in the correct region
+- Ensure the bucket name is correctly configured
 
 **Bucket Not Found**
-```bash
-# List available buckets
-aws s3 ls
-
-# Check bucket region
-aws s3api get-bucket-location --bucket my-security-reports
-```
+- Verify the bucket name is correct
+- Check that the bucket exists in the specified AWS region
+- Ensure AWS credentials have access to the bucket
 
 **Upload Failures**
-```bash
-# Test S3 connectivity
-aws s3 cp test-file.txt s3://my-security-reports/test/
-
-# Check CloudTrail for detailed error information
-aws logs filter-log-events \
-  --log-group-name CloudTrail/S3DataEvents \
-  --start-time 1640995200000
-```
+- Check network connectivity to AWS
+- Verify AWS credentials are valid and not expired
+- Review the retry configuration if uploads are timing out
 
 ### Debug Mode
 
-Enable debug logging:
+Enable debug logging to see detailed error information:
 
 ```bash
-ash /path/to/code --reporters s3-reporter --log-level DEBUG
+ash /path/to/code --reporters s3 --log-level DEBUG
 ```
 
 ### Retry Configuration
 
-Configure retry behavior for API calls:
+The reporter includes built-in retry logic. You can configure retry behavior:
 
 ```yaml
 reporters:
-  s3-reporter:
+  s3:
     enabled: true
     options:
       bucket_name: "my-security-reports"
       aws_region: "us-east-1"
       # Retry configuration
-      max_retries: 5  # Increase max retries
-      base_delay: 2.0  # Increase base delay
-      max_delay: 120.0  # Increase max delay
+      max_retries: 5      # Default: 3
+      base_delay: 2.0     # Default: 1.0 seconds
+      max_delay: 120.0    # Default: 60.0 seconds
 ```
 
 ## Best Practices

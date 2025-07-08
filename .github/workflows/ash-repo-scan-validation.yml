@@ -124,17 +124,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+          cache: "pip"
       - name: Install ASH Python package at commit SHA (shell)
         if: contains(matrix.method, 'python') && !contains(matrix.os, 'windows')
         run: |
           echo "Installing ASH using Python on ${{ matrix.os }} (${{ matrix.platform }})"
-          uv pip install --system git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
+          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
 
       - name: Update GITHUB_PATH with Python scripts path on Windows
         if: contains(matrix.method, 'python') && matrix.os == 'windows-latest'
         shell: pwsh
         run: |
+          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
           echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
 
       - name: Validate ASH using Python + Container
@@ -205,7 +206,6 @@ jobs:
           ./ash --help
           echo "ASH Scan Output:"
           ./ash --build-target ci --verbose --ignore-suppressions
-
 
       - name: Verify scan completed
         shell: pwsh
