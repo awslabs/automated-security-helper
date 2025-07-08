@@ -101,7 +101,7 @@ def run_command(
     # Set encoding for Windows compatibility
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
-    
+
     try:
         result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
@@ -190,7 +190,7 @@ def run_command_with_output_handling(
     # Set encoding for Windows compatibility
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
-    
+
     try:
         result = subprocess.run(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             command,
@@ -322,7 +322,7 @@ def run_command_stream_output(
     # Set encoding for Windows compatibility
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"
-    
+
     try:
         process = subprocess.Popen(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
             args,
@@ -449,7 +449,7 @@ def create_process_with_pipes(
     ASH_LOGGER.verbose(f"Creating process with pipes: {cmd_str}")
 
     stderr = subprocess.STDOUT if stderr_to_stdout else subprocess.PIPE
-    
+
     # Set encoding for Windows compatibility
     if encoding is None and platform.system().lower() == "windows":
         encoding = "utf-8"

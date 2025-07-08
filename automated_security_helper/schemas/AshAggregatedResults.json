@@ -1528,7 +1528,7 @@
               }
             },
             "opengrep": {
-              "enabled": false,
+              "enabled": true,
               "name": "opengrep",
               "options": {
                 "config": "auto",
@@ -1546,7 +1546,7 @@
               }
             },
             "semgrep": {
-              "enabled": true,
+              "enabled": false,
               "name": "semgrep",
               "options": {
                 "config": "auto",
@@ -10689,7 +10689,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -12934,6 +12934,12 @@
           "description": "Description of the tool/scan",
           "title": "Description"
         },
+        "execution_discrepancy_report": {
+          "additionalProperties": true,
+          "description": "Discrepancy report for ASH execution",
+          "title": "Execution Discrepancy Report",
+          "type": "object"
+        },
         "generated_at": {
           "anyOf": [
             {
@@ -13009,6 +13015,12 @@
           "default": null,
           "description": "Version of the security tool",
           "title": "Tool Version"
+        },
+        "validation_summary": {
+          "additionalProperties": true,
+          "description": "Summary of ASH component validation results for the report",
+          "title": "Validation Summary",
+          "type": "object"
         }
       },
       "title": "ReportMetadata",
@@ -15342,7 +15354,7 @@
         "opengrep": {
           "$ref": "#/$defs/OpengrepScannerConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "name": "opengrep",
             "options": {
               "config": "auto",
@@ -15364,7 +15376,7 @@
         "semgrep": {
           "$ref": "#/$defs/SemgrepScannerConfig",
           "default": {
-            "enabled": true,
+            "enabled": false,
             "name": "semgrep",
             "options": {
               "config": "auto",
@@ -15900,7 +15912,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": true,
+          "default": false,
           "title": "Enabled",
           "type": "boolean"
         },

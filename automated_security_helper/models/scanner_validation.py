@@ -739,9 +739,7 @@ class ScannerValidationManager:
                 f"Validation checkpoint has {len(checkpoint.discrepancies)} discrepancies and {len(checkpoint.errors)} errors"
             )
         else:
-            self.logger.verbose(
-                "Result completeness validation passed without issues"
-            )
+            self.logger.verbose("Result completeness validation passed without issues")
 
         return checkpoint
 

@@ -202,9 +202,7 @@ def validate_npm_audit_offline_mode() -> Tuple[bool, List[str]]:
     for cache_dir in npm_cache_dirs:
         if cache_dir and Path(cache_dir).exists():
             cache_found = True
-            ASH_LOGGER.info(
-                f"npm audit offline mode: Found npm cache at {cache_dir}"
-            )
+            ASH_LOGGER.info(f"npm audit offline mode: Found npm cache at {cache_dir}")
             messages.append(f"Found npm cache at {cache_dir}")
             break
 
@@ -223,9 +221,7 @@ def validate_npm_audit_offline_mode() -> Tuple[bool, List[str]]:
 
     for cache_dir in yarn_cache_dirs:
         if cache_dir and Path(cache_dir).exists():
-            ASH_LOGGER.info(
-                f"npm audit offline mode: Found yarn cache at {cache_dir}"
-            )
+            ASH_LOGGER.info(f"npm audit offline mode: Found yarn cache at {cache_dir}")
             messages.append(f"Found yarn cache at {cache_dir}")
             break
 

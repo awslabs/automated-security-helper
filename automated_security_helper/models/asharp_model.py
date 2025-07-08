@@ -158,11 +158,14 @@ class ReportMetadata(BaseModel):
     ] = SummaryStats()
     validation_summary: Annotated[
         Dict[str, Any],
-        Field(default_factory=dict,description="Summary of ASH component validation results for the report"),
+        Field(
+            default_factory=dict,
+            description="Summary of ASH component validation results for the report",
+        ),
     ] = {}
     execution_discrepancy_report: Annotated[
         Dict[str, Any],
-        Field(default_factory=dict,description="Discrepancy report for ASH execution"),
+        Field(default_factory=dict, description="Discrepancy report for ASH execution"),
     ] = {}
 
     @field_validator("project_name")

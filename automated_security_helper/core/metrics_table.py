@@ -209,7 +209,7 @@ def display_metrics_table(
             "safe_box": platform.system().lower() == "windows",
             "_environ": {},  # Prevent environment variable issues
         }
-        
+
         # Set color system based on platform and color preference
         if use_color:
             if platform.system().lower() == "windows":
@@ -218,7 +218,7 @@ def display_metrics_table(
                 console_kwargs["color_system"] = "auto"
         else:
             console_kwargs["color_system"] = None
-            
+
         console = Console(**console_kwargs)
 
         # Generate the metrics table using unified data
@@ -262,7 +262,7 @@ def display_metrics_table(
             if platform.system().lower() == "windows"
             else "📊 ASH Scan Results Help"
         )
-        
+
         help_panel = Panel(
             help_text,
             title=help_title,

@@ -68,7 +68,6 @@ def run_cdk_nag_against_cfn_template(
 
     # Suppress JSII stack traces by redirecting stderr for entire function
     import sys
-    import warnings
 
     original_stderr = sys.stderr
     devnull_file = None
@@ -105,7 +104,9 @@ def run_cdk_nag_against_cfn_template(
                 if template_path is None:
                     raise ValueError("template_path must be provided")
                 if not template_path.exists():
-                    raise FileNotFoundError(f"Template file does not exist: {template_path}")
+                    raise FileNotFoundError(
+                        f"Template file does not exist: {template_path}"
+                    )
                 super().__init__(scope, id)
                 # Get the relative path to use as the logical ID
                 # CDK will replace path separators with

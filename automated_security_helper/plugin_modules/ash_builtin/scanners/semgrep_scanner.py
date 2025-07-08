@@ -152,7 +152,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 level=logging.INFO,
             )
             return False
-            
+
         # First validate UV tool availability if required
         if not self._validate_uv_tool_availability():
             # If UV tool is not available, try direct executable fallback

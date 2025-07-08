@@ -209,7 +209,11 @@ def _is_windows_with_encoding_issues() -> bool:
         console_encoding = sys.stdout.encoding or "unknown"
         # CP1252 and other problematic encodings on Windows
         has_encoding_issues = console_encoding.lower() in [
-            "cp1252", "windows-1252", "cp850", "cp437", "ascii"
+            "cp1252",
+            "windows-1252",
+            "cp850",
+            "cp437",
+            "ascii",
         ]
     except (AttributeError, TypeError):
         has_encoding_issues = True  # Assume issues if we can't determine encoding
@@ -317,7 +321,11 @@ def configure_windows_safe_logging():
     try:
         console_encoding = sys.stdout.encoding or "unknown"
         has_encoding_issues = console_encoding.lower() in [
-            "cp1252", "windows-1252", "cp850", "cp437", "ascii"
+            "cp1252",
+            "windows-1252",
+            "cp850",
+            "cp437",
+            "ascii",
         ]
     except (AttributeError, TypeError):
         has_encoding_issues = True
@@ -338,8 +346,12 @@ def configure_windows_safe_logging():
             except (AttributeError, OSError):
                 # Fallback: wrap stdout/stderr with UTF-8 codec
                 try:
-                    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach(), errors="replace")
-                    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach(), errors="replace")
+                    sys.stdout = codecs.getwriter("utf-8")(
+                        sys.stdout.detach(), errors="replace"
+                    )
+                    sys.stderr = codecs.getwriter("utf-8")(
+                        sys.stderr.detach(), errors="replace"
+                    )
                 except (AttributeError, OSError):
                     pass
 
@@ -500,7 +512,7 @@ def get_logger(
         "safe_box": platform.system().lower() == "windows",
         "_environ": {},  # Prevent environment variable issues
     }
-    
+
     # Set color system based on platform and encoding capabilities
     if use_color:
         if platform.system().lower() == "windows":
@@ -509,11 +521,11 @@ def get_logger(
             console_base_params["color_system"] = "auto"
     else:
         console_base_params["color_system"] = None
-    
+
     # Add width constraint for container environments
     if os.environ.get("ASH_IN_CONTAINER", "NO").upper() in ["YES", "1", "TRUE"]:
         console_base_params["width"] = 150
-    
+
     custom_console_params = {"console": Console(**console_base_params)}
     if SHOW_DEBUG_INFO:
         handler = RichHandler(
