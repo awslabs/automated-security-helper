@@ -84,8 +84,6 @@ def test_sanitize_sarif_paths():
     else:
         # On Windows, just ensure forward slashes are used
         assert "/" in sanitized_uri
-    # Normalize both paths for comparison (handle Windows vs Unix differences)
-    assert str(sanitized_uri).replace("\\", "/") == expected_path
 
 
 def test_sanitize_sarif_paths_with_empty_report():

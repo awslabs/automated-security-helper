@@ -129,7 +129,7 @@ jobs:
         if: contains(matrix.method, 'python') && !contains(matrix.os, 'windows')
         run: |
           echo "Installing ASH using Python on ${{ matrix.os }} (${{ matrix.platform }})"
-          uv pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
+          uv pip install --system git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
 
       - name: Update GITHUB_PATH with Python scripts path on Windows
         if: contains(matrix.method, 'python') && matrix.os == 'windows-latest'

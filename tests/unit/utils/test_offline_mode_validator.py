@@ -413,7 +413,14 @@ class TestOfflineModeValidator:
 
         OfflineModeValidator.log_validation_results("TestScanner", False, messages)
 
-        assert "⚠️ TestScanner offline mode validation failed" in caplog.text
+        # Check for either emoji or Windows-safe ASCII version
+        failure_patterns = [
+            "⚠️ TestScanner offline mode validation failed",
+            "[WARNING] TestScanner offline mode validation failed",
+        ]
+        assert any(pattern in caplog.text for pattern in failure_patterns), (
+            f"Expected failure pattern not found in: {caplog.text}"
+        )
         assert "Cache directory not found" in caplog.text
         assert "No database files" in caplog.text
 
