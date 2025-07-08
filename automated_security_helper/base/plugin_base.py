@@ -72,7 +72,7 @@ class PluginBase(BaseModel):
         self,
         *msg: str,
         level: int = 15,
-        target_type: str | None = None,
+        target_type: str | None = "source",
         append_to_stream: Literal["stderr", "stdout", "none"] = "none",
     ):
         """Log a message to the plugin's log file.
@@ -518,7 +518,7 @@ class PluginBase(BaseModel):
             f"[INSTALLATION_START] Initiating UV tool installation for '{self.command}'",
             f"Installation parameters: timeout={timeout}s, retry_config={retry_config}",
             f"Start time: {installation_start_datetime.isoformat()}",
-            level=logging.INFO,
+            level=15,
         )
 
         if not self.use_uv_tool or not self.command:
@@ -535,7 +535,7 @@ class PluginBase(BaseModel):
                 "[INSTALLATION_SKIP] Offline mode detected (ASH_OFFLINE=true)",
                 f"Skipping UV tool installation for '{self.command}' and relying on pre-installed tools",
                 "Fallback strategy: Will attempt to use pre-installed version if available",
-                level=logging.INFO,
+                level=15,
             )
             return False
 
@@ -627,7 +627,7 @@ class PluginBase(BaseModel):
                 f"Version constraint: {version_constraint or 'latest'}",
                 f"Package extras: {package_extras or 'none'}",
                 f"Timeout: {timeout}s",
-                level=logging.INFO,
+                level=15,
             )
 
             # Check if tool is already installed before attempting installation
@@ -645,7 +645,7 @@ class PluginBase(BaseModel):
                         f"Installed version: {validation_result['version'] or 'unknown'}",
                         f"Pre-installation check took {pre_install_check_time:.3f}s",
                         "Skipping installation and using cached version",
-                        level=logging.INFO,
+                        level=15,
                     )
                     return True
                 else:
@@ -671,7 +671,7 @@ class PluginBase(BaseModel):
                 self._plugin_log(
                     f"[INSTALLATION_PROGRESS] Starting installation (timeout: {timeout}s)",
                     "This may take several minutes depending on network speed and tool size",
-                    level=logging.INFO,
+                    level=15,
                 )
 
             success = runner.install_tool_with_version(
@@ -689,7 +689,7 @@ class PluginBase(BaseModel):
             if install_duration > 30:  # Log if installation took more than 30 seconds
                 self._plugin_log(
                     f"[INSTALLATION_PROGRESS] Installation attempt completed in {install_duration:.1f}s",
-                    level=logging.INFO,
+                    level=15,
                 )
 
             installation_time = time.time() - installation_start_time
@@ -703,7 +703,7 @@ class PluginBase(BaseModel):
                     f"Installed version: {post_install_version or 'unknown'}",
                     f"Total installation time: {installation_time:.3f}s",
                     f"Installation completed at: {datetime.now(timezone.utc).isoformat()}",
-                    level=logging.INFO,
+                    level=15,
                 )
                 return True
             else:
@@ -934,14 +934,14 @@ class PluginBase(BaseModel):
             if installation_info["preferred_source"] == "uv":
                 self._plugin_log(
                     f"Tool {self.command} validated via UV tool (version: {installation_info.get('uv_version', 'unknown')})",
-                    level=logging.INFO,
+                    level=15,
                 )
             elif installation_info["preferred_source"] == "pre_installed":
                 self._plugin_log(
                     f"Tool {self.command} validated via pre-installed executable "
                     f"(version: {installation_info.get('pre_installed_version', 'unknown')}, "
                     f"path: {installation_info.get('pre_installed_path', 'unknown')})",
-                    level=logging.INFO,
+                    level=15,
                 )
                 validation_result["warnings"].append(
                     f"Using pre-installed {self.command} instead of UV-managed version. "
@@ -954,7 +954,7 @@ class PluginBase(BaseModel):
         if self.use_uv_tool and self._should_install_tool(prefer_cached=True):
             self._plugin_log(
                 f"Tool {self.command} not available, attempting UV installation",
-                level=logging.INFO,
+                level=15,
             )
 
             if self._install_uv_tool():
@@ -967,7 +967,7 @@ class PluginBase(BaseModel):
                     validation_result["validation_method"] = "uv_installed"
                     self._plugin_log(
                         f"Tool {self.command} successfully installed and validated via UV",
-                        level=logging.INFO,
+                        level=15,
                     )
                 else:
                     validation_result["errors"].append(

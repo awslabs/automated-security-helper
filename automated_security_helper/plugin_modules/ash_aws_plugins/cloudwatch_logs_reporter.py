@@ -34,23 +34,78 @@ class CloudWatchLogsReporterConfigOptions(ReporterOptionsBase):
                 "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
             ),
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
+            description="AWS region for CloudWatch Logs",
         ),
-    ]
-    log_group_name: str | None = Field(
-        default_factory=lambda: os.environ.get("ASH_CLOUDWATCH_LOG_GROUP_NAME", None)
-    )
-    log_stream_name: str = "ASHScanResults"
+    ] = None
+    log_group_name: Annotated[
+        str | None,
+        Field(
+            default_factory=lambda: os.environ.get(
+                "ASH_CLOUDWATCH_LOG_GROUP_NAME", None
+            ),
+            description="CloudWatch Logs group name to publish results to",
+        ),
+    ] = None
+    log_stream_name: Annotated[
+        str,
+        Field(
+            default="ASHScanResults",
+            description="CloudWatch Logs stream name to publish results to",
+        ),
+    ] = "ASHScanResults"
     # Retry configuration
-    max_retries: int = 3
-    base_delay: float = 1.0
-    max_delay: float = 60.0
+    max_retries: Annotated[
+        int,
+        Field(
+            default=3,
+            description="Maximum number of retry attempts for CloudWatch API calls",
+        ),
+    ] = 3
+    base_delay: Annotated[
+        float,
+        Field(
+            default=1.0,
+            description="Base delay in seconds between retry attempts",
+        ),
+    ] = 1.0
+    max_delay: Annotated[
+        float,
+        Field(
+            default=60.0,
+            description="Maximum delay in seconds between retry attempts",
+        ),
+    ] = 60.0
 
 
 class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
-    name: Literal["cloudwatch-logs"] = "cloudwatch-logs"
-    extension: str = "cwlog.json"
-    enabled: bool = True
-    options: CloudWatchLogsReporterConfigOptions = CloudWatchLogsReporterConfigOptions()
+    name: Annotated[
+        Literal["cloudwatch-logs"],
+        Field(
+            default="cloudwatch-logs",
+            description="Name identifier for the CloudWatch Logs reporter plugin",
+        ),
+    ] = "cloudwatch-logs"
+    extension: Annotated[
+        str,
+        Field(
+            default="cwlog.json",
+            description="File extension for CloudWatch Logs output files",
+        ),
+    ] = "cwlog.json"
+    enabled: Annotated[
+        bool,
+        Field(
+            default=True,
+            description="Whether the CloudWatch Logs reporter is enabled",
+        ),
+    ] = True
+    options: Annotated[
+        CloudWatchLogsReporterConfigOptions,
+        Field(
+            default_factory=CloudWatchLogsReporterConfigOptions,
+            description="Configuration options for CloudWatch Logs reporter",
+        ),
+    ] = CloudWatchLogsReporterConfigOptions()
 
 
 @ash_reporter_plugin
@@ -71,7 +126,7 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
         ):
             return self.dependencies_satisfied
         try:
-            sts_client = boto3.client("sts", region=self.config.options.aws_region)
+            sts_client = boto3.client("sts", region_name=self.config.options.aws_region)
             caller_id = sts_client.get_caller_identity()
             self.dependencies_satisfied = "Account" in caller_id
         except Exception as e:

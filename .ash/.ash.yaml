@@ -8,6 +8,12 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    - path: automated_security_helper/utils/subprocess_utils.py
+      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen1
+      reason: This package requires Python3.10 or greater.
+    - path: automated_security_helper/utils/subprocess_utils.py
+      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen2
+      reason: This package requires Python3.10 or greater.
     - path: tests/unit/plugin_modules/ash_aws_plugins/test_cloudwatch_logs_reporter*
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive, dummy test data and not an actual secret.

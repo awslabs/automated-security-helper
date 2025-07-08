@@ -216,8 +216,8 @@ class ScanPhase(EnginePhase):
                                 aggregated_results=aggregated_results,
                             )
 
-                            # Add to completed scanners for metrics display
-                            self._completed_scanners.append(plugin_instance)
+                            # Do NOT add to completed scanners - this scanner was excluded and didn't run
+                            # self._completed_scanners.append(plugin_instance)
 
                             aggregated_results.scanner_results[display_name] = (
                                 ScannerStatusInfo(
@@ -257,8 +257,8 @@ class ScanPhase(EnginePhase):
                                 aggregated_results=aggregated_results,
                             )
 
-                            # Add to completed scanners for metrics display
-                            self._completed_scanners.append(plugin_instance)
+                            # Do NOT add to completed scanners - this scanner didn't actually run due to missing dependencies
+                            # self._completed_scanners.append(plugin_instance)
 
                             aggregated_results.scanner_results[display_name] = (
                                 ScannerStatusInfo(
@@ -395,8 +395,8 @@ class ScanPhase(EnginePhase):
                                 aggregated_results=aggregated_results,
                             )
 
-                            # Add to completed scanners for metrics display
-                            self._completed_scanners.append(plugin_instance)
+                            # Do NOT add to completed scanners - this scanner was excluded and didn't run
+                            # self._completed_scanners.append(plugin_instance)
 
                             aggregated_results.scanner_results[display_name] = (
                                 ScannerStatusInfo(

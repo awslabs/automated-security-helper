@@ -41,9 +41,9 @@ reporters:
       file_format: json
       key_prefix: security-scans/
       # Retry configuration
-      max_retries: 3
-      base_delay: 1.0
-      max_delay: 60.0
+      max_retries: 5      # Default: 3
+      base_delay: 2.0     # Default: 1.0 seconds
+      max_delay: 120.0    # Default: 60.0 seconds
 ```
 
 ### Environment Variables
@@ -199,7 +199,7 @@ pipeline {
     stages {
         stage('Security Scan') {
             steps {
-                sh 'ash . --reporters s3,html'
+                sh 'ash . --reporters s3,html --'
             }
         }
         stage('Archive Results') {

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 import os
-from typing import Annotated, Literal, Optional, TYPE_CHECKING
+from typing import Annotated, Literal, TYPE_CHECKING
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -24,25 +24,53 @@ class SecurityHubReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         str | None,
         Field(
+            default=None,
             default_factory=lambda: os.environ.get(
                 "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
             ),
+            description="AWS Region for Security Hub integration",
         ),
-    ]
-    aws_profile: Optional[str] = Field(
-        default_factory=lambda: os.environ.get("AWS_PROFILE", None)
-    )
-    account_id: Optional[str] = Field(
-        default=None,
-        description="AWS Account ID (will be auto-detected if not provided)",
-    )
+    ] = None
+    aws_profile: Annotated[
+        str | None,
+        Field(
+            default=None,
+            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
+            description="AWS Profile to use for authentication",
+        ),
+    ] = None
+    account_id: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="AWS Account ID (will be auto-detected if not provided)",
+        ),
+    ] = None
 
 
 class SecurityHubReporterConfig(ReporterPluginConfigBase):
     name: Literal["aws-security-hub"] = "aws-security-hub"
-    extension: str = "aws-security-hub.asff.json"
-    enabled: bool = True
-    options: SecurityHubReporterConfigOptions = SecurityHubReporterConfigOptions()
+    extension: Annotated[
+        str,
+        Field(
+            default="aws-security-hub.asff.json",
+            description="File extension for Security Hub ASFF output",
+        ),
+    ] = "aws-security-hub.asff.json"
+    enabled: Annotated[
+        bool,
+        Field(
+            default=True,
+            description="Whether the Security Hub reporter is enabled",
+        ),
+    ] = True
+    options: Annotated[
+        SecurityHubReporterConfigOptions,
+        Field(
+            default_factory=SecurityHubReporterConfigOptions,
+            description="Configuration options for Security Hub reporter",
+        ),
+    ] = SecurityHubReporterConfigOptions()
 
 
 @ash_reporter_plugin

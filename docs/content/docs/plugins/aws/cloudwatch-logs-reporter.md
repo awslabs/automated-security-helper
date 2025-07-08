@@ -272,9 +272,9 @@ reporters:
       log_group_name: "/aws/ash/scan-results"
       log_stream_name: "ASHScanResults"
       # Retry configuration
-      max_retries: 5  # Increase max retries
-      base_delay: 2.0  # Increase base delay
-      max_delay: 120.0  # Increase max delay
+      max_retries: 5      # Default: 3
+      base_delay: 2.0     # Default: 1.0 seconds
+      max_delay: 120.0    # Default: 60.0 seconds
 ``````
 
 ### Debug Mode

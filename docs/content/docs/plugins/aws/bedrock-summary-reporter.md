@@ -45,9 +45,9 @@ reporters:
       summary_style: "executive"  # executive, technical, or detailed
       custom_prompt: "Focus on business impact and compliance risks"
       # Retry and fallback configuration
-      max_retries: 3
-      base_delay: 1.0
-      max_delay: 60.0
+      max_retries: 5      # Default: 3
+      base_delay: 2.0     # Default: 1.0 seconds
+      max_delay: 120.0    # Default: 60.0 seconds
       enable_fallback_models: true
 ```
 
@@ -404,9 +404,9 @@ options:
 ```yaml
 # Configure retry behavior
 options:
-  max_retries: 5  # Increase max retries
-  base_delay: 2.0  # Increase base delay
-  max_delay: 120.0  # Increase max delay
+  max_retries: 5      # Default: 3
+  base_delay: 2.0     # Default: 1.0 seconds
+  max_delay: 120.0    # Default: 60.0 seconds
   enable_fallback_models: true  # Enable fallback models
 ```
 
