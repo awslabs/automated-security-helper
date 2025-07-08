@@ -24,7 +24,6 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
-    PropertyBag,
     SarifReport,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -347,7 +346,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason] = [],
         config: OpengrepScannerConfig | None = None,
-    ) -> SarifReport | bool:
+    ) -> SarifReport | bool | None:
         """Execute Opengrep scan and return results.
 
         Args:
@@ -459,119 +458,58 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 target_type=target_type,
             )
 
-            # Handle different result formats based on mode
-            if self.config.options.patterns:
-                # Pattern search mode - parse JSON results
-                if results_file.exists():
-                    try:
-                        with open(results_file, mode="r", encoding="utf-8") as f:
-                            results_data = json.load(f)
-
-                        # Convert OpenGrep results to findings format
-                        findings = []
-                        for match in results_data.get("matches", []):
-                            findings.append(
-                                {
-                                    "file": match.get("file", ""),
-                                    "line": match.get("line", 0),
-                                    "column": match.get("column", 0),
-                                    "message": f"Found pattern: {match.get('pattern', '')}",
-                                    "severity": "MEDIUM",  # Default severity
-                                    "code": match.get("content", ""),
-                                }
-                            )
-                        self._post_scan(
-                            target=target,
-                            target_type=target_type,
-                        )
-                        return {"findings": findings}
-                    except Exception as e:
-                        self._plugin_log(
-                            f"Error parsing OpenGrep results: {e}", level=logging.ERROR
-                        )
-                        self._post_scan(
-                            target=target,
-                            target_type=target_type,
-                        )
-                        return {"findings": []}
-                else:
-                    self._plugin_log(
-                        f"No results file found at {results_file}",
-                        level=logging.WARNING,
+            # SARIF mode - parse SARIF results
+            if Path(results_file).exists():
+                with open(results_file, mode="r", encoding="utf-8") as f:
+                    opengrep_results = json.load(f)
+                try:
+                    sarif_report: SarifReport = SarifReport.model_validate(
+                        opengrep_results
                     )
+
+                    # Attach scanner details for proper identification
+                    sarif_report = attach_scanner_details(
+                        sarif_report=sarif_report,
+                        scanner_name=self.config.name,
+                        scanner_version=getattr(self, "tool_version", None),
+                        invocation_details={
+                            "command_line": " ".join(final_args),
+                            "arguments": final_args[1:],
+                            "working_directory": get_shortest_name(input=target),
+                            "start_time": self.start_time.isoformat()
+                            if self.start_time
+                            else None,
+                            "end_time": self.end_time.isoformat()
+                            if self.end_time
+                            else None,
+                            "exit_code": self.exit_code,
+                        },
+                    )
+
+                    sarif_report.runs[0].invocations = [
+                        Invocation(
+                            commandLine=" ".join(final_args),
+                            arguments=final_args[1:],
+                            startTimeUtc=self.start_time,
+                            endTimeUtc=self.end_time,
+                            executionSuccessful=True,
+                            exitCode=self.exit_code,
+                            exitCodeDescription="\n".join(self.errors),
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target),
+                            ),
+                        )
+                    ]
                     self._post_scan(
                         target=target,
                         target_type=target_type,
                     )
-                    return {"findings": []}
-            else:
-                # SARIF mode - parse SARIF results
-                if Path(results_file).exists():
-                    with open(results_file, mode="r", encoding="utf-8") as f:
-                        opengrep_results = json.load(f)
-                    try:
-                        sarif_report: SarifReport = SarifReport.model_validate(
-                            opengrep_results
-                        )
-
-                        # Attach scanner details for proper identification
-                        sarif_report = attach_scanner_details(
-                            sarif_report=sarif_report,
-                            scanner_name=self.config.name,
-                            scanner_version=getattr(self, "tool_version", None),
-                            invocation_details={
-                                "command_line": " ".join(final_args),
-                                "arguments": final_args[1:],
-                                "working_directory": get_shortest_name(input=target),
-                                "start_time": self.start_time.isoformat()
-                                if self.start_time
-                                else None,
-                                "end_time": self.end_time.isoformat()
-                                if self.end_time
-                                else None,
-                                "exit_code": self.exit_code,
-                            },
-                        )
-
-                        sarif_report.runs[0].invocations = [
-                            Invocation(
-                                commandLine=" ".join(final_args),
-                                arguments=final_args[1:],
-                                startTimeUtc=self.start_time,
-                                endTimeUtc=self.end_time,
-                                executionSuccessful=True,
-                                exitCode=self.exit_code,
-                                exitCodeDescription="\n".join(self.errors),
-                                workingDirectory=ArtifactLocation(
-                                    uri=get_shortest_name(input=target),
-                                ),
-                                properties=PropertyBag(
-                                    tool=sarif_report.runs[0].tool,
-                                ),
-                            )
-                        ]
-                        self._post_scan(
-                            target=target,
-                            target_type=target_type,
-                        )
-                        return sarif_report
-                    except Exception as e:
-                        self._plugin_log(
-                            f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
-                            target_type=target_type,
-                            level=logging.ERROR,
-                            append_to_stream="stderr",
-                        )
-                        self._post_scan(
-                            target=target,
-                            target_type=target_type,
-                        )
-                        return
-                else:
+                    return sarif_report
+                except Exception as e:
                     self._plugin_log(
-                        f"No results file found at {results_file}",
+                        f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
                         target_type=target_type,
-                        level=logging.WARNING,
+                        level=logging.ERROR,
                         append_to_stream="stderr",
                     )
                     self._post_scan(
@@ -579,6 +517,17 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                         target_type=target_type,
                     )
                     return
+            else:
+                self._plugin_log(
+                    f"No results file found at {results_file}",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
+                self._post_scan(
+                    target=target,
+                    target_type=target_type,
+                )
 
         except Exception as e:
             # Check if there are useful error details

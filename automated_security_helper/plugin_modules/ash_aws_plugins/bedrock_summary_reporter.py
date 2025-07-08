@@ -31,59 +31,215 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         str | None,
         Field(
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}"
+            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
+            description="AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests.",
         ),
     ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
-    aws_profile: str | None = os.environ.get("AWS_PROFILE", None)
-    model_id: str = os.environ.get(
+    aws_profile: Annotated[
+        str | None,
+        Field(
+            description="AWS profile to use for Bedrock. If not specified, the default profile will be used.",
+        ),
+    ] = os.environ.get("AWS_PROFILE", None)
+    model_id: Annotated[
+        str,
+        Field(
+            description="Bedrock model ID to use for generating summaries.",
+        ),
+    ] = os.environ.get(
         "ASH_BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
     )
-    temperature: float = float(os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5"))
-    max_tokens: int = int(os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000"))
-    top_p: float = 0.9
-    max_findings_to_analyze: int = 10
-    max_findings_per_severity: int = 5
-    group_by_severity: bool = True
-    add_section_headers: bool = True
-    add_table_of_contents: bool = True
-    enable_caching: bool = True
-    output_markdown: bool = True
-    output_file: str = "ash.bedrock.summary.md"
+    temperature: Annotated[
+        float,
+        Field(
+            description="Temperature parameter for the Bedrock model. Higher values make output more random.",
+        ),
+    ] = float(os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5"))
+    max_tokens: Annotated[
+        int,
+        Field(
+            description="Maximum number of tokens to generate in the response.",
+        ),
+    ] = int(os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000"))
+    top_p: Annotated[
+        float,
+        Field(
+            description="Top-p parameter for the Bedrock model. Controls diversity of generated text.",
+        ),
+    ] = 0.9
+    max_findings_to_analyze: Annotated[
+        int,
+        Field(
+            description="Maximum number of findings to include in the analysis.",
+        ),
+    ] = 10
+    max_findings_per_severity: Annotated[
+        int,
+        Field(
+            description="Maximum number of findings to include per severity level when grouping by severity.",
+        ),
+    ] = 5
+    group_by_severity: Annotated[
+        bool,
+        Field(
+            description="Whether to group findings by severity level in the report.",
+        ),
+    ] = True
+    add_section_headers: Annotated[
+        bool,
+        Field(
+            description="Whether to add section headers to the report for better organization.",
+        ),
+    ] = True
+    add_table_of_contents: Annotated[
+        bool,
+        Field(
+            description="Whether to add a table of contents to the report.",
+        ),
+    ] = True
+    enable_caching: Annotated[
+        bool,
+        Field(
+            description="Whether to cache Bedrock responses to avoid duplicate API calls.",
+        ),
+    ] = True
+    output_markdown: Annotated[
+        bool,
+        Field(
+            description="Whether to output the report as a markdown file.",
+        ),
+    ] = True
+    output_file: Annotated[
+        str,
+        Field(
+            description="Filename for the main output markdown report.",
+        ),
+    ] = "ash.bedrock.summary.md"
     # Retry configuration
-    max_retries: int = 3
-    base_delay: float = 1.0
-    max_delay: float = 60.0
-    # Fallback model configuration
-    enable_fallback_models: bool = True
+    max_retries: Annotated[
+        int,
+        Field(
+            description="Maximum number of retries for Bedrock API calls.",
+        ),
+    ] = 3
+    base_delay: Annotated[
+        float,
+        Field(
+            description="Base delay in seconds between retries (will be increased exponentially).",
+        ),
+    ] = 1.0
+    max_delay: Annotated[
+        float,
+        Field(
+            description="Maximum delay in seconds between retries.",
+        ),
+    ] = 60.0
+
+    enable_fallback_models: Annotated[
+        bool,
+        Field(
+            description="Whether to try fallback models if the primary model fails.",
+        ),
+    ] = True
     # Output additional files with specific content
-    output_executive_file: str = "bedrock-executive.md"
-    output_technical_file: str = "bedrock-technical.md"
-    # Include code snippets in the report
-    include_code_snippets: bool = False
+    output_executive_file: Annotated[
+        str,
+        Field(
+            description="Filename for the executive summary markdown report.",
+        ),
+    ] = "bedrock-executive.md"
+    output_technical_file: Annotated[
+        str,
+        Field(
+            description="Filename for the technical analysis markdown report.",
+        ),
+    ] = "bedrock-technical.md"
+
+    include_code_snippets: Annotated[
+        bool,
+        Field(
+            description="Whether to include code snippets in the report.",
+        ),
+    ] = False
     # Summary style: executive, technical, or detailed
-    summary_style: Literal["executive", "technical", "detailed"] = "executive"
+    summary_style: Annotated[
+        Literal["executive", "technical", "detailed"],
+        Field(
+            description="Style of summary to generate: executive (high-level), technical (detailed), or detailed (comprehensive).",
+        ),
+    ] = "executive"
     # Custom prompt to guide the AI analysis
-    custom_prompt: str | None = None
+    custom_prompt: Annotated[
+        str | None,
+        Field(
+            description="Custom prompt to prepend to all Bedrock requests for more tailored analysis.",
+        ),
+    ] = None
     # List of scanner types to exclude from detailed analysis
-    exclude_scanner_types: List[str] = ["SECRET"]
+    exclude_scanner_types: Annotated[
+        List[str],
+        Field(
+            description="List of scanner types to exclude from detailed analysis (e.g., 'SECRET').",
+        ),
+    ] = ["SECRET"]
     # Include only actionable findings (not suppressed, above severity threshold)
-    actionable_only: bool = True
+    actionable_only: Annotated[
+        bool,
+        Field(
+            description="Whether to include only actionable findings (not suppressed, above severity threshold).",
+        ),
+    ] = True
     # Sections to include or exclude
-    include_sections: List[str] = [
+    include_sections: Annotated[
+        List[str],
+        Field(
+            description="List of sections to include in the report.",
+        ),
+    ] = [
         "executive_summary",
         "risk_assessment",
         "technical_analysis",
         "remediation_guide",
         "compliance_impact",
     ]
-    exclude_sections: List[str] = []
+    exclude_sections: Annotated[
+        List[str],
+        Field(
+            description="List of sections to exclude from the report.",
+        ),
+    ] = []
     # Industry-specific analysis
-    industry_context: str | None = None
-    compliance_frameworks: List[str] = []
-    custom_context: str | None = None
+    industry_context: Annotated[
+        str | None,
+        Field(
+            description="Industry context to provide to the model for more relevant analysis.",
+        ),
+    ] = None
+    compliance_frameworks: Annotated[
+        List[str],
+        Field(
+            description="List of compliance frameworks to consider in the analysis.",
+        ),
+    ] = []
+    custom_context: Annotated[
+        str | None,
+        Field(
+            description="Custom context information to provide to the model.",
+        ),
+    ] = None
     # Performance optimization
-    summarize_findings: bool = False
-    batch_processing: bool = False
+    summarize_findings: Annotated[
+        bool,
+        Field(
+            description="Whether to summarize findings to reduce token usage.",
+        ),
+    ] = False
+    batch_processing: Annotated[
+        bool,
+        Field(
+            description="Whether to process findings in batches for better performance with large datasets.",
+        ),
+    ] = False
 
 
 class BedrockSummaryReporterConfig(ReporterPluginConfigBase):
@@ -1573,9 +1729,13 @@ Provide a risk assessment including:
             batch_results.append(batch_summary)
 
         # Combine batch results
+        formatted_results = [
+            "\n".join([f"BATCH {i + 1}:", f"{summary}"])
+            for i, summary in enumerate(batch_results)
+        ]
         combined_prompt = f"""Synthesize the following batch summaries into a cohesive overall summary:
 
-{chr(10).join([f"BATCH {i + 1}:\n{summary}" for i, summary in enumerate(batch_results)])}
+{chr(10).join(formatted_results)}
 
 Provide a unified summary that captures the key insights from all batches.
 """

@@ -25,7 +25,7 @@ Prerequisites: Python 3.10+, [uv](https://docs.astral.sh/uv/getting-started/inst
 curl -sSf https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
 ```
 
 #### Windows PowerShell
@@ -34,7 +34,7 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0 $args }
 ```
 
 ### Option 2: Using pipx
@@ -42,7 +42,7 @@ function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@
 Prerequisites: Python 3.10+, [pipx](https://pipx.pypa.io/stable/installation/)
 
 ```bash
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 ```
 
 ### Option 3: Using pip
@@ -50,7 +50,7 @@ pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 Prerequisites: Python 3.10+
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 ```
 
 ## Basic Usage
@@ -116,7 +116,7 @@ ash config init
 This creates `.ash/.ash.yaml` with default settings. Edit this file to customize your scan:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 project_name: my-project
 global_settings:
   severity_threshold: MEDIUM
@@ -187,7 +187,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0-beta
+    rev: v3.0.0
     hooks:
       - id: ash-simple-scan
 ```

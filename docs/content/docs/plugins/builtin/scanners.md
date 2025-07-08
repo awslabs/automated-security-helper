@@ -122,7 +122,7 @@ scanners:
 - Terraform module validation
 - Custom policy enforcement
 
-**Dependencies**: `checkov` Python package
+**Dependencies**: Managed via `uv tool run` (automatically downloaded when needed)
 
 ---
 
@@ -247,7 +247,7 @@ scanners:
 - Code quality and maintainability
 - Custom organizational rules
 
-**Dependencies**: `semgrep` Python package
+**Dependencies**: Managed via `uv tool run` (automatically downloaded when needed)
 
 ---
 

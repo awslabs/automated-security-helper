@@ -159,8 +159,8 @@ def sanitize_sarif_paths(
 def attach_scanner_details(
     sarif_report: SarifReport,
     scanner_name: str,
-    scanner_version: str = None,
-    invocation_details: dict = None,
+    scanner_version: str | None = None,
+    invocation_details: dict = {},
 ) -> SarifReport:
     """
     Attach scanner details to a SARIF report.
@@ -312,15 +312,17 @@ def apply_suppressions_to_sarif(
 
     suppressions = plugin_context.config.global_settings.suppressions or []
 
-    # If ignore_suppressions flag is set, skip applying suppressions
-    if (
+    # Check if ignore_suppressions flag is set
+    # ASH_LOGGER.info(plugin_context.model_dump_json(indent=2))
+    ignore_suppressions = (
         hasattr(plugin_context, "ignore_suppressions")
         and plugin_context.ignore_suppressions
-    ):
+    )
+
+    if ignore_suppressions:
         ASH_LOGGER.warning(
             "Ignoring all suppression rules as requested by --ignore-suppressions flag"
         )
-        return sarif_report
 
     # Note: Suppression expiration check is now handled by the EXECUTION_START event callback
     # in automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker
@@ -367,8 +369,11 @@ def apply_suppressions_to_sarif(
                                     is_in_ignorable_path = True
                                     break  # No need to check other ignore paths
 
-            # Check if result matches any suppression rule
-            if not is_in_ignorable_path and suppressions:
+            # Check if result matches any suppression rule (only if suppressions are not being ignored)
+            ASH_LOGGER.debug(
+                f"Suppression check: is_in_ignorable_path={is_in_ignorable_path}, suppressions={bool(suppressions)}, ignore_suppressions={ignore_suppressions}"
+            )
+            if not is_in_ignorable_path and suppressions and not ignore_suppressions:
                 # Convert SARIF result to FlatVulnerability for suppression matching
                 flat_finding = None
                 if result.ruleId and result.locations and len(result.locations) > 0:

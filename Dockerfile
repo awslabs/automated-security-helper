@@ -1,21 +1,24 @@
 #checkov:skip=CKV_DOCKER_7:Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-bullseye
 
-# First stage: Build poetry requirements
-FROM ${BASE_IMAGE} AS poetry-reqs
+# First stage: Build UV requirements
+FROM ${BASE_IMAGE} AS uv-reqs
 
 ENV PYTHONDONTWRITEBYTECODE=1
 RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y python3-venv git tree && \
+    apt-get install -y python3-venv git tree curl && \
     rm -rf /var/lib/apt/lists/*
 
 ARG INSTALL_ASH_REVISION="LOCAL"
 ARG ASH_REPO_CLONE_URL="https://github.com/awslabs/automated-security-helper.git"
 ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 ENV ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
-RUN python3 -m pip install -U pip poetry
+
+# Install UV
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /src
 RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
@@ -24,18 +27,20 @@ RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
         ${ASH_REPO_CLONE_URL} \
         . || echo "Skipping clone of repo for LOCAL revision"
 
-COPY pyproject.toml* poetry.lock* README.md* LICENSE* Dockerfile* ./
+COPY pyproject.toml* hatch_build.py uv.lock* README.md* LICENSE* Dockerfile* ./
 COPY ci*/ ci/
 COPY automated_security_helper*/ automated_security_helper/
 RUN tree .
 RUN git status --short || true
-RUN poetry build
-RUN python -m pip install poetry-plugin-export
-RUN poetry export --without-hashes --format=requirements.txt > requirements.txt
+RUN uv build
+# RUN uv export --format requirements-txt --no-hashes > requirements.txt && \
+#     sed -i '/^-e \./d' requirements.txt && \
+#     sed -i '/^\./d' requirements.txt
 
 # Second stage: Core ASH image
 FROM ${BASE_IMAGE} AS core
 SHELL ["/bin/bash", "-c"]
+ENV SHELL="bash"
 ARG BUILD_DATE_EPOCH="-1"
 ARG OFFLINE="NO"
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
@@ -96,6 +101,11 @@ RUN set -uex; \
      > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
     apt-get -qy install nodejs;
+#
+# Install UV in the core stage
+#
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
 #
 # Python (no-op other than updating pip --- Python deps managed via Poetry @ pyproject.toml)
@@ -120,7 +130,10 @@ RUN echo "gem: --no-document" >> /etc/gemrc && \
 #
 # JavaScript:
 #
-RUN npm install -g npm pnpm yarn
+RUN npm install -g npm
+RUN curl -o- -L https://yarnpkg.com/install.sh | bash
+RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
+
 
 #
 # Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
@@ -133,7 +146,6 @@ ENV PATH="/usr/local/bin:$PATH"
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | \
     sh -s -- -b /usr/local/bin
 RUN syft --version
-
 
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | \
     sh -s -- -b /usr/local/bin
@@ -164,11 +176,8 @@ ENV NODE_OPTIONS=--max_old_space_size=512
 #
 # COPY ASH source to /ash instead of / to isolate
 #
-COPY --from=poetry-reqs /src/dist/*.whl .
-COPY --from=poetry-reqs /src/requirements.txt .
-RUN python -m pip install -r requirements.txt && \
-    python -m pip install *.whl --no-deps && \
-    rm -rf *.whl requirements.txt
+COPY --from=uv-reqs /src/dist/*.whl .
+RUN uv pip install --system *.whl && rm -rf *.whl
 
 #
 # Make sure the ash script is executable
@@ -243,6 +252,7 @@ ENV HOME=${ASHUSER_HOME}
 ENV ASH_USER=${ASH_USER}
 ENV ASH_GROUP=${ASH_GROUP}
 
+RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD command -v ash || exit 1

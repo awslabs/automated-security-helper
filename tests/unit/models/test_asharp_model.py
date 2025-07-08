@@ -19,7 +19,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
     Result,
     Message,
+    Message1,
     PropertyBag,
+    Level,
 )
 
 
@@ -60,8 +62,7 @@ def test_scanner_status_info_initialization():
 
     assert status_info.dependencies_satisfied is True
     assert status_info.excluded is False
-    assert isinstance(status_info.source, ScannerTargetStatusInfo)
-    assert isinstance(status_info.converted, ScannerTargetStatusInfo)
+    assert isinstance(status_info, ScannerStatusInfo)
 
 
 def test_converter_status_info_initialization():
@@ -92,9 +93,9 @@ def test_ash_aggregated_results_to_simple_dict():
         name="Test Report",
         description="Test Description",
         scanner_results={
-            "bandit": ScannerStatusInfo(
+            "bandit": ScannerTargetStatusInfo(
                 status=ScannerStatus.PASSED,
-                source=ScannerTargetStatusInfo(finding_count=5),
+                finding_count=5,
             )
         },
         converter_results={
@@ -108,7 +109,7 @@ def test_ash_aggregated_results_to_simple_dict():
     assert simple_dict["description"] == "Test Description"
     assert "scanner_results" in simple_dict
     assert "bandit" in simple_dict["scanner_results"]
-    assert simple_dict["scanner_results"]["bandit"]["source"]["finding_count"] == 5
+    assert simple_dict["scanner_results"]["bandit"]["finding_count"] == 5
     assert "converter_results" in simple_dict
     assert "archive" in simple_dict["converter_results"]
     assert simple_dict["converter_results"]["archive"]["converted_paths"] == [
@@ -238,8 +239,8 @@ def test_ash_aggregated_results_to_flat_vulnerabilities_with_sarif():
                 results=[
                     Result(
                         ruleId="TEST001",
-                        level="error",
-                        message=Message(text="Test finding"),
+                        level=Level.error,
+                        message=Message(root=Message1(text="Test finding")),
                         locations=[
                             {
                                 "physicalLocation": {

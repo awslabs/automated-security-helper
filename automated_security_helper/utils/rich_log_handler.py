@@ -25,12 +25,12 @@ class RichLogPanel:
         # Map log levels to their display names
         self.level_names = {
             logging.CRITICAL: "CRIT",
-            logging.ERROR: "ERROR",
+            logging.ERROR: "ERR ",
             logging.WARNING: "WARN",
             logging.INFO: "INFO",
-            15: "VERBOSE",  # VERBOSE
-            logging.DEBUG: "DEBUG",
-            5: "TRACE",  # TRACE
+            15: "VERB",  # VERBOSE
+            logging.DEBUG: "DEBG",
+            5: "TRAC",  # TRACE
         }
 
     def add_log(self, message: str, level: int = logging.INFO):

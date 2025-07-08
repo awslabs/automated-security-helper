@@ -15,7 +15,7 @@ from typing import List
 import typer
 import threading
 import io
-from importlib.metadata import import_module
+from importlib_metadata import import_module
 
 # Import subprocess utilities
 from automated_security_helper.core.constants import (
@@ -95,7 +95,7 @@ def get_ash_revision() -> str | None:
     return return_val
 
 
-def validate_path(path: str) -> Path:
+def validate_path(path: str | Path) -> Path:
     """
     Validate that a path is safe and convert it to a Path object.
 
@@ -211,11 +211,11 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
 
 def run_ash_container(
     ctx=None,
-    source_dir: str = Path.cwd().as_posix(),
-    output_dir: str = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    source_dir: str | Path = Path.cwd().as_posix(),
+    output_dir: str | Path = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
     log_level: AshLogLevel = AshLogLevel.INFO,
-    config: str = None,
-    config_overrides: List[str] = None,
+    config: str | None = None,
+    config_overrides: List[str] = [],
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
     scanners: List[str] = [],
@@ -229,7 +229,7 @@ def run_ash_container(
         Phases.report,
     ],
     inspect: bool = False,
-    existing_results: str = None,
+    existing_results: str | None = None,
     python_based_plugins_only: bool = False,
     quiet: bool = False,
     simple: bool = False,
@@ -241,7 +241,7 @@ def run_ash_container(
     build: bool = True,
     run: bool = True,
     force: bool = False,
-    oci_runner: str = None,
+    oci_runner: str | None = None,
     build_target: BuildTarget | None = None,
     offline_semgrep_rulesets: str = "p/ci",
     container_uid: str | None = None,
@@ -293,7 +293,7 @@ def run_ash_container(
                 stderr="Container UID must be a numeric value",
             )
     else:
-        container_uid = host_uid
+        container_uid = str(host_uid)
 
     if container_gid is not None:
         if not container_gid.isdigit():
@@ -305,7 +305,7 @@ def run_ash_container(
                 stderr="Container GID must be a numeric value",
             )
     else:
-        container_gid = host_gid
+        container_gid = str(host_gid)
 
     # Resolve OCI runner
     resolved_oci_runner = None

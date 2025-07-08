@@ -35,7 +35,9 @@ class LiveProgressDisplay:
     def __init__(
         self,
         show_progress: bool = True,
-        color_system: str = "auto",
+        color_system: Literal[
+            "auto", "standard", "256", "truecolor", "windows"
+        ] = "auto",
         max_log_lines: int = 15,
         verbose: bool = False,
         debug: bool = False,
@@ -77,11 +79,11 @@ class LiveProgressDisplay:
         self.log_panel = RichLogPanel(max_lines=max_log_lines)
 
         # Set up a log handler to capture logs with appropriate level based on flags
-        log_level = logging.DEBUG
-        # if verbose:
-        #     log_level = 15  # VERBOSE level
-        # if debug:
-        #     log_level = logging.DEBUG
+        log_level = 15
+        if verbose:
+            log_level = 15  # VERBOSE level
+        if debug:
+            log_level = logging.DEBUG
 
         self.log_handler = LiveDisplayLogHandler(self.log_panel, level=log_level)
         self.log_handler.setFormatter(logging.Formatter("%(message)s"))
@@ -212,10 +214,10 @@ class LiveProgressDisplay:
         self,
         phase: ExecutionPhase,
         task_id: TaskID,
-        advance: int = None,
-        completed: int = None,
-        description: str = None,
-        visible: bool = None,
+        advance: int | None = None,
+        completed: int | None = None,
+        description: str | None = None,
+        visible: bool | None = None,
     ):
         """Update a task in the progress display.
 
@@ -278,7 +280,7 @@ class LiveProgressDisplay:
         phase: ExecutionPhase,
         task_id: TaskID,
         success: bool = True,
-        description: str = None,
+        description: str | None = None,
         warning: bool = False,
         skipped: bool = False,
     ):

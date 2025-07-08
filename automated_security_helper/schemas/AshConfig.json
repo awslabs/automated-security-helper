@@ -65,7 +65,10 @@
             "jupyter": {
               "enabled": true,
               "name": "jupyter",
-              "options": {}
+              "options": {
+                "install_timeout": 300,
+                "tool_version": ">=7.16.0,<8.0.0"
+              }
             }
           },
           "description": "Converter configurations by name."
@@ -209,7 +212,9 @@
                 "config_file": null,
                 "excluded_paths": [],
                 "ignore_nosec": false,
-                "severity_threshold": null
+                "install_timeout": 300,
+                "severity_threshold": null,
+                "tool_version": ">=1.7.0,<2.0.0"
               }
             },
             "cdk-nag": {
@@ -244,10 +249,12 @@
                 "frameworks": [
                   "all"
                 ],
+                "install_timeout": 300,
                 "offline": false,
                 "severity_threshold": null,
                 "skip_frameworks": [],
-                "skip_path": []
+                "skip_path": [],
+                "tool_version": null
               }
             },
             "detect-secrets": {
@@ -310,10 +317,12 @@
                   "*_report_result.txt"
                 ],
                 "exclude_rule": [],
+                "install_timeout": 300,
                 "metrics": "auto",
                 "offline": false,
                 "severity": [],
-                "severity_threshold": null
+                "severity_threshold": null,
+                "tool_version": null
               }
             },
             "syft": {
@@ -468,7 +477,9 @@
             "config_file": null,
             "excluded_paths": [],
             "ignore_nosec": false,
-            "severity_threshold": null
+            "install_timeout": 300,
+            "severity_threshold": null,
+            "tool_version": ">=1.7.0,<2.0.0"
           },
           "description": "Configure Bandit scanner"
         }
@@ -542,6 +553,12 @@
           "title": "Ignore Nosec",
           "type": "boolean"
         },
+        "install_timeout": {
+          "default": 300,
+          "description": "Timeout in seconds for tool installation",
+          "title": "Install Timeout",
+          "type": "integer"
+        },
         "severity_threshold": {
           "anyOf": [
             {
@@ -561,6 +578,19 @@
           "default": null,
           "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
           "title": "Severity Threshold"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": ">=1.7.0,<2.0.0",
+          "description": "Specific version constraint for bandit installation (e.g., '>=1.7.0,<2.0.0')",
+          "title": "Tool Version"
         }
       },
       "title": "BanditScannerConfigOptions",
@@ -822,10 +852,12 @@
             "frameworks": [
               "all"
             ],
+            "install_timeout": 300,
             "offline": false,
             "severity_threshold": null,
             "skip_frameworks": [],
-            "skip_path": []
+            "skip_path": [],
+            "tool_version": null
           },
           "description": "Configure Checkov scanner"
         }
@@ -925,6 +957,12 @@
           "title": "Frameworks",
           "type": "array"
         },
+        "install_timeout": {
+          "default": 300,
+          "description": "Timeout in seconds for tool installation",
+          "title": "Install Timeout",
+          "type": "integer"
+        },
         "offline": {
           "default": false,
           "description": "Run in offline mode, disabling policy downloads",
@@ -1006,6 +1044,19 @@
           },
           "title": "Skip Path",
           "type": "array"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Specific version constraint for checkov installation (e.g., '>=3.2.0,<4.0.0')",
+          "title": "Tool Version"
         }
       },
       "title": "CheckovScannerConfigOptions",
@@ -1035,7 +1086,10 @@
           "default": {
             "enabled": true,
             "name": "jupyter",
-            "options": {}
+            "options": {
+              "install_timeout": 300,
+              "tool_version": ">=7.16.0,<8.0.0"
+            }
           },
           "description": "Configure the options for the JupyterConverter"
         }
@@ -1653,7 +1707,10 @@
         },
         "options": {
           "$ref": "#/$defs/JupyterConverterConfigOptions",
-          "default": {},
+          "default": {
+            "install_timeout": 300,
+            "tool_version": ">=7.16.0,<8.0.0"
+          },
           "description": "Configure Jupyter Notebook converter"
         }
       },
@@ -1662,7 +1719,27 @@
     },
     "JupyterConverterConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "properties": {
+        "install_timeout": {
+          "default": 300,
+          "description": "Timeout in seconds for tool installation (default: 300)",
+          "title": "Install Timeout",
+          "type": "integer"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": ">=7.16.0,<8.0.0",
+          "description": "Version constraint for nbconvert tool installation (e.g., '>=7.16.0'). If not specified, the latest version will be installed.",
+          "title": "Tool Version"
+        }
+      },
       "title": "JupyterConverterConfigOptions",
       "type": "object"
     },
@@ -1971,6 +2048,8 @@
       "enum": [
         "apt",
         "pip",
+        "uv",
+        "conda",
         "npm",
         "brew",
         "yum",
@@ -2330,7 +2409,9 @@
               "config_file": null,
               "excluded_paths": [],
               "ignore_nosec": false,
-              "severity_threshold": null
+              "install_timeout": 300,
+              "severity_threshold": null,
+              "tool_version": ">=1.7.0,<2.0.0"
             }
           },
           "description": "Configure the options for Bandit"
@@ -2377,10 +2458,12 @@
               "frameworks": [
                 "all"
               ],
+              "install_timeout": 300,
               "offline": false,
               "severity_threshold": null,
               "skip_frameworks": [],
-              "skip_path": []
+              "skip_path": [],
+              "tool_version": null
             }
           },
           "description": "Configure the options for Checkov"
@@ -2463,10 +2546,12 @@
                 "*_report_result.txt"
               ],
               "exclude_rule": [],
+              "install_timeout": 300,
               "metrics": "auto",
               "offline": false,
               "severity": [],
-              "severity_threshold": null
+              "severity_threshold": null,
+              "tool_version": null
             }
           },
           "description": "Configure the options for Semgrep"
@@ -2535,10 +2620,17 @@
           "description": "Specialized arguments to pass to the scanner command. Includes an `extra_args` field which accepts a dictionary of arbitrary arguments to pass to the scanner. These are not configurable at scan time."
         },
         "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
           "description": "The command to invoke the scanner, typically the binary or path to a script",
-          "title": "Command",
-          "type": "string"
+          "title": "Command"
         },
         "config": {
           "anyOf": [
@@ -2708,6 +2800,21 @@
           ],
           "default": null,
           "title": "Tool Version"
+        },
+        "use_uv_tool": {
+          "default": false,
+          "description": "Flag to indicate whether this scanner should use UV tool execution instead of direct command execution",
+          "title": "Use Uv Tool",
+          "type": "boolean"
+        },
+        "uv_tool_install_commands": {
+          "default": [],
+          "description": "List of UV tool install commands to execute for this scanner",
+          "items": {
+            "type": "string"
+          },
+          "title": "Uv Tool Install Commands",
+          "type": "array"
         }
       },
       "title": "ScannerPluginBase",
@@ -2780,10 +2887,12 @@
               "*_report_result.txt"
             ],
             "exclude_rule": [],
+            "install_timeout": 300,
             "metrics": "auto",
             "offline": false,
             "severity": [],
-            "severity_threshold": null
+            "severity_threshold": null,
+            "tool_version": null
           },
           "description": "Configure Semgrep scanner"
         }
@@ -2820,6 +2929,12 @@
           },
           "title": "Exclude Rule",
           "type": "array"
+        },
+        "install_timeout": {
+          "default": 300,
+          "description": "Timeout in seconds for tool installation",
+          "title": "Install Timeout",
+          "type": "integer"
         },
         "metrics": {
           "default": "auto",
@@ -2871,6 +2986,19 @@
           "default": null,
           "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
           "title": "Severity Threshold"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Specific version constraint for semgrep installation (e.g., '>=1.125.0')",
+          "title": "Tool Version"
         }
       },
       "title": "SemgrepScannerConfigOptions",

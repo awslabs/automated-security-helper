@@ -92,7 +92,7 @@ ASH uses YAML configuration files by default. The standard location is `.ash/.as
 A basic configuration file looks like this:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 project_name: my-project
 global_settings:
   severity_threshold: MEDIUM
@@ -116,7 +116,7 @@ reporters:
 ASH provides a JSON schema for configuration files, which enables validation and auto-completion in compatible editors. Add this line at the top of your YAML file:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
 ```
 
 ### Configuration Commands

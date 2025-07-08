@@ -27,29 +27,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "poetry"
-
-      - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
 
       - name: Install dependencies
-        run: poetry install
+        run: uv sync
 
       - name: Build documentation
-        run: poetry run mkdocs build --clean
+        run: uv run mkdocs build --clean
 
   deploy-docs:
     name: Deploy documentation
@@ -63,26 +55,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "poetry"
-
-      - name: Install Poetry
-        run: |
-          curl -sSL https://install.python-poetry.org | python3 -
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
 
       - name: Install dependencies
-        run: poetry install
+        run: uv sync
 
       - name: Deploy documentation
-        run: poetry run mkdocs gh-deploy --clean --force
+        run: uv run mkdocs gh-deploy --clean --force

@@ -20,30 +20,23 @@ The S3 Reporter provides:
 
 ```yaml
 reporters:
-  s3-reporter:
+  s3:
     enabled: true
     options:
-      bucket_name: "my-security-reports"
-      aws_region: "us-east-1"
+      bucket_name: myorg-ash-reports
+      aws_region: us-east-1
 ```
 
 ### Advanced Configuration
 
 ```yaml
 reporters:
-  s3-reporter:
+  s3:
     enabled: true
     options:
-      bucket_name: "company-security-scans"
-      aws_region: "us-west-2"
-      key_prefix: "ash-reports"
-      include_timestamp: true
-      storage_class: "STANDARD_IA"
-      server_side_encryption: "AES256"
-      metadata:
-        project: "security-scanning"
-        environment: "production"
-        team: "security"
+      # use the environment variables to insert the bucket name
+      bucket_name: !ENV ASH_S3_BUCKET_NAME
+      aws_region: !ENV AWS_REGION
 ```
 
 ### Environment Variables

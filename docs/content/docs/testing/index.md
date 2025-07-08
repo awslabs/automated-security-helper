@@ -67,6 +67,28 @@ Tests are categorized using pytest markers to allow selective execution:
 - `@pytest.mark.model`: Tests related to data models
 - `@pytest.mark.serial`: Tests that should not run in parallel
 
+### UV Migration Tests
+
+The project includes comprehensive integration tests for the Poetry to UV migration. See [UV Migration Tests](uv-migration-tests.md) for detailed information about testing UV functionality, including:
+
+- UV tool scanner execution tests
+- UV dependency resolution and installation tests
+- UV build system functionality tests
+- Performance comparison tests between Poetry and UV
+- Cross-platform compatibility tests
+
+#### Migration Validation
+
+The project includes a migration validator that can be used in tests and CI:
+
+```bash
+# Validate migration status in tests
+python -m automated_security_helper.utils.migration_validator
+
+# Use in CI with JSON output
+python -m automated_security_helper.utils.migration_validator --json
+```
+
 Example:
 ```python
 import pytest

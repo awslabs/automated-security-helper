@@ -1,7 +1,7 @@
 """Module containing the Checkov security scanner implementation."""
 
-from importlib.metadata import version
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Annotated, List, Literal
@@ -23,7 +23,6 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
-    PropertyBag,
     SarifReport,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -120,6 +119,16 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
             description="Specific frameworks to exclude with Checkov. Defaults to none."
         ),
     ] = []
+    tool_version: Annotated[
+        str | None,
+        Field(
+            description="Specific version constraint for checkov installation (e.g., '>=3.2.0,<4.0.0')"
+        ),
+    ] = None
+    install_timeout: Annotated[
+        int,
+        Field(description="Timeout in seconds for tool installation"),
+    ] = 300
 
 
 class CheckovScannerConfig(ScannerPluginConfigBase):
@@ -140,8 +149,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         if self.config is None:
             self.config = CheckovScannerConfig()
         self.command = "checkov"
+        self.use_uv_tool = True  # Enable UV tool execution
         self.tool_type = "IAC"
-        self.tool_version = version("checkov")
+
+        # Set up explicit UV tool installation commands
+        self._setup_uv_tool_install_commands()
+
+        # Update tool version detection to work with explicit installation
+        self.tool_version = self._get_uv_tool_version("checkov")
         self.args = ToolArgs(
             format_arg="--output",
             format_arg_value="sarif",
@@ -153,6 +168,20 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         )
         super().model_post_init(context)
 
+    def _get_tool_version_constraint(self) -> str | None:
+        """Get version constraint for checkov installation.
+
+        Returns:
+            Version constraint string for checkov (e.g., ">=3.2.0,<4.0.0") or None for latest
+        """
+        # Use configured tool version if provided, otherwise use default
+        if self.config and self.config.options.tool_version:
+            return self.config.options.tool_version
+
+        # Use checkov-specific version constraint - checkov 3.2.0+ has improved stability
+        # and better SARIF support, but avoid 4.x for now due to potential breaking changes
+        return ">=3.2.0,<4.0.0"
+
     def validate(self) -> bool:
         """Validate the scanner configuration and requirements.
 
@@ -162,11 +191,38 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # Checkov is a dependency this Python module, if the Python import got
-        # this far then we know we're in a valid runtime for this scanner.
-        # found = find_executable(self.command)
-        # return found is not None
-        return self.tool_version is not None and str(self.tool_version).strip() != ""
+        # First validate UV tool availability if required
+        if not self._validate_uv_tool_availability():
+            return False
+
+        # For UV tool-based scanners, attempt explicit installation if needed
+        if self.use_uv_tool:
+            # Check if tool is already installed
+            if not self._is_uv_tool_installed():
+                self._plugin_log(
+                    "Checkov not found via UV tool, attempting explicit installation..."
+                )
+
+                # Attempt explicit tool installation with configured timeout
+                timeout = self.config.options.install_timeout if self.config else 300
+                if self._install_uv_tool(timeout=timeout):
+                    self._plugin_log("Successfully installed checkov via UV tool")
+                    self.dependencies_satisfied = True
+                    return True
+                else:
+                    self._plugin_log(
+                        "UV tool installation failed for checkov, falling back to existing validation",
+                        level=logging.WARNING,
+                    )
+                    # Fall back to existing validation logic
+                    return super().validate()
+            else:
+                self._plugin_log("Checkov already installed via UV tool")
+                self.dependencies_satisfied = True
+                return True
+
+        # Fall back to base class validation for non-UV tool scenarios
+        return super().validate()
 
     def _process_config_options(self):
         # Checkov config path
@@ -325,9 +381,6 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                         exitCodeDescription="\n".join(self.errors),
                         workingDirectory=ArtifactLocation(
                             uri=get_shortest_name(input=target),
-                        ),
-                        properties=PropertyBag(
-                            tool=sarif_report.runs[0].tool,
                         ),
                     )
                 ]

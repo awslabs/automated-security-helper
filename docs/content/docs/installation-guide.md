@@ -6,11 +6,14 @@ ASH v3 offers multiple installation methods to fit your workflow. Choose the opt
 
 ### For Local Mode
 - Python 3.10 or later
+- UV package manager (automatically installed with ASH)
 
-For full scanner coverage in local mode, the following non-Python tools are recommended:
+ASH v3 uses UV's tool isolation system to automatically manage most scanner dependencies (Bandit, Checkov, Semgrep). For full scanner coverage in local mode, the following additional non-Python tools are recommended:
 - Ruby with cfn-nag (`gem install cfn-nag`)
 - Node.js/npm (for npm audit support)
 - Grype and Syft (for SBOM and vulnerability scanning)
+
+**Note**: Tools like Bandit, Checkov, and Semgrep are automatically installed via UV tool management when needed, so you don't need to install them manually. ASH uses sensible default version constraints with the flexibility to override through configuration.
 
 ### For Container Mode
 - Any OCI-compatible container runtime (Docker, Podman, Finch, etc.)
@@ -28,7 +31,7 @@ For full scanner coverage in local mode, the following non-Python tools are reco
 curl -sSf https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
 
 # Use as normal
 ash --help
@@ -40,7 +43,7 @@ ash --help
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0 $args }
 
 # Use as normal
 ash --help
@@ -52,7 +55,7 @@ ash --help
 
 ```bash
 # Works on Windows, macOS, and Linux
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 
 # Use as normal
 ash --help
@@ -64,7 +67,7 @@ Standard Python package installation:
 
 ```bash
 # Works on Windows, macOS, and Linux
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 
 # Use as normal
 ash --help
@@ -76,7 +79,7 @@ For development or if you want to modify ASH:
 
 ```bash
 # Works on Windows, macOS, and Linux
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.0-beta
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.0
 cd automated-security-helper
 pip install .
 
@@ -112,7 +115,7 @@ To upgrade ASH to the latest version:
 ### If installed with `uvx`
 ```bash
 # Your alias will use the latest version when specified
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
 ```
 
 ### If installed with `pipx`
@@ -122,7 +125,7 @@ pipx upgrade automated-security-helper
 
 ### If installed with `pip`
 ```bash
-pip install --upgrade git+https://github.com/awslabs/automated-security-helper.git@v3.0.0-beta
+pip install --upgrade git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 ```
 
 ### If installed from repository

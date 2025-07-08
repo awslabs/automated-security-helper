@@ -27,26 +27,60 @@ if TYPE_CHECKING:
 
 class S3ReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
-        str | None,
+        Optional[str],
         Field(
             default_factory=lambda: os.environ.get(
                 "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
             ),
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
+            description="AWS region to use for S3 operations",
         ),
-    ]
-    aws_profile: Optional[str] = Field(
-        default_factory=lambda: os.environ.get("AWS_PROFILE", None)
-    )
-    bucket_name: str | None = Field(
-        default_factory=lambda: os.environ.get("ASH_S3_BUCKET_NAME", None)
-    )
-    key_prefix: str = "ash-reports/"
-    file_format: Literal["json", "yaml"] = "json"
+    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None))
+    aws_profile: Annotated[
+        Optional[str],
+        Field(
+            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
+            description="AWS profile to use for authentication",
+        ),
+    ] = os.environ.get("AWS_PROFILE", None)
+    bucket_name: Annotated[
+        str | None,
+        Field(
+            default_factory=lambda: os.environ.get("ASH_S3_BUCKET_NAME", None),
+            description="Name of the S3 bucket to store reports",
+        ),
+    ] = os.environ.get("ASH_S3_BUCKET_NAME", None)
+    key_prefix: Annotated[
+        str,
+        Field(
+            description="Prefix for S3 object keys",
+        ),
+    ] = "ash-reports/"
+    file_format: Annotated[
+        Literal["json", "yaml"],
+        Field(
+            description="Format to use for the report file",
+        ),
+    ] = "json"
     # Retry configuration
-    max_retries: int = 3
-    base_delay: float = 1.0
-    max_delay: float = 60.0
+    max_retries: Annotated[
+        int,
+        Field(
+            description="Maximum number of retry attempts for S3 operations",
+        ),
+    ] = 3
+    base_delay: Annotated[
+        float,
+        Field(
+            description="Base delay in seconds between retry attempts",
+        ),
+    ] = 1.0
+    max_delay: Annotated[
+        float,
+        Field(
+            description="Maximum delay in seconds between retry attempts",
+        ),
+    ] = 60.0
 
 
 class S3ReporterConfig(ReporterPluginConfigBase):
@@ -130,9 +164,11 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 Bucket=self.config.options.bucket_name,
                 Key=s3_key,
                 Body=output_content,
-                ContentType="application/json"
-                if file_extension == "json"
-                else "application/yaml",
+                ContentType=(
+                    "application/json"
+                    if file_extension == "json"
+                    else "application/yaml"
+                ),
             )
 
             s3_url = f"s3://{self.config.options.bucket_name}/{s3_key}"

@@ -38,6 +38,7 @@ KNOWN_LOCKFILE_NAMES = [
     "pnpm-lock.yaml",
     "npm-shrinkwrap.json",
     "poetry.lock",
+    "uv.lock",
     "pipenv.lock",
     "conda-lock.yml",
     "conda-lock.yaml",

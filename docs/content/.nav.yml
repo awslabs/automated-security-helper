@@ -54,6 +54,8 @@ nav:
                 - Plugin Best Practices: docs/plugins/plugin-best-practices.md
     - Developer Guide:
           - Unified Metrics System: developer-guide/unified-metrics.md
+          - Scanner Validation System: developer-guide/scanner-validation-system.md
+          - UV Tool Management: developer-guide/uv-tool-management.md
     - Contributing:
           - How to Contribute: contributing.md
           - Testing:

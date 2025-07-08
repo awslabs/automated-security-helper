@@ -513,9 +513,8 @@ def get_logger(
             show_level=not simple_format,
             enable_link_path=not simple_format,
             rich_tracebacks=not simple_format,
-            show_path=not simple_format
-            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
-            not in ["YES", "1", "TRUE"],
+            show_path=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
+            in ["YES", "1", "TRUE"],
             tracebacks_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
             in ["YES", "1", "TRUE"],
             markup=True,

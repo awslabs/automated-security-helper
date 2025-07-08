@@ -5,7 +5,7 @@ repos:
     hooks:
       - id: generate-schemas
         name: Generate ASH JSON schemas
-        entry: poetry run generate-ash-schemas
+        entry: uv run generate-ash-schemas
         language: system
         verbose: true
         pass_filenames: false
@@ -13,6 +13,7 @@ repos:
     rev: v5.0.0
     hooks:
       - id: pretty-format-json
+        exclude: '.vscode/.*'
         args:
           - "--autofix"
           - "--indent=2"
@@ -33,7 +34,7 @@ repos:
       - id: ash
         name: (manual) ASH dev manual scan
         description: Runs various code scanners from Python directly
-        entry: poetry run ash --mode=precommit
+        entry: uv run ash --mode=precommit
         pass_filenames: false
         verbose: true
         language: system

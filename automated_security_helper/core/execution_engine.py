@@ -1,11 +1,10 @@
 """Execution engine for security scanners."""
 
-import multiprocessing
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 import platform
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -30,6 +29,9 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.core.metrics_alignment import (
+    populate_metrics_from_unified_source,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -44,15 +46,17 @@ class ScanExecutionEngine:
         # at runtime for a more focused scan (e.g. during finding remediation where
         # there is only a single scanner failing, isolating scans to just that
         # scanner will allow quicker retesting until passing and a full scan can be )
-        enabled_scanners: Optional[List[str]] = [],
+        enabled_scanners: List[str] = [],
         # excluded_scanners is the list of scanner names that should be excluded from running
         # This takes precedence over enabled_scanners
-        excluded_scanners: Optional[List[str]] = [],
+        excluded_scanners: List[str] = [],
         strategy: Optional[ExecutionStrategy] = ExecutionStrategy.PARALLEL,
         asharp_model: Optional[AshAggregatedResults] = None,
         show_progress: bool = True,
         global_ignore_paths: List[IgnorePathWithReason] = [],
-        color_system: str = "auto",
+        color_system: Literal[
+            "auto", "standard", "256", "truecolor", "windows"
+        ] = "auto",
         verbose: bool = False,
         debug: bool = False,
         python_based_plugins_only: bool = False,
@@ -226,7 +230,7 @@ class ScanExecutionEngine:
         self._completed_scanners = []
         self._results = self._asharp_model
         self._progress = None
-        self._max_workers = multiprocessing.cpu_count()
+        self._max_workers = min(32, (os.cpu_count() or 1 + 4))
 
         # Register custom scanners from configuration
         self._register_custom_scanners()
@@ -606,6 +610,14 @@ class ScanExecutionEngine:
                     )
 
                 if self._asharp_model:
+                    # Populate final metrics before displaying the table
+                    # This ensures the metrics table shows the correct aligned data
+                    updated_asharp_model = populate_metrics_from_unified_source(
+                        aggregated_results=self._asharp_model
+                    )
+                    self._asharp_model = updated_asharp_model
+                    # self._asharp_model._populate_final_metrics()
+
                     # Get color setting from progress display
                     use_color = True
                     if hasattr(self.progress_display, "console") and hasattr(
