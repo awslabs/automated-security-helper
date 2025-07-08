@@ -145,6 +145,14 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
+        # Check if running on Windows (Semgrep doesn't support Windows)
+        if platform.system().lower() == "windows":
+            self._plugin_log(
+                "Semgrep is not supported on Windows and will be skipped",
+                level=logging.INFO,
+            )
+            return False
+            
         # First validate UV tool availability if required
         if not self._validate_uv_tool_availability():
             # If UV tool is not available, try direct executable fallback
@@ -250,7 +258,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 ]
                 if semgrep_rules:
                     ASH_LOGGER.info(
-                        f"✅ Semgrep offline mode: Found {len(semgrep_rules)} rule files in cache"
+                        f"Semgrep offline mode: Found {len(semgrep_rules)} rule files in cache"
                     )
                     self.args.extra_args.extend(
                         [

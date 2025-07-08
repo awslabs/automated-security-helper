@@ -57,6 +57,8 @@ class UVToolRunner:
                 text=True,
                 timeout=10,
                 check=False,
+                encoding="utf-8",
+                errors="replace",
             )
             self._uv_available_cache = result.returncode == 0
         except Exception:
@@ -76,6 +78,8 @@ class UVToolRunner:
                 text=True,
                 timeout=30,
                 check=True,
+                encoding="utf-8",
+                errors="replace",
             )
 
             tools = []
@@ -111,6 +115,8 @@ class UVToolRunner:
                 text=True,
                 timeout=15,
                 check=False,
+                encoding="utf-8",
+                errors="replace",
             )
 
             if result.returncode == 0 and result.stdout.strip():
@@ -218,6 +224,8 @@ class UVToolRunner:
                 text=True,
                 timeout=timeout,
                 check=True,
+                encoding="utf-8",
+                errors="replace",
             )
 
             # Stop progress monitoring
@@ -319,6 +327,8 @@ class UVToolRunner:
                 check=check,
                 timeout=timeout,
                 env=env,
+                encoding="utf-8" if text else None,
+                errors="replace" if text else None,
             )
             return result
         except subprocess.CalledProcessError as e:
@@ -382,6 +392,8 @@ class UVToolRunner:
                 text=True,
                 timeout=30,
                 check=False,
+                encoding="utf-8",
+                errors="replace",
             )
 
             if result.returncode == 0:
@@ -423,6 +435,8 @@ class UVToolRunner:
                 text=True,
                 timeout=60,
                 check=True,
+                encoding="utf-8",
+                errors="replace",
             )
             return True
         except Exception:

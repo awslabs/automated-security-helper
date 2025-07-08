@@ -442,7 +442,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             )
                             if not offline_valid:
                                 ASH_LOGGER.warning(
-                                    "⚠️ npm audit offline mode validation failed, but continuing with scan"
+                                    "npm audit offline mode validation failed, but continuing with scan"
                                 )
 
                         result = self._run_subprocess(

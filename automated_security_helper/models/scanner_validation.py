@@ -498,7 +498,7 @@ class ScannerValidationManager:
                     f"  ❌ Scanner '{scanner_name}' failed to complete execution"
                 )
         else:
-            self.logger.verbose("  ✅ All expected scanners completed execution")
+            self.logger.verbose("  All expected scanners completed execution")
 
         # Create validation checkpoint
         checkpoint = self.create_checkpoint(
@@ -668,7 +668,7 @@ class ScannerValidationManager:
                     )
         else:
             self.logger.verbose(
-                "✅ All registered scanners are present in results - no missing scanners to add"
+                "All registered scanners are present in results - no missing scanners to add"
             )
 
         # Update all scanners that executed successfully to reflect inclusion in results
@@ -740,7 +740,7 @@ class ScannerValidationManager:
             )
         else:
             self.logger.verbose(
-                "✅ Result completeness validation passed without issues"
+                "Result completeness validation passed without issues"
             )
 
         return checkpoint

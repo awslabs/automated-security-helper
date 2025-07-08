@@ -58,7 +58,7 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
     expiring_suppressions = check_for_expiring_suppressions(suppressions)
 
     if expiring_suppressions:
-        ASH_LOGGER.warning("⚠️ The following suppressions will expire within 30 days:")
+        ASH_LOGGER.warning("The following suppressions will expire within 30 days:")
         for suppression in expiring_suppressions:
             expiration_date = suppression.expiration
             rule_id = suppression.rule_id
@@ -70,7 +70,7 @@ def handle_suppression_expiration_check(*args, **kwargs) -> bool:
 
         # Add a helpful message about how to update suppressions
         ASH_LOGGER.info(
-            "💡 To update suppression expiration dates, modify your ASH configuration file"
+            "To update suppression expiration dates, modify your ASH configuration file"
         )
     else:
         ASH_LOGGER.debug("No suppressions are expiring within 30 days")

@@ -121,9 +121,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 "- **Actionable**: Number of findings at or above the threshold severity level that require attention"
             )
             md_parts.append("- **Result**:")
-            md_parts.append("  - ✅ **PASSED** = No findings at or above threshold")
+            md_parts.append("  - **PASSED** = No findings at or above threshold")
             md_parts.append("  - ❌ **FAILED** = Findings at or above threshold")
-            md_parts.append("  - ⚠️ **MISSING** = Required dependencies not available")
+            md_parts.append("  - **MISSING** = Required dependencies not available")
             md_parts.append("  - ⏭️ **SKIPPED** = Scanner explicitly disabled")
             md_parts.append(
                 "- **Threshold**: The minimum severity level that will cause a scanner to fail"
@@ -165,11 +165,11 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 # Determine status text and emoji based on status field
                 status = result["status"]
                 if status == "PASSED":
-                    status_text = "✅ PASSED"
+                    status_text = "PASSED"
                 elif status == "FAILED":
                     status_text = "❌ FAILED"
                 elif status == "MISSING":
-                    status_text = "⚠️ MISSING"
+                    status_text = "MISSING"
                 elif status == "SKIPPED":
                     status_text = "⏭️ SKIPPED"
                 else:

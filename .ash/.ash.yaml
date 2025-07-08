@@ -66,17 +66,17 @@ global_settings:
 reporters:
   security-hub:
     enabled: false
-  cloudwatch-logs:
-    enabled: false
-    options:
-      aws_region: !ENV ${AWS_REGION:None}
-      log_group_name: !ENV ${ASH_CLOUDWATCH_LOG_GROUP:None}
-  s3:
-    enabled: false
-    options:
-      aws_region: !ENV ${AWS_REGION:None}
-      bucket_name: !ENV ${ASH_S3_BUCKET_NAME:None}
-      bucket_prefix: !ENV ${ASH_S3_BUCKET_PREFIX:None}
+  # cloudwatch-logs:
+  #   enabled: false
+  #   options:
+  #     aws_region: !ENV ${AWS_REGION:None}
+  #     log_group_name: !ENV ${ASH_CLOUDWATCH_LOG_GROUP:None}
+  # s3:
+  #   enabled: false
+  #   options:
+  #     aws_region: !ENV ${AWS_REGION:None}
+  #     bucket_name: !ENV ${ASH_S3_BUCKET_NAME:None}
+  #     bucket_prefix: !ENV ${ASH_S3_BUCKET_PREFIX:None}
   csv:
     enabled: true
   cyclonedx:

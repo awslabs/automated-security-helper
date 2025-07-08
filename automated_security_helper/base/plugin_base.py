@@ -266,6 +266,8 @@ class PluginBase(BaseModel):
                 cwd=working_dir,
                 shell=False,
                 class_name=self.__class__.__name__,
+                encoding="utf-8",
+                errors="replace",
             )
 
             # Process stdout and stderr for the scanner plugin

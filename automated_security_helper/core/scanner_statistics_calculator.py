@@ -124,7 +124,7 @@ class ScannerStatisticsCalculator:
             )
         )
 
-        ASH_LOGGER.debug("🔍 Scanner Discovery Summary:")
+        ASH_LOGGER.debug("Scanner Discovery Summary:")
         ASH_LOGGER.debug(
             f"   SARIF scanners: {len(sarif_scanner_names)} - {sorted(sarif_scanner_names)}"
         )
@@ -182,7 +182,7 @@ class ScannerStatisticsCalculator:
                         else None
                     )
                     ASH_LOGGER.debug(
-                        f"🔍 Got duration for {scanner_name} from additional_reports: {duration}"
+                        f"Got duration for {scanner_name} from additional_reports: {duration}"
                     )
 
             # Fallback to scanner_results if available (for backward compatibility)
@@ -193,7 +193,7 @@ class ScannerStatisticsCalculator:
                 from automated_security_helper.utils.log import ASH_LOGGER
 
                 ASH_LOGGER.debug(
-                    f"🔍 Processing {scanner_name}: type={type(scanner_status_info)}"
+                    f"Processing {scanner_name}: type={type(scanner_status_info)}"
                 )
                 ASH_LOGGER.debug(
                     f"   Has 'source': {hasattr(scanner_status_info, 'source')}"
@@ -285,7 +285,7 @@ class ScannerStatisticsCalculator:
                         )
 
         scanner_list = list(scanner_names)
-        ASH_LOGGER.debug("🔍 SARIF Scanner Discovery:")
+        ASH_LOGGER.debug("SARIF Scanner Discovery:")
         ASH_LOGGER.debug(f"   Total SARIF results: {total_results}")
         ASH_LOGGER.debug(f"   Results with scanner_name: {results_with_scanner_name}")
         ASH_LOGGER.debug(f"   Unique scanners found: {len(scanner_list)}")
@@ -419,7 +419,7 @@ class ScannerStatisticsCalculator:
                 from automated_security_helper.utils.log import ASH_LOGGER
 
                 ASH_LOGGER.debug(
-                    f"🔍 Fallback processing {scanner_name}: type={type(scanner_status_info)}"
+                    f"Fallback processing {scanner_name}: type={type(scanner_status_info)}"
                 )
                 ASH_LOGGER.debug(
                     f"   Has 'source': {hasattr(scanner_status_info, 'source')}"

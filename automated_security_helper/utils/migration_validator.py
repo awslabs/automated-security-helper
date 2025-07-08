@@ -315,7 +315,7 @@ class MigrationValidator:
         report.append("")
 
         # Overall status
-        status = "✅ PASSED" if results["valid"] else "❌ FAILED"
+        status = "PASSED" if results["valid"] else "❌ FAILED"
         report.append(f"Overall Status: {status}")
         report.append("")
 
@@ -328,14 +328,14 @@ class MigrationValidator:
 
         # Warnings
         if results["warnings"]:
-            report.append("⚠️  WARNINGS:")
+            report.append(" WARNINGS:")
             for warning in results["warnings"]:
                 report.append(f"  • {warning}")
             report.append("")
 
         # Recommendations
         if results["recommendations"]:
-            report.append("💡 RECOMMENDATIONS:")
+            report.append("RECOMMENDATIONS:")
             for rec in results["recommendations"]:
                 report.append(f"  • {rec}")
             report.append("")

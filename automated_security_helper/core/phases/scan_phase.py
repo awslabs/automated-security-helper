@@ -14,6 +14,7 @@ from automated_security_helper.models.scan_results_container import ScanResultsC
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
@@ -426,7 +427,7 @@ class ScanPhase(EnginePhase):
             self._validate_scanner_tasks(aggregated_results)
 
             # Add comprehensive debugging for scanner filtering
-            ASH_LOGGER.info("🔍 Scanner Filtering Summary:")
+            ASH_LOGGER.info("Scanner Filtering Summary:")
             ASH_LOGGER.info(
                 f"   Total scanner classes found: {len(scanner_classes) if scanner_classes else 0}"
             )
@@ -1365,12 +1366,12 @@ class ScanPhase(EnginePhase):
 
         # Process the raw results based on type
         ASH_LOGGER.debug(
-            f"🔍 Processing results for {scanner_name}: type={type(results.raw_results)}, value={results.raw_results if not isinstance(results.raw_results, SarifReport) else 'SarifReport'}"
+            f"Processing results for {scanner_name}: type={type(results.raw_results)}, value={results.raw_results if not isinstance(results.raw_results, SarifReport) else 'SarifReport'}"
         )
 
         if isinstance(results.raw_results, SarifReport):
             ASH_LOGGER.debug(
-                f"✅ {scanner_name}: Processing as SARIF report with {len(results.raw_results.runs[0].results) if results.raw_results.runs and results.raw_results.runs[0].results else 0} results"
+                f"{scanner_name}: Processing as SARIF report with {len(results.raw_results.runs[0].results) if results.raw_results.runs and results.raw_results.runs[0].results else 0} results"
             )
             # Sanitize paths in SARIF report to be relative to source directory
             sanitized_sarif = sanitize_sarif_paths(
@@ -1442,8 +1443,8 @@ class ScanPhase(EnginePhase):
             # Attach scanner details before merging
             sanitized_sarif.attach_scanner_details(
                 scanner_name=results.scanner_name,
-                scanner_version=scanner_version,
-                invocation_details=invocation_details if invocation_details else None,
+                scanner_version=scanner_version or get_ash_version(),
+                invocation_details=invocation_details if invocation_details else {},
             )
 
             # Log the scanner details for debugging
@@ -1453,14 +1454,11 @@ class ScanPhase(EnginePhase):
 
             aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(results.raw_results, CycloneDXReport):
-            ASH_LOGGER.debug(f"📊 {scanner_name}: Processing as CycloneDX report")
+            ASH_LOGGER.debug(f"{scanner_name}: Processing as CycloneDX report")
             aggregated_results.cyclonedx = results.raw_results
-        elif isinstance(results.raw_results, AshAggregatedResults):
-            ASH_LOGGER.debug(f"🔗 {scanner_name}: Processing as AshAggregatedResults")
-            aggregated_results.merge_model(results.raw_results)
         else:
             ASH_LOGGER.debug(
-                f"📁 {scanner_name}: Processing as additional report (type: {type(results.raw_results)})"
+                f"{scanner_name}: Processing as additional report (type: {type(results.raw_results)})"
             )
             if scanner_name not in aggregated_results.additional_reports:
                 aggregated_results.additional_reports[scanner_name] = {}
@@ -1785,7 +1783,7 @@ class ScanPhase(EnginePhase):
                         f"Failed to notify validation warning event: {str(event_error)}"
                     )
             else:
-                ASH_LOGGER.info("✅ Scanner tasks validation completed successfully")
+                ASH_LOGGER.info("Scanner tasks validation completed successfully")
 
                 # Notify about successful validation
                 try:
@@ -2007,7 +2005,7 @@ class ScanPhase(EnginePhase):
                     "completion_rate", 0.0
                 )
                 ASH_LOGGER.info(
-                    f"✅ Execution completion validation passed - completion rate: {completion_rate:.1%}"
+                    f"Execution completion validation passed - completion rate: {completion_rate:.1%}"
                 )
 
                 # Notify about successful validation
@@ -2073,7 +2071,7 @@ class ScanPhase(EnginePhase):
             aggregated_results: The aggregated scan results to validate and potentially modify
         """
         try:
-            ASH_LOGGER.info("🔍 Validating result completeness...")
+            ASH_LOGGER.info("Validating result completeness...")
 
             # Call the validation manager to ensure complete results
             validation_checkpoint = self.validation_manager.ensure_complete_results(
@@ -2207,7 +2205,7 @@ class ScanPhase(EnginePhase):
                     "completeness_rate", 0.0
                 )
                 ASH_LOGGER.info(
-                    f"✅ Result completeness validation passed - completeness rate: {completeness_rate:.1%}"
+                    f"Result completeness validation passed - completeness rate: {completeness_rate:.1%}"
                 )
 
                 # Notify about successful validation

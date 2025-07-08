@@ -398,7 +398,7 @@ class TestOfflineModeValidator:
 
         # Check for either emoji or Windows-safe ASCII version
         success_patterns = [
-            "✅ TestScanner offline mode validation passed",
+            "TestScanner offline mode validation passed",
             "[OK] TestScanner offline mode validation passed",
         ]
         assert any(pattern in caplog.text for pattern in success_patterns), (
@@ -415,7 +415,7 @@ class TestOfflineModeValidator:
 
         # Check for either emoji or Windows-safe ASCII version
         failure_patterns = [
-            "⚠️ TestScanner offline mode validation failed",
+            "TestScanner offline mode validation failed",
             "[WARNING] TestScanner offline mode validation failed",
         ]
         assert any(pattern in caplog.text for pattern in failure_patterns), (
