@@ -13,7 +13,7 @@ repos:
     rev: v5.0.0
     hooks:
       - id: pretty-format-json
-        exclude: '.vscode/.*'
+        exclude: ".vscode/.*"
         args:
           - "--autofix"
           - "--indent=2"
