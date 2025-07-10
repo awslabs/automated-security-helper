@@ -6,7 +6,6 @@ from automated_security_helper.core.unified_metrics import (
     ScannerMetrics,
     format_duration,
     get_unified_scanner_metrics,
-    get_summary_metrics,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
@@ -193,50 +192,3 @@ class TestUnifiedMetrics:
             # Check scanner3 metrics (dependencies missing)
             assert metrics[2].status == "MISSING"
             assert metrics[2].passed is True
-
-    def test_get_summary_metrics(self):
-        """Test getting summary metrics from AshAggregatedResults."""
-        from automated_security_helper.config.ash_config import AshConfig
-        from automated_security_helper.config.default_config import get_default_config
-
-        # First define AshConfig and rebuild the model
-        AshConfig.model_rebuild()
-        AshAggregatedResults.model_rebuild()
-
-        model = AshAggregatedResults()
-        model.ash_config = get_default_config()
-
-        with patch(
-            "automated_security_helper.core.scanner_statistics_calculator.ScannerStatisticsCalculator.get_summary_statistics"
-        ) as mock_get_summary:
-            mock_get_summary.return_value = {
-                "total_scanners": 4,
-                "passed_scanners": 1,
-                "failed_scanners": 1,
-                "skipped_scanners": 1,
-                "missing_scanners": 1,
-                "total_suppressed": 10,
-                "total_critical": 5,
-                "total_high": 10,
-                "total_medium": 15,
-                "total_low": 20,
-                "total_info": 25,
-                "total_findings": 75,
-                "total_actionable": 30,
-            }
-
-            summary = get_summary_metrics(model)
-
-            assert summary["total_scanners"] == 4
-            assert summary["passed_scanners"] == 1
-            assert summary["failed_scanners"] == 1
-            assert summary["skipped_scanners"] == 1
-            assert summary["missing_scanners"] == 1
-            assert summary["total_suppressed"] == 10
-            assert summary["total_critical"] == 5
-            assert summary["total_high"] == 10
-            assert summary["total_medium"] == 15
-            assert summary["total_low"] == 20
-            assert summary["total_info"] == 25
-            assert summary["total_findings"] == 75
-            assert summary["total_actionable"] == 30

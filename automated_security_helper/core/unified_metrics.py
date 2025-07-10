@@ -29,7 +29,7 @@ Example usage:
     ```
 """
 
-from typing import Dict, List, Any, Optional
+from typing import List, Optional
 from pydantic import BaseModel
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -207,46 +207,3 @@ def get_unified_scanner_metrics(
     metrics_list.sort(key=lambda m: m.scanner_name)
 
     return metrics_list
-
-
-def get_summary_metrics(asharp_model: AshAggregatedResults) -> Dict[str, Any]:
-    """Get summary metrics from AshAggregatedResults.
-
-    This function calculates aggregate statistics across all scanners, providing
-    a high-level overview of the scan results. It uses the ScannerStatisticsCalculator
-    to get summary statistics, which include:
-
-    - Total number of scanners
-    - Number of passed, failed, skipped, and missing scanners
-    - Total number of findings across all severity levels
-    - Total number of suppressed findings
-    - Total number of actionable findings
-
-    Args:
-        asharp_model: The AshAggregatedResults model containing scan data
-
-    Returns:
-        Dictionary with summary metrics containing the following keys:
-        - total_scanners: Total number of scanners
-        - passed_scanners: Number of scanners that passed
-        - failed_scanners: Number of scanners that failed
-        - skipped_scanners: Number of scanners that were skipped
-        - missing_scanners: Number of scanners with missing dependencies
-        - total_suppressed: Total number of suppressed findings
-        - total_critical: Total number of critical findings
-        - total_high: Total number of high findings
-        - total_medium: Total number of medium findings
-        - total_low: Total number of low findings
-        - total_info: Total number of informational findings
-        - total_findings: Total number of non-suppressed findings
-        - total_actionable: Total number of actionable findings
-
-    Example:
-        ```python
-        summary = get_summary_metrics(asharp_model)
-        print(f"Total findings: {summary['total_findings']}")
-        print(f"Actionable findings: {summary['total_actionable']}")
-        ```
-    """
-    # Use the centralized scanner statistics calculator to get summary statistics
-    return ScannerStatisticsCalculator.get_summary_statistics(asharp_model)

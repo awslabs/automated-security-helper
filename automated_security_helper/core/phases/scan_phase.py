@@ -1,6 +1,7 @@
 """Implementation of the Scan phase."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from typing import Dict, List, Any, Tuple
 from pathlib import Path
 
@@ -754,15 +755,18 @@ class ScanPhase(EnginePhase):
                     # Set raw results
                     container.start_time = scanner_plugin.start_time
                     container.end_time = scanner_plugin.end_time
+                    container.duration = None
                     try:
-                        container.duration = (
-                            scanner_plugin.end_time - scanner_plugin.start_time
-                        ).total_seconds()
+                        if isinstance(scanner_plugin.end_time, datetime) and isinstance(
+                            scanner_plugin.start_time, datetime
+                        ):
+                            container.duration = (
+                                scanner_plugin.end_time - scanner_plugin.start_time
+                            ).total_seconds()
                     except Exception as e:
                         ASH_LOGGER.debug(
                             f"Error calculating duration for scanner {scanner_plugin.config.name}: {e}"
                         )
-                        container.duration = None
                     container.raw_results = raw_results
 
                     # Extract metrics based on result type
