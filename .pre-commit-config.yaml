@@ -39,10 +39,7 @@ repos:
         verbose: true
         language: system
         args:
-          # - --exclude-scanners=cdk-nag
-          - --no-fail-on-findings
           - --output-dir=.ash/ash_output_precommit_local
-          - --no-cleanup
   # - repo: https://github.com/awslabs/automated-security-helper
   #   rev: v3.0.0-beta
   #   hooks:
