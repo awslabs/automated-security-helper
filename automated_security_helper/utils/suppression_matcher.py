@@ -59,6 +59,11 @@ def _file_path_matches(
         return False
 
     # Use glob pattern matching for file paths
+    if finding_file_path == suppression_file_path:
+        # If it's an exact match, return True instead of wasting cycles on
+        # pattern matching
+        return True
+
     return fnmatch.fnmatch(finding_file_path, suppression_file_path)
 
 
@@ -94,8 +99,8 @@ def _line_range_matches(
     )
 
     # Check if the finding's line range overlaps with the suppression's line range
-    return (finding_start <= suppression.line_end) and (
-        finding_end >= suppression.line_start
+    return (finding_start <= (suppression.line_end or 0)) and (
+        finding_end >= (suppression.line_start or 0)
     )
 
 

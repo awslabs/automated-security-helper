@@ -364,16 +364,18 @@ def apply_suppressions_to_sarif(
                                 # Check if the URI matches the ignore path pattern
                                 if path_matches_pattern(uri, ignore_path.path):
                                     ASH_LOGGER.verbose(
-                                        f"Ignorning finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
+                                        f"Ignoring finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
                                     )
                                     is_in_ignorable_path = True
                                     break  # No need to check other ignore paths
 
+            if is_in_ignorable_path:
+                continue
             # Check if result matches any suppression rule (only if suppressions are not being ignored)
             ASH_LOGGER.debug(
                 f"Suppression check: is_in_ignorable_path={is_in_ignorable_path}, suppressions={bool(suppressions)}, ignore_suppressions={ignore_suppressions}"
             )
-            if not is_in_ignorable_path and suppressions and not ignore_suppressions:
+            if suppressions and not ignore_suppressions:
                 # Convert SARIF result to FlatVulnerability for suppression matching
                 flat_finding = None
                 if result.ruleId and result.locations and len(result.locations) > 0:
@@ -386,9 +388,7 @@ def apply_suppressions_to_sarif(
                         line_start = None
                         line_end = None
                         if (
-                            hasattr(location.physicalLocation, "root")
-                            and location.physicalLocation.root
-                            and hasattr(location.physicalLocation.root, "region")
+                            hasattr(location.physicalLocation.root, "region")
                             and location.physicalLocation.root.region
                         ):
                             line_start = location.physicalLocation.root.region.startLine
@@ -431,9 +431,12 @@ def apply_suppressions_to_sarif(
                             ASH_LOGGER.debug(
                                 f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues."
                             )
+                            updated_results.append(result)
                             continue
                         # Add suppression
-                        reason = matching_suppression.reason or "No reason provided"
+                        reason = (
+                            matching_suppression and matching_suppression.reason
+                        ) or "No reason provided"
                         ASH_LOGGER.verbose(
                             f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
                         )
@@ -444,7 +447,7 @@ def apply_suppressions_to_sarif(
                         result.suppressions.append(suppression)
 
             # Add the result to the updated results list
-            if not is_in_ignorable_path:
-                updated_results.append(result)
+            updated_results.append(result)
+
         sarif_report.runs[0].results = updated_results
     return sarif_report

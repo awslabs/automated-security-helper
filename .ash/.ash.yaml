@@ -8,6 +8,9 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    - path: pyproject.toml
+      rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      reason: This is the project configuration. Findings of this type are false positives.
     - path: automated_security_helper/utils/subprocess_utils.py
       rule_id: python.lang.compatibility.python36.python36-compatibility-Popen1
       reason: This package requires Python3.10 or greater.

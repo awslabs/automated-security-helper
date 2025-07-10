@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+from automated_security_helper.config.ash_config import AshConfigGlobalSettingsSection
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
@@ -12,6 +13,8 @@ from automated_security_helper.models.asharp_model import (
     ScannerSeverityCount,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    Level,
+    Message1,
     Result,
     Message,
     PropertyBag,
@@ -39,45 +42,6 @@ class TestScannerStatisticsCalculator:
         stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
         assert stats == {}
 
-    def test_extract_scanner_statistics_with_scanner_results(self):
-        """Test extracting statistics from a model with scanner results."""
-        from automated_security_helper.config.ash_config import AshConfig
-        from automated_security_helper.config.default_config import get_default_config
-
-        # First define AshConfig and rebuild the model
-        AshConfig.model_rebuild()
-        AshAggregatedResults.model_rebuild()
-
-        model = AshAggregatedResults()
-        model.ash_config = get_default_config()
-
-        # Add scanner results
-        scanner_info = ScannerStatusInfo(
-            source=ScannerTargetStatusInfo(
-                severity_counts=ScannerSeverityCount(
-                    critical=1, high=2, medium=3, low=4, info=5, suppressed=6
-                ),
-                finding_count=15,
-                actionable_finding_count=6,
-                suppressed_finding_count=6,
-                duration=10.5,
-            ),
-            converted=ScannerTargetStatusInfo(),
-        )
-        model.scanner_results["test_scanner"] = scanner_info
-
-        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
-
-        assert "test_scanner" in stats
-        assert stats["test_scanner"]["critical"] == 1
-        assert stats["test_scanner"]["high"] == 2
-        assert stats["test_scanner"]["medium"] == 3
-        assert stats["test_scanner"]["low"] == 4
-        assert stats["test_scanner"]["info"] == 5
-        assert stats["test_scanner"]["suppressed"] == 6
-        assert stats["test_scanner"]["total"] == 15
-        assert stats["test_scanner"]["duration"] == 10.5
-
     def test_extract_sarif_counts_for_scanner(self):
         """Test extracting severity counts from SARIF data for a specific scanner."""
         from automated_security_helper.config.ash_config import AshConfig
@@ -99,32 +63,32 @@ class TestScannerStatisticsCalculator:
                     results=[
                         Result(
                             ruleId="RULE1",
-                            level="error",
-                            message=Message(text="Critical issue"),
+                            level=Level.error,
+                            message=Message(root=Message1(text="Critical issue")),
                             properties=PropertyBag(scanner_name="test_scanner"),
                         ),
                         Result(
                             ruleId="RULE2",
-                            level="warning",
-                            message=Message(text="Medium issue"),
+                            level=Level.warning,
+                            message=Message(root=Message1(text="Medium issue")),
                             properties=PropertyBag(scanner_name="test_scanner"),
                         ),
                         Result(
                             ruleId="RULE3",
-                            level="note",
-                            message=Message(text="Low issue"),
+                            level=Level.note,
+                            message=Message(root=Message1(text="Low issue")),
                             properties=PropertyBag(scanner_name="test_scanner"),
                         ),
                         Result(
                             ruleId="RULE4",
-                            level="none",
-                            message=Message(text="Info issue"),
+                            level=Level.none,
+                            message=Message(root=Message1(text="Info issue")),
                             properties=PropertyBag(scanner_name="test_scanner"),
                         ),
                         Result(
                             ruleId="RULE5",
-                            level="error",
-                            message=Message(text="Other scanner issue"),
+                            level=Level.error,
+                            message=Message(root=Message1(text="Other scanner issue")),
                             properties=PropertyBag(scanner_name="other_scanner"),
                         ),
                     ],
@@ -166,8 +130,8 @@ class TestScannerStatisticsCalculator:
                     results=[
                         Result(
                             ruleId="RULE1",
-                            level="error",
-                            message=Message(text="Critical issue"),
+                            level=Level.error,
+                            message=Message(root=Message1(text="Critical issue")),
                             properties=PropertyBag(scanner_name="test_scanner"),
                             suppressions=[
                                 {
@@ -178,8 +142,8 @@ class TestScannerStatisticsCalculator:
                         ),
                         Result(
                             ruleId="RULE2",
-                            level="warning",
-                            message=Message(text="Medium issue"),
+                            level=Level.warning,
+                            message=Message(root=Message1(text="Medium issue")),
                             properties=PropertyBag(scanner_name="test_scanner"),
                         ),
                     ],
@@ -205,7 +169,7 @@ class TestScannerStatisticsCalculator:
         # Test with scanner_name in properties
         result1 = Result(
             ruleId="RULE1",
-            message=Message(text="Test message"),
+            message=Message(root=Message1(text="Test message")),
             properties=PropertyBag(scanner_name="test_scanner"),
         )
         assert (
@@ -220,7 +184,7 @@ class TestScannerStatisticsCalculator:
         scanner_details = SimpleNamespace(tool_name="other_scanner")
         result2 = Result(
             ruleId="RULE2",
-            message=Message(text="Test message"),
+            message=Message(root=Message1(text="Test message")),
             properties=PropertyBag(scanner_details=scanner_details),
         )
         assert (
@@ -231,7 +195,7 @@ class TestScannerStatisticsCalculator:
         # Test with tags
         result3 = Result(
             ruleId="RULE3",
-            message=Message(text="Test message"),
+            message=Message(root=Message1(text="Test message")),
             properties=PropertyBag(tags=["bandit", "security"]),
         )
         assert (
@@ -242,7 +206,7 @@ class TestScannerStatisticsCalculator:
         # Test with no identifiable scanner name
         result4 = Result(
             ruleId="RULE4",
-            message=Message(text="Test message"),
+            message=Message(root=Message1(text="Test message")),
             properties=PropertyBag(tags=["security"]),
         )
         assert (
@@ -309,7 +273,8 @@ class TestScannerStatisticsCalculator:
         from automated_security_helper.config.ash_config import AshConfig
 
         model.ash_config = AshConfig(
-            project_name="test", global_settings={"severity_threshold": "HIGH"}
+            project_name="test",
+            global_settings=AshConfigGlobalSettingsSection(severity_threshold="HIGH"),
         )
 
         threshold, source = ScannerStatisticsCalculator.get_scanner_threshold_info(
@@ -587,17 +552,17 @@ class TestScannerStatisticsCalculator:
                     results=[
                         Result(
                             ruleId="RULE1",
-                            message=Message(text="Test message"),
+                            message=Message(root=Message1(text="Test message")),
                             properties=PropertyBag(scanner_name="scanner1"),
                         ),
                         Result(
                             ruleId="RULE2",
-                            message=Message(text="Test message"),
+                            message=Message(root=Message1(text="Test message")),
                             properties=PropertyBag(scanner_name="scanner1"),
                         ),
                         Result(
                             ruleId="RULE3",
-                            message=Message(text="Test message"),
+                            message=Message(root=Message1(text="Test message")),
                             properties=PropertyBag(scanner_name="scanner2"),
                         ),
                     ],

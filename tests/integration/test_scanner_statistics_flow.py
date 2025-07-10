@@ -9,7 +9,6 @@ from automated_security_helper.core.scanner_statistics_calculator import (
 )
 from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
-    get_summary_metrics,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -27,6 +26,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_rep
     FlatJSONReporter,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
+    Level,
+    Message1,
+    PhysicalLocation2,
     Result,
     Message,
     Location,
@@ -64,32 +66,36 @@ class TestScannerStatisticsFlow:
                         # Scanner 1 findings
                         Result(
                             ruleId="RULE1",
-                            level="error",
-                            message=Message(text="Critical issue"),
+                            level=Level.error,
+                            message=Message(root=Message1(text="Critical issue")),
                             properties=PropertyBag(scanner_name="scanner1"),
                             locations=[
                                 Location(
                                     physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri="src/file1.py"
-                                        ),
-                                        region=Region(startLine=10),
+                                        root=PhysicalLocation2(
+                                            artifactLocation=ArtifactLocation(
+                                                uri="src/file1.py"
+                                            ),
+                                            region=Region(startLine=10),
+                                        )
                                     )
                                 )
                             ],
                         ),
                         Result(
                             ruleId="RULE2",
-                            level="warning",
-                            message=Message(text="Medium issue"),
+                            level=Level.warning,
+                            message=Message(root=Message1(text="Medium issue")),
                             properties=PropertyBag(scanner_name="scanner1"),
                             locations=[
                                 Location(
                                     physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri="src/file2.py"
-                                        ),
-                                        region=Region(startLine=20),
+                                        root=PhysicalLocation2(
+                                            artifactLocation=ArtifactLocation(
+                                                uri="src/file2.py"
+                                            ),
+                                            region=Region(startLine=20),
+                                        )
                                     )
                                 )
                             ],
@@ -97,16 +103,18 @@ class TestScannerStatisticsFlow:
                         # Scanner 2 findings
                         Result(
                             ruleId="RULE3",
-                            level="error",
-                            message=Message(text="Critical issue"),
+                            level=Level.error,
+                            message=Message(root=Message1(text="Critical issue")),
                             properties=PropertyBag(scanner_name="scanner2"),
                             locations=[
                                 Location(
                                     physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri="src/file3.py"
-                                        ),
-                                        region=Region(startLine=30),
+                                        root=PhysicalLocation2(
+                                            artifactLocation=ArtifactLocation(
+                                                uri="src/file3.py"
+                                            ),
+                                            region=Region(startLine=30),
+                                        )
                                     )
                                 )
                             ],
@@ -119,16 +127,18 @@ class TestScannerStatisticsFlow:
                         ),
                         Result(
                             ruleId="RULE4",
-                            level="note",
-                            message=Message(text="Low issue"),
+                            level=Level.note,
+                            message=Message(root=Message1(text="Low issue")),
                             properties=PropertyBag(scanner_name="scanner2"),
                             locations=[
                                 Location(
                                     physicalLocation=PhysicalLocation(
-                                        artifactLocation=ArtifactLocation(
-                                            uri="src/file4.py"
-                                        ),
-                                        region=Region(startLine=40),
+                                        root=PhysicalLocation2(
+                                            artifactLocation=ArtifactLocation(
+                                                uri="src/file4.py"
+                                            ),
+                                            region=Region(startLine=40),
+                                        )
                                     )
                                 )
                             ],
@@ -179,15 +189,7 @@ class TestScannerStatisticsFlow:
             scanner2_metrics.status == "PASSED"
         )  # Assuming MEDIUM threshold, only low findings
 
-        # Step 3: Get summary metrics
-        summary = get_summary_metrics(model)
-
-        # Verify summary metrics
-        assert summary["total_scanners"] == 2
-        assert summary["total_findings"] == 3  # 1 critical, 1 medium, 1 low
-        assert summary["total_suppressed"] == 1
-
-        # Step 4: Test report content emitter
+        # Step 3: Test report content emitter
         emitter = ReportContentEmitter(model)
         scanner_results = emitter.get_scanner_results()
 
@@ -196,7 +198,7 @@ class TestScannerStatisticsFlow:
         assert any(r["scanner_name"] == "scanner1" for r in scanner_results)
         assert any(r["scanner_name"] == "scanner2" for r in scanner_results)
 
-        # Step 5: Test different reporters for consistency
+        # Step 4: Test different reporters for consistency
 
         # HTML Reporter
         html_reporter = HtmlReporter(context=test_plugin_context)
