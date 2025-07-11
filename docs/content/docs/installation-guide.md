@@ -21,7 +21,9 @@ ASH v3 uses UV's tool isolation system to automatically manage most scanner depe
 
 ## Installation Options
 
-### 1. Using `uvx` (Recommended)
+### Standard Installation
+
+#### 1. Using `uvx` (Recommended)
 
 [`uvx`](https://github.com/astral-sh/uv) is a fast Python package installer and resolver that allows you to run packages directly without installing them permanently.
 
@@ -49,7 +51,7 @@ function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@
 ash --help
 ```
 
-### 2. Using `pipx`
+#### 2. Using `pipx`
 
 [`pipx`](https://pypa.github.io/pipx/) installs packages in isolated environments and makes their entry points available globally.
 
@@ -61,7 +63,7 @@ pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 ash --help
 ```
 
-### 3. Using `pip`
+#### 3. Using `pip`
 
 Standard Python package installation:
 
@@ -73,7 +75,7 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 ash --help
 ```
 
-### 4. Clone the Repository
+#### 4. Clone the Repository
 
 For development or if you want to modify ASH:
 
@@ -85,6 +87,20 @@ pip install .
 
 # Use as normal
 ash --help
+```
+
+### MCP Support
+
+ASH v3 includes built-in Model Context Protocol (MCP) support for AI integration. No additional installation steps are required - MCP dependencies are included as core dependencies.
+
+After installing ASH with any of the methods above, you can immediately use MCP features:
+
+```bash
+# Start the MCP server
+ash mcp
+
+# Verify MCP support
+ash mcp --help
 ```
 
 ## Windows-Specific Installation Notes

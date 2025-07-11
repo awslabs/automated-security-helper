@@ -39,10 +39,7 @@ repos:
         verbose: true
         language: system
         args:
-          # - --exclude-scanners=cdk-nag
-          - --no-fail-on-findings
           - --output-dir=.ash/ash_output_precommit_local
-          - --no-cleanup
   # - repo: https://github.com/awslabs/automated-security-helper
   #   rev: v3.0.0-beta
   #   hooks:
@@ -51,17 +48,8 @@ repos:
   #         ## REQUIRED ARGS
   #         # N/A - ASH pre-commit hooks include `--mode=precommit` by default.
   #         # The only ARGS needed are custom args past what is available by default.
-  #         #
   #         ## EXTRA ARGS (these are specific to this repo's usage of the hook and are not required)
-  #         # Default behavior is to fail if any actionable findings are found.
-  #         # We are working through resolution right now while still needing
-  #         # to run this hook, so we are disabling the '--fail-on-findings' default
-  #         # behavior temporarily to allow the hook to not be blocking while
-  #         # still providing necessary visibility into findings state.
-  #         - --no-fail-on-findings
   #         # Default output-dir is `.ash/ash_output`, customize if preferred.
   #         # This is to allow the pre-commit runs of ASH to not collide with the
   #         # manual runs so results are retained independently.
   #         - --output-dir=.ash/ash_output_precommit
-  #       stages:
-  #         - pre-commit

@@ -219,7 +219,7 @@ ASH v3 includes a comprehensive Scanner Validation System that monitors scanner 
 
 The validation system will log specific reasons why scanners might be disabled (missing dependencies, configuration exclusions, etc.) and attempt automatic recovery where possible. Additionally, the system ensures all originally registered scanners appear in the final results with appropriate status, even if they failed or were disabled during the scan.
 
-For detailed information about the scanner validation system, see the [Scanner Validation System](../developer-guide/scanner-validation-system.md) developer guide.
+For detailed information about the scanner validation system, see the [Scanner Validation System](developer-guide/scanner-validation-system.md) developer guide.
 
 ### How do I debug ASH?
 ```bash
@@ -229,6 +229,102 @@ ash --debug
 # Enable verbose logging
 ash --verbose
 ```
+
+## AI Integration and MCP
+
+### What is MCP and how does ASH support it?
+Model Context Protocol (MCP) is a standardized way for AI applications to access external tools and data sources. ASH includes an MCP server that allows AI assistants to perform security scans, monitor progress, and analyze results through natural language interactions.
+
+### How do I set up ASH with MCP?
+1. **Install UV and Python 3.10+**:
+   - Install `uv` from [Astral](https://docs.astral.sh/uv/getting-started/installation/) or the [GitHub README](https://github.com/astral-sh/uv#installation)
+   - Install Python 3.10+ using `uv python install 3.10` (or a more recent version)
+
+2. **Configure your AI client** to use the ASH MCP server:
+
+   **Amazon Q Developer CLI** - Add to `~/.aws/amazonq/mcp.json`:
+   ```json
+   {
+     "mcpServers": {
+       "ash": {
+         "command": "uvx",
+         "args": [
+           "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+           "ash",
+           "mcp"
+         ],
+         "disabled": false,
+         "autoApprove": []
+       }
+     }
+   }
+   ```
+
+   **Claude Desktop** - Add to `claude_desktop_config.json`:
+   ```json
+   {
+     "mcpServers": {
+       "ash-security": {
+         "command": "uvx",
+         "args": [
+           "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+           "ash",
+           "mcp"
+         ]
+       }
+     }
+   }
+   ```
+
+   **Cline (VS Code)**:
+   ```json
+   {
+     "mcpServers": {
+       "ash": {
+         "command": "uvx",
+         "args": [
+           "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+           "ash",
+           "mcp"
+         ],
+         "disabled": false,
+         "autoApprove": [
+           "get_scan_progress",
+           "list_active_scans",
+           "get_scan_results"
+         ]
+       }
+     }
+   }
+   ```
+
+### What can I do with ASH through MCP?
+- Start security scans with natural language commands
+- Monitor scan progress in real-time
+- Analyze and prioritize security findings
+- Generate security reports and remediation plans
+- Manage multiple concurrent scans
+
+### I'm getting MCP dependency errors
+MCP dependencies are included by default in ASH v3. If you're still getting errors:
+
+1. **Check UV installation**: Ensure UV is installed and available: `uv --version`
+2. **Check Python version**: Ensure Python 3.10+ is available: `uv python list`
+3. **Test the MCP server**: Try running the server directly:
+   ```bash
+   uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash mcp --help
+   ```
+
+### How do I test the ASH MCP server?
+```bash
+# Test MCP server startup
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash mcp --debug
+
+# Check ASH version
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash --version
+```
+
+For more details, see the [MCP Tutorial](tutorials/using-ash-with-mcp.md).
 
 ## Getting Help
 

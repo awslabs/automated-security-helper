@@ -7,6 +7,7 @@ from automated_security_helper.cli.config import config_app
 from automated_security_helper.cli.dependencies import dependencies_app
 from automated_security_helper.cli.image import build_ash_image_cli_command
 from automated_security_helper.cli.inspect import inspect_app
+from automated_security_helper.cli.mcp import mcp_command
 from automated_security_helper.cli.plugin import plugin_app
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.cli.report import report_command
@@ -39,6 +40,7 @@ Any additional arguments passed will be forwarded to ASH inside the container im
 )(build_ash_image_cli_command)
 
 app.command(name="report")(report_command)
+app.command(name="mcp")(mcp_command)
 
 
 app.add_typer(config_app, name="config")

@@ -158,7 +158,7 @@ class ScannerStatisticsCalculator:
                 )
             )
 
-            total = critical + high + medium + low + info
+            total = critical + high + medium + low + info + suppressed
 
             # Calculate actionable findings based on threshold
             actionable = ScannerStatisticsCalculator.calculate_actionable_count(
@@ -211,8 +211,8 @@ class ScannerStatisticsCalculator:
                 ):
                     # Old ScannerStatusInfo structure
                     ASH_LOGGER.debug("   Using OLD ScannerStatusInfo structure")
-                    source_duration = scanner_status_info.source.duration or 0
-                    converted_duration = scanner_status_info.converted.duration or 0
+                    source_duration = scanner_status_info.duration or 0
+                    converted_duration = scanner_status_info.duration or 0
                     duration = source_duration + converted_duration
                 elif hasattr(scanner_status_info, "duration"):
                     # New ScannerMetrics structure
@@ -407,52 +407,8 @@ class ScannerStatisticsCalculator:
                                     # Default to info if no level specified
                                     info += 1
 
-        # Verify that the total number of findings matches what we expect
-        total_findings = critical + high + medium + low + info + suppressed
-
-        # If no findings were found in SARIF, fall back to scanner_results
-        if total_findings == 0:
-            if scanner_name in asharp_model.scanner_results:
-                scanner_status_info = asharp_model.scanner_results[scanner_name]
-
-                # Debug logging
-                from automated_security_helper.utils.log import ASH_LOGGER
-
-                ASH_LOGGER.debug(
-                    f"Fallback processing {scanner_name}: type={type(scanner_status_info)}"
-                )
-                ASH_LOGGER.debug(
-                    f"   Has 'source': {hasattr(scanner_status_info, 'source')}"
-                )
-                ASH_LOGGER.debug(
-                    f"   Has 'converted': {hasattr(scanner_status_info, 'converted')}"
-                )
-
-                # Handle both old ScannerStatusInfo and new ScannerMetrics structures
-                if hasattr(scanner_status_info, "source") and hasattr(
-                    scanner_status_info, "converted"
-                ):
-                    # Old ScannerStatusInfo structure
-                    ASH_LOGGER.debug(
-                        "   Using OLD ScannerStatusInfo structure for fallback"
-                    )
-                    source_counts = scanner_status_info.source.severity_counts
-                    converted_counts = scanner_status_info.converted.severity_counts
-
-                    suppressed = source_counts.suppressed + converted_counts.suppressed
-                    critical = source_counts.critical + converted_counts.critical
-                    high = source_counts.high + converted_counts.high
-                    medium = source_counts.medium + converted_counts.medium
-                    low = source_counts.low + converted_counts.low
-                    info = source_counts.info + converted_counts.info
-                elif hasattr(scanner_status_info, "suppressed"):
-                    # New ScannerMetrics structure - use the metrics directly
-                    suppressed = scanner_status_info.suppressed
-                    critical = scanner_status_info.critical
-                    high = scanner_status_info.high
-                    medium = scanner_status_info.medium
-                    low = scanner_status_info.low
-                    info = scanner_status_info.info
+        # # Verify that the total number of findings matches what we expect
+        # total_findings = critical + high + medium + low + info + suppressed
 
         return suppressed, critical, high, medium, low, info
 
