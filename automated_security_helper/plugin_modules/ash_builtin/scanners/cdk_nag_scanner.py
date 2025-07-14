@@ -97,7 +97,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         self.tool_version = version("cdk_nag")
         return super().model_post_init(context)
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
 
         Returns:

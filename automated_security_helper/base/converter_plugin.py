@@ -60,7 +60,7 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         if config:
             self.config = config
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate converter configuration and requirements.
 
         Defaults to returning True as most converter plugins are entirely Python based."""

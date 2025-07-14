@@ -53,7 +53,7 @@ def test_bandit_scanner_configure(test_plugin_context, test_source_dir):
 
 def test_bandit_scanner_validate(test_bandit_scanner):
     """Test BanditScanner validation."""
-    assert test_bandit_scanner.validate() is True
+    assert test_bandit_scanner.validate_plugin_dependencies() is True
 
 
 @pytest.mark.parametrize(

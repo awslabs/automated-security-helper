@@ -101,7 +101,7 @@ class TestBedrockSummaryReporter:
 
         reporter = BedrockSummaryReporter(context=mock_context)
 
-        result = reporter.validate()
+        result = reporter.validate_plugin_dependencies()
 
         assert result is False
         assert reporter.dependencies_satisfied is False
@@ -114,7 +114,7 @@ class TestBedrockSummaryReporter:
         reporter = BedrockSummaryReporter(context=mock_context)
         reporter.config.options.aws_region = None
 
-        result = reporter.validate()
+        result = reporter.validate_plugin_dependencies()
 
         assert result is False
         assert reporter.dependencies_satisfied is False
@@ -130,7 +130,7 @@ class TestBedrockSummaryReporter:
 
         reporter = BedrockSummaryReporter(context=mock_context)
 
-        result = reporter.validate()
+        result = reporter.validate_plugin_dependencies()
 
         assert result is False
         assert reporter.dependencies_satisfied is False
@@ -162,7 +162,7 @@ class TestBedrockSummaryReporter:
 
         reporter = BedrockSummaryReporter(context=mock_context)
 
-        result = reporter.validate()
+        result = reporter.validate_plugin_dependencies()
 
         assert result is False
         assert reporter.dependencies_satisfied is False
@@ -181,7 +181,7 @@ class TestBedrockSummaryReporter:
         reporter.config.options.model_id = "invalid-model-id"
         reporter.config.options.enable_fallback_models = False
 
-        result = reporter.validate()
+        result = reporter.validate_plugin_dependencies()
 
         assert result is False
         assert reporter.dependencies_satisfied is False
@@ -221,7 +221,7 @@ class TestBedrockSummaryReporter:
         reporter.config.options.model_id = "us.amazon.nova-pro-v1:0"  # Not in the list
         reporter.config.options.enable_fallback_models = True
 
-        result = reporter.validate()
+        result = reporter.validate_plugin_dependencies()
 
         assert result is True
         assert reporter.dependencies_satisfied is True

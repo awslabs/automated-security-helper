@@ -90,7 +90,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             self.config = S3ReporterConfig()
         return super().model_post_init(context)
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
         if self.config.options.aws_region is None or self.config.options.bucket_name is None:
@@ -121,7 +121,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model and upload to S3 bucket."""
         if isinstance(self.config, dict):
-            self.config = S3ReporterConfig.model_validate(self.config)
+            self.config = S3ReporterConfig.model_validate_plugin_dependencies(self.config)
 
         # Create a unique key for the S3 object
         timestamp = model.scan_metadata.scan_time.strftime("%Y%m%d-%H%M%S")

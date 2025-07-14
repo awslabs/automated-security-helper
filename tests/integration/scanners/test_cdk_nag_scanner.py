@@ -30,7 +30,7 @@ def test_cdk_nag_scanner_init(test_plugin_context):
 
 def test_cdk_nag_scanner_validate(test_cdk_nag_scanner):
     """Test CdkNagScanner validation."""
-    assert test_cdk_nag_scanner.validate() is True
+    assert test_cdk_nag_scanner.validate_plugin_dependencies() is True
 
 
 def test_cdk_nag_scanner_configure(test_plugin_context):

@@ -32,7 +32,7 @@ def test_semgrep_scanner_init(test_plugin_context):
 
 def test_semgrep_scanner_validate(test_semgrep_scanner):
     """Test SemgrepScanner validation."""
-    assert test_semgrep_scanner.validate() is True
+    assert test_semgrep_scanner.validate_plugin_dependencies() is True
 
 
 def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
@@ -70,7 +70,7 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         mock_runner.return_value = mock_runner_instance
         mock_runner_instance.is_uv_available.return_value = True
 
-        assert scanner.validate() is True
+        assert scanner.validate_plugin_dependencies() is True
 
     # Test validation with UV tool unavailable but direct executable available
     with (
@@ -86,7 +86,7 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         mock_runner_instance.is_uv_available.return_value = False
         mock_find.return_value = "/usr/local/bin/semgrep"
 
-        assert scanner.validate() is True
+        assert scanner.validate_plugin_dependencies() is True
         assert scanner.use_uv_tool is False  # Should be disabled after fallback
 
     # Test validation with neither UV tool nor direct executable available
@@ -103,7 +103,7 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         mock_runner_instance.is_uv_available.return_value = False
         mock_find.return_value = None
 
-        assert scanner.validate() is False
+        assert scanner.validate_plugin_dependencies() is False
 
 
 def test_semgrep_scanner_configure(test_plugin_context):

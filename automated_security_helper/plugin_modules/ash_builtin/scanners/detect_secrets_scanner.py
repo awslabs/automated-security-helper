@@ -107,7 +107,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         self._secrets_collection = SecretsCollection()
         super().model_post_init(context)
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
 
         Returns:

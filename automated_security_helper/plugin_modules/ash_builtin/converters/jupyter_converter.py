@@ -93,7 +93,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         """
         return ["jupyter"]
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Enhanced validation with explicit tool installation.
 
         This method implements the enhanced validation workflow that:

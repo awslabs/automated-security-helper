@@ -48,7 +48,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     def model_post_init(self, context):
         return super().model_post_init(context)
 
-    def validate(self):
+    def validate_plugin_dependencies(self):
         # Return True since this scanner is entirely within the same Python module,
         # so there is nothing further to validate in terms of availability.
         return True

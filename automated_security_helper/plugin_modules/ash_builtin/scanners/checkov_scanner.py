@@ -182,7 +182,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # and better SARIF support, but avoid 4.x for now due to potential breaking changes
         return ">=3.2.0,<4.0.0"
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
 
         Returns:
@@ -215,14 +215,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                         level=logging.WARNING,
                     )
                     # Fall back to existing validation logic
-                    return super().validate()
+                    return super().validate_plugin_dependencies()
             else:
                 self._plugin_log("Checkov already installed via UV tool")
                 self.dependencies_satisfied = True
                 return True
 
         # Fall back to base class validation for non-UV tool scenarios
-        return super().validate()
+        return super().validate_plugin_dependencies()
 
     def _process_config_options(self):
         # Checkov config path

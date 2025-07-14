@@ -127,7 +127,7 @@ function Invoke-ASH {
         [parameter()]
         [ValidateSet("ci", "non-root")]
         [string]
-        $BuildTarget = $(if($env:CI -or $env:IsCI -or $env:CODEBUILD_BUILD_ID){"ci"}else{"non-root"}),
+        $BuildTarget = $(if($env:CI -or $env:IsCI -or $env:CODEBUILD_BUILD_ID -or $PSVersionTable.PSVersion.Major -le 5 -or $IsWindows){"ci"}else{"non-root"}),
         [parameter()]
         [switch]
         $Offline,

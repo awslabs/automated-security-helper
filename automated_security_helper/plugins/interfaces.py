@@ -9,7 +9,7 @@ class IConverter:
         """Convert a target file/directory"""
         pass
 
-    def validate(self):
+    def validate_plugin_dependencies(self):
         """Validate converter configuration"""
         pass
 
@@ -21,7 +21,7 @@ class IScanner:
         """Scan a target file/directory"""
         pass
 
-    def validate(self):
+    def validate_plugin_dependencies(self):
         """Validate scanner configuration"""
         pass
 
