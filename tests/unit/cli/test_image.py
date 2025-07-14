@@ -1,5 +1,6 @@
 """Unit tests for the image CLI module."""
 
+import platform
 from unittest.mock import patch, MagicMock
 
 from automated_security_helper.cli.image import build_ash_image_cli_command
@@ -19,7 +20,9 @@ def test_build_ash_image_cli_command_basic(mock_run_ash_scan):
         ctx,
         force=True,
         oci_runner=None,
-        # build_target=BuildTarget.NON_ROOT, ## TODO - Commented out for now due to Windows discrepancies
+        build_target=BuildTarget.CI
+        if platform.system().lower().startswith("win")
+        else BuildTarget.NON_ROOT,
         offline_semgrep_rulesets="p/ci",
         container_uid=None,
         container_gid=None,
@@ -42,7 +45,9 @@ def test_build_ash_image_cli_command_basic(mock_run_ash_scan):
         run=False,
         force=True,
         oci_runner=None,
-        # build_target=BuildTarget.NON_ROOT, ## TODO - Commented out for now due to Windows discrepancies
+        build_target=BuildTarget.CI
+        if platform.system().lower().startswith("win")
+        else BuildTarget.NON_ROOT,
         offline_semgrep_rulesets="p/ci",
         container_uid=None,
         container_gid=None,
