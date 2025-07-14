@@ -315,7 +315,7 @@ class MigrationValidator:
         report.append("")
 
         # Overall status
-        status = "PASSED" if results["valid"] else "❌ FAILED"
+        status = "PASSED" if results["valid"] else "FAILED"
         report.append(f"Overall Status: {status}")
         report.append("")
 
