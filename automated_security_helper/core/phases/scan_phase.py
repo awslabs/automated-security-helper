@@ -233,7 +233,7 @@ class ScanPhase(EnginePhase):
                         # Check dependencies early
                         ASH_LOGGER.debug(f"Validating dependencies for: {display_name}")
                         plugin_instance.dependencies_satisfied = (
-                            plugin_instance.validate()
+                            plugin_instance.validate_plugin_dependencies()
                         )
                         if not plugin_instance.dependencies_satisfied:
                             ASH_LOGGER.warning(
@@ -1374,7 +1374,7 @@ class ScanPhase(EnginePhase):
         )
 
         if isinstance(results.raw_results, SarifReport):
-            ASH_LOGGER.debug(
+            ASH_LOGGER.verbose(
                 f"{scanner_name}: Processing as SARIF report with {len(results.raw_results.runs[0].results) if results.raw_results.runs and results.raw_results.runs[0].results else 0} results"
             )
             # Sanitize paths in SARIF report to be relative to source directory
@@ -1458,10 +1458,10 @@ class ScanPhase(EnginePhase):
 
             aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
         elif isinstance(results.raw_results, CycloneDXReport):
-            ASH_LOGGER.debug(f"{scanner_name}: Processing as CycloneDX report")
+            ASH_LOGGER.verbose(f"{scanner_name}: Processing as CycloneDX report")
             aggregated_results.cyclonedx = results.raw_results
         else:
-            ASH_LOGGER.debug(
+            ASH_LOGGER.verbose(
                 f"{scanner_name}: Processing as additional report (type: {type(results.raw_results)})"
             )
             if scanner_name not in aggregated_results.additional_reports:
@@ -1474,7 +1474,6 @@ class ScanPhase(EnginePhase):
                 aggregated_results.additional_reports[scanner_name][
                     results.target_type
                 ] = {}
-
             aggregated_results.additional_reports[scanner_name][results.target_type][
                 "raw_results"
             ] = results.raw_results

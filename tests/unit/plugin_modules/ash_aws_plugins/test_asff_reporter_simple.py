@@ -49,7 +49,7 @@ def test_security_hub_reporter_validate_success(mock_session):
     reporter.config = config
 
     # Validate
-    result = reporter.validate()
+    result = reporter.validate_plugin_dependencies()
 
     # Verify result
     assert result is True

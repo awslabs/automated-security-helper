@@ -271,7 +271,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
     def _get_tool_version_constraint(self) -> str | None:
         return ">=1.0.0,<2.0.0"
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         # Validate UV tool availability
         if not self._validate_uv_tool_availability():
             return False
@@ -283,7 +283,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
                 return True
 
         # Fallback to base validation
-        return super().validate()
+        return super().validate_plugin_dependencies()
 ```
 
 ### Testing UV Tool Integration
@@ -301,7 +301,7 @@ def test_uv_tool_integration(mock_get_runner):
 
     # Test scanner initialization
     scanner = CustomScanner(config=config, context=context)
-    assert scanner.validate() is True
+    assert scanner.validate_plugin_dependencies() is True
 
     # Verify UV tool operations
     mock_runner.install_tool_with_version.assert_called_once()

@@ -109,7 +109,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
         return self
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
 
         Returns:

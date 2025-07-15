@@ -3,6 +3,7 @@
 
 from typing import Annotated, Optional, List
 import typer
+import platform
 
 # Import subprocess utilities
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
@@ -147,7 +148,10 @@ def build_ash_image_cli_command(
         run=False,
         force=force,
         oci_runner=oci_runner,
-        build_target=build_target,
+        # TODO - Windows cannot map write permissions to the bind-mounted output directory, so reports and logs fail to emit successfully.
+        build_target=BuildTarget.CI
+        if platform.system().lower().startswith("win")
+        else build_target,
         offline_semgrep_rulesets=offline_semgrep_rulesets,
         container_uid=container_uid,
         container_gid=container_gid,

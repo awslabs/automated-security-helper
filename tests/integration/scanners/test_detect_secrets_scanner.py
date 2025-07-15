@@ -64,7 +64,7 @@ def test_detect_secrets_scanner_init(detect_secrets_scanner):
 
 def test_detect_secrets_scanner_validate(detect_secrets_scanner):
     """Test DetectSecretsScanner validation."""
-    assert detect_secrets_scanner.validate() is True
+    assert detect_secrets_scanner.validate_plugin_dependencies() is True
 
 
 def test_detect_secrets_scanner_process_config_options(detect_secrets_scanner):

@@ -65,7 +65,7 @@ class TestArchiveConverter:
             context=test_plugin_context,
             config=ArchiveConverterConfig(),
         )
-        assert converter.validate() is True
+        assert converter.validate_plugin_dependencies() is True
 
     def test_archive_converter_inspect_members_zip(
         self, temp_dir, sample_zip_file, test_plugin_context
@@ -205,7 +205,7 @@ class TestJupyterConverter:
             context=test_plugin_context,
             config=JupyterConverterConfig(),
         )
-        assert converter.validate() is True
+        assert converter.validate_plugin_dependencies() is True
 
     def test_jupyter_converter_convert(
         self, test_plugin_context, sample_notebook, monkeypatch

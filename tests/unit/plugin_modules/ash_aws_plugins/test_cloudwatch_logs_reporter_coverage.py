@@ -44,7 +44,7 @@ def test_cloudwatch_logs_reporter_validate_success(mock_boto3):
     )
 
     # Validate
-    result = reporter.validate()
+    result = reporter.validate_plugin_dependencies()
 
     # Verify result
     assert result is True
@@ -80,7 +80,7 @@ def test_cloudwatch_logs_reporter_validate_aws_error(mock_boto3):
     )
 
     # Validate
-    result = reporter.validate()
+    result = reporter.validate_plugin_dependencies()
 
     # Verify result
     assert result is False
@@ -110,7 +110,7 @@ def test_cloudwatch_logs_reporter_validate_missing_config(mock_boto3):
     )
 
     # Validate
-    result = reporter.validate()
+    result = reporter.validate_plugin_dependencies()
 
     # Verify result
     assert result is False

@@ -39,7 +39,7 @@ class TestConverterPlugin:
     class DummyConverter(ConverterPluginBase["TestConverterPlugin.DummyConfig"]):
         """Dummy converter for testing."""
 
-        def validate(self) -> bool:
+        def validate_plugin_dependencies(self) -> bool:
             return True
 
         def convert(self, target: Path | str) -> list[Path]:
@@ -116,7 +116,7 @@ class TestConverterPlugin:
         converter = self.DummyConverter(
             context=test_plugin_context, config=dummy_converter_config
         )
-        assert converter.validate() is True
+        assert converter.validate_plugin_dependencies() is True
 
     def test_convert_implementation(self, test_plugin_context, dummy_converter_config):
         """Test convert method implementation."""
@@ -152,7 +152,7 @@ class TestReporterPlugin:
     class DummyReporter(ReporterPluginBase["TestReporterPlugin.DummyConfig"]):
         """Dummy reporter for testing."""
 
-        def validate(self) -> bool:
+        def validate_plugin_dependencies(self) -> bool:
             return True
 
         def report(self, model: AshAggregatedResults) -> str:
@@ -199,7 +199,7 @@ class TestReporterPlugin:
         reporter = self.DummyReporter(
             context=test_plugin_context, config=dummy_reporter_config
         )
-        assert reporter.validate() is True
+        assert reporter.validate_plugin_dependencies() is True
 
     def test_pre_report(self, test_plugin_context, dummy_reporter_config):
         """Test _pre_report sets start time."""
@@ -269,7 +269,7 @@ class TestScannerPlugin:
 
         config: "TestScannerPlugin.DummyConfig" = None
 
-        def validate(self) -> bool:
+        def validate_plugin_dependencies(self) -> bool:
             return True
 
         def scan(

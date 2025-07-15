@@ -308,7 +308,7 @@ def update(
 
 
 @config_app.command()
-def validate(
+def validate_plugin_dependencies(
     config_path: Annotated[
         str,
         typer.Argument(

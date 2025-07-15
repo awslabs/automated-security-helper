@@ -252,7 +252,13 @@ class PluginBase(BaseModel):
             if self.use_uv_tool and self.command and len(command) > 0:
                 # Check if the first element of the command is our tool command
                 if command[0] == self.command:
-                    uv_result = self._try_uv_tool_execution(command, working_dir)
+                    uv_result = self._try_uv_tool_execution(
+                        command,
+                        working_dir,
+                        results_dir=Path(results_dir) if results_dir else None,
+                        stdout_preference=stdout_preference,
+                        stderr_preference=stderr_preference,
+                    )
                     if uv_result is not None:
                         return uv_result
                     # If UV execution failed, continue with direct execution fallback
@@ -297,13 +303,21 @@ class PluginBase(BaseModel):
             return {"error": str(e)}
 
     def _try_uv_tool_execution(
-        self, command: List[str], working_dir: Path
+        self,
+        command: List[str],
+        working_dir: Path,
+        results_dir: Optional[Path] = None,
+        stdout_preference: str = "write",
+        stderr_preference: str = "write",
     ) -> Optional[Dict[str, str]]:
         """Attempt to execute command using UV tool run.
 
         Args:
             command: Command to execute
             working_dir: Working directory for the command
+            results_dir: Directory to write output files to
+            stdout_preference: How to handle stdout
+            stderr_preference: How to handle stderr
 
         Returns:
             Dictionary with command results if successful, None if UV execution should fall back
@@ -336,7 +350,7 @@ class PluginBase(BaseModel):
             package_extras = self._get_tool_package_extras()
             version_constraint = self._get_tool_version_constraint()
 
-            # Use UV tool runner to execute the command
+            # Use UV tool runner to execute the command with output handling
             result = uv_runner.run_tool(
                 tool_name=self.command,
                 args=tool_args,
@@ -346,6 +360,10 @@ class PluginBase(BaseModel):
                 check=False,
                 package_extras=package_extras,
                 version_constraint=version_constraint,
+                results_dir=results_dir,
+                stdout_preference=stdout_preference,
+                stderr_preference=stderr_preference,
+                class_name=self.__class__.__name__,
             )
 
             # Convert subprocess result to expected format

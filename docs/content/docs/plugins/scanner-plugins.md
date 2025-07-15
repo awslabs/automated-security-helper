@@ -178,7 +178,7 @@ class MyScanner(ScannerPluginBase):
 
         super().model_post_init(context)
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate scanner dependencies"""
         # UV tool availability is automatically validated
         if not self._validate_uv_tool_availability():
@@ -189,7 +189,7 @@ class MyScanner(ScannerPluginBase):
             self.dependencies_satisfied = True
             return True
 
-        return super().validate()
+        return super().validate_plugin_dependencies()
 ```
 
 ### Benefits of UV Tool Integration

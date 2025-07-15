@@ -33,7 +33,7 @@ def test_checkov_scanner_init(test_plugin_context):
 
 def test_checkov_scanner_validate(test_checkov_scanner):
     """Test CheckovScanner validation."""
-    assert test_checkov_scanner.validate() is True
+    assert test_checkov_scanner.validate_plugin_dependencies() is True
 
 
 def test_checkov_scanner_uv_tool_integration(test_plugin_context):
@@ -71,7 +71,7 @@ def test_checkov_scanner_uv_tool_integration(test_plugin_context):
         mock_runner.return_value = mock_runner_instance
         mock_runner_instance.is_uv_available.return_value = True
 
-        assert scanner.validate() is True
+        assert scanner.validate_plugin_dependencies() is True
 
     # Test validation with UV tool unavailable
     with unittest.mock.patch(
@@ -81,7 +81,7 @@ def test_checkov_scanner_uv_tool_integration(test_plugin_context):
         mock_runner.return_value = mock_runner_instance
         mock_runner_instance.is_uv_available.return_value = False
 
-        assert scanner.validate() is False
+        assert scanner.validate_plugin_dependencies() is False
 
 
 def test_checkov_scanner_configure(test_plugin_context):

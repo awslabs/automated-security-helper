@@ -495,7 +495,7 @@ class ScannerValidationManager:
                     failure_reason="Scanner was queued for execution but did not complete - execution failed",
                 )
                 self.logger.error(
-                    f"  ❌ Scanner '{scanner_name}' failed to complete execution"
+                    f"  Scanner '{scanner_name}' failed to complete execution"
                 )
         else:
             self.logger.verbose("  All expected scanners completed execution")

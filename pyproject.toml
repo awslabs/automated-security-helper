@@ -46,7 +46,6 @@ dependencies = [
     "constructs>=10.3.0,<11.0.0",
     "boto3>=1.34.0,<2.0.0",
     "cfn-flip>=1.3.0,<2",
-
     "toml>=0.10.2,<1.0.0",
 ]
 
@@ -56,9 +55,7 @@ Repository = "https://github.com/awslabs/automated-security-helper"
 [project.scripts]
 ash = "automated_security_helper.cli.main:app"
 ashv3 = "automated_security_helper.cli.main:app"
-automated-security-helper = "automated_security_helper.cli:ash_cli"
-generate-ash-schemas = "automated_security_helper.schemas.generate_schemas:main"
-get-scan-set = "automated_security_helper.utils.get_scan_set:main"
+automated-security-helper = "automated_security_helper.cli.main:app"
 
 [dependency-groups]
 dev = [

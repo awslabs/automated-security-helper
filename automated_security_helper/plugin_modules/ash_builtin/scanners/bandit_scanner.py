@@ -167,7 +167,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 f"Failed to configure {self.__class__.__name__}: {str(e)}"
             )
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Enhanced validation with explicit tool installation.
 
         This method implements the enhanced validation workflow that:
@@ -216,7 +216,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                         level=logging.WARNING,
                     )
                     # Fall back to base class validation which includes pre-installed tool detection
-                    return super().validate()
+                    return super().validate_plugin_dependencies()
             else:
                 self._plugin_log(
                     "Bandit already installed via UV tool", level=logging.INFO
@@ -225,7 +225,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 return True
 
         # Fall back to base class validation for non-UV tool scenarios
-        return super().validate()
+        return super().validate_plugin_dependencies()
 
     def _process_config_options(self):
         # Bandit config path
