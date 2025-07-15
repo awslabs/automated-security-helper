@@ -71,7 +71,7 @@ classDiagram
     class PluginBase {
         +context: PluginContext
         +config: Any
-        +validate() bool
+        +validate_plugin_dependencies() bool
         +model_post_init(context)
         #_plugin_log(message, level, target_type, append_to_stream)
         #_run_subprocess(cmd, stdout_preference, stderr_preference)

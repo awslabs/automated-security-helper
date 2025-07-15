@@ -344,7 +344,7 @@ def dummy_scanner(test_plugin_context, dummy_scanner_config):
     class DummyScanner(ScannerPluginBase):
         """Dummy scanner for testing."""
 
-        def validate(self) -> bool:
+        def validate_plugin_dependencies(self) -> bool:
             return True
 
         def scan(
@@ -379,7 +379,7 @@ def dummy_reporter(test_plugin_context, dummy_reporter_config):
     class DummyReporter(ReporterPluginBase):
         """Dummy reporter for testing."""
 
-        def validate(self) -> bool:
+        def validate_plugin_dependencies(self) -> bool:
             return True
 
         def report(self, model: AshAggregatedResults) -> str:
@@ -399,7 +399,7 @@ def dummy_converter(test_plugin_context, dummy_converter_config):
     class DummyConverter(ConverterPluginBase):
         """Dummy converter for testing."""
 
-        def validate(self) -> bool:
+        def validate_plugin_dependencies(self) -> bool:
             return True
 
         def convert(self) -> list[Path]:

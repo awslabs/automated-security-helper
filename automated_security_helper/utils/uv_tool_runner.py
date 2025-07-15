@@ -263,8 +263,12 @@ class UVToolRunner:
         timeout: Optional[int] = None,
         package_extras: Optional[List[str]] = None,
         version_constraint: Optional[str] = None,
+        results_dir: Optional[Path] = None,
+        stdout_preference: str = "write",
+        stderr_preference: str = "write",
+        class_name: Optional[str] = None,
     ) -> subprocess.CompletedProcess:
-        """Run a UV tool with specified arguments and offline mode support.
+        """Run a UV tool with specified arguments and output handling support.
 
         Args:
             tool_name: Name of the tool to run
@@ -276,10 +280,17 @@ class UVToolRunner:
             timeout: Timeout in seconds
             package_extras: Optional list of package extras for --from parameter
             version_constraint: Optional version constraint for --from parameter
+            results_dir: Directory to write output files to
+            stdout_preference: How to handle stdout ("return", "write", "both", "none")
+            stderr_preference: How to handle stderr ("return", "write", "both", "none")
+            class_name: Optional class name for log file naming
 
         Returns:
-            CompletedProcess result
+            CompletedProcess result with enhanced output handling
         """
+        from automated_security_helper.utils.subprocess_utils import (
+            run_command_with_output_handling,
+        )
         import os
 
         if not self.is_uv_available():
@@ -318,6 +329,45 @@ class UVToolRunner:
             env = os.environ.copy()
             env["UV_OFFLINE"] = "1"
 
+        # Use the centralized output handling if results_dir is provided
+        if results_dir is not None:
+            try:
+                response = run_command_with_output_handling(
+                    command=command,
+                    results_dir=results_dir,
+                    stdout_preference=stdout_preference,
+                    stderr_preference=stderr_preference,
+                    cwd=cwd,
+                    env=env,
+                    shell=False,
+                    class_name=class_name or f"UVTool_{tool_name}",
+                    encoding="utf-8" if text else None,
+                    errors="replace" if text else None,
+                )
+
+                # Create a CompletedProcess-like object from the response
+                result = subprocess.CompletedProcess(
+                    args=command,
+                    returncode=response.get("returncode", 0),
+                    stdout=response.get("stdout", ""),
+                    stderr=response.get("stderr", ""),
+                )
+
+                if check and result.returncode != 0:
+                    raise subprocess.CalledProcessError(
+                        result.returncode, command, result.stdout, result.stderr
+                    )
+
+                return result
+
+            except Exception as e:
+                if "error" in str(e) and "returncode" in str(e):
+                    # This is likely from run_command_with_output_handling
+                    raise UVToolRunnerError(f"UV tool run failed for {tool_name}: {e}")
+                else:
+                    raise UVToolRunnerError(f"UV tool run failed for {tool_name}: {e}")
+
+        # Fallback to original subprocess.run for backward compatibility
         try:
             result = subprocess.run(
                 command,

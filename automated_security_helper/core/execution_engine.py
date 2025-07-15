@@ -541,7 +541,7 @@ class ScanExecutionEngine:
 
         except Exception as e:
             ASH_LOGGER.error(f"Execution failed: {str(e)}")
-            ASH_LOGGER.info(f"\n❌ Execution failed: {str(e)}")
+            ASH_LOGGER.info(f"\nExecution failed: {str(e)}")
 
             # Notify execution error
             try:

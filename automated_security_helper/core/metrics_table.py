@@ -1,14 +1,12 @@
 """Module for generating metrics tables for ASH scan results."""
 
 from pathlib import Path
-from typing import Dict, List, Any
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
     format_duration,
@@ -152,39 +150,6 @@ def generate_metrics_table_from_unified_data(
         )
 
     return table
-
-
-def generate_metrics_table(
-    completed_scanners: List[ScannerPluginBase],
-    asharp_model: AshAggregatedResults,
-    source_dir: str | Path | None = None,
-    output_dir: str | Path | None = None,
-    scan_results: Dict[str, Any] = None,
-    console: Console = None,
-) -> Table:
-    """Generate a Rich table with metrics for each scanner.
-
-    This is the legacy function that maintains backward compatibility.
-    New code should use generate_metrics_table_from_unified_data().
-
-    Args:
-        completed_scanners: List of completed scanner plugins (DEPRECATED - not used)
-        asharp_model: The AshAggregatedResults with scan results
-        source_dir: Source directory path for display
-        output_dir: Output directory path for display
-        scan_results: Optional dictionary of additional scan results (DEPRECATED - not used)
-        console: Rich console for responsive formatting
-
-    Returns:
-        Table: Rich table with scanner metrics
-    """
-    # Use the new unified approach, ignoring the legacy parameters
-    return generate_metrics_table_from_unified_data(
-        asharp_model=asharp_model,
-        source_dir=source_dir,
-        output_dir=output_dir,
-        console=console,
-    )
 
 
 def display_metrics_table(

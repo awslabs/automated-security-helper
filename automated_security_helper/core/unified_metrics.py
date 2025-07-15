@@ -32,7 +32,10 @@ Example usage:
 from typing import List, Optional
 from pydantic import BaseModel
 
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ScannerTargetStatusInfo,
+)
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
@@ -174,7 +177,12 @@ def get_unified_scanner_metrics(
         elif stats["actionable"] > 0:
             status = "FAILED"
         else:
-            status = "PASSED"
+            scan_result: ScannerTargetStatusInfo | None = (
+                asharp_model.scanner_results.get(scanner_name, None)
+            )
+            status = (
+                scan_result.status if scan_result and scan_result.status else "PASSED"
+            )
         status_text = status
 
         # Determine if the scanner passed

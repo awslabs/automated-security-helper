@@ -271,6 +271,6 @@ def verify_metrics_alignment(aggregated_results: AshAggregatedResults) -> bool:
     if alignment_ok:
         ASH_LOGGER.info("All metrics sources are aligned")
     else:
-        ASH_LOGGER.error("❌ Metrics alignment verification failed")
+        ASH_LOGGER.error("Metrics alignment verification failed")
 
     return alignment_ok

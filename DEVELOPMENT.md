@@ -248,7 +248,7 @@ class MyCustomScanner(ScannerPluginBase[MyCustomScannerConfig]):
 
         super().model_post_init(context)
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         # Implement validation logic
         return True
 

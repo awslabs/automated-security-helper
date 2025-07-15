@@ -136,7 +136,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         # Use semgrep-specific version constraint - semgrep 1.125.0+ has improved stability
         return ">=1.125.0,<2.0.0"
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
 
         Returns:

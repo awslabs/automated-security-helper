@@ -126,7 +126,7 @@ def test_s3_reporter_validate_success(mock_boto3, ash_temp_path):
     reporter = S3Reporter(context=context, config=config)
 
     # Call validate
-    result = reporter.validate()
+    result = reporter.validate_plugin_dependencies()
 
     # Verify result
     assert result is True
@@ -155,7 +155,7 @@ def test_s3_reporter_validate_missing_config(mock_boto3, ash_temp_path):
     reporter = S3Reporter(context=context, config=config)
 
     # Call validate
-    result = reporter.validate()
+    result = reporter.validate_plugin_dependencies()
 
     # Verify result
     assert result is False
@@ -200,7 +200,7 @@ def test_s3_reporter_validate_aws_error(mock_boto3, ash_temp_path):
     reporter._plugin_log = MagicMock()
 
     # Call validate
-    result = reporter.validate()
+    result = reporter.validate_plugin_dependencies()
 
     # Verify result
     assert result is False

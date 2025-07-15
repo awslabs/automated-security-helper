@@ -56,9 +56,7 @@ Repository = "https://github.com/awslabs/automated-security-helper"
 [project.scripts]
 ash = "automated_security_helper.cli.main:app"
 ashv3 = "automated_security_helper.cli.main:app"
-automated-security-helper = "automated_security_helper.cli:ash_cli"
-generate-ash-schemas = "automated_security_helper.schemas.generate_schemas:main"
-get-scan-set = "automated_security_helper.utils.get_scan_set:main"
+automated-security-helper = "automated_security_helper.cli.main:app"
 
 
 [dependency-groups]

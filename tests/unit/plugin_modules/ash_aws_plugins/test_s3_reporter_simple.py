@@ -128,7 +128,7 @@ def test_s3_reporter_validate_success(mock_boto3):
         )
 
         # Validate
-        result = reporter.validate()
+        result = reporter.validate_plugin_dependencies()
 
         # Verify result
         assert result is True

@@ -71,7 +71,7 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         """
         return None
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements.
 
         Defaults to returning True as most reporter plugins are entirely Python based."""

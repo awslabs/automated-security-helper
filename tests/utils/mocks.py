@@ -113,7 +113,7 @@ def create_mock_scanner_plugin(
         def model_post_init(self, context):
             return super().model_post_init(context)
 
-        def validate(self):
+        def validate_plugin_dependencies(self):
             return True
 
         def scan(self, target, config=None, *args, **kwargs):

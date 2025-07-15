@@ -78,7 +78,7 @@ class ConvertPhase(EnginePhase):
                     continue
 
                 # Check if the converter validates
-                if not plugin_instance.validate():
+                if not plugin_instance.validate_plugin_dependencies():
                     ASH_LOGGER.debug(
                         f"Converter {plugin_name} validation failed, skipping"
                     )

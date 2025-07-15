@@ -122,9 +122,9 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             )
             md_parts.append("- **Result**:")
             md_parts.append("  - **PASSED** = No findings at or above threshold")
-            md_parts.append("  - ❌ **FAILED** = Findings at or above threshold")
+            md_parts.append("  - **FAILED** = Findings at or above threshold")
             md_parts.append("  - **MISSING** = Required dependencies not available")
-            md_parts.append("  - ⏭️ **SKIPPED** = Scanner explicitly disabled")
+            md_parts.append("  - **SKIPPED** = Scanner explicitly disabled")
             md_parts.append(
                 "- **Threshold**: The minimum severity level that will cause a scanner to fail"
             )
@@ -167,11 +167,11 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 if status == "PASSED":
                     status_text = "PASSED"
                 elif status == "FAILED":
-                    status_text = "❌ FAILED"
+                    status_text = "FAILED"
                 elif status == "MISSING":
                     status_text = "MISSING"
                 elif status == "SKIPPED":
-                    status_text = "⏭️ SKIPPED"
+                    status_text = "SKIPPED"
                 else:
                     status_text = status
 

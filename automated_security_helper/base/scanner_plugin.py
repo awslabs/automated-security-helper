@@ -173,7 +173,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.start_time = datetime.now(timezone.utc)
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        self.dependencies_satisfied = self.validate()
+        self.dependencies_satisfied = self.validate_plugin_dependencies()
 
         if not self.dependencies_satisfied:
             self._plugin_log(
@@ -250,7 +250,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         )
 
     ### Methods that require implementation by plugins.
-    def validate(self) -> bool:
+    def validate_plugin(self) -> bool:
         """Validate scanner configuration and requirements."""
         # Use enhanced validation that includes pre-installed tool detection
         validation_result = self._validate_tool_availability_with_pre_installed()

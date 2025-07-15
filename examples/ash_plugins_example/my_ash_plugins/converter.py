@@ -45,7 +45,7 @@ class ExampleConverter(ConverterPluginBase[ExampleConverterConfig]):
         ).joinpath(self.config.name)
         return super().model_post_init(context)
 
-    def validate(self) -> bool:
+    def validate_plugin_dependencies(self) -> bool:
         """Validate converter configuration.
 
         Returns:

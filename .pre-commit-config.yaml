@@ -5,7 +5,7 @@ repos:
     hooks:
       - id: generate-schemas
         name: Generate ASH JSON schemas
-        entry: uv run generate-ash-schemas
+        entry: uv run python -m automated_security_helper.schemas.generate_schemas
         language: system
         verbose: true
         pass_filenames: false

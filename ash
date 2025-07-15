@@ -9,7 +9,6 @@ export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 # Set local variables
 SOURCE_DIR=""
 OUTPUT_DIR=".ash/ash_output"
-OUTPUT_DIR_SPECIFIED="NO"
 CONTAINER_UID_SPECIFIED="NO"
 CONTAINER_GID_SPECIFIED="NO"
 OUTPUT_FORMAT="text"
@@ -34,7 +33,6 @@ while (("$#")); do
     --output-dir)
       shift
       OUTPUT_DIR="$1"
-      OUTPUT_DIR_SPECIFIED="YES"
       ;;
     --offline)
       OFFLINE="YES"
@@ -60,7 +58,7 @@ while (("$#")); do
       CONTAINER_UID_SPECIFIED="YES"
       CONTAINER_UID="$1"
       ;;
-    --container-gid | -u)
+    --container-gid | -g)
       shift
       CONTAINER_GID_SPECIFIED="YES"
       CONTAINER_GID="$1"
