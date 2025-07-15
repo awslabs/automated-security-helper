@@ -1,0 +1,233 @@
+{
+  "descriptor": {
+    "configuration": {
+      "add-cpes-if-none": false,
+      "by-cve": false,
+      "check-for-app-update": true,
+      "db": {
+        "auto-update": true,
+        "ca-cert": "",
+        "cache-dir": "/deps/.grype",
+        "max-allowed-built-age": 432000000000000,
+        "max-update-check-frequency": 7200000000000,
+        "require-update-check": false,
+        "update-available-timeout": 30000000000,
+        "update-download-timeout": 300000000000,
+        "update-url": "https://grype.anchore.io/databases",
+        "validate-age": true,
+        "validate-by-hash-on-start": true
+      },
+      "default-image-pull-source": "",
+      "dev": {
+        "db": {
+          "debug": false
+        }
+      },
+      "distro": "",
+      "exclude": [
+        "/src/ash_output/work/**/*-converted.py",
+        "/src/ash_output/work/**/*_report_result.txt"
+      ],
+      "exp": {},
+      "externalSources": {
+        "enable": false,
+        "maven": {
+          "baseUrl": "https://search.maven.org/solrsearch/select",
+          "rateLimit": 300000000,
+          "searchUpstreamBySha1": true
+        }
+      },
+      "fail-on-severity": "medium",
+      "file": "",
+      "ignore": [
+        {
+          "fix-state": "",
+          "match-type": "exact-indirect-match",
+          "namespace": "",
+          "package": {
+            "language": "",
+            "location": "",
+            "name": "kernel-headers",
+            "type": "rpm",
+            "upstream-name": "kernel",
+            "version": ""
+          },
+          "reason": "",
+          "vex-justification": "",
+          "vex-status": "",
+          "vulnerability": ""
+        },
+        {
+          "fix-state": "",
+          "match-type": "exact-indirect-match",
+          "namespace": "",
+          "package": {
+            "language": "",
+            "location": "",
+            "name": "linux(-.*)?-headers-.*",
+            "type": "deb",
+            "upstream-name": "linux.*",
+            "version": ""
+          },
+          "reason": "",
+          "vex-justification": "",
+          "vex-status": "",
+          "vulnerability": ""
+        },
+        {
+          "fix-state": "",
+          "match-type": "exact-indirect-match",
+          "namespace": "",
+          "package": {
+            "language": "",
+            "location": "",
+            "name": "linux-libc-dev",
+            "type": "deb",
+            "upstream-name": "linux",
+            "version": ""
+          },
+          "reason": "",
+          "vex-justification": "",
+          "vex-status": "",
+          "vulnerability": ""
+        }
+      ],
+      "ignore-wontfix": "",
+      "match": {
+        "dotnet": {
+          "using-cpes": false
+        },
+        "golang": {
+          "allow-main-module-pseudo-version-comparison": false,
+          "always-use-cpe-for-stdlib": true,
+          "using-cpes": false
+        },
+        "java": {
+          "using-cpes": false
+        },
+        "javascript": {
+          "using-cpes": false
+        },
+        "jvm": {
+          "using-cpes": true
+        },
+        "python": {
+          "using-cpes": false
+        },
+        "ruby": {
+          "using-cpes": false
+        },
+        "rust": {
+          "using-cpes": false
+        },
+        "stock": {
+          "using-cpes": true
+        }
+      },
+      "match-upstream-kernel-headers": false,
+      "name": "",
+      "only-fixed": false,
+      "only-notfixed": false,
+      "output": [
+        "json"
+      ],
+      "output-template-file": "",
+      "platform": "",
+      "pretty": false,
+      "registry": {
+        "auth": null,
+        "ca-cert": "",
+        "insecure-skip-tls-verify": false,
+        "insecure-use-http": false
+      },
+      "search": {
+        "indexed-archives": true,
+        "scope": "squashed",
+        "unindexed-archives": false
+      },
+      "show-suppressed": false,
+      "vex-add": [],
+      "vex-documents": []
+    },
+    "db": {
+      "providers": {
+        "alpine": {
+          "captured": "2025-04-01T01:32:50Z",
+          "input": "xxh64:c45556b3d251c9a8"
+        },
+        "amazon": {
+          "captured": "2025-04-01T01:31:39Z",
+          "input": "xxh64:3984da2a8ee942c3"
+        },
+        "chainguard": {
+          "captured": "2025-04-01T01:32:32Z",
+          "input": "xxh64:ae5e19e263827387"
+        },
+        "debian": {
+          "captured": "2025-04-01T01:32:38Z",
+          "input": "xxh64:9e64566bea45d2b6"
+        },
+        "epss": {
+          "captured": "2025-04-01T01:32:38Z",
+          "input": "xxh64:af18a12b328ed880"
+        },
+        "github": {
+          "captured": "2025-04-01T01:33:09Z",
+          "input": "xxh64:3402f0e5c4acef5e"
+        },
+        "kev": {
+          "captured": "2025-04-01T01:32:57Z",
+          "input": "xxh64:e05c02e66fb8e1c5"
+        },
+        "mariner": {
+          "captured": "2025-04-01T01:32:55Z",
+          "input": "xxh64:91c9dadb5d25d3c7"
+        },
+        "nvd": {
+          "captured": "2025-04-01T01:32:57Z",
+          "input": "xxh64:392dc047861ee67d"
+        },
+        "oracle": {
+          "captured": "2025-04-01T01:32:49Z",
+          "input": "xxh64:5f3f527abbfa3ad7"
+        },
+        "rhel": {
+          "captured": "2025-04-01T01:33:25Z",
+          "input": "xxh64:72ab31ada33a781b"
+        },
+        "sles": {
+          "captured": "2025-04-01T01:32:53Z",
+          "input": "xxh64:5bd23eb7b341c8a6"
+        },
+        "ubuntu": {
+          "captured": "2025-04-01T01:33:33Z",
+          "input": "xxh64:4dd8fdcfc6db1541"
+        },
+        "wolfi": {
+          "captured": "2025-04-01T01:32:49Z",
+          "input": "xxh64:36fce80efdb5eff4"
+        }
+      },
+      "status": {
+        "built": "2025-04-01T04:08:17Z",
+        "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.0.2_2025-04-01T01:31:39Z_1743480497.tar.zst?checksum=sha256%3A3c167f99651f8c69ab785aff771c769d5143f6537014fef32a53c1527192bda3",
+        "path": "/deps/.grype/6/vulnerability.db",
+        "schemaVersion": "v6.0.2",
+        "valid": true
+      }
+    },
+    "name": "grype",
+    "timestamp": "2025-04-01T23:04:25.094798815Z",
+    "version": "0.91.0"
+  },
+  "distro": {
+    "idLike": null,
+    "name": "",
+    "version": ""
+  },
+  "matches": [],
+  "source": {
+    "target": "/src/ash_output/work",
+    "type": "directory"
+  }
+}

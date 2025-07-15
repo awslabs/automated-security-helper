@@ -1,0 +1,3 @@
+>>>>>> begin tree result >>>>>>
+<<<<<< end tree -x -h -a --du -I .git result <<<<<<
+Not in a git repository - skipping git checks
