@@ -29,16 +29,10 @@ def ash_plugin(
         if auto_register:
             # Get the module path of the class
             module_path = cls.__module__
-            log_level = "debug" if plugin_type == "reporter" else "info"
 
-            if log_level == "info":
-                ASH_LOGGER.info(
-                    f"Auto-registering {plugin_type} plugin {cls.__name__} from {module_path}"
-                )
-            else:
-                ASH_LOGGER.debug(
-                    f"Auto-registering {plugin_type} plugin {cls.__name__} from {module_path}"
-                )
+            ASH_LOGGER.debug(
+                f"Auto-registering {plugin_type} plugin {cls.__name__} from {module_path}"
+            )
 
             plug_mod_ver = None
             try:

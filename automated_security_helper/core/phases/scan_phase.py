@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import json
 from typing import Dict, List, Any, Tuple
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
+    get_severity_metrics_from_sarif,
     sanitize_sarif_paths,
     apply_suppressions_to_sarif,
 )
@@ -594,20 +596,26 @@ class ScanPhase(EnginePhase):
             ScannerStatisticsCalculator.extract_sarif_counts_for_scanner instead.
         """
         from automated_security_helper.models.asharp_model import AshAggregatedResults
-        from automated_security_helper.core.scanner_statistics_calculator import (
-            ScannerStatisticsCalculator,
-        )
 
         # Create a temporary AshAggregatedResults with the SARIF report
         temp_model = AshAggregatedResults()
         temp_model.sarif = sarif_report
 
         # Use the centralized calculator to extract counts for a generic scanner
-        suppressed, critical, high, medium, low, info = (
-            ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
-                temp_model, "generic"
-            )
+        # suppressed, critical, high, medium, low, info = (
+        #     ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
+        #         temp_model, "generic"
+        #     )
+        # )
+        sev_count = get_severity_metrics_from_sarif(
+            sarif_report=sarif_report, plugin_context=self.plugin_context
         )
+        suppressed = sev_count.suppressed or 0
+        critical = sev_count.critical or 0
+        high = sev_count.high or 0
+        medium = sev_count.medium or 0
+        low = sev_count.low or 0
+        info = sev_count.info or 0
 
         # Format the results to match the expected return format
         severity_counts = {
@@ -1357,11 +1365,29 @@ class ScanPhase(EnginePhase):
         if scanner_name not in aggregated_results.additional_reports:
             aggregated_results.additional_reports[scanner_name] = {}
 
+        if (
+            results.target_type
+            not in aggregated_results.additional_reports[scanner_name]
+        ):
+            aggregated_results.additional_reports[scanner_name][
+                results.target_type
+            ] = {}
+
         # Store the full container information for duration and other metadata access
         # This preserves duration, start_time, end_time, and other container metadata
-        aggregated_results.additional_reports[scanner_name]["source"] = (
-            results.model_dump()
+        aggregated_results.additional_reports[scanner_name][results.target_type] = (
+            results.model_dump(
+                exclude_none=True,
+                exclude_unset=True,
+                by_alias=True,
+                mode="json",
+            )
         )
+
+        ash_target_result_path = self.plugin_context.output_dir.joinpath(
+            "scanners", scanner_name, results.target_type, "ASH.ScanResults.json"
+        )
+        ash_target_result_path.parent.mkdir(parents=True, exist_ok=True)
 
         # NOTE: We no longer populate scanner_results or summary_stats here during scan phase.
         # Instead, both will be populated from the final SARIF data right before saving
@@ -1457,26 +1483,66 @@ class ScanPhase(EnginePhase):
             )
 
             aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
+            if (
+                "raw_results"
+                in aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ]
+            ):
+                del aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ]["raw_results"]
         elif isinstance(results.raw_results, CycloneDXReport):
             ASH_LOGGER.verbose(f"{scanner_name}: Processing as CycloneDX report")
             aggregated_results.cyclonedx = results.raw_results
+            if (
+                "severity_counts"
+                in aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ]
+            ):
+                del aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ]["severity_counts"]
+            if (
+                "raw_results"
+                in aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ]
+            ):
+                del aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ]["raw_results"]
         else:
             ASH_LOGGER.verbose(
                 f"{scanner_name}: Processing as additional report (type: {type(results.raw_results)})"
             )
-            if scanner_name not in aggregated_results.additional_reports:
-                aggregated_results.additional_reports[scanner_name] = {}
-
-            if (
-                results.target_type
-                not in aggregated_results.additional_reports[scanner_name]
-            ):
-                aggregated_results.additional_reports[scanner_name][
-                    results.target_type
-                ] = {}
             aggregated_results.additional_reports[scanner_name][results.target_type][
                 "raw_results"
             ] = results.raw_results
+            if (
+                "severity_counts"
+                in aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ]
+            ):
+                del aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ]["severity_counts"]
+
+        ash_target_result_path.write_text(
+            json.dumps(
+                aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ],
+                default=str,
+            )
+            # results.model_dump_json(
+            #     exclude_none=True,
+            #     exclude_unset=True,
+            #     by_alias=True,
+            # )
+        )
 
         return aggregated_results
 
@@ -2140,8 +2206,10 @@ class ScanPhase(EnginePhase):
                 if not hasattr(
                     aggregated_results.metadata, "result_completeness_report"
                 ):
-                    aggregated_results.metadata.result_completeness_report = (
-                        completeness_report
+                    setattr(
+                        aggregated_results.metadata,
+                        "result_completeness_report",
+                        completeness_report,
                     )
 
             # Add validation results to aggregated results for debugging

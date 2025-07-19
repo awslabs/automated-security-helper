@@ -76,6 +76,7 @@ dependencies = [
 dev = [
     { name = "hatchling" },
     { name = "lazydocs" },
+    { name = "mcp" },
     { name = "mkdocs" },
     { name = "mkdocs-autorefs" },
     { name = "mkdocs-awesome-nav" },
@@ -128,6 +129,7 @@ requires-dist = [
 dev = [
     { name = "hatchling", specifier = ">=1.27.0" },
     { name = "lazydocs", specifier = ">=0.4.8,<1.0.0" },
+    { name = "mcp", specifier = ">=1.10.1" },
     { name = "mkdocs", specifier = ">=1.6.1,<2.0.0" },
     { name = "mkdocs-autorefs", specifier = ">=1.4.1,<2.0.0" },
     { name = "mkdocs-awesome-nav", specifier = ">=3.1.2,<4.0.0" },

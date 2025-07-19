@@ -438,6 +438,40 @@ def capture_logging(
 
 
 @contextmanager
+def disable_root_logger() -> Generator[None, None, None]:
+    """Temporarily disable the root logger to prevent duplicate log messages.
+
+    This is useful when testing code that configures its own loggers but might be affected
+    by handlers attached to the root logger.
+
+    Yields:
+        None
+
+    Example:
+        >>> with disable_root_logger():
+        ...     # Code that configures and uses loggers
+        ...     run_logging_code()
+    """
+    import logging
+
+    # Store the original root logger configuration
+    root_logger = logging.getLogger()
+    original_handlers = list(root_logger.handlers)
+    original_level = root_logger.level
+
+    # Temporarily remove all handlers and set level to CRITICAL to suppress most messages
+    root_logger.handlers = []
+    root_logger.setLevel(logging.CRITICAL)
+
+    try:
+        yield
+    finally:
+        # Restore the original root logger configuration
+        root_logger.handlers = original_handlers
+        root_logger.setLevel(original_level)
+
+
+@contextmanager
 def mock_file_system(
     file_structure: Dict[str, Union[str, Dict]],
 ) -> Generator[Path, None, None]:

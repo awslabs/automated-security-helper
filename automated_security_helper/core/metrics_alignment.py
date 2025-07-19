@@ -12,13 +12,17 @@ are populated consistently with the final processed findings.
 """
 
 from datetime import datetime
+from typing import List
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     SummaryStats,
     ScannerTargetStatusInfo,
     ScannerSeverityCount,
 )
-from automated_security_helper.core.unified_metrics import get_unified_scanner_metrics
+from automated_security_helper.core.unified_metrics import (
+    get_unified_scanner_metrics,
+    ScannerMetrics,
+)
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -38,7 +42,7 @@ def populate_metrics_from_unified_source(
     Args:
         aggregated_results: The AshAggregatedResults model to update
     """
-    ASH_LOGGER.info(
+    ASH_LOGGER.verbose(
         "Aligning all metrics using unified scanner metrics as source of truth"
     )
 
@@ -55,18 +59,20 @@ def populate_metrics_from_unified_source(
         aggregated_results, unified_metrics
     )
 
-    ASH_LOGGER.info("Metrics alignment completed - all sources now use unified metrics")
+    ASH_LOGGER.verbose(
+        "Metrics alignment completed - all sources now use unified metrics"
+    )
     return aggregated_results
 
 
 def _populate_summary_stats_from_unified_metrics(
-    aggregated_results: AshAggregatedResults, unified_metrics: list
+    aggregated_results: AshAggregatedResults, unified_metrics: List[ScannerMetrics]
 ) -> AshAggregatedResults:
     """Populate summary_stats from unified metrics.
 
     Args:
         aggregated_results: The AshAggregatedResults model to update
-        unified_metrics: List of ScannerMetrics from get_unified_scanner_metrics()
+        unified_metrics: List[ScannerMetrics] from get_unified_scanner_metrics()
     """
     # Calculate totals from unified metrics
     total_suppressed = sum(m.suppressed for m in unified_metrics)
@@ -91,12 +97,16 @@ def _populate_summary_stats_from_unified_metrics(
 
     # Create new summary stats with unified metrics
     aggregated_results.metadata.summary_stats = SummaryStats(
-        start=existing_start.isoformat(timespec="seconds")
-        if isinstance(existing_start, datetime)
-        else existing_start,
-        end=existing_end.isoformat(timespec="seconds")
-        if isinstance(existing_end, datetime)
-        else existing_end,
+        start=(
+            existing_start.isoformat(timespec="seconds")
+            if isinstance(existing_start, datetime)
+            else existing_start
+        ),
+        end=(
+            existing_end.isoformat(timespec="seconds")
+            if isinstance(existing_end, datetime)
+            else existing_end
+        ),
         duration=existing_duration,
         suppressed=total_suppressed,
         critical=total_critical,
@@ -120,7 +130,7 @@ def _populate_summary_stats_from_unified_metrics(
 
 
 def _populate_scanner_results_from_unified_metrics(
-    aggregated_results: AshAggregatedResults, unified_metrics: list
+    aggregated_results: AshAggregatedResults, unified_metrics: List[ScannerMetrics]
 ) -> AshAggregatedResults:
     """Update scanner_results to consolidate source/converted layers and align with unified metrics.
 
@@ -130,7 +140,7 @@ def _populate_scanner_results_from_unified_metrics(
 
     Args:
         aggregated_results: The AshAggregatedResults model to update
-        unified_metrics: List of ScannerMetrics from get_unified_scanner_metrics()
+        unified_metrics: List[ScannerMetrics] from get_unified_scanner_metrics()
     """
     for metrics in unified_metrics:
         scanner_name = metrics.scanner_name

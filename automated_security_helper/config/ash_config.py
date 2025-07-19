@@ -254,6 +254,159 @@ class ReporterConfigSegment(BaseModel):
     ] = YAMLReporterConfig()
 
 
+class MCPResourceManagementConfig(BaseModel):
+    """Configuration model for MCP resource management settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Concurrent operation limits
+    max_concurrent_scans: Annotated[
+        int,
+        Field(
+            description="Maximum number of concurrent scans allowed",
+            ge=1,
+            le=10,
+        ),
+    ] = 3
+
+    max_concurrent_tasks: Annotated[
+        int,
+        Field(
+            description="Maximum number of concurrent async tasks allowed",
+            ge=1,
+            le=50,
+        ),
+    ] = 20
+
+    # Thread pool configuration
+    thread_pool_max_workers: Annotated[
+        int,
+        Field(
+            description="Maximum number of worker threads in the shared thread pool",
+            ge=1,
+            le=20,
+        ),
+    ] = 4
+
+    # Timeout configuration (in seconds)
+    scan_timeout_seconds: Annotated[
+        int,
+        Field(
+            description="Maximum time allowed for a single scan operation in seconds",
+            ge=60,
+            le=7200,  # 2 hours max
+        ),
+    ] = 1800  # 30 minutes default
+
+    operation_timeout_seconds: Annotated[
+        int,
+        Field(
+            description="Default timeout for general operations in seconds",
+            ge=30,
+            le=600,  # 10 minutes max
+        ),
+    ] = 180  # 3 minutes default
+
+    shutdown_timeout_seconds: Annotated[
+        int,
+        Field(
+            description="Maximum time to wait for graceful shutdown in seconds",
+            ge=5,
+            le=300,  # 5 minutes max
+        ),
+    ] = 30
+
+    # Resource monitoring thresholds
+    memory_warning_threshold_mb: Annotated[
+        int,
+        Field(
+            description="Memory usage threshold in MB that triggers warnings",
+            ge=100,
+            le=8192,  # 8GB max
+        ),
+    ] = 1024  # 1GB default
+
+    memory_critical_threshold_mb: Annotated[
+        int,
+        Field(
+            description="Memory usage threshold in MB that triggers protective actions",
+            ge=200,
+            le=16384,  # 16GB max
+        ),
+    ] = 2048  # 2GB default
+
+    task_count_warning_threshold: Annotated[
+        int,
+        Field(
+            description="Active task count that triggers warnings",
+            ge=5,
+            le=100,
+        ),
+    ] = 15
+
+    # Message size limits
+    max_message_size_bytes: Annotated[
+        int,
+        Field(
+            description="Maximum size of MCP messages in bytes",
+            ge=1024,  # 1KB min
+            le=100 * 1024 * 1024,  # 100MB max
+        ),
+    ] = 10 * 1024 * 1024  # 10MB default
+
+    # Path validation limits
+    max_path_length: Annotated[
+        int,
+        Field(
+            description="Maximum allowed path length for security validation",
+            ge=256,
+            le=8192,
+        ),
+    ] = 4096
+
+    # Directory size limits
+    max_directory_size_mb: Annotated[
+        int,
+        Field(
+            description="Maximum directory size in MB that can be scanned",
+            ge=10,
+            le=10240,  # 10GB max
+        ),
+    ] = 1000  # 1GB default
+
+    # Health check configuration
+    enable_health_checks: Annotated[
+        bool,
+        Field(
+            description="Enable periodic health checks and resource monitoring",
+        ),
+    ] = True
+
+    health_check_interval_seconds: Annotated[
+        int,
+        Field(
+            description="Interval between health checks in seconds",
+            ge=10,
+            le=300,  # 5 minutes max
+        ),
+    ] = 60  # 1 minute default
+
+    # Logging configuration
+    enable_resource_logging: Annotated[
+        bool,
+        Field(
+            description="Enable detailed resource management logging",
+        ),
+    ] = True
+
+    log_resource_operations: Annotated[
+        bool,
+        Field(
+            description="Log individual resource operations for debugging",
+        ),
+    ] = False
+
+
 class AshConfigGlobalSettingsSection(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -346,6 +499,15 @@ class AshConfig(BaseModel):
         ReporterConfigSegment,
         Field(description="Reporter configurations by name."),
     ] = ReporterConfigSegment()
+
+    # MCP resource management configuration
+    mcp_resource_management: Annotated[
+        MCPResourceManagementConfig,
+        Field(
+            description="Configuration for MCP server resource management and limits",
+            alias="mcp-resource-management",
+        ),
+    ] = MCPResourceManagementConfig()
 
     @classmethod
     def from_file(cls, config_path: Path) -> "AshConfig":

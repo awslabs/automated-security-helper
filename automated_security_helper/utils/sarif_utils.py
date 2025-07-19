@@ -26,6 +26,7 @@ from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.asharp_model import ScannerSeverityCount
 
 
 def get_finding_id(
@@ -275,6 +276,68 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
             return True
 
     return False
+
+
+def get_severity_metrics_from_sarif(
+    sarif_report: SarifReport,
+    plugin_context: PluginContext,
+) -> ScannerSeverityCount:
+    scanner_severity_count = ScannerSeverityCount(
+        suppressed=0,
+        critical=0,
+        high=0,
+        medium=0,
+        low=0,
+        info=0,
+    )
+    for result in sarif_report.runs[0].results:
+        if result.suppressions and len(result.suppressions) > 0:
+            scanner_severity_count.suppressed = 1 + scanner_severity_count.suppressed
+        elif result.level:
+            has_severity_in_properties = False
+            if result.properties:
+                props: PropertyBag | dict | None = result.properties
+                if isinstance(props, PropertyBag):
+                    props = props.model_dump(
+                        mode="json",
+                        exclude_unset=True,
+                        exclude_none=True,
+                    )
+
+                if hasattr(
+                    props, "issue_severity"
+                ) and props.issue_severity.upper() in [
+                    "INFO",
+                    "LOW",
+                    "MEDIUM",
+                    "HIGH",
+                    "CRITICAL",
+                ]:
+                    iss_sev_up = props.issue_severity.upper()
+                    if iss_sev_up == "CRITICAL":
+                        scanner_severity_count.critical += 1
+                    elif iss_sev_up == "HIGH":
+                        scanner_severity_count.high += 1
+                    elif iss_sev_up == "MEDIUM":
+                        scanner_severity_count.medium += 1
+                    elif iss_sev_up == "LOW":
+                        scanner_severity_count.low += 1
+                    else:
+                        scanner_severity_count.info += 1
+                    has_severity_in_properties = True
+
+            if not has_severity_in_properties:
+                level = str(result.level).lower()
+                if level == "error":
+                    scanner_severity_count.critical += 1
+                elif level == "warning":
+                    scanner_severity_count.medium += 1
+                elif level == "note":
+                    scanner_severity_count.low += 1
+                else:
+                    scanner_severity_count.info += 1
+
+    return scanner_severity_count
 
 
 def apply_suppressions_to_sarif(

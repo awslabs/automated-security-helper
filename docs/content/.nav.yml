@@ -42,6 +42,8 @@ nav:
           - MCP Streaming Guide: tutorials/mcp-streaming-guide.md
     - Advanced Usage:
           - Advanced Features: docs/advanced-usage.md
+          - MCP Server Guide: docs/mcp-server-guide.md
+          - MCP Performance and Scalability: docs/mcp-performance-scalability.md
           - Plugin Development:
                 - Overview: docs/plugins/index.md
                 - Plugin Architecture: docs/plugins/architecture.md

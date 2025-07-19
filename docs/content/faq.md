@@ -304,6 +304,38 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
 - Analyze and prioritize security findings
 - Generate security reports and remediation plans
 - Manage multiple concurrent scans
+- Configure resource limits and performance settings
+- Monitor system resource usage and health
+
+### How do I configure resource management for the MCP server?
+
+ASH v3 includes comprehensive resource management that can be configured through your ASH configuration file:
+
+```yaml
+# .ash/ash.yaml
+mcp-resource-management:
+  max_concurrent_scans: 5          # Limit simultaneous scans
+  max_concurrent_tasks: 25         # Limit async tasks
+  thread_pool_max_workers: 6       # Thread pool size
+  scan_timeout_seconds: 2400       # 40 minute scan timeout
+  memory_warning_threshold_mb: 2048 # Memory usage warnings
+  enable_health_checks: true       # Enable monitoring
+```
+
+This prevents memory leaks, manages system resources, and ensures stable operation under load.
+
+### I'm getting "Maximum concurrent scans exceeded" errors
+
+This is a resource protection feature. You can adjust the limits in your configuration:
+
+```yaml
+# .ash/ash.yaml
+mcp-resource-management:
+  max_concurrent_scans: 10  # Increase from default of 3
+  max_concurrent_tasks: 50  # Increase task limit if needed
+```
+
+Or wait for existing scans to complete before starting new ones.
 
 ### I'm getting MCP dependency errors
 MCP dependencies are included by default in ASH v3. If you're still getting errors:
@@ -322,6 +354,25 @@ uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash m
 
 # Check ASH version
 uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash --version
+```
+
+### How do I monitor MCP server performance?
+
+Enable resource monitoring in your configuration:
+
+```yaml
+# .ash/ash.yaml
+mcp-resource-management:
+  enable_health_checks: true
+  enable_resource_logging: true
+  log_resource_operations: true
+```
+
+Then ask your AI assistant:
+```
+"Show me the current resource usage of the MCP server"
+"How many scans are currently running?"
+"What's the memory usage of the security scanner?"
 ```
 
 For more details, see the [MCP Tutorial](tutorials/using-ash-with-mcp.md).

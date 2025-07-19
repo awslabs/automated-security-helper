@@ -26,6 +26,7 @@ utils/try*.sh
 docs/**/*.pdf
 docs/**/*_temp.html
 .*-backup
+/test_scan_dir/
 
 ### Generated or cloned into the assets directory at time of build/install ###
 automated_security_helper/assets/ASH_INSTALLED_REVISION

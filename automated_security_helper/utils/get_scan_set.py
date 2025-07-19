@@ -52,7 +52,7 @@ def black(msg) -> str:
     return "\033[98m{}\033[00m".format(msg)
 
 
-def debug_echo(*msg, debug: bool = False) -> str:
+def debug_echo(*msg, debug: bool = False) -> str | None:
     if debug:
         ASH_LOGGER.debug(msg)
 

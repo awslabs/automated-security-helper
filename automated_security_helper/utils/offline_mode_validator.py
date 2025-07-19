@@ -294,9 +294,15 @@ class OfflineModeValidator:
             messages: List of validation messages
         """
         if is_valid:
-            ASH_LOGGER.info(f"{scanner_name} offline mode validation passed")
+            ASH_LOGGER.info(f"[OK] {scanner_name} offline mode validation passed")
         else:
-            ASH_LOGGER.warning(f"{scanner_name} offline mode validation failed")
+            ASH_LOGGER.warning(
+                f"[WARNING] {scanner_name} offline mode validation failed"
+            )
 
+        # Log each message
         for message in messages:
-            ASH_LOGGER.info(f"  - {message}")
+            if is_valid:
+                ASH_LOGGER.info(f"  - {message}")
+            else:
+                ASH_LOGGER.warning(f"  - {message}")

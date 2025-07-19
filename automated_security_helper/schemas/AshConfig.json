@@ -97,6 +97,28 @@
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
         },
+        "mcp-resource-management": {
+          "$ref": "#/$defs/MCPResourceManagementConfig",
+          "default": {
+            "enable_health_checks": true,
+            "enable_resource_logging": true,
+            "health_check_interval_seconds": 60,
+            "log_resource_operations": false,
+            "max_concurrent_scans": 3,
+            "max_concurrent_tasks": 20,
+            "max_directory_size_mb": 1000,
+            "max_message_size_bytes": 10485760,
+            "max_path_length": 4096,
+            "memory_critical_threshold_mb": 2048,
+            "memory_warning_threshold_mb": 1024,
+            "operation_timeout_seconds": 180,
+            "scan_timeout_seconds": 1800,
+            "shutdown_timeout_seconds": 30,
+            "task_count_warning_threshold": 15,
+            "thread_pool_max_workers": 4
+          },
+          "description": "Configuration for MCP server resource management and limits"
+        },
         "project_name": {
           "default": "ash-scan",
           "description": "Name of the project being scanned",
@@ -1741,6 +1763,136 @@
         }
       },
       "title": "JupyterConverterConfigOptions",
+      "type": "object"
+    },
+    "MCPResourceManagementConfig": {
+      "additionalProperties": false,
+      "description": "Configuration model for MCP resource management settings.",
+      "properties": {
+        "enable_health_checks": {
+          "default": true,
+          "description": "Enable periodic health checks and resource monitoring",
+          "title": "Enable Health Checks",
+          "type": "boolean"
+        },
+        "enable_resource_logging": {
+          "default": true,
+          "description": "Enable detailed resource management logging",
+          "title": "Enable Resource Logging",
+          "type": "boolean"
+        },
+        "health_check_interval_seconds": {
+          "default": 60,
+          "description": "Interval between health checks in seconds",
+          "maximum": 300,
+          "minimum": 10,
+          "title": "Health Check Interval Seconds",
+          "type": "integer"
+        },
+        "log_resource_operations": {
+          "default": false,
+          "description": "Log individual resource operations for debugging",
+          "title": "Log Resource Operations",
+          "type": "boolean"
+        },
+        "max_concurrent_scans": {
+          "default": 3,
+          "description": "Maximum number of concurrent scans allowed",
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Concurrent Scans",
+          "type": "integer"
+        },
+        "max_concurrent_tasks": {
+          "default": 20,
+          "description": "Maximum number of concurrent async tasks allowed",
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Max Concurrent Tasks",
+          "type": "integer"
+        },
+        "max_directory_size_mb": {
+          "default": 1000,
+          "description": "Maximum directory size in MB that can be scanned",
+          "maximum": 10240,
+          "minimum": 10,
+          "title": "Max Directory Size Mb",
+          "type": "integer"
+        },
+        "max_message_size_bytes": {
+          "default": 10485760,
+          "description": "Maximum size of MCP messages in bytes",
+          "maximum": 104857600,
+          "minimum": 1024,
+          "title": "Max Message Size Bytes",
+          "type": "integer"
+        },
+        "max_path_length": {
+          "default": 4096,
+          "description": "Maximum allowed path length for security validation",
+          "maximum": 8192,
+          "minimum": 256,
+          "title": "Max Path Length",
+          "type": "integer"
+        },
+        "memory_critical_threshold_mb": {
+          "default": 2048,
+          "description": "Memory usage threshold in MB that triggers protective actions",
+          "maximum": 16384,
+          "minimum": 200,
+          "title": "Memory Critical Threshold Mb",
+          "type": "integer"
+        },
+        "memory_warning_threshold_mb": {
+          "default": 1024,
+          "description": "Memory usage threshold in MB that triggers warnings",
+          "maximum": 8192,
+          "minimum": 100,
+          "title": "Memory Warning Threshold Mb",
+          "type": "integer"
+        },
+        "operation_timeout_seconds": {
+          "default": 180,
+          "description": "Default timeout for general operations in seconds",
+          "maximum": 600,
+          "minimum": 30,
+          "title": "Operation Timeout Seconds",
+          "type": "integer"
+        },
+        "scan_timeout_seconds": {
+          "default": 1800,
+          "description": "Maximum time allowed for a single scan operation in seconds",
+          "maximum": 7200,
+          "minimum": 60,
+          "title": "Scan Timeout Seconds",
+          "type": "integer"
+        },
+        "shutdown_timeout_seconds": {
+          "default": 30,
+          "description": "Maximum time to wait for graceful shutdown in seconds",
+          "maximum": 300,
+          "minimum": 5,
+          "title": "Shutdown Timeout Seconds",
+          "type": "integer"
+        },
+        "task_count_warning_threshold": {
+          "default": 15,
+          "description": "Active task count that triggers warnings",
+          "maximum": 100,
+          "minimum": 5,
+          "title": "Task Count Warning Threshold",
+          "type": "integer"
+        },
+        "thread_pool_max_workers": {
+          "default": 4,
+          "description": "Maximum number of worker threads in the shared thread pool",
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Thread Pool Max Workers",
+          "type": "integer"
+        }
+      },
+      "title": "MCPResourceManagementConfig",
       "type": "object"
     },
     "MarkdownReporterConfig": {
