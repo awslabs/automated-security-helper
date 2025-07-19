@@ -96,14 +96,18 @@ class ScannerProgress:
         self.status = ScannerStatus.COMPLETED
         self.end_time = datetime.now()
         if self.start_time:
-            self.duration = (self.end_time - self.start_time).total_seconds()
+            duration = (self.end_time - self.start_time).total_seconds()
+            # Ensure duration is at least a small positive value for cross-platform compatibility
+            self.duration = max(duration, 0.001)
 
     def mark_failed(self) -> None:
         """Mark the scanner as failed and calculate duration."""
         self.status = ScannerStatus.FAILED
         self.end_time = datetime.now()
         if self.start_time:
-            self.duration = (self.end_time - self.start_time).total_seconds()
+            duration = (self.end_time - self.start_time).total_seconds()
+            # Ensure duration is at least a small positive value for cross-platform compatibility
+            self.duration = max(duration, 0.001)
 
     def mark_skipped(self) -> None:
         """Mark the scanner as skipped."""
@@ -219,13 +223,17 @@ class ScanProgress:
         """Mark the scan as completed and calculate duration."""
         self.status = "completed"
         self.end_time = datetime.now()
-        self.duration = (self.end_time - self.start_time).total_seconds()
+        duration = (self.end_time - self.start_time).total_seconds()
+        # Ensure duration is at least a small positive value for cross-platform compatibility
+        self.duration = max(duration, 0.001)
 
     def mark_failed(self) -> None:
         """Mark the scan as failed and calculate duration."""
         self.status = "failed"
         self.end_time = datetime.now()
-        self.duration = (self.end_time - self.start_time).total_seconds()
+        duration = (self.end_time - self.start_time).total_seconds()
+        # Ensure duration is at least a small positive value for cross-platform compatibility
+        self.duration = max(duration, 0.001)
 
     @property
     def completed_scanners(self) -> int:

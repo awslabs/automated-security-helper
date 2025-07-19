@@ -235,13 +235,17 @@ class ResourceManager:
             except Exception:
                 thread_pool_active = 0
 
+        # Calculate uptime and ensure it's at least a small positive value for cross-platform compatibility
+        uptime = time.time() - self._start_time
+        uptime = max(uptime, 0.001)
+
         return ResourceStats(
             active_tasks=0,  # This would be provided by TaskManager
             active_scans=self._active_operations,
             thread_pool_size=thread_pool_size,
             thread_pool_active=thread_pool_active,
             memory_usage_mb=memory_mb,
-            uptime_seconds=time.time() - self._start_time,
+            uptime_seconds=uptime,
         )
 
     def is_healthy(self) -> bool:
