@@ -211,8 +211,16 @@ class ScannerStatisticsCalculator:
                 ):
                     # Old ScannerStatusInfo structure
                     ASH_LOGGER.debug("   Using OLD ScannerStatusInfo structure")
-                    source_duration = scanner_status_info.duration or 0
-                    converted_duration = scanner_status_info.duration or 0
+                    source_duration = (
+                        float(scanner_status_info.source.duration)
+                        if hasattr(scanner_status_info.source, "duration")
+                        else 0
+                    )
+                    converted_duration = (
+                        float(scanner_status_info.converted.duration)
+                        if hasattr(scanner_status_info.converted, "duration")
+                        else 0
+                    )
                     duration = source_duration + converted_duration
                 elif hasattr(scanner_status_info, "duration"):
                     # New ScannerMetrics structure
@@ -546,10 +554,14 @@ class ScannerStatisticsCalculator:
             global_threshold = ash_conf.global_settings.severity_threshold
 
         # Get scanner-specific configuration
-        scanner_config_entry = ash_conf.get_plugin_config(
-            plugin_type="scanner",
-            plugin_name=scanner_name,
-        )
+        scanner_config_entry = None
+        if hasattr(ash_conf, "get_plugin_config") and callable(
+            ash_conf.get_plugin_config
+        ):
+            scanner_config_entry = ash_conf.get_plugin_config(
+                plugin_type="scanner",
+                plugin_name=scanner_name,
+            )
 
         # Initialize scanner_threshold to None
         scanner_threshold = None

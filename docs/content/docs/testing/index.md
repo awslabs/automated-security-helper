@@ -69,7 +69,7 @@ Tests are categorized using pytest markers to allow selective execution:
 
 ### UV Migration Tests
 
-The project includes comprehensive integration tests for the Poetry to UV migration. See [UV Migration Tests](uv-migration-tests.md) for detailed information about testing UV functionality, including:
+The project includes comprehensive integration tests for the Poetry to UV migration, including:
 
 - UV tool scanner execution tests
 - UV dependency resolution and installation tests

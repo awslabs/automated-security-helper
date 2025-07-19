@@ -60,7 +60,7 @@ class ASHScanOrchestrator(BaseModel):
         Field(description="Whether to execute scanners in parallel or sequentially"),
     ] = ExecutionStrategy.PARALLEL
     config_path: Annotated[
-        Optional[Path], Field(None, description="Path to configuration file")
+        Optional[Path | str], Field(None, description="Path to configuration file")
     ]
     config_overrides: Annotated[
         Optional[List[str]],
@@ -69,24 +69,26 @@ class ASHScanOrchestrator(BaseModel):
     color_system: Annotated[
         Optional[str], Field(None, description="Color system to use for console output")
     ] = None
-    verbose: Annotated[bool, Field(False, description="Enable verbose logging")]
-    debug: Annotated[bool, Field(False, description="Enable debug logging")]
+    verbose: Annotated[bool, Field(False, description="Enable verbose logging")] = False
+    debug: Annotated[bool, Field(False, description="Enable debug logging")] = False
     show_progress: Annotated[
         bool,
         Field(True, description="Enable graphical progress visibility in the console."),
-    ]
+    ] = True
     simple_mode: Annotated[
         bool,
         Field(
             False,
             description="Enable simplified output mode for pre-commit hooks and CI.",
         ),
-    ]
-    offline: Annotated[bool, Field(False, description="Run in offline mode")]
-    no_run: Annotated[bool, Field(False, description="Only build container image")]
+    ] = False
+    offline: Annotated[bool, Field(False, description="Run in offline mode")] = False
+    no_run: Annotated[bool, Field(False, description="Only build container image")] = (
+        False
+    )
     build_target: Annotated[
-        str, Field("default", description="Build target for container image")
-    ]
+        str | None, Field("default", description="Build target for container image")
+    ] = None
     enabled_scanners: Annotated[
         List[str],
         Field(
@@ -99,7 +101,9 @@ class ASHScanOrchestrator(BaseModel):
             description="List of scanners to exclude. Takes precedence over enabled_scanners.",
         ),
     ] = []
-    oci_runner: Annotated[str, Field("docker", description="OCI runner to use")]
+    oci_runner: Annotated[str, Field("docker", description="OCI runner to use")] = (
+        "docker"
+    )
     no_cleanup: Annotated[
         bool, Field(False, description="Keep work directory after scan")
     ]
@@ -111,9 +115,9 @@ class ASHScanOrchestrator(BaseModel):
     ] = False
 
     metadata: Annotated[
-        Dict[str, Any],
+        Dict[str, Any] | None,
         Field(default_factory=dict, description="Additional metadata for the scan"),
-    ]
+    ] = None
 
     # Core components
     execution_engine: Annotated[ScanExecutionEngine | None, Field()] = None

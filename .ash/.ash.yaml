@@ -8,6 +8,15 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    - path: tests/integration/cli/test_mcp_integration_simple.py
+      rule_id: SECRET-SECRET-KEYWORD
+      reason: False positive.
+    - path: tests/integration/cli/test_mcp_integration.py
+      rule_id: SECRET-SECRET-KEYWORD
+      reason: False positive.
+    - path: tests/integration/cli/conftest.py
+      rule_id: SECRET-SECRET-KEYWORD
+      reason: False positive.
     - path: pyproject.toml
       rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       reason: This is the project configuration. Findings of this type are false positives.

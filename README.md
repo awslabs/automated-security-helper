@@ -18,6 +18,14 @@
     - [Clone the Repository](#clone-the-repository)
 - [Basic Usage](#basic-usage)
   - [Sample Output](#sample-output)
+- [AI Integration with MCP](#ai-integration-with-mcp)
+  - [MCP Server Features](#mcp-server-features)
+  - [Installation and Setup](#installation-and-setup)
+    - [Prerequisites](#prerequisites-1)
+    - [Client Configuration](#client-configuration)
+  - [Available MCP Tools](#available-mcp-tools)
+  - [Usage Examples](#usage-examples)
+  - [Configuration Support](#configuration-support)
 - [Configuration](#configuration)
 - [Using ASH with pre-commit](#using-ash-with-pre-commit)
 - [Output Files](#output-files)
@@ -170,6 +178,139 @@ To investigate...
   2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
 ERROR (2) Exiting due to 122 actionable findings found in ASH scan
 ```
+
+## AI Integration with MCP
+
+ASH includes a Model Context Protocol (MCP) server that enables AI assistants to perform security scans and analyze results through a standardized interface. This allows you to integrate ASH with AI development tools like Amazon Q CLI, Claude Desktop, and Cline (VS Code).
+
+### MCP Server Features
+
+The ASH MCP server provides:
+
+- **Real-time Progress Tracking**: Monitor scan progress with streaming updates
+- **Background Scanning**: Start scans and continue other work while they run
+- **Multiple Scan Management**: Handle concurrent scans with unique identifiers
+- **Comprehensive Error Handling**: Detailed error messages and recovery suggestions
+- **Configuration Support**: Full support for ASH configuration files and environment variables
+
+### Installation and Setup
+
+#### Prerequisites
+
+1. **Install UV**: Install `uv` from [Astral](https://docs.astral.sh/uv/getting-started/installation/) or the [GitHub README](https://github.com/astral-sh/uv#installation)
+2. **Install Python 3.10+**: Use `uv python install 3.10` (or a more recent version)
+
+#### Client Configuration
+
+**Amazon Q Developer CLI** - Add to `~/.aws/amazonq/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "ash",
+        "mcp"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+**Claude Desktop** - Add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "ash-security": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "ash",
+        "mcp"
+      ]
+    }
+  }
+}
+```
+
+**Cline (VS Code)**:
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "ash",
+        "mcp"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "get_scan_progress",
+        "list_active_scans",
+        "get_scan_results"
+      ]
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+The ASH MCP server provides these tools:
+
+| Tool | Description | Use Case |
+|------|-------------|----------|
+| `scan_directory` | Perform a complete security scan | One-time scans with full results |
+| `scan_directory_with_progress` | Start a scan with real-time progress tracking | Long-running scans with progress monitoring |
+| `get_scan_progress` | Get current progress of a running scan | Monitor scan status and partial results |
+| `get_scan_results` | Get final results of a completed scan | Retrieve complete scan results |
+| `list_active_scans` | List all active and recent scans | Manage multiple concurrent scans |
+| `cancel_scan` | Cancel a running scan | Stop unnecessary or problematic scans |
+| `check_installation` | Verify ASH installation and dependencies | Troubleshoot setup issues |
+
+### Usage Examples
+
+Once configured, you can interact with ASH through natural language. Each of the
+sentences below represent prompts which can be used in the various coding CLIs
+(Q CLI, Cline, etc.) in order to inform the CLI to identify the ASH MCP tool and use it
+based on the instructions provided in the prompt.
+
+
+**Basic Security Scanning:**
+```
+"Can you scan this project directory for security vulnerabilities?"
+"Please run ASH on the ./src folder and analyze the results"
+"Check this code for security issues with HIGH severity threshold"
+```
+
+**Progress Monitoring:**
+```
+"Start a security scan on this directory and show me the progress"
+"Monitor the current scan and let me know when it's done"
+"What's the status of my running security scans?"
+```
+
+**Analysis & Reporting:**
+```
+"Perform a comprehensive security audit and create a prioritized action plan"
+"Scan this code and help me fix any critical security issues"
+"Generate a security report with remediation recommendations"
+```
+
+### Configuration Support
+
+The MCP server supports all ASH configuration methods:
+
+- **Configuration files**: `.ash/ash.yaml` or custom config paths
+- **Environment variables**: `ASH_DEFAULT_SEVERITY_LEVEL`, `ASH_OFFLINE`, etc.
+- **CLI parameters**: Severity thresholds, custom output directories
+
+For detailed information about streaming capabilities and advanced usage, see the [MCP Streaming Guide](docs/content/tutorials/mcp-streaming-guide.md).
+
 
 ## Configuration
 

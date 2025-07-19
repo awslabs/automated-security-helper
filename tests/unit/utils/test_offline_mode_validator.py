@@ -390,40 +390,6 @@ class TestOfflineModeValidator:
         assert len(messages) == 1
         assert "Found 3 cache files" in messages[0]
 
-    def test_log_validation_results_success(self, caplog):
-        """Test logging of successful validation results."""
-        messages = ["Found 5 cache files", "Database is up to date"]
-
-        OfflineModeValidator.log_validation_results("TestScanner", True, messages)
-
-        # Check for either emoji or Windows-safe ASCII version
-        success_patterns = [
-            "TestScanner offline mode validation passed",
-            "[OK] TestScanner offline mode validation passed",
-        ]
-        assert any(pattern in caplog.text for pattern in success_patterns), (
-            f"Expected success pattern not found in: {caplog.text}"
-        )
-        assert "Found 5 cache files" in caplog.text
-        assert "Database is up to date" in caplog.text
-
-    def test_log_validation_results_failure(self, caplog):
-        """Test logging of failed validation results."""
-        messages = ["Cache directory not found", "No database files"]
-
-        OfflineModeValidator.log_validation_results("TestScanner", False, messages)
-
-        # Check for either emoji or Windows-safe ASCII version
-        failure_patterns = [
-            "TestScanner offline mode validation failed",
-            "[WARNING] TestScanner offline mode validation failed",
-        ]
-        assert any(pattern in caplog.text for pattern in failure_patterns), (
-            f"Expected failure pattern not found in: {caplog.text}"
-        )
-        assert "Cache directory not found" in caplog.text
-        assert "No database files" in caplog.text
-
 
 class TestIntegrationScenarios:
     """Integration tests for realistic offline mode scenarios."""

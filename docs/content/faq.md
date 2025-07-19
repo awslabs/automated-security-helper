@@ -219,7 +219,7 @@ ASH v3 includes a comprehensive Scanner Validation System that monitors scanner 
 
 The validation system will log specific reasons why scanners might be disabled (missing dependencies, configuration exclusions, etc.) and attempt automatic recovery where possible. Additionally, the system ensures all originally registered scanners appear in the final results with appropriate status, even if they failed or were disabled during the scan.
 
-For detailed information about the scanner validation system, see the [Scanner Validation System](../developer-guide/scanner-validation-system.md) developer guide.
+For detailed information about the scanner validation system, see the [Scanner Validation System](developer-guide/scanner-validation-system.md) developer guide.
 
 ### How do I debug ASH?
 ```bash
@@ -229,6 +229,153 @@ ash --debug
 # Enable verbose logging
 ash --verbose
 ```
+
+## AI Integration and MCP
+
+### What is MCP and how does ASH support it?
+Model Context Protocol (MCP) is a standardized way for AI applications to access external tools and data sources. ASH includes an MCP server that allows AI assistants to perform security scans, monitor progress, and analyze results through natural language interactions.
+
+### How do I set up ASH with MCP?
+1. **Install UV and Python 3.10+**:
+   - Install `uv` from [Astral](https://docs.astral.sh/uv/getting-started/installation/) or the [GitHub README](https://github.com/astral-sh/uv#installation)
+   - Install Python 3.10+ using `uv python install 3.10` (or a more recent version)
+
+2. **Configure your AI client** to use the ASH MCP server:
+
+   **Amazon Q Developer CLI** - Add to `~/.aws/amazonq/mcp.json`:
+   ```json
+   {
+     "mcpServers": {
+       "ash": {
+         "command": "uvx",
+         "args": [
+           "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+           "ash",
+           "mcp"
+         ],
+         "disabled": false,
+         "autoApprove": []
+       }
+     }
+   }
+   ```
+
+   **Claude Desktop** - Add to `claude_desktop_config.json`:
+   ```json
+   {
+     "mcpServers": {
+       "ash-security": {
+         "command": "uvx",
+         "args": [
+           "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+           "ash",
+           "mcp"
+         ]
+       }
+     }
+   }
+   ```
+
+   **Cline (VS Code)**:
+   ```json
+   {
+     "mcpServers": {
+       "ash": {
+         "command": "uvx",
+         "args": [
+           "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+           "ash",
+           "mcp"
+         ],
+         "disabled": false,
+         "autoApprove": [
+           "get_scan_progress",
+           "list_active_scans",
+           "get_scan_results"
+         ]
+       }
+     }
+   }
+   ```
+
+### What can I do with ASH through MCP?
+- Start security scans with natural language commands
+- Monitor scan progress in real-time
+- Analyze and prioritize security findings
+- Generate security reports and remediation plans
+- Manage multiple concurrent scans
+- Configure resource limits and performance settings
+- Monitor system resource usage and health
+
+### How do I configure resource management for the MCP server?
+
+ASH v3 includes comprehensive resource management that can be configured through your ASH configuration file:
+
+```yaml
+# .ash/ash.yaml
+mcp-resource-management:
+  max_concurrent_scans: 5          # Limit simultaneous scans
+  max_concurrent_tasks: 25         # Limit async tasks
+  thread_pool_max_workers: 6       # Thread pool size
+  scan_timeout_seconds: 2400       # 40 minute scan timeout
+  memory_warning_threshold_mb: 2048 # Memory usage warnings
+  enable_health_checks: true       # Enable monitoring
+```
+
+This prevents memory leaks, manages system resources, and ensures stable operation under load.
+
+### I'm getting "Maximum concurrent scans exceeded" errors
+
+This is a resource protection feature. You can adjust the limits in your configuration:
+
+```yaml
+# .ash/ash.yaml
+mcp-resource-management:
+  max_concurrent_scans: 10  # Increase from default of 3
+  max_concurrent_tasks: 50  # Increase task limit if needed
+```
+
+Or wait for existing scans to complete before starting new ones.
+
+### I'm getting MCP dependency errors
+MCP dependencies are included by default in ASH v3. If you're still getting errors:
+
+1. **Check UV installation**: Ensure UV is installed and available: `uv --version`
+2. **Check Python version**: Ensure Python 3.10+ is available: `uv python list`
+3. **Test the MCP server**: Try running the server directly:
+   ```bash
+   uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash mcp --help
+   ```
+
+### How do I test the ASH MCP server?
+```bash
+# Test MCP server startup
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash mcp --debug
+
+# Check ASH version
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash --version
+```
+
+### How do I monitor MCP server performance?
+
+Enable resource monitoring in your configuration:
+
+```yaml
+# .ash/ash.yaml
+mcp-resource-management:
+  enable_health_checks: true
+  enable_resource_logging: true
+  log_resource_operations: true
+```
+
+Then ask your AI assistant:
+```
+"Show me the current resource usage of the MCP server"
+"How many scans are currently running?"
+"What's the memory usage of the security scanner?"
+```
+
+For more details, see the [MCP Tutorial](tutorials/using-ash-with-mcp.md).
 
 ## Getting Help
 

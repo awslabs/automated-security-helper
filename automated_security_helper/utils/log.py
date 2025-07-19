@@ -102,7 +102,7 @@ class JsonFormatter(logging.Formatter):
 
     def __init__(
         self,
-        fmt_dict: dict = None,
+        fmt_dict: dict | None = None,
         time_format: str = "%Y-%m-%dT%H:%M:%S",
         msec_format: str = "%s.%03dZ",
     ):
@@ -339,7 +339,12 @@ def configure_windows_safe_logging():
         import codecs
 
         # Try to set console to UTF-8 if possible
-        if hasattr(sys.stdout, "reconfigure"):
+        if (
+            sys.stdout
+            and hasattr(sys.stdout, "reconfigure")
+            and sys.stderr
+            and hasattr(sys.stderr, "reconfigure")
+        ):
             try:
                 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
                 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -441,13 +446,18 @@ def get_logger(
     # Configure Windows-safe logging early
     configure_windows_safe_logging()
 
-    # VERBOSE_FORMAT = "[%(asctime)s] [%(levelname)-18s] ($BOLD%(filename)s$RESET:%(lineno)d) %(message)s "
-    # DEFAULT_FORMAT = "[%(levelname)-18s] %(message)s "
+    # Disable propagation to the root logger to prevent duplicate messages
+    # This is the key fix for the duplicate logging issue
+    root_logger = logging.getLogger()
+    if root_logger.handlers and name != "":
+        # If we're not configuring the root logger itself and the root logger has handlers,
+        # we need to prevent propagation to avoid duplicate messages
+        logging.getLogger(name).propagate = False
 
     logger: logging.Logger = logging.getLogger(name)
 
-    # If this is the main ASH logger, enhance it with Windows-safe functionality
-    if name == "ash" and not hasattr(logger, "_windows_safe_mode"):
+    # enhance it with Windows-safe functionality
+    if not hasattr(logger, "_windows_safe_mode"):
         # Monkey patch the logger with Windows-safe functionality
         logger._windows_safe_mode = _is_windows_with_encoding_issues()
         logger._emoji_fallback_map = _get_default_emoji_fallback_map()
@@ -477,7 +487,11 @@ def get_logger(
         # Replace the _log method
         logger._log = _safe_log
 
-    # Explicit set the root logger level to TRACE/5
+    # Clear existing handlers to avoid duplicates when the function is called multiple times
+    if logger.handlers:
+        logger.handlers = []
+
+    # Explicit set the logger level to TRACE/5
     # (root logger sets the lowest level depth for all attached handlers)
     logger.setLevel(logging._nameToLevel.get("TRACE", 5))
     level_param = {}
@@ -553,27 +567,14 @@ def get_logger(
             **level_param,
             **custom_console_params,
         )
-    # if logger.level is None or logger.level > 15:
-    #     COLOR_FORMAT = formatter_message(DEFAULT_FORMAT, True)
-    # else:
-    #     COLOR_FORMAT = formatter_message(VERBOSE_FORMAT, True)
-
-    # color_formatter = ColoredFormatter(COLOR_FORMAT)
 
     handler.setFormatter(logging.Formatter("%(message)s"))
 
-    # if logger.level == logging.DEBUG:
-    #     formatter_str = "[%(asctime)s] [%(name)s] [%(filename)s:%(lineno)d] %(levelname)s: %(message)s"
-    #     # formatter_str = f"{Color.cyan('[%(asctime)s]')} {Color.gray('[%(name)s]')} {Color.yellow('[%(filename)s:%(lineno)d]')} {Color.yellow('[%(levelname)s]')}: %(message)s"
-    #     formatter = logging.Formatter(formatter_str)
-    #     # formatter = logging.Formatter(CustomFormatter())
-    # else:
-    #     formatter_str = "[%(asctime)s] %(levelname)s: %(message)s"
-    #     formatter = logging.Formatter(formatter_str)
-    # handler.setFormatter(formatter)
-
-    if not logger.handlers and not show_progress:
+    # Always add the handler unless show_progress is True
+    # (show_progress means we're using a different progress display mechanism)
+    if not show_progress:
         logger.addHandler(handler)
+
     if output_dir:
         """Add a file handler for this logger with the specified `name` (and
         store the log file under `output_dir`)."""
@@ -630,7 +631,11 @@ def get_logger(
     return logger
 
 
+# Initialize the ASH_LOGGER with proper configuration to avoid duplicate handlers
 ASH_LOGGER = logging.getLogger("ash")
+
+# Disable propagation to the root logger to prevent duplicate messages
+ASH_LOGGER.propagate = False
 
 # Enhance the main ASH logger with Windows-safe functionality
 if not hasattr(ASH_LOGGER, "_windows_safe_mode"):
