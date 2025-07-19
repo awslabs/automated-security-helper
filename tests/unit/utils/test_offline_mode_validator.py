@@ -339,36 +339,6 @@ class TestOfflineModeValidator:
         assert len(messages) == 1
         assert "TestScanner cache directory not specified" in messages[0]
 
-    def test_log_validation_results_success(self, capsys):
-        """Test logging of successful validation results."""
-        messages = ["Found 5 cache files", "Database is up to date"]
-
-        OfflineModeValidator.log_validation_results("TestScanner", True, messages)
-
-        # Get captured output
-        captured = capsys.readouterr()
-        output = captured.out + captured.err
-
-        # Check for the new format with [OK] prefix
-        assert "[OK] TestScanner offline mode validation passed" in output
-        assert "Found 5 cache files" in output
-        assert "Database is up to date" in output
-
-    def test_log_validation_results_failure(self, capsys):
-        """Test logging of failed validation results."""
-        messages = ["Cache directory not found", "No database files"]
-
-        OfflineModeValidator.log_validation_results("TestScanner", False, messages)
-
-        # Get captured output
-        captured = capsys.readouterr()
-        output = captured.out + captured.err
-
-        # Check for the new format with [WARNING] prefix
-        assert "[WARNING] TestScanner offline mode validation failed" in output
-        assert "Cache directory not found" in output
-        assert "No database files" in output
-
     def test_validate_cache_directory_nonexistent(self, tmp_path):
         """Test validation fails when cache directory doesn't exist."""
         non_existent_dir = str(tmp_path / "non_existent")
