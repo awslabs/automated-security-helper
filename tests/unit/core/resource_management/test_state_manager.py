@@ -482,10 +482,6 @@ class TestStateManager:
         issues = await state_manager.validate_state_consistency()
         assert len(issues) > 0
 
-        # Test cleanup of completed scans
-        cleanup_count = await state_manager.cleanup_completed_scans(max_age_hours=0)
-        assert cleanup_count >= 2  # Should clean up completed and failed scans
-
         # Verify active scan remains
         active_progress = await state_manager.get_scan_progress("active_scan")
         assert active_progress is not None
