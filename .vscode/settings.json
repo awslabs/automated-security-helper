@@ -4,14 +4,5 @@
   ],
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
-  "sarif-viewer.connectToGithubCodeScanning": "off",
-  "yaml.schemas": {
-    ".gitlab-ci.yml": "https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json",
-    "https://squidfunk.github.io/mkdocs-material/schema.json": "mkdocs.yml",
-    "file:///local/home/nateferl/.vscode-server/extensions/marklel.vscode-brazil-0.51.201448/assets/languages/rde/schema.json": "**/definition.yaml",
-    ".ash.yml": "https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json",
-    ".ash.yaml": "https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/beta/automated_security_helper/schemas/AshConfig.json",
-    "file:///Users/nateferl/.kiro/extensions/atlassian.atlascode-3.8.3-universal/resources/schemas/pipelines-schema.json": "bitbucket-pipelines.yml",
-    "https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json": "untitled:Untitled-2"
-  }
+  "sarif-viewer.connectToGithubCodeScanning": "off"
 }
