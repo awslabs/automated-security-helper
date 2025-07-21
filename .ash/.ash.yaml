@@ -8,6 +8,9 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    - path: tests/integration/cli/test_mcp_file_tracking_integration.py
+      rule_id: SECRET-SECRET-KEYWORD
+      reason: False positive.
     - path: tests/integration/cli/test_mcp_integration_simple.py
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive.
