@@ -252,6 +252,7 @@ ENV HOME=${ASHUSER_HOME}
 ENV ASH_USER=${ASH_USER}
 ENV ASH_GROUP=${ASH_GROUP}
 
+ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
