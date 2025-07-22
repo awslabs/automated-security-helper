@@ -11,7 +11,7 @@
       "args": [
         "--verbose",
         "--scanners",
-        "detect-secrets,bandit,checkov"
+        "grype"
       ],
       "console": "internalConsole",
       "env": {

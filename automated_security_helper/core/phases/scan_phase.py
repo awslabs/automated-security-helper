@@ -1385,7 +1385,10 @@ class ScanPhase(EnginePhase):
         )
 
         ash_target_result_path = self.plugin_context.output_dir.joinpath(
-            "scanners", scanner_name, results.target_type, "ASH.ScanResults.json"
+            "scanners",
+            scanner_name,
+            (results.target_type or "source"),
+            "ASH.ScanResults.json",
         )
         ash_target_result_path.parent.mkdir(parents=True, exist_ok=True)
 
