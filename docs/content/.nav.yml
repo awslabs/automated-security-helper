@@ -4,8 +4,9 @@ nav:
           - Quick Start Guide: docs/quick-start-guide.md
           - Installation Guide: docs/installation-guide.md
           - Migrating from ASH v2 to v3: docs/migration-guide.md
-          - Troubleshooting UV Installation: docs/troubleshooting-uv-installation.md
-          - UV Tool Installation Guide: docs/uv-tool-installation-guide.md
+          - UV Tool Installation Guide: 
+                  - Overview: docs/uv-tool-installation-guide.md
+                  - Troubleshooting UV Installation: docs/troubleshooting-uv-installation.md
     - User Guide:
           - Configuration: docs/configuration-guide.md
           - CLI Reference: docs/cli-reference.md

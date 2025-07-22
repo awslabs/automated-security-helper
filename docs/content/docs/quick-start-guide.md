@@ -11,6 +11,16 @@ ASH v3 has been entirely rewritten in Python with significant improvements:
 3. **New Output Structure**: Results stored in `.ash/ash_output/` with multiple report formats
 4. **Enhanced Configuration**: YAML-based configuration with CLI overrides
 
+## Prerequisites
+
+### Runtime Requirements
+
+| Mode      | Requirements                                                                                                                                                         | Notes                                                    |
+|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|
+| Local     | Python 3.10+, UV package manager                                                                                                                                     | Some scanners require additional tools (see Built-In Scanners in Installation Guide) |
+| Container | Any OCI-compatible container runtime ([Finch](https://github.com/runfinch/finch), [Docker](https://docs.docker.com/get-docker/), [Podman](https://podman.io/), etc.) | On Windows: WSL2 is typically required                   |
+| Precommit | Python 3.10+, UV package manager                                                                                                                                     | Subset of scanners, optimized for speed                  |
+
 ## Installation
 
 Choose one of these methods to install ASH:
@@ -98,6 +108,7 @@ start .ash/ash_output/reports/ash.html  # On Windows
 ```
 
 Available report formats:
+
 - `ash.summary.txt`: Human-readable text summary
 - `ash.summary.md`: Markdown summary for GitHub PRs and other platforms
 - `ash.html`: Interactive HTML report

@@ -160,68 +160,6 @@ export UV_OFFLINE=1
 export SEMGREP_RULES_CACHE_DIR=/path/to/cached/rules
 ```
 
-## Error Handling and Troubleshooting
-
-### Common Installation Issues
-
-#### 1. UV Not Available
-
-**Error**: `UV tool validation failed - UV is not available but required`
-
-**Solution**:
-```bash
-# Install UV using pip
-pip install uv
-
-# Or using homebrew (macOS)
-brew install uv
-
-# Or using the official installer
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-#### 2. Installation Timeout
-
-**Error**: `Tool installation timed out after 300 seconds`
-
-**Solutions**:
-- Increase timeout in configuration:
-  ```yaml
-  scanners:
-    bandit:
-      options:
-        install_timeout: 600  # 10 minutes
-  ```
-- Check network connectivity
-- Use offline mode with pre-installed tools
-
-#### 3. Version Conflicts
-
-**Error**: `Tool installation failed with exit code 1`
-
-**Solutions**:
-- Check version constraint syntax
-- Verify tool version availability
-- Use broader version ranges:
-  ```yaml
-  tool_version: ">=1.7.0"  # Instead of exact version
-  ```
-
-#### 4. Offline Mode Issues
-
-**Error**: `Offline mode is enabled but tool 'bandit' is not available`
-
-**Solutions**:
-- Pre-install tools manually:
-  ```bash
-  uv tool install bandit
-  ```
-- Install tools system-wide:
-  ```bash
-  pip install bandit checkov semgrep
-  ```
-- Disable offline mode temporarily
-
 ### Logging and Diagnostics
 
 The installation system provides structured logging with tags:

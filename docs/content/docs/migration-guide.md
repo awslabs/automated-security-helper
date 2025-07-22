@@ -10,16 +10,20 @@ This guide helps users migrate from ASH v2 to ASH v3.
    ash config init
    ```
 3. **Update Scripts**:
+
    - Add `--mode container` to your ASH commands if you need to run ASH in a container still
-    - **NOTE: This is only required if you are using the ASH CLI to manage the lifecycle of the container. If you are already running inside a container, such as running inside a CI pipeline using a pre-built ASH image, then you do not have to adjust your scripts.**
+    - **NOTE:** This is only required if you are using the ASH CLI to manage the lifecycle of the container. If you are already running inside a container, such as running inside a CI pipeline using a pre-built ASH image, then you do not have to adjust your scripts.
    - Update output directory handling:
     - If you are explicitly passing the `--output-dir` to ASH, then ASH will continue to output to the same directory.
     - If you are not explicitly passing the `--output-dir` to ASH, then you will need to update output directory references to `.ash/ash_output` OR start including `--output-dir ash_output` in your scripts to retain the existing output directory.
    - Replace any collection and/or parsing of `aggregated_results.txt` with collecting/parsing the reports found in the new `reports` directory of the `output-dir` OR with JSON parsing of the new `ash_aggregated_results.json` (public JSON schema in GitHub)
    - **Recommendation**: Add `ash report` to your script after `ash` has completed to pretty-print the summary report in the terminal or job stdout.
+
 4. **Update Pre-commit Configuration**:
+
    - Change hook ID from `ash` to `ash-simple-scan`
    - Update the revision to `v3.0.0` or later
+   
 5. **Test Your Migration**:
    ```bash
    ash --mode local
