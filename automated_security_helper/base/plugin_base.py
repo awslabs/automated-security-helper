@@ -486,9 +486,9 @@ class PluginBase(BaseModel):
         # Build install command with offline mode support
         install_cmd_parts = ["uv", "tool", "install"]
 
-        # Add offline flag if in offline mode
-        if self._is_offline_mode():
-            install_cmd_parts.append("--offline")
+        # # Add offline flag if in offline mode
+        # if self._is_offline_mode():
+        #     install_cmd_parts.append("--offline")
 
         install_cmd_parts.append(tool_spec)
 

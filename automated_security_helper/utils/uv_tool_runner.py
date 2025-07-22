@@ -299,6 +299,15 @@ class UVToolRunner:
         if args is None:
             args = []
 
+        command = [self.uv_executable, "tool", "run"]
+
+        # Set up environment for offline mode if needed
+        env = None
+        if os.environ.get("ASH_OFFLINE", "NO").upper() in ["YES", "TRUE", "1"]:
+            env = os.environ.copy()
+            env["UV_OFFLINE"] = "1"
+            command.append("--offline")
+
         # Build command with --from parameter if extras or version constraint specified
         if package_extras or version_constraint:
             # Build the --from specification
@@ -312,22 +321,14 @@ class UVToolRunner:
                 f"{base_spec}{version_constraint}" if version_constraint else base_spec
             )
 
-            command = [
-                self.uv_executable,
-                "tool",
-                "run",
-                "--from",
-                from_spec,
-                tool_name,
-            ] + args
-        else:
-            command = [self.uv_executable, "tool", "run", tool_name] + args
+            command.extend(
+                [
+                    "--from",
+                    from_spec,
+                ]
+            )
 
-        # Set up environment for offline mode if needed
-        env = None
-        if os.environ.get("ASH_OFFLINE", "NO").upper() in ["YES", "TRUE", "1"]:
-            env = os.environ.copy()
-            env["UV_OFFLINE"] = "1"
+        command.extend([tool_name, *args])
 
         # Use the centralized output handling if results_dir is provided
         if results_dir is not None:

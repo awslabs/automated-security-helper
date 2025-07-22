@@ -619,27 +619,40 @@ class ScannerStatisticsCalculator:
             - excluded: True if the scanner was explicitly excluded from the scan
             - dependencies_missing: True if the scanner has missing dependencies
         """
-        if scanner_name in asharp_model.scanner_results:
+        excluded = False
+        dependencies_missing = False
+        if (
+            scanner_name in asharp_model.additional_reports
+            and "None" in asharp_model.additional_reports[scanner_name]
+            and asharp_model.additional_reports[scanner_name]["None"]["scanner_name"]
+            == scanner_name
+        ):
+            if (
+                asharp_model.additional_reports[scanner_name]["None"]["status"]
+                == "SKIPPED"
+            ):
+                excluded = True
+            elif (
+                asharp_model.additional_reports[scanner_name]["None"]["status"]
+                == "MISSING"
+            ):
+                dependencies_missing = True
+            else:
+                excluded = True
+        elif scanner_name in asharp_model.scanner_results:
             scanner_status_info = asharp_model.scanner_results[scanner_name]
 
             # Handle both old ScannerStatusInfo and new ScannerMetrics structures
             if hasattr(scanner_status_info, "excluded"):
                 excluded = scanner_status_info.excluded
-            else:
-                excluded = False
-
             if hasattr(scanner_status_info, "dependencies_satisfied"):
                 # Old ScannerStatusInfo structure
                 dependencies_missing = not scanner_status_info.dependencies_satisfied
             elif hasattr(scanner_status_info, "dependencies_missing"):
                 # New ScannerMetrics structure
                 dependencies_missing = scanner_status_info.dependencies_missing
-            else:
-                dependencies_missing = False
 
-            return excluded, dependencies_missing
-
-        return False, False
+        return excluded, dependencies_missing
 
     @staticmethod
     def get_scanner_status(
