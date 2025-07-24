@@ -284,3 +284,6 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# Snyk Cache
+.dccache

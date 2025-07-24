@@ -69,13 +69,30 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         Returns:
             bool: True if validation passes
         """
-        if self.config.options.snyk_token_env_var_name is None:
-            return False
-        if os.environ.get("SNYK_TOKEN", "") == "":
+        # TODO: Validate this is rejecting snyk with offline mode.
+        if self._is_offline_mode():
             self._plugin_log(
-                f"SNYK_TOKEN env var is not set! Unable to run {self.__class__.__name__}"
+                f"Offline mode detected. Skipping validation for {self.__class__.__name__}"
             )
             return False
+
+        # Check if SNYK_TOKEN is defined on the environment variable or if using local
+        # mode, the file ${HOME}/.config/configstore/snyk.json or ${HOME}/.config/configstore/.snyk.json exists
+        if os.environ.get("SNYK_TOKEN", "") != "":
+            # Token found in environment variable
+            pass
+        else:
+            # Check for credential files
+            home = Path.home()
+            snyk_config_paths = home.joinpath(".config", "configstore", "snyk.json")
+
+            if not snyk_config_paths.exists():
+                # No credentials found
+                self._plugin_log(
+                    "Warning: No Snyk credentials found. SNYK_TOKEN env var is not set and no credential files found at ~/.config/configstore/snyk.json. The scan might fail.",
+                    level=logging.WARNING,
+                )
+
         snyk_binary = find_executable("snyk")
         if not snyk_binary or snyk_binary is None:
             return False
@@ -167,8 +184,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             target_results_dir.mkdir(exist_ok=True, parents=True)
 
             final_args = self._resolve_arguments(
-                target=target,
-                results_file=results_file,
+                target=target, results_file=results_file, use_equal=True
             )
 
             self._plugin_log(
@@ -179,10 +195,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
             # Set environment variables for offline mode if needed
             env_vars = {}
-            if self.config.options.offline and "OPENGREP_RULES_CACHE_DIR" in os.environ:
-                env_vars["OPENGREP_RULES"] = (
-                    f"{os.environ['OPENGREP_RULES_CACHE_DIR']}/*"
-                )
 
             # Run the subprocess with the environment variables
             if env_vars:
@@ -287,4 +299,4 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         except Exception as e:
             # Check if there are useful error details
-            raise ScannerError(f"Opengrep scan failed: {str(e)}")
+            raise ScannerError(f"Snyk Code scan failed: {str(e)}")
