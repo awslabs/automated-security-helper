@@ -184,7 +184,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             target_results_dir.mkdir(exist_ok=True, parents=True)
 
             final_args = self._resolve_arguments(
-                target=target, results_file=results_file, use_equal=True
+                target=target, results_file=results_file, use_equal=False
             )
 
             self._plugin_log(
@@ -225,6 +225,13 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
+
+            # Handle errors executing the scanner. For Snyk, non-zero response indicate the scanner was not
+            # executed successfully.
+            if self.exit_code != 0:
+                raise ScannerError(
+                    f"Snyk scan failed with exit code {self.exit_code}: {self.errors}"
+                )
 
             # SARIF mode - parse SARIF results
             if Path(results_file).exists():
