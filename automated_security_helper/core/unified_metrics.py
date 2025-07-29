@@ -34,7 +34,6 @@ from pydantic import BaseModel
 
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
-    ScannerTargetStatusInfo,
 )
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
@@ -170,20 +169,9 @@ def get_unified_scanner_metrics(
     # Convert the statistics to ScannerMetrics objects
     for scanner_name, stats in scanner_stats.items():
         # Determine status text (same as status for now)
-        if stats["excluded"]:
-            status = "SKIPPED"
-        elif stats["dependencies_missing"]:
-            status = "MISSING"
-        elif stats["actionable"] > 0:
-            status = "FAILED"
-        else:
-            scan_result: ScannerTargetStatusInfo | None = (
-                asharp_model.scanner_results.get(scanner_name, None)
-            )
-            status = (
-                scan_result.status if scan_result and scan_result.status else "PASSED"
-            )
-        status_text = status
+        status = ScannerStatisticsCalculator.get_scanner_status(
+            asharp_model=asharp_model, scanner_name=scanner_name
+        )
 
         # Determine if the scanner passed
         passed = status in ["PASSED", "SKIPPED", "MISSING"]
@@ -201,7 +189,7 @@ def get_unified_scanner_metrics(
             actionable=stats["actionable"],
             duration=stats["duration"],
             status=status,
-            status_text=status_text,
+            status_text=status,  # Same as the status for now
             threshold=stats["threshold"],
             threshold_source=stats["threshold_source"],
             excluded=stats["excluded"],

@@ -106,6 +106,8 @@ def generate_metrics_table_from_unified_data(
                 status_text = Text("PASSED", style="green bold")
             elif metrics.status == "FAILED":
                 status_text = Text("FAILED", style="red bold")
+            elif metrics.status == "ERROR":
+                status_text = Text("ERROR", style="red bold")
             elif metrics.status == "SKIPPED":
                 status_text = Text("SKIPPED", style="blue bold")
             elif metrics.status == "MISSING":
@@ -118,6 +120,8 @@ def generate_metrics_table_from_unified_data(
                 status_text = "[bold green]PASSED[/bold green]"
             elif metrics.status == "FAILED":
                 status_text = "[bold red]FAILED[/bold red]"
+            elif metrics.status == "ERROR":
+                status_text = "[bold red]ERROR[/bold red]"
             elif metrics.status == "SKIPPED":
                 status_text = "[bold blue]SKIPPED[/bold blue]"
             elif metrics.status == "MISSING":
@@ -211,6 +215,7 @@ def display_metrics_table(
             "  - [bold red]FAILED[/bold red] = Findings at or above threshold\n"
             "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
             "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
+            "  - [bold red]ERROR[/bold red] = Scanner execution errorn"
             "- [bold]*Threshold (Thresh)*[/bold]: The minimum severity level that will cause a scanner to fail\n"
             "  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL\n"
             "  - Source: (g)lobal, (c)onfig, (s)canner\n"
