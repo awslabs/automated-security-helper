@@ -630,17 +630,15 @@ class ScannerStatisticsCalculator:
             and asharp_model.additional_reports[scanner_name]["None"]["scanner_name"]
             == scanner_name
         ):
-            if (
-                asharp_model.additional_reports[scanner_name]["None"]["status"]
-                == "SKIPPED"
-            ):
+            status = asharp_model.additional_reports[scanner_name]["None"]["status"]
+            if status == "SKIPPED":
                 excluded = True
-            elif (
-                asharp_model.additional_reports[scanner_name]["None"]["status"]
-                == "MISSING"
-            ):
+            elif status == "MISSING":
                 dependencies_missing = True
+            elif status == "ERROR":
+                error = True
             else:
+                # For any other status, treat as excluded for backward compatibility
                 excluded = True
         elif scanner_name in asharp_model.scanner_results:
             scanner_status_info = asharp_model.scanner_results[scanner_name]
