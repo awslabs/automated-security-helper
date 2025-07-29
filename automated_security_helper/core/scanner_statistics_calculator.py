@@ -652,8 +652,25 @@ class ScannerStatisticsCalculator:
             elif hasattr(scanner_status_info, "dependencies_missing"):
                 # New ScannerMetrics structure
                 dependencies_missing = scanner_status_info.dependencies_missing
+        elif (
+            scanner_name in asharp_model.additional_reports
+            and "source" in asharp_model.additional_reports[scanner_name]
+            and asharp_model.additional_reports[scanner_name]["source"]["scanner_name"]
+            and asharp_model.additional_reports[scanner_name]["source"]["status"]
+        ):
+            # If the scanner is not found in the dictionary, check for errors
+            status = asharp_model.additional_reports[scanner_name]["source"]["status"]
+            if status == "SKIPPED":
+                excluded = True
+            elif status == "MISSING":
+                dependencies_missing = True
+            elif status == "ERROR":
+                error = True
+            elif status != "PASSED":
+                # For any other status, treat as excluded for backward compatibility
+                excluded = True
         else:
-            # If the scanner is not found in the dictionary, return (True, True)
+            # If the scanner is not found in the dictionary, check for errors
             error = True
 
         return excluded, dependencies_missing, error
