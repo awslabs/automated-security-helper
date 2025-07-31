@@ -165,6 +165,8 @@ def _populate_scanner_results_from_unified_metrics(
             status = ScannerStatus.SKIPPED
         elif metrics.status == "MISSING":
             status = ScannerStatus.MISSING
+        elif metrics.status == "ERROR":
+            status = ScannerStatus.ERROR
         else:
             status = ScannerStatus.PASSED  # Default fallback
 

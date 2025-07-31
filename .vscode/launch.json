@@ -72,11 +72,11 @@
       "request": "launch",
       "type": "debugpy"
     },
-       {
+    {
       "args": [
         "--verbose",
         "--scanners",
-        "snyk-code",
+        "snyk-code,bandit",
         "--config-overrides",
         "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
       ],
@@ -89,7 +89,22 @@
       "program": "./automated_security_helper/cli/main.py",
       "request": "launch",
       "type": "debugpy"
-    }, 
+    },
+    {
+      "args": [
+        "--debug",
+        "--mode=precommit",
+      ],
+      "console": "internalConsole",
+      "env": {
+        "PATH": "${workspaceFolder}/.venv/bin:/opt/homebrew/bin:~/.local/share/mise/installs/node/20.19.0/bin:${env.PATH}",
+        "COLUMNS": "160",
+      },
+      "name": "ASH: Test pre-commit",
+      "program": "./automated_security_helper/cli/main.py",
+      "request": "launch",
+      "type": "debugpy"
+    },
   ],
   "version": "0.2.0"
 }

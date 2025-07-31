@@ -343,32 +343,42 @@ class TestScannerStatisticsCalculator:
         )
 
         # Test excluded scanner
-        excluded, deps_missing = ScannerStatisticsCalculator.get_scanner_status_info(
-            model, "excluded_scanner"
+        excluded, deps_missing, error = (
+            ScannerStatisticsCalculator.get_scanner_status_info(
+                model, "excluded_scanner"
+            )
         )
         assert excluded is True
         assert deps_missing is False
+        assert error is False
 
         # Test scanner with missing dependencies
-        excluded, deps_missing = ScannerStatisticsCalculator.get_scanner_status_info(
-            model, "missing_deps_scanner"
+        excluded, deps_missing, error = (
+            ScannerStatisticsCalculator.get_scanner_status_info(
+                model, "missing_deps_scanner"
+            )
         )
         assert excluded is False
         assert deps_missing is True
+        assert error is False
 
         # Test normal scanner
-        excluded, deps_missing = ScannerStatisticsCalculator.get_scanner_status_info(
-            model, "normal_scanner"
+        excluded, deps_missing, error = (
+            ScannerStatisticsCalculator.get_scanner_status_info(model, "normal_scanner")
         )
         assert excluded is False
         assert deps_missing is False
+        assert error is False
 
         # Test non-existent scanner
-        excluded, deps_missing = ScannerStatisticsCalculator.get_scanner_status_info(
-            model, "non_existent_scanner"
+        excluded, deps_missing, error = (
+            ScannerStatisticsCalculator.get_scanner_status_info(
+                model, "non_existent_scanner"
+            )
         )
         assert excluded is False
         assert deps_missing is False
+        assert error is True
 
     def test_get_scanner_status(self):
         """Test determining scanner status based on findings and configuration."""
@@ -402,8 +412,15 @@ class TestScannerStatisticsCalculator:
                 == "PASSED"
             )
 
-            # For failed_scanner: has actionable findings
+            # For failed_scanner: has actionable findings (but scanner doesn't exist in scanner_results)
             mock_extract.return_value = (0, 1, 0, 0, 0, 0)
+            assert (
+                ScannerStatisticsCalculator.get_scanner_status(model, "failed_scanner")
+                == "ERROR"
+            )
+
+            # Add the failed_scanner to scanner_results and test again
+            model.scanner_results["failed_scanner"] = ScannerStatusInfo()
             assert (
                 ScannerStatisticsCalculator.get_scanner_status(model, "failed_scanner")
                 == "FAILED"
@@ -530,6 +547,96 @@ class TestScannerStatisticsCalculator:
             assert summary["total_info"] == 11
             assert summary["total_findings"] == 35
             assert summary["total_actionable"] == 15
+
+    def test_get_scanner_status_error_case(self):
+        """Test scanner status when scanner fails to execute and returns non-zero exit code with no report."""
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.default_config import get_default_config
+
+        # First define AshConfig and rebuild the model
+        AshConfig.model_rebuild()
+        AshAggregatedResults.model_rebuild()
+
+        model = AshAggregatedResults()
+        model.ash_config = get_default_config()
+
+        # Test case: Scanner that failed to execute (not in scanner_results)
+        # This simulates a scanner that returned non-zero exit code and generated no report
+        assert (
+            ScannerStatisticsCalculator.get_scanner_status(
+                model, "failed_execution_scanner"
+            )
+            == "ERROR"
+        )
+
+        # Test case: Scanner that exists but has error status
+        # Add a scanner with error status to additional_reports
+        model.additional_reports = {
+            "error_scanner": {
+                "None": {
+                    "scanner_name": "error_scanner",
+                    "status": "ERROR",
+                    "duration": None,
+                    "findings": [],
+                }
+            }
+        }
+
+        # The scanner should still return ERROR status
+        assert (
+            ScannerStatisticsCalculator.get_scanner_status(model, "error_scanner")
+            == "ERROR"
+        )
+
+    def test_extract_scanner_statistics_with_error_scanner(self):
+        """Test extracting statistics for a scanner that failed to execute."""
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.default_config import get_default_config
+
+        # First define AshConfig and rebuild the model
+        AshConfig.model_rebuild()
+        AshAggregatedResults.model_rebuild()
+
+        model = AshAggregatedResults()
+        model.ash_config = get_default_config()
+
+        # Add a scanner that failed to execute (no SARIF data, no scanner_results)
+        # This simulates a scanner that returned non-zero exit code
+        model.additional_reports = {
+            "failed_scanner": {
+                "source": {
+                    "scanner_name": "failed_scanner",
+                    "status": "ERROR",
+                    "duration": None,
+                    "exit_code": 1,
+                    "error_message": "Scanner failed to execute",
+                }
+            }
+        }
+
+        stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+        # Should have statistics for the failed scanner
+        assert "failed_scanner" in stats
+        failed_stats = stats["failed_scanner"]
+
+        # All counts should be zero since no SARIF data was generated
+        assert failed_stats["suppressed"] == 0
+        assert failed_stats["critical"] == 0
+        assert failed_stats["high"] == 0
+        assert failed_stats["medium"] == 0
+        assert failed_stats["low"] == 0
+        assert failed_stats["info"] == 0
+        assert failed_stats["total"] == 0
+        assert failed_stats["actionable"] == 0
+
+        # Duration should be None for failed scanner
+        assert failed_stats["duration"] is None
+
+        # Error flag should be True
+        assert failed_stats["error"] is True
+        assert failed_stats["excluded"] is False
+        assert failed_stats["dependencies_missing"] is False
 
     def test_verify_sarif_finding_counts(self):
         """Test verifying that the total number of findings matches the length of results in SARIF."""
