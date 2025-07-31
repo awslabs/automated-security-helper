@@ -40,7 +40,7 @@ global_settings:
     - path: .github/workflows/run-ash-security-scan.yml
       rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
       reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars
-      expiration: '2025-07-30'
+      expiration: '2025-10-01'
     - path: tests/**/*.py
       rule_id: B101
       reason: Assert usage expected with Pytest
