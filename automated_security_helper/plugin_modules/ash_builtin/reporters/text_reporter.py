@@ -114,6 +114,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             text_parts.append("  - FAILED = Findings at or above threshold")
             text_parts.append("  - MISSING = Required dependencies not available")
             text_parts.append("  - SKIPPED = Scanner explicitly disabled")
+            text_parts.append("  - ERROR = Scanner execution error")
             text_parts.append(
                 "- Note: All statistics are calculated from the final aggregated SARIF report"
             )

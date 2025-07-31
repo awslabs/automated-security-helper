@@ -124,6 +124,7 @@ class TestUnifiedMetrics:
                     "threshold_source": "global",
                     "excluded": False,
                     "dependencies_missing": False,
+                    "error": False,
                 },
                 "scanner2": {
                     "suppressed": 0,
@@ -139,6 +140,7 @@ class TestUnifiedMetrics:
                     "threshold_source": "config",
                     "excluded": True,
                     "dependencies_missing": False,
+                    "error": False,
                 },
                 "scanner3": {
                     "suppressed": 0,
@@ -154,6 +156,7 @@ class TestUnifiedMetrics:
                     "threshold_source": "global",
                     "excluded": False,
                     "dependencies_missing": True,
+                    "error": False,
                 },
             }
 
@@ -192,3 +195,54 @@ class TestUnifiedMetrics:
             # Check scanner3 metrics (dependencies missing)
             assert metrics[2].status == "MISSING"
             assert metrics[2].passed is True
+
+    def test_get_unified_scanner_metrics_with_error_scanner(self):
+        """Test getting unified scanner metrics when a scanner fails to execute."""
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.default_config import get_default_config
+
+        # First define AshConfig and rebuild the model
+        AshConfig.model_rebuild()
+        AshAggregatedResults.model_rebuild()
+
+        model = AshAggregatedResults()
+        model.ash_config = get_default_config()
+
+        with patch(
+            "automated_security_helper.core.scanner_statistics_calculator.ScannerStatisticsCalculator.extract_scanner_statistics"
+        ) as mock_extract:
+            mock_extract.return_value = {
+                "error_scanner": {
+                    "suppressed": 0,
+                    "critical": 0,
+                    "high": 0,
+                    "medium": 0,
+                    "low": 0,
+                    "info": 0,
+                    "total": 0,
+                    "actionable": 0,
+                    "duration": None,
+                    "threshold": "MEDIUM",
+                    "threshold_source": "global",
+                    "excluded": False,
+                    "dependencies_missing": False,
+                    "error": True,
+                },
+            }
+
+            metrics = get_unified_scanner_metrics(model)
+
+            assert isinstance(metrics, list)
+            assert len(metrics) == 1
+
+            # Check error scanner metrics
+            error_metrics = metrics[0]
+            assert error_metrics.scanner_name == "error_scanner"
+            assert error_metrics.status == "ERROR"
+            assert error_metrics.status_text == "ERROR"
+            assert (
+                error_metrics.passed is False
+            )  # Error scanners should not be considered as passed
+            assert error_metrics.duration is None
+            assert error_metrics.total == 0
+            assert error_metrics.actionable == 0

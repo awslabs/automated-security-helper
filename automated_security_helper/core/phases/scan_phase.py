@@ -808,63 +808,73 @@ class ScanPhase(EnginePhase):
                         container.severity_counts = severity_counts
                         container.finding_count = finding_count
                     elif isinstance(raw_results, dict):
-                        # Try to extract severity counts from dictionary
-                        if "severity_counts" in raw_results:
-                            container.severity_counts = raw_results["severity_counts"]
-                            container.finding_count = sum(
-                                raw_results["severity_counts"].values()
-                            )
-                        elif "findings" in raw_results and isinstance(
-                            raw_results["findings"], list
+                        if (
+                            "status" in raw_results
+                            and raw_results["status"] == "failed"
                         ):
-                            # Count findings by severity
-                            for finding in raw_results["findings"]:
-                                if "severity" in finding:
-                                    severity = finding["severity"].lower()
-                                    if severity in container.severity_counts:
-                                        container.severity_counts[severity] += 1
-                                    else:
-                                        container.severity_counts["info"] += 1
-                            container.finding_count = len(raw_results["findings"])
+                            container.status = ScannerStatus.ERROR
+                        else:
+                            # Try to extract severity counts from dictionary
+                            if "severity_counts" in raw_results:
+                                container.severity_counts = raw_results[
+                                    "severity_counts"
+                                ]
+                                container.finding_count = sum(
+                                    raw_results["severity_counts"].values()
+                                )
+                            elif "findings" in raw_results and isinstance(
+                                raw_results["findings"], list
+                            ):
+                                # Count findings by severity
+                                for finding in raw_results["findings"]:
+                                    if "severity" in finding:
+                                        severity = finding["severity"].lower()
+                                        if severity in container.severity_counts:
+                                            container.severity_counts[severity] += 1
+                                        else:
+                                            container.severity_counts["info"] += 1
+                                container.finding_count = len(raw_results["findings"])
 
                     # Get exit code from scanner
                     container.exit_code = getattr(scanner_plugin, "exit_code", 0)
 
-                    # Determine status based on severity counts
-                    if container.severity_counts.get("critical", 0) > 0:
-                        container.status = ScannerStatus.FAILED
-                    elif container.severity_counts.get(
-                        "high", 0
-                    ) > 0 and scanner_config.options.severity_threshold in [
-                        "ALL",
-                        "LOW",
-                        "MEDIUM",
-                        "HIGH",
-                    ]:
-                        container.status = ScannerStatus.FAILED
-                    elif container.severity_counts.get(
-                        "medium", 0
-                    ) > 0 and scanner_config.options.severity_threshold in [
-                        "ALL",
-                        "LOW",
-                        "MEDIUM",
-                    ]:
-                        container.status = ScannerStatus.FAILED
-                    elif container.severity_counts.get(
-                        "low", 0
-                    ) > 0 and scanner_config.options.severity_threshold in [
-                        "ALL",
-                        "LOW",
-                    ]:
-                        container.status = ScannerStatus.FAILED
-                    elif container.severity_counts.get(
-                        "info", 0
-                    ) > 0 and scanner_config.options.severity_threshold in [
-                        "ALL",
-                    ]:
-                        container.status = ScannerStatus.FAILED
-                    else:
-                        container.status = ScannerStatus.PASSED
+                    # Skip severity count for failed scans
+                    if container.status != ScannerStatus.ERROR:
+                        # Determine status based on severity counts
+                        if container.severity_counts.get("critical", 0) > 0:
+                            container.status = ScannerStatus.FAILED
+                        elif container.severity_counts.get(
+                            "high", 0
+                        ) > 0 and scanner_config.options.severity_threshold in [
+                            "ALL",
+                            "LOW",
+                            "MEDIUM",
+                            "HIGH",
+                        ]:
+                            container.status = ScannerStatus.FAILED
+                        elif container.severity_counts.get(
+                            "medium", 0
+                        ) > 0 and scanner_config.options.severity_threshold in [
+                            "ALL",
+                            "LOW",
+                            "MEDIUM",
+                        ]:
+                            container.status = ScannerStatus.FAILED
+                        elif container.severity_counts.get(
+                            "low", 0
+                        ) > 0 and scanner_config.options.severity_threshold in [
+                            "ALL",
+                            "LOW",
+                        ]:
+                            container.status = ScannerStatus.FAILED
+                        elif container.severity_counts.get(
+                            "info", 0
+                        ) > 0 and scanner_config.options.severity_threshold in [
+                            "ALL",
+                        ]:
+                            container.status = ScannerStatus.FAILED
+                        else:
+                            container.status = ScannerStatus.PASSED
 
                     # Extract and add metadata if present
                     if isinstance(raw_results, dict) and "metadata" in raw_results:
