@@ -106,6 +106,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         .severity-none {{ color: #28a745; }}
         .status-passed {{ color: #28a745; font-weight: bold; }}
         .status-failed {{ color: #dc3545; font-weight: bold; }}
+        .status-error {{ color: #dc3545; font-weight: bold; }}
         .status-skipped {{ color: #6c757d; font-weight: bold; }}
         .status-missing {{ color: #fd7e14; font-weight: bold; }}
         table {{
@@ -181,6 +182,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                         <li class="status-failed">FAILED = Findings at or above threshold</li>
                         <li class="status-missing">MISSING = Required dependencies not available</li>
                         <li class="status-skipped">SKIPPED = Scanner explicitly disabled</li>
+                        <li class="status-error">ERROR = Scanner execution error</li>
                     </ul>
                 </li>
                 <li><strong>Threshold:</strong> The minimum severity level that will cause a scanner to fail</li>

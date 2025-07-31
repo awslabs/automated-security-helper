@@ -149,7 +149,7 @@ ash-scan-container:
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
   script:
-    - apk add --no-cache python3 py3-pip
+    - apk add --no-cache python3 py3-pip git
     - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
     - ash --mode container
   artifacts:
@@ -250,7 +250,7 @@ pipeline {
     stages {
         stage('Install ASH') {
             steps {
-                sh 'apk add --no-cache python3 py3-pip'
+                sh 'apk add --no-cache python3 py3-pip git'
                 sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0'
             }
         }

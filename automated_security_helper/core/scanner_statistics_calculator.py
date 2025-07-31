@@ -152,7 +152,7 @@ class ScannerStatisticsCalculator:
                 )
             )
 
-            excluded, dependencies_missing = (
+            excluded, dependencies_missing, error = (
                 ScannerStatisticsCalculator.get_scanner_status_info(
                     asharp_model, scanner_name
                 )
@@ -244,6 +244,7 @@ class ScannerStatisticsCalculator:
                 "threshold_source": threshold_source,
                 "excluded": excluded,
                 "dependencies_missing": dependencies_missing,
+                "error": error,
             }
 
         return scanner_stats
@@ -599,7 +600,7 @@ class ScannerStatisticsCalculator:
     @staticmethod
     def get_scanner_status_info(
         asharp_model: AshAggregatedResults, scanner_name: str
-    ) -> Tuple[bool, bool]:
+    ) -> Tuple[bool, bool, bool]:
         """Get scanner status information.
 
         This method retrieves status information for a specific scanner, including
@@ -618,26 +619,26 @@ class ScannerStatisticsCalculator:
             Tuple of (excluded, dependencies_missing), where:
             - excluded: True if the scanner was explicitly excluded from the scan
             - dependencies_missing: True if the scanner has missing dependencies
+            - error: True if the scanner failed to run or generate results
         """
         excluded = False
         dependencies_missing = False
+        error = False
         if (
             scanner_name in asharp_model.additional_reports
             and "None" in asharp_model.additional_reports[scanner_name]
             and asharp_model.additional_reports[scanner_name]["None"]["scanner_name"]
             == scanner_name
         ):
-            if (
-                asharp_model.additional_reports[scanner_name]["None"]["status"]
-                == "SKIPPED"
-            ):
+            status = asharp_model.additional_reports[scanner_name]["None"]["status"]
+            if status == "SKIPPED":
                 excluded = True
-            elif (
-                asharp_model.additional_reports[scanner_name]["None"]["status"]
-                == "MISSING"
-            ):
+            elif status == "MISSING":
                 dependencies_missing = True
+            elif status == "ERROR":
+                error = True
             else:
+                # For any other status, treat as excluded for backward compatibility
                 excluded = True
         elif scanner_name in asharp_model.scanner_results:
             scanner_status_info = asharp_model.scanner_results[scanner_name]
@@ -651,8 +652,28 @@ class ScannerStatisticsCalculator:
             elif hasattr(scanner_status_info, "dependencies_missing"):
                 # New ScannerMetrics structure
                 dependencies_missing = scanner_status_info.dependencies_missing
+        elif (
+            scanner_name in asharp_model.additional_reports
+            and "source" in asharp_model.additional_reports[scanner_name]
+            and asharp_model.additional_reports[scanner_name]["source"]["scanner_name"]
+            and asharp_model.additional_reports[scanner_name]["source"]["status"]
+        ):
+            # If the scanner is not found in the dictionary, check for errors
+            status = asharp_model.additional_reports[scanner_name]["source"]["status"]
+            if status == "SKIPPED":
+                excluded = True
+            elif status == "MISSING":
+                dependencies_missing = True
+            elif status == "ERROR":
+                error = True
+            elif status != "PASSED":
+                # For any other status, treat as excluded for backward compatibility
+                excluded = True
+        else:
+            # If the scanner is not found in the dictionary, check for errors
+            error = True
 
-        return excluded, dependencies_missing
+        return excluded, dependencies_missing, error
 
     @staticmethod
     def get_scanner_status(
@@ -679,11 +700,14 @@ class ScannerStatisticsCalculator:
         Returns:
             Status string: "PASSED", "FAILED", "SKIPPED", or "MISSING"
         """
-        excluded, dependencies_missing = (
+        excluded, dependencies_missing, error = (
             ScannerStatisticsCalculator.get_scanner_status_info(
                 asharp_model, scanner_name
             )
         )
+
+        if error:
+            return "ERROR"
 
         if excluded:
             return "SKIPPED"

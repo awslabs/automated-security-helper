@@ -174,6 +174,8 @@ def get_unified_scanner_metrics(
             status = "SKIPPED"
         elif stats["dependencies_missing"]:
             status = "MISSING"
+        elif stats["error"]:
+            status = "ERROR"
         elif stats["actionable"] > 0:
             status = "FAILED"
         else:
@@ -201,7 +203,7 @@ def get_unified_scanner_metrics(
             actionable=stats["actionable"],
             duration=stats["duration"],
             status=status,
-            status_text=status_text,
+            status_text=status_text,  # Same as the status for now
             threshold=stats["threshold"],
             threshold_source=stats["threshold_source"],
             excluded=stats["excluded"],
