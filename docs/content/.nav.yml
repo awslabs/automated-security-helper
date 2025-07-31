@@ -34,6 +34,7 @@ nav:
           - S3 Reporter Diagrams: docs/plugins/aws/s3-reporter-diagrams.md
     - Community Plugins:
           - Overview: docs/plugins/community/index.md
+          - Trivy Plugin: docs/plugins/community/trivy-plugin.md
     - Tutorials:
           - Running ASH Locally: tutorials/running-ash-locally.md
           - Running ASH in CI: tutorials/running-ash-in-ci.md

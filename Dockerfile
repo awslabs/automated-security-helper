@@ -157,6 +157,10 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
     fi
 
+RUN curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | \
+    sh -s -- -b /usr/local/bin 
+RUN trivy --version
+
 #
 # Setting default WORKDIR to /src
 #
