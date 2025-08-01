@@ -39,6 +39,7 @@ The security helper supports the following vectors:
     * **[bandit](https://github.com/PyCQA/bandit)** - finds common security issues in Python code.
     * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Python code.
     * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Python code.
+    * **[Vulert](vulert.com)** - Vulert secures software by detecting vulnerabilities in open-source dependencies—without accessing your code. It supports Python, Js, PHP, Java, and more.
     * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Python code.
   * Jupyter Notebook
     * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts Jupyter Notebook (ipynb) files into Python executables. Code scan with Bandit.
