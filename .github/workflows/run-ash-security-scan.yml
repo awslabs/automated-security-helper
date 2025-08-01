@@ -102,11 +102,11 @@ jobs:
         env:
           ASH_MODE: ${{ inputs.ash-mode }}
           ASH_ARGS: ${{ inputs.ash-args }}
-          FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+          FAIL_ON_FINDINGS_PARAM: ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}}
           VERBOSE: ${{ inputs.verbose }}
         run: |-
           uvx --from ${ASH_UVX_SOURCE} ash \
-            --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress --build-target ci ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}} --mode ${ASH_MODE} ${VERBOSE:+--verbose}
+            --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose}
 
       - name: Show ASH Summary Report
         if: success() || failure()
