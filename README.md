@@ -1,301 +1,466 @@
-# ASH
+# ASH - Automated Security Helper
 
-- [ASH; The *A*utomated *S*ecurity *H*elper](#ash-the-automated-security-helper)
-- [Description](#description)
-- [Supported frameworks](#supported-frameworks)
+[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml)
+[![ASH - Matrix Unit Tests](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml)
+
+## Table of Contents
+- [Table of Contents](#table-of-contents)
+- [Overview](#overview)
+- [Key Features in ASH v3](#key-features-in-ash-v3)
+- [Built-In Scanners](#built-in-scanners)
 - [Prerequisites](#prerequisites)
-- [Getting Started](#getting-started)
-  - [Getting Started - Linux or MacOS](#getting-started---linux-or-macos)
-  - [Getting Started - Windows](#getting-started---windows)
-  - [Cloud9 Quickstart Guide](#cloud9-quickstart-guide)
-- [Using `ash` with `pre-commit`](#using-ash-with-pre-commit)
-- [Examples](#examples)
-- [Synopsis](#synopsis)
+  - [Runtime Requirements](#runtime-requirements)
+- [Installation Options](#installation-options)
+  - [Quick Install (Recommended)](#quick-install-recommended)
+  - [Other Installation Methods](#other-installation-methods)
+    - [Using `uvx`](#using-uvx)
+    - [Using `pip`](#using-pip)
+    - [Clone the Repository](#clone-the-repository)
+- [Basic Usage](#basic-usage)
+  - [Sample Output](#sample-output)
+- [AI Integration with MCP](#ai-integration-with-mcp)
+  - [MCP Server Features](#mcp-server-features)
+  - [Installation and Setup](#installation-and-setup)
+    - [Prerequisites](#prerequisites-1)
+    - [Client Configuration](#client-configuration)
+  - [Available MCP Tools](#available-mcp-tools)
+  - [Usage Examples](#usage-examples)
+  - [Configuration Support](#configuration-support)
+- [Configuration](#configuration)
+- [Using ASH with pre-commit](#using-ash-with-pre-commit)
+- [Output Files](#output-files)
 - [FAQ](#faq)
-- [Feedback](#feedback)
-- [Contributing](#contributing)
+- [Documentation](#documentation)
+- [Feedback and Contributing](#feedback-and-contributing)
 - [Security](#security)
 - [License](#license)
+- [Star History](#star-history)
 
-## ASH; The *A*utomated *S*ecurity *H*elper
+## Overview
 
-## Description
+ASH (Automated Security Helper) is a security scanning tool designed to help you identify potential security issues in your code, infrastructure, and IAM configurations as early as possible in your development process.
 
-The security helper tool was created to help you reduce the probability of a security violation in a new code, infrastructure or IAM configuration
-by providing a fast and easy tool to conduct  preliminary security check as early as possible within your development process.
+- ASH is not a replacement for human review or team/customer security standards
+- It leverages lightweight, open-source tools for flexibility and portability
+- ASH v3 has been completely rewritten in Python with significant improvements to usability and functionality
 
-- It is not a replacement of a human review nor standards enforced by your team/customer.
-- It uses light, open source tools to maintain its flexibility and ability to run from anywhere.
-- ASH is cloning and running different open-source tools, such as: git-secrets, bandit, Semgrep, Grype, Syft, nbconvert, npm-audit, checkov, cdk-nag and cfn-nag. Please review the tools [LICENSE](license) before usage.
+## Key Features in ASH v3
 
-## Supported frameworks
+- **Python-based CLI**: ASH now has a Python-based CLI entrypoint while maintaining backward compatibility with the shell script entrypoint
+- **Multiple Execution Modes**: Run ASH in `local`, `container`, or `precommit` mode depending on your needs
+- **Enhanced Configuration**: Support for YAML/JSON configuration files with overrides via CLI parameters
+- **Improved Reporting**: Multiple report formats including JSON, Markdown, HTML, and CSV
+- **Scanner Validation System**: Comprehensive validation ensures all expected scanners are registered, enabled, queued, executed, and included in results
+- **Pluggable Architecture**: Extend ASH with custom plugins, scanners, and reporters
+- **Unified Output Format**: Standardized output format that can be exported to multiple formats (SARIF, JSON, HTML, Markdown, CSV)
+- **UV Package Management**: ASH now uses UV for faster dependency resolution and tool isolation
+- **Comprehensive Testing**: Extensive integration test suite validates UV migration functionality across platforms
 
-The security helper supports the following vectors:
+## Built-In Scanners
 
-* Code
-  * Git
-    * **[git-secrets](https://github.com/awslabs/git-secrets)** - Find api keys, passwords, AWS keys in the code
-  * Python
-    * **[bandit](https://github.com/PyCQA/bandit)** - finds common security issues in Python code.
-    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Python code.
-    * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Python code.
-    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Python code.
-  * Jupyter Notebook
-    * **[nbconvert](https://nbconvert.readthedocs.io/en/latest/)** - converts Jupyter Notebook (ipynb) files into Python executables. Code scan with Bandit.
-  * JavaScript; NodeJS
-    * **[npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit)** - checks for vulnerabilities in Javascript and NodeJS.
-    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in JavaScript code.
-    * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Javascript and NodeJS.
-    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Javascript and NodeJS.
-  * Go
-    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Golang code.
-    * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Golang.
-    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Golang.
-  * C#
-    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in C# code.
-  * Bash
-    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Bash code.
-  * Java
-    * **[Semgrep](https://github.com/returntocorp/semgrep)** - finds common security issues in Java code.
-    * **[Grype](https://github.com/anchore/grype)** - finds vulnerabilities scanner for Java.
-    * **[Syft](https://github.com/anchore/syft)** - generating a Software Bill of Materials (SBOM) for Java.
-* Infrastructure
-  * Terraform; Cloudformation
-    * **[checkov](https://github.com/bridgecrewio/checkov)**
-    * **[cfn_nag](https://github.com/stelligent/cfn_nag)**
-    * **[cdk-nag](https://github.com/cdklabs/cdk-nag)** (via import of rendered CloudFormation templates into a custom CDK project with the [AWS Solutions NagPack](https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#aws-solutions) enabled)
-  * Dockerfile
-    * **[checkov](https://github.com/bridgecrewio/checkov)**
+ASH v3 integrates multiple open-source security tools as scanners. Tools like Bandit, Checkov, and Semgrep are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments without affecting your project dependencies:
+
+| Scanner                                                       | Type      | Languages/Frameworks                                                                         | Installation (Local Mode)                                               |
+|---------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
+| [Bandit](https://github.com/PyCQA/bandit)                     | SAST      | Python                                                                                       | Managed via UV tool isolation (auto-installed: `bandit>=1.7.0`)        |
+| [Semgrep](https://github.com/semgrep/semgrep)                 | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0`)     |
+| [detect-secrets](https://github.com/Yelp/detect-secrets)      | Secrets   | All text files                                                                               | Included with ASH                                                       |
+| [Checkov](https://github.com/bridgecrewio/checkov)            | IaC, SAST | Terraform, CloudFormation, Kubernetes, Dockerfile, ARM Templates, Serverless, Helm, and more | Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`) |
+| [cfn_nag](https://github.com/stelligent/cfn_nag)              | IaC       | CloudFormation                                                                               | `gem install cfn-nag`                                                   |
+| [cdk-nag](https://github.com/cdklabs/cdk-nag)                 | IaC       | CloudFormation                                                                               | Included with ASH                                                       |
+| [npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit) | SCA       | JavaScript/Node.js                                                                           | Install Node.js/npm                                                     |
+| [Grype](https://github.com/anchore/grype)                     | SCA       | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Grype Installation](https://github.com/anchore/grype#installation) |
+| [Syft](https://github.com/anchore/syft)                       | SBOM      | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Syft Installation](https://github.com/anchore/syft#installation)   |
 
 ## Prerequisites
 
-To start using `ash` please make sure to install and configure the following:
+### Runtime Requirements
 
-- Tools installed to run Linux containers, such as [Finch](https://github.com/runfinch/finch), [Rancher Desktop](https://rancherdesktop.io/), [Podman Desktop](https://podman-desktop.io/), or [Docker Desktop](https://docs.docker.com/get-docker/).
-  - This can be any command-line interface (CLI) + container engine combination; there is nothing in ASH that requires a specific container runtime.
-  - If on Windows, you will also likely need Windows Subsystem for Linux (WSL) installed as a prerequisite for the listed container engine tools. Please see the specific instructions for the tool of choice regarding Windows-specific prerequisites.
+| Mode      | Requirements                                                                                                                                                         | Notes                                                    |
+|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|
+| Local     | Python 3.10+, UV package manager                                                                                                                                     | Some scanners require additional tools (see table above) |
+| Container | Any OCI-compatible container runtime ([Finch](https://github.com/runfinch/finch), [Docker](https://docs.docker.com/get-docker/), [Podman](https://podman.io/), etc.) | On Windows: WSL2 is typically required                   |
+| Precommit | Python 3.10+, UV package manager                                                                                                                                     | Subset of scanners, optimized for speed                  |
 
-## Getting Started
+## Installation Options
 
-### Getting Started - Linux or MacOS
-
-Clone the git repository into a folder.  For example:
+### Quick Install (Recommended)
 
 ```bash
-# Set up some variables
-REPO_DIR="${HOME}"/Documents/repos/reference
-REPO_NAME=automated-security-helper
+# Install with pipx (isolated environment)
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 
-# Create a folder to hold reference git repositories
-mkdir -p ${REPO_DIR}
-
-# Clone the repository into the reference area
-git clone https://github.com/awslabs/automated-security-helper "${REPO_DIR}/${REPO_NAME}"
-
-# Set the repo path in your shell for easier access
-#
-# Add this (and the variable settings above) to
-# your ~/.bashrc, ~/.bash_profile, ~/.zshrc, or similar
-# start-up scripts so that the ash tool is in your PATH
-# after re-starting or starting a new shell.
-#
-export PATH="${PATH}:${REPO_DIR}/${REPO_NAME}"
-
-# Execute the ash tool
-ash --version
+# Use as normal
+ash --help
 ```
 
-### Getting Started - Windows
+### Other Installation Methods
 
-**ASH** uses containers, `bash` shell scripts, and multiple background processes running in parallel to run the multiple
-source code security scanning tools that it uses.  Because of this, running `ash` from either a `PowerShell` or `cmd`
-shell on Windows is not possible.  Furthermore, due to reliance on running containers, usually with Docker Desktop
-when running on Windows, there is an implicit dependency on having installed, configured, and operational a
-Windows Subsystem for Linux (WSL) 2 environment on the Windows machine where `ash` will be run.
+<details>
+<summary>Click to expand other installation options</summary>
 
-To use `ash` on Windows:
+#### Using `uvx`
 
-- Install, configure, and test the [WSL 2 environment on Windows](https://learn.microsoft.com/en-us/windows/wsl/install)
-- Install, configure, and test [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/), using the WSL 2 environment
-- Use the [Windows Terminal](https://learn.microsoft.com/en-us/windows/terminal/install) program and open a command-line window to interact with the WSL 2 environment
-- Install and/or update the `git` client in the WSL 2 environment.  This should be pre-installed, but you may need to update the version
-  using the `apt-get update` command.
+```bash
+# Linux/macOS
+curl -sSf https://astral.sh/uv/install.sh | sh
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
 
-Once the WSL2 command-line window is open, follow the steps above in [Getting Started - Linux or MacOS](#getting-started---linux-or-macos)
-to install and run `ash` in WSL 2 on the Windows machine.
+# Windows PowerShell
+irm https://astral.sh/uv/install.ps1 | iex
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0 $args }
+```
 
-To run `ash`, open a Windows Terminal shell into the WSL 2 environment and use that command-line shell to run the `ash` command.
+#### Using `pip`
 
-**Note**: when working this way, be sure to `git clone` any git repositories to be scanned into the WSL 2 filesystem.
-Results are un-predictable if repositories or file sub-trees in the Windows filesystem are scanned using `ash`
-that is running in the WSL 2 environment.
+```bash
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
+```
 
-**Tip**: If you are using Microsoft VSCode for development, it is possible to configure a "remote" connection
-[using VSCode into the WSL2 environment](https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-vscode).
-By doing this, you can host your git repositories in WSL 2 and still
-work with them as you have in the past when they were in the Windows filesystem of your Windows machine.
+#### Clone the Repository
 
-### Cloud9 Quickstart Guide
+```bash
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.0
+cd automated-security-helper
+pip install .
+```
+</details>
 
-Follow the instruction in the [quickstart page](/quickstart/README.md) to deploy an AWS Cloud9 Environment with ASH pre-installed.
+## Basic Usage
 
-## Using `ash` with `pre-commit`
+```bash
+# Run a scan in local mode (Python only)
+ash --mode local
 
-The `ash` tool can be used interactively on a workstation or run using the [`pre-commit`](https://pre-commit.com/) command.
-If `pre-commit` is used to run `ash`, then the `pre-commit` processing takes care of installing
-a copy of the `ash` git repository and setting up to run the `ash` program from that installed
-repository.  Using `pre-commit` still requires usage of WSL 2 when running on Windows.
+# Run a scan in container mode (all tools)
+ash --mode container
 
-Using `ash` as a [`pre-commit`](https://pre-commit.com/) hook enables development teams to use the `ash` tool
-in two ways.  First, developers can use `ash` as a part of their local development process on whatever
-development workstation or environment they are using.  Second, `ash` can be run in a build automation stage
-by running `pre-commit run --hook-stage manual ash` in build automation stage.
-When using `pre-commit`, run the `pre-commit` commands while in a folder/directory within the git repository that is
-configured with `pre-commit` hooks.
+# Run a scan in precommit mode (fast subset of tools)
+ash --mode precommit
+```
 
-Refer to the [pre-commit-hooks](./.pre-commit-hooks.yaml) file for information about the `pre-commit`
-hook itself.
+### Sample Output
 
-To configure a git repository to use the `ash` hook, start with the following `pre-commit-config` configuration:
+```
+                                                 ASH Scan Results Summary
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━┳━━━━━┳━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
+┃ Scanner        ┃ Suppressed ┃ Critical ┃ High ┃ Medium ┃ Low ┃ Info ┃ Duration ┃ Actionable ┃ Result ┃ Threshold       ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━╇━━━━━╇━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
+│ bandit         │ 7          │ 0        │ 1    │ 0      │ 56  │ 0    │ 19.9s    │ 1          │ FAILED │ MEDIUM (global) │
+│ cdk-nag        │ 0          │ 0        │ 30   │ 0      │ 0   │ 5    │ 48.7s    │ 30         │ FAILED │ MEDIUM (global) │
+│ cfn-nag        │ 0          │ 0        │ 0    │ 15     │ 0   │ 0    │ 45.1s    │ 15         │ FAILED │ MEDIUM (global) │
+│ checkov        │ 10         │ 0        │ 25   │ 0      │ 0   │ 0    │ 38.9s    │ 25         │ FAILED │ MEDIUM (global) │
+│ detect-secrets │ 0          │ 0        │ 48   │ 0      │ 0   │ 0    │ 18.9s    │ 48         │ FAILED │ MEDIUM (global) │
+│ grype          │ 0          │ 0        │ 2    │ 1      │ 0   │ 0    │ 40.3s    │ 3          │ FAILED │ MEDIUM (global) │
+└────────────────┴────────────┴──────────┴──────┴────────┴─────┴──────┴──────────┴────────────┴────────┴─────────────────┘
+                                                     source-dir: '.'
+                                              output-dir: '.ash/ash_output'
+
+=== ASH Scan Completed in 1m 6s: Next Steps ===
+View detailed findings...
+  - SARIF: '.ash/ash_output/reports/ash.sarif'
+  - JUnit: '.ash/ash_output/reports/ash.junit.xml'
+  - ASH aggregated results JSON available at: '.ash/ash_output/ash_aggregated_results.json'
+
+=== Actionable findings detected! ===
+To investigate...
+  1. Open one of the summary reports for a user-friendly table of the findings:
+    - HTML report of all findings: '.ash/ash_output/reports/ash.html'
+    - Markdown summary: '.ash/ash_output/reports/ash.summary.md'
+    - Text summary: '.ash/ash_output/reports/ash.summary.txt'
+  2. Use ash report to view a short text summary of the scan in your terminal
+  3. Use ash inspect findings to explore the findings interactively
+  4. Review scanner-specific reports and outputs in the '.ash/ash_output/scanners' directory
+
+=== ASH Exit Codes ===
+  0: Success - No actionable findings or not configured to fail on findings
+  1: Error during execution
+  2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
+ERROR (2) Exiting due to 122 actionable findings found in ASH scan
+```
+
+## AI Integration with MCP
+
+ASH includes a Model Context Protocol (MCP) server that enables AI assistants to perform security scans and analyze results through a standardized interface. This allows you to integrate ASH with AI development tools like Amazon Q CLI, Claude Desktop, and Cline (VS Code).
+
+### MCP Server Features
+
+The ASH MCP server provides:
+
+- **Real-time Progress Tracking**: Monitor scan progress with streaming updates
+- **Background Scanning**: Start scans and continue other work while they run
+- **Multiple Scan Management**: Handle concurrent scans with unique identifiers
+- **Comprehensive Error Handling**: Detailed error messages and recovery suggestions
+- **Configuration Support**: Full support for ASH configuration files and environment variables
+
+### Installation and Setup
+
+#### Prerequisites
+
+1. **Install UV**: Install `uv` from [Astral](https://docs.astral.sh/uv/getting-started/installation/) or the [GitHub README](https://github.com/astral-sh/uv#installation)
+2. **Install Python 3.10+**: Use `uv python install 3.10` (or a more recent version)
+
+#### Client Configuration
+
+**Amazon Q Developer CLI** - Add to `~/.aws/amazonq/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "ash",
+        "mcp"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+**Claude Desktop** - Add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "ash-security": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "ash",
+        "mcp"
+      ]
+    }
+  }
+}
+```
+
+**Cline (VS Code)**:
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "ash",
+        "mcp"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "get_scan_progress",
+        "list_active_scans",
+        "get_scan_results"
+      ]
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+The ASH MCP server provides these tools:
+
+| Tool | Description | Use Case |
+|------|-------------|----------|
+| `scan_directory` | Perform a complete security scan | One-time scans with full results |
+| `scan_directory_with_progress` | Start a scan with real-time progress tracking | Long-running scans with progress monitoring |
+| `get_scan_progress` | Get current progress of a running scan | Monitor scan status and partial results |
+| `get_scan_results` | Get final results of a completed scan | Retrieve complete scan results |
+| `list_active_scans` | List all active and recent scans | Manage multiple concurrent scans |
+| `cancel_scan` | Cancel a running scan | Stop unnecessary or problematic scans |
+| `check_installation` | Verify ASH installation and dependencies | Troubleshoot setup issues |
+
+### Usage Examples
+
+Once configured, you can interact with ASH through natural language. Each of the
+sentences below represent prompts which can be used in the various coding CLIs
+(Q CLI, Cline, etc.) in order to inform the CLI to identify the ASH MCP tool and use it
+based on the instructions provided in the prompt.
+
+
+**Basic Security Scanning:**
+```
+"Can you scan this project directory for security vulnerabilities?"
+"Please run ASH on the ./src folder and analyze the results"
+"Check this code for security issues with HIGH severity threshold"
+```
+
+**Progress Monitoring:**
+```
+"Start a security scan on this directory and show me the progress"
+"Monitor the current scan and let me know when it's done"
+"What's the status of my running security scans?"
+```
+
+**Analysis & Reporting:**
+```
+"Perform a comprehensive security audit and create a prioritized action plan"
+"Scan this code and help me fix any critical security issues"
+"Generate a security report with remediation recommendations"
+```
+
+### Configuration Support
+
+The MCP server supports all ASH configuration methods:
+
+- **Configuration files**: `.ash/ash.yaml` or custom config paths
+- **Environment variables**: `ASH_DEFAULT_SEVERITY_LEVEL`, `ASH_OFFLINE`, etc.
+- **CLI parameters**: Severity thresholds, custom output directories
+
+For detailed information about streaming capabilities and advanced usage, see the [MCP Streaming Guide](docs/content/tutorials/mcp-streaming-guide.md).
+
+
+## Configuration
+
+ASH v3 uses a YAML configuration file (`.ash/ash.yaml`) with support for JSON Schema validation:
 
 ```yaml
-  - repo: git@github.com:awslabs/automated-security-helper.git
-    rev: '1.1.0-e-01Dec2023' # update with the latest tagged version in the repository
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
+project_name: my-project
+global_settings:
+  severity_threshold: MEDIUM
+  ignore_paths:
+    - path: 'tests/test_data'
+      reason: 'Test data only'
+scanners:
+  bandit:
+    enabled: true
+    options:
+      confidence_level: high
+reporters:
+  markdown:
+    enabled: true
+    options:
+      include_detailed_findings: true
+```
+
+## Using ASH with pre-commit
+
+Add this to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/awslabs/automated-security-helper
+    rev: v3.0.0
     hooks:
-    - id: ash
-      name: scan files using ash
-      stages: [ manual ]
-      # uncomment the line below if using "finch" on MacOS
-      # args: [ "-f" ]
+      - id: ash-simple-scan
 ```
 
-Once the `.pre-commit-hooks.yaml` file is updated, the `ash` tool can be run using the following command:
+Run with:
 
 ```bash
-pre-commit run --hook-stage manual ash
+pre-commit run ash-simple-scan --all-files
 ```
 
-Results from the run of the `ash` tool can be found in the `aggregated_results.txt` file
-the `--output-dir` folder/directory.
+## Output Files
 
-When ASH converts CloudFormation files into CDK and runs cdk-nag on them,
-the output of the cdk-nag check results are preserved in a 'ash_cf2cdk_output'
-folder/directory under `--output-dir` after the ASH scan is run.  This folder/directory is
-in addition to the `aggregated_results.txt` file found in `--output-dir`.
+ASH v3 produces several output files in the `.ash/ash_output/` directory:
 
-## Examples
+- `ash_aggregated_results.json`: Complete machine-readable results including validation checkpoints
+- `reports/ash.summary.txt`: Human-readable text summary
+- `reports/ash.summary.md`: Markdown summary for GitHub PRs and other platforms
+- `reports/ash.html`: Interactive HTML report
+- `reports/ash.csv`: CSV report for filtering and sorting findings
 
-```bash
-# Getting help
-ash -h
-
-# Scan a directory
-ash --source-dir /my/remote/files
-
-# Save the final report to a different directory
-ash --output-dir /my/remote/files
-
-# Force rebuild the entire framework to obtain latests changes and up-to-date database
-ash --force
-
-# Force run scan for Python code
-ash --source-dir . --ext py
-
-* All commands can be used together.
-```
-
-## Synopsis
-
-```text
-$ ash --help
-NAME:
-    ash
-SYNOPSIS:
-    ash [OPTIONS] --source-dir /path/to/dir --output-dir /path/to/dir
-OPTIONS:
-    --source-dir                    Path to the directory containing the code/files you wish to scan. Defaults to $(pwd)
-    --output-dir                    Path to the directory that will contain the report of the scans. Defaults to $(pwd)
-
-    --format                        Output format of the aggregated_results file segments.
-                                    Options: text, json
-                                    Default: text
-
-    --build-target                  Specify the target stage of the ASH image to build.
-                                    Options: non-root, ci
-                                    Default: non-root
-
-    --offline                       Build ASH for offline execution.
-                                    Default: false
-
-    --offline-semgrep-rulesets      Specify Semgrep rulesets for use in ASH offline mode.
-                                    Default: p/ci
-
-    --no-build                      Skip rebuild of the ASH container image, run a scan only.
-                                    Requires an existing ASH image to be present in the image cache.
-    --no-run                        Skip running a scan with ASH, build a new ASH container image only.
-                                    Useful when needing to build an ASH image for publishing to a private image registry.
-
-    --no-cleanup                    Don't cleanup the work directory where temp reports are stored during scans.
-    --ext | -extension              Force a file extension to scan. Defaults to identify files automatically.
-
-    -c    | --no-color              Don't print colorized output.
-    -s    | --single-process        Run ash scanners serially rather than as separate, parallel sub-processes.
-    -o    | --oci-runner            Use the specified OCI runner instead of docker to run the containerized tools.
-    -p    | --preserve-report       Add timestamp to the final report file to avoid overwriting it after multiple executions.
-
-    -d    | --debug                 Print ASH debug log information where applicable.
-    -q    | --quiet                 Don't print verbose text about the build process.
-    -v    | --version               Prints version number.
-
-INFO:
-    For more information, please visit https://github.com/awslabs/automated-security-helper
-```
+The `ash_aggregated_results.json` file includes comprehensive validation information that tracks scanner registration, enablement, execution, and result inclusion throughout the scan process. The Scanner Validation System can also generate detailed validation reports that provide comprehensive analysis of scanner states, validation checkpoints, dependency issues, and actionable recommendations for troubleshooting scan issues.
 
 ## FAQ
 
-- Q: How to run `ash` on a Windows machine
+<details>
+<summary>How do I run ASH on Windows?</summary>
 
-  A: ASH on a windows machine
+ASH v3 can run directly on Windows in local mode with Python 3.10+. Simply install ASH using pip, pipx, or uvx and run with `--mode local`. For container mode, you'll need WSL2 and a container runtime like Docker Desktop, Rancher Desktop, or Podman Desktop.
+</details>
 
-  - Install a Windows Subsystem for Linux (WSL) 2 environment with a [Ubuntu distribution](https://docs.microsoft.com/en-us/windows/wsl/install). Be sure to use the WSL 2.
-  - Install Docker Desktop for windows and activate the [integration the WSL 2](https://docs.docker.com/desktop/windows/wsl/)
-  - Clone this git repo from a windows terminal via VPN (while in vpn it'll not connect to the repo directly from Ubuntu WSL 2).
-  - Execute the helper tool from the folder downloaded in the previous step from the Ubuntu WSL.
+<details>
+<summary>How do I run ASH in CI/CD pipelines?</summary>
 
-- Q: How to run `ash` in a Continuous Integration/Continuous Deployment (CI/CD) pipline?
+ASH can be run in container mode in any CI/CD environment that supports containers. See the [tutorials](docs/content/tutorials/running-ash-in-ci.md) for examples.
+</details>
 
-  A: Check the [ASH Pipeline solution](https://github.com/aws-samples/automated-security-helper-pipeline)
+<details>
+<summary>How do I exclude files from scanning?</summary>
 
-- Q: How to run `ash` with [finch](https://aws.amazon.com/blogs/opensource/introducing-finch-an-open-source-client-for-container-development/)
-  or another Open Container Initiative (OCI) compatible tool.
+ASH respects `.gitignore` files. You can also configure ignore paths in your `.ash/ash.yaml` configuration file.
+</details>
 
-  A: You can configure the OCI compatible tool to use with by using the environment variable `ASH_OCI_RUNNER`
+<details>
+<summary>How do I run ASH in an offline/air-gapped environment?</summary>
 
-- Q: How to exclude files from scanning.
+Build an offline image with `ash --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash --mode container --offline --no-build` in your air-gapped environment.
+</details>
 
-  A: `ash` will scan all the files in the folder specified in `--source-dir`, or the current directory if invoked without parameters. If the folder is a git repository,
-  then `ash` will use the exclusions in your `.gitignore` configuration file. If you want to exclude any specific folder, it **must** be added to your git ignore list before invoking `ash`.
+<details>
+<summary>I am trying to scan a CDK application, but ASH does not show CDK Nag scan results -- why is that?</summary>
 
-- Q: `ash` reports there are not files to scan or you see a message stating `warning: You appear to have cloned an empty repository.`
+ASH uses CDK Nag underneath to apply NagPack rules to *CloudFormation templates* via the `CfnInclude` CDK construct. This is purely a mechanism to ingest a bare CloudFormation template and apply CDK NagPacks to it; doing this against a template emitted by another CDK application causes a collision in the `CfnInclude` construct due to the presence of the `BootstrapVersion` parameter on the template added by CDK. For CDK applications, we recommend integrating CDK Nag directly in your CDK code. ASH will still apply other CloudFormation scanners (cfn-nag, checkov) against templates synthesized via CDK, but the CDK Nag scanner will not scan those templates.
+</details>
 
-  A: Ensure you're running ASH inside the folder you intend to scan or using the `--source-dir` parameter. If the folder where the files reside is part of a git repository, ensure the files are added (committed) before running ASH.
+<details>
+<summary>Why is ASH trying to install tools automatically? Can I use my own tool installations?</summary>
 
-- Q: How to run `ash` in an environment without internet connectivity/with an airgap?
+ASH v3 uses UV's tool isolation system to automatically manage scanner dependencies like Bandit, Checkov, and Semgrep. This ensures consistent tool versions and avoids dependency conflicts. If you prefer to use your own tool installations:
 
-  A: From your environment which does have internet connectivity, build the ASH image using `--offline` and `--offline-semgrep-rulesets` to specify what resources to package into the image.  Environment variable `$ASH_IMAGE_NAME` controls the name of the image.  After building, push to your container repository of choice which will be available within the airgapped environment.  When you go to execute ASH in your offline environment, passing `--no-build` to `ash` alongside `--offline` and `--offline-semgrep-rulesets` will use your offline image and skip the build.  Specify `$ASH_IMAGE_NAME` to override ASH's container image to the previously-built image available within your airgapped environment.
+1. **Pre-install tools**: Install tools manually using `uv tool install <tool>` or your preferred method
+2. **Offline mode**: Set `ASH_OFFLINE=true` to skip automatic installations and use system-installed tools
+3. **Fallback behavior**: ASH automatically falls back to system-installed tools if UV tool installation fails
 
-## Feedback
+The automatic installation uses sensible default version constraints to ensure compatibility:
+- **Bandit**: `>=1.7.0` (enhanced SARIF support and security fixes)
+- **Checkov**: `>=3.2.0,<4.0.0` (improved stability, avoiding potential breaking changes in 4.x)
+- **Semgrep**: `>=1.125.0` (comprehensive rule support and performance improvements)
 
-Create an issue [here](https://github.com/awslabs/automated-security-helper/issues).
+These constraints can be overridden through scanner configuration when needed.
+</details>
 
-## Contributing
+<details>
+<summary>ASH is failing with UV tool installation errors. How do I fix this?</summary>
 
-See [CONTRIBUTING](CONTRIBUTING.md#contributing-guidelines) for information on how to contribute to this project.
+If you're experiencing UV tool installation issues:
+
+1. **Check UV installation**: Ensure UV is installed and available: `uv --version`
+2. **Network connectivity**: UV tool installation requires internet access
+3. **Use offline mode**: Set `ASH_OFFLINE=true` to skip downloads and use pre-installed tools
+4. **Manual installation**: Pre-install tools manually:
+   ```bash
+   uv tool install bandit>=1.7.0
+   uv tool install checkov>=3.2.0,<4.0.0
+   uv tool install semgrep>=1.125.0
+   ```
+5. **Check logs**: Run ASH with `--verbose` to see detailed error messages including:
+   - UV availability status
+   - Tool installation attempts and retry logic
+   - Version detection information
+   - Fallback mechanism activation
+6. **Fallback to system tools**: ASH will automatically try to use system-installed tools if UV installation fails
+7. **Installation timeout**: Increase timeout in scanner configuration if needed:
+   ```yaml
+   scanners:
+     checkov:
+       options:
+         install_timeout: 600  # 10 minutes
+   ```
+</details>
+
+## Documentation
+
+For complete documentation, visit the [ASH Documentation](https://awslabs.github.io/automated-security-helper/).
+
+## Feedback and Contributing
+
+- Create an issue [here](https://github.com/awslabs/automated-security-helper/issues)
+- See [CONTRIBUTING](CONTRIBUTING.md) for contribution guidelines
 
 ## Security
 
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for security issue reporting information.
 
 ## License
 
-This library is licensed under the Apache 2.0 License. See the LICENSE file.
+This library is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=awslabs/automated-security-helper&type=Date)](https://www.star-history.com/#awslabs/automated-security-helper&Date)

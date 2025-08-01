@@ -1,12 +1,36 @@
+# TEMP
+/automated_security_helper/identifiers/
+/fix_*.py
+
+# ASH Ignores
 utils/cfn-to-cdk/cfn_to_cdk/
 utils/cfn-to-cdk/cdk.out/
 /**/aggregated_results.txt
 /**/__pycache__
 utils/cfn-to-cdk/cfn_to_cdk/cfn_to_cdk_stack.py
-ash_output
+ash_output*
 *.bak
+*.bak.*
 src/automated_security_helper/models/*generated*
 !tests/test_data/aggregated_results.txt
+refactoring/
+tests/test_data/scanners/cdk/test.yaml_cdk_nag_results/cdk_nag_results_*/
+test_output.json
+tests/pytest-temp/
+output/
+.*q/
+.kir*/
+/Amazon*.md
+.envrc
+utils/try*.sh
+docs/**/*.pdf
+docs/**/*_temp.html
+.*-backup
+/test_scan_dir/
+
+### Generated or cloned into the assets directory at time of build/install ###
+automated_security_helper/assets/ASH_INSTALLED_REVISION
+automated_security_helper/assets/Dockerfile
 
 ### macOS ###
 # General
@@ -94,6 +118,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+test-results/
 
 # Translations
 *.mo
@@ -166,6 +191,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv/
 env/
 venv/
 ENV/

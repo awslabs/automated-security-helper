@@ -1,28 +1,21 @@
 site_name: ASH - Automated Security Helper
-site_description: 'Your one-stop shop for code security scanning'
-site_url: 'https://awslabs.github.io/automated-security-helper'
-repo_name: 'awslabs/automated-security-helper'
-repo_url: 'https://github.com/awslabs/automated-security-helper'
-edit_uri: 'edit/main/site/content'
-copyright: '&copy; 2024, Amazon Web Services, Inc. or its affiliates. All rights reserved.'
-docs_dir: 'docs/content'
-site_dir: 'public'
+site_description: "Your one-stop shop for code security scanning"
+site_url: "https://awslabs.github.io/automated-security-helper"
+repo_name: "awslabs/automated-security-helper"
+repo_url: "https://github.com/awslabs/automated-security-helper"
+edit_uri: "edit/main/site/content"
+copyright: "&copy; Amazon Web Services, Inc. or its affiliates. All rights reserved."
+docs_dir: "docs/content"
+site_dir: "public"
 # use_directory_urls: true
 
-nav:
-  - Overview: index.md
-  - Documentation:
-    - Getting started:
-      - Prerequisites: docs/prerequisites.md
-    - Support Matrix: docs/support.md
-  - Tutorials:
-    - Running ASH locally: tutorials/running-ash-locally.md
-    - Running ASH in a CI environment: tutorials/running-ash-in-ci.md
-    - Cloud9 Quick Start: tutorials/cloud9-quickstart.md
-  # - Troubleshooting:
-  #   - Finch Issues: troubleshooting/finch.md
-  - Contributing to ASH: contributing.md
-  - FAQs: faq.md
+plugins:
+  - privacy
+  - search
+  - awesome-nav
+  - autorefs
+  - mkdocstrings
+  - mermaid2
 
 theme:
   name: material
@@ -59,15 +52,15 @@ theme:
 markdown_extensions:
   - admonition
   - pymdownx.emoji:
-      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_index: !!python/name:pymdownx.emoji.twemoji
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
-
-plugins:
-    - search
-    - awesome-pages
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom

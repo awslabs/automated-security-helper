@@ -1,0 +1,8 @@
+{
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "sarif-viewer.connectToGithubCodeScanning": "off"
+}

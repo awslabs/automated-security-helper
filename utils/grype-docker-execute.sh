@@ -74,7 +74,12 @@ cd "${_ASH_SOURCE_DIR}"
 debug_echo "[grype] pwd: '$(pwd)' :: _ASH_SOURCE_DIR: ${_ASH_SOURCE_DIR} :: _ASH_RUN_DIR: ${_ASH_RUN_DIR}"
 
 # Set REPORT_PATH to the report location, then touch it to ensure it exists
-REPORT_PATH="${_ASH_OUTPUT_DIR}/work/grype_report_result.txt"
+SCANNER_DIR="${_ASH_OUTPUT_DIR}/scanners"
+RESULTS_DIR="${SCANNER_DIR}/results"
+
+mkdir -p "${RESULTS_DIR}"
+
+REPORT_PATH="${RESULTS_DIR}/grype_report_result.txt"
 rm ${REPORT_PATH} 2> /dev/null
 touch ${REPORT_PATH}
 
@@ -89,7 +94,15 @@ if [[ "${ASH_OUTPUT_FORMAT:-text}" != "text" ]]; then
   GRYPE_ARGS="-o json ${GRYPE_ARGS}"
   SYFT_ARGS="-o json ${SYFT_ARGS}"
   SEMGREP_ARGS="--json ${SEMGREP_ARGS}"
+  TEEFILEEXT="json"
+else
+  TEEFILEEXT="txt"
 fi
+
+if [ -d "${SCANNER_DIR}/grype" ]; then
+  rm -rf "${SCANNER_DIR}/grype"
+fi
+mkdir -p "${SCANNER_DIR}/grype"
 
 #
 # Run Grype
@@ -98,13 +111,14 @@ debug_echo "[grype] Starting all scanners within the Grype scanner tool set"
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
+  cleanfile=$(echo $scan_path | sed 's/\//./g;s/^\.//g')
   cd ${scan_path}
   debug_echo "[grype] Starting Grype scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Grype output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   debug_echo "[grype] grype ${GRYPE_ARGS} dir:${scan_path}"
-  grype ${GRYPE_ARGS} dir:${scan_path} >> ${REPORT_PATH} 2>&1
+  grype ${GRYPE_ARGS} dir:${scan_path} >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/grype/grype.${cleanfile}.${TEEFILEEXT}"
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
@@ -118,13 +132,14 @@ done
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
+  cleanfile=$(echo $scan_path | sed 's/\//./g;s/^\.//g')
   cd ${scan_path}
   debug_echo "[grype] Starting Syft scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Syft output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   debug_echo "[grype] syft ${SYFT_ARGS} ${scan_path}"
-  syft ${SYFT_ARGS} ${scan_path} >> ${REPORT_PATH} 2>&1
+  syft ${SYFT_ARGS} ${scan_path} >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/grype/syft.${cleanfile}.${TEEFILEEXT}"
   SRC=$?
   RC=$(bumprc $RC $SRC)
 
@@ -138,13 +153,14 @@ done
 for i in "${!scan_paths[@]}";
 do
   scan_path=${scan_paths[$i]}
+  cleanfile=$(echo $scan_path | sed 's/\//./g;s/^\.//g')
   cd ${scan_path}
   debug_echo "[grype] Starting Semgrep scan of ${scan_path}"
   # debug_show_tree ${scan_path} ${REPORT_PATH}
   echo -e "\n>>>>>> Begin Semgrep output for ${scan_path} >>>>>>\n" >> ${REPORT_PATH}
 
   debug_echo "[grype] semgrep ${SEMGREP_ARGS} $scan_path"
-  semgrep ${SEMGREP_ARGS} $scan_path >> ${REPORT_PATH} 2>&1
+  semgrep ${SEMGREP_ARGS} $scan_path >> ${REPORT_PATH} 2>&1 > "${SCANNER_DIR}/grype/semgrep.${cleanfile}.${TEEFILEEXT}"
   SRC=$?
   RC=$(bumprc $RC $SRC)
 

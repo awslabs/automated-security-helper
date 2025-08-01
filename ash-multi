@@ -104,7 +104,7 @@ get_all_files() {
   pushd . >/dev/null 2>&1
   # cd to the source directory as a starting point
   cd "${_ASH_SOURCE_DIR}"
-  src_files=$(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" --source $(pwd) --output "${_ASH_OUTPUT_DIR}" ${ASH_SCANSET_ARGS})
+  src_files=$(get-scan-set --source $(pwd) --output "${_ASH_OUTPUT_DIR}" ${ASH_SCANSET_ARGS})
   popd >/dev/null 2>&1
 
   all_files+=( "$src_files" )
@@ -202,6 +202,12 @@ validate_input() {
     rm -rf "${OUTPUT_DIR}/work"
   fi
   mkdir -p "${OUTPUT_DIR}/work"
+
+  if [ -d "${OUTPUT_DIR}/scanners" ]; then
+    rm -rf "${OUTPUT_DIR}/scanners"
+  fi
+  mkdir -p "${OUTPUT_DIR}/scanners"
+
   OUTPUT_DIR=$(cd "${OUTPUT_DIR}"; pwd) # Transform any relative path to absolute
   CFNRULES_LOCATION=$(cd "${CFNRULES_LOCATION}"; pwd) # Transform any relative path to absolute
   UTILS_LOCATION=$(cd "${UTILS_LOCATION}"; pwd) # Transform any relative path to absolute
@@ -247,10 +253,7 @@ run_security_check() {
       # Invoke the resolved scanner script
       bash -C ${FULL_SCANNER_SCRIPT_PATH}
     else
-      echo -e "${LPURPLE}Found ${CYAN}one or more${LPURPLE} of: [ ${RED}""${ITEMS_TO_SCAN[*]}""${LPURPLE} ] items in source dir,${NC} ${CYAN}running${GREEN} ${DOCKERFILE_TO_EXECUTE} ...${NC}"
-      ${OCI_RUNNER} build -t "${RUNTIME_CONTAINER_NAME}" -f "${DOCKERFILE_LOCATION}"/"${DOCKERFILE_TO_EXECUTE}" ${DOCKER_EXTRA_ARGS} "${SOURCE_DIR}" > /dev/null
-      set +e # the scan will fail the command if it finds any finding. we don't want it to stop our script execution
-      ${OCI_RUNNER} run --name "${RUNTIME_CONTAINER_NAME}" -v "${CFNRULES_LOCATION}":/cfnrules:ro -v "${UTILS_LOCATION}":/utils:ro -v "${SOURCE_DIR}":/src:ro -v "${OUTPUT_DIR}":/out:rw "${RUNTIME_CONTAINER_NAME}"
+      echo -e "${$YELLOW}Multi-container architecture is no longer supported!"
     fi
     #
     # capture the return code of the command invoked through docker
@@ -331,7 +334,6 @@ CFN_EXTENSIONS=("yaml" "yml" "json" "template")
 JS_EXTENSIONS=("js" "jsx" "ts" "tsx")
 GRYPE_EXTENSIONS=("js" "jsx" "ts" "tsx" "py" "java" "go" "cs" "sh" "war" "jar")
 
-DOCKERFILE_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"helper_dockerfiles"
 UTILS_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"utils"
 CFNRULES_LOCATION="$(dirname "${BASH_SOURCE[0]}")"/"appsec_cfn_rules"
 
@@ -501,7 +503,7 @@ IFS=$'\n' # Support directories with spaces, make the loop iterate over newline 
 pushd . >/dev/null 2>&1
 cd "${SOURCE_DIR}"
 # We do not include --output here explicitly to only yield the relative path
-for zipfile in $(python "${_ASH_UTILS_LOCATION}/get-scan-set.py" --source . | grep '\.zip$');
+for zipfile in $(get-scan-set --source . | grep '\.zip$');
 do
   tgt_dir=$(dirname "${OUTPUT_DIR}"/work/"${zipfile:2}")/"$(basename "${zipfile%.*}")"
   mkdir -p "${tgt_dir}"
@@ -648,10 +650,10 @@ if [[ -n "${AGGREGATED_RESULTS_REPORT_FILENAME}" && -n "${OUTPUT_DIR}" && -f "${
 fi
 
 # if an extension was not found, no report file will be in place, so skip the final report
-if [[ $(find "${OUTPUT_DIR}/work" -iname "*_report_result.txt" | wc -l | awk '{print $1}') -gt 0 ]];
+if [[ $(find "${OUTPUT_DIR}/scanners/results" -iname "*_report_result.txt" | wc -l | awk '{print $1}') -gt 0 ]];
 then
   # Aggregate the results output files
-  for result in "${OUTPUT_DIR}"/work/*_report_result.txt;
+  for result in "${OUTPUT_DIR}"/scanners/results/*_report_result.txt;
   do
     echo "#############################################" >> "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"
     echo "Start of  ${result}" >> "${OUTPUT_DIR}"/"${AGGREGATED_RESULTS_REPORT_FILENAME}"

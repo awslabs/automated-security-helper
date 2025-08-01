@@ -1,0 +1,516 @@
+"""Utility functions for working with SARIF reports."""
+
+import os
+import random
+from typing import List
+import uuid
+from pathlib import Path
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.constants import (
+    ASH_WORK_DIR_NAME,
+    KNOWN_IGNORE_PATHS,
+)
+from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.schemas.sarif_schema_model import (
+    SarifReport,
+    Tool,
+    ToolComponent,
+    PropertyBag,
+)
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.schemas.sarif_schema_model import (
+    Suppression,
+    Kind1,
+)
+from automated_security_helper.utils.suppression_matcher import (
+    should_suppress_finding,
+)
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.asharp_model import ScannerSeverityCount
+
+
+def get_finding_id(
+    rule_id: str,
+    file: str | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
+) -> str:
+    seed = "::".join(
+        [
+            item
+            for item in [
+                rule_id,
+                file,
+                str(start_line),
+                str(end_line),
+            ]
+            if item
+        ]
+    )
+    rd = random.Random()
+    rd.seed(seed)
+    return str(uuid.UUID(int=rd.getrandbits(128), version=4))
+
+
+def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
+    """
+    Sanitize a URI in a SARIF report.
+
+    Args:
+        uri: The URI to sanitize
+        source_dir_path: The source directory path object
+        source_dir_str: The source directory string with trailing separator
+
+    Returns:
+        The sanitized URI
+    """
+    if not uri:
+        return uri
+
+    # Remove file:// prefix if present
+    if uri.startswith("file://"):
+        uri = uri[7:]
+
+    # Make path relative to source directory
+    try:
+        # Try to resolve the path and make it relative
+        path_obj = Path(uri)
+        if path_obj.is_absolute():
+            try:
+                uri = str(path_obj.relative_to(source_dir_path))
+            except ValueError:
+                # If the path is not relative to source_dir, keep it as is
+                pass
+        elif uri.startswith(source_dir_str):
+            uri = uri[len(source_dir_str) :]
+    except Exception as e:
+        ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
+
+    # Replace backslashes with forward slashes for consistency
+    uri = str(uri).replace("\\", "/")
+    return uri
+
+
+def sanitize_sarif_paths(
+    sarif_report: SarifReport, source_dir: str | Path
+) -> SarifReport:
+    """
+    Sanitize paths in SARIF report to be relative to the source directory.
+
+    Args:
+        sarif_report: The SARIF report to sanitize
+        source_dir: The source directory to make paths relative to
+
+    Returns:
+        The sanitized SARIF report
+    """
+    if not sarif_report or not sarif_report.runs:
+        return sarif_report
+
+    source_dir_path = Path(source_dir).resolve()
+    source_dir_str = str(source_dir_path) + os.sep
+
+    ASH_LOGGER.debug(f"Sanitizing SARIF paths relative to: {source_dir_str}")
+
+    clean_runs = []
+    for run in sarif_report.runs:
+        if not run.results:
+            clean_runs.append(run)
+            continue
+        clean_results = []
+        for result in run.results:
+            # Process locations
+            if result.locations:
+                for location in result.locations:
+                    if (
+                        location.physicalLocation
+                        and location.physicalLocation.root.artifactLocation
+                    ):
+                        uri = location.physicalLocation.root.artifactLocation.uri
+                        if uri:
+                            uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
+                            location.physicalLocation.root.artifactLocation.uri = uri
+
+            # Process related locations if present
+            if hasattr(result, "relatedLocations") and result.relatedLocations:
+                for related in result.relatedLocations:
+                    if (
+                        related.physicalLocation
+                        and related.physicalLocation.root.artifactLocation
+                    ):
+                        uri = related.physicalLocation.root.artifactLocation.uri
+                        if uri:
+                            uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
+                            related.physicalLocation.root.artifactLocation.uri = uri
+
+            # Process analysis target if present
+            if result.analysisTarget and result.analysisTarget.uri:
+                uri = result.analysisTarget.uri
+                uri = _sanitize_uri(uri, source_dir_path, source_dir_str)
+                result.analysisTarget.uri = uri
+            clean_results.append(result)
+
+        run.results = clean_results
+        clean_runs.append(run)
+    sarif_report.runs = clean_runs
+
+    return sarif_report
+
+
+def attach_scanner_details(
+    sarif_report: SarifReport,
+    scanner_name: str,
+    scanner_version: str | None = None,
+    invocation_details: dict = {},
+) -> SarifReport:
+    """
+    Attach scanner details to a SARIF report.
+
+    Args:
+        sarif_report: The SARIF report to update
+        scanner_name: Name of the scanner
+        scanner_version: Version of the scanner (optional)
+        invocation_details: Dictionary with invocation details (optional)
+            Can include keys like 'command_line', 'arguments', 'working_directory', etc.
+
+    Returns:
+        The updated SARIF report
+    """
+    if not sarif_report or not sarif_report.runs:
+        return sarif_report
+
+    ASH_LOGGER.debug(f"Attaching scanner details for {scanner_name} v{scanner_version}")
+
+    for run in sarif_report.runs:
+        # Create or update tool.driver information
+        if not run.tool:
+            run.tool = Tool()
+
+        if not run.tool.driver:
+            run.tool.driver = ToolComponent(name=scanner_name)
+
+        # Update basic properties
+        run.tool.driver.name = scanner_name
+        if scanner_version:
+            run.tool.driver.version = scanner_version
+
+        # Add scanner details to properties
+        if not run.tool.driver.properties:
+            run.tool.driver.properties = PropertyBag()
+
+        # Add scanner name and version to properties
+        run.tool.driver.properties.tags = run.tool.driver.properties.tags or []
+        if scanner_name not in run.tool.driver.properties.tags:
+            run.tool.driver.properties.tags.append(scanner_name)
+
+        # Add scanner details to properties
+        scanner_details = {
+            "tool_name": scanner_name,
+        }
+        if scanner_version:
+            scanner_details["tool_version"] = scanner_version
+
+        # Add invocation details if provided
+        if invocation_details:
+            scanner_details["tool_invocation"] = invocation_details
+
+        # Add scanner details to properties
+        run.tool.driver.properties.scanner_details = scanner_details
+
+        # Also attach scanner information to each result
+        if run.results:
+            for result in run.results:
+                # Ensure result has properties
+                if not result.properties:
+                    result.properties = PropertyBag()
+
+                # Add scanner name to result tags
+                result.properties.tags = result.properties.tags or []
+                if scanner_name not in result.properties.tags:
+                    result.properties.tags.append(scanner_name)
+
+                # Add scanner details to result properties
+                setattr(result.properties, "scanner_name", scanner_name)
+                if scanner_version:
+                    setattr(result.properties, "scanner_version", scanner_version)
+
+                # Add scanner details object to result properties
+                setattr(result.properties, "scanner_details", scanner_details)
+
+    return sarif_report
+
+
+def path_matches_pattern(path: str, pattern: str) -> bool:
+    """
+    Check if a path matches a pattern.
+
+    Args:
+        path: The path to check
+        pattern: The pattern to match against
+
+    Returns:
+        True if the path matches the pattern, False otherwise
+    """
+    import fnmatch
+
+    # Normalize paths for comparison
+    path = str(path).replace("\\", "/")
+    pattern = str(pattern).replace("\\", "/")
+    patterns = [
+        pattern + "/**/*.*",
+        pattern + "/*.*",
+        pattern,
+    ]
+
+    for pat in patterns:
+        # Check for exact match
+        if path == pat:
+            return True
+        elif path in pat:
+            return True
+        elif fnmatch.fnmatch(path, pat):
+            return True
+
+        # Check for directory match (e.g., "dir/" should match "dir/file.txt")
+        if pat.endswith("/") and path.startswith(pat):
+            return True
+
+    return False
+
+
+def get_severity_metrics_from_sarif(
+    sarif_report: SarifReport,
+    plugin_context: PluginContext,
+) -> ScannerSeverityCount:
+    scanner_severity_count = ScannerSeverityCount(
+        suppressed=0,
+        critical=0,
+        high=0,
+        medium=0,
+        low=0,
+        info=0,
+    )
+    for result in sarif_report.runs[0].results:
+        if result.suppressions and len(result.suppressions) > 0:
+            scanner_severity_count.suppressed = 1 + scanner_severity_count.suppressed
+        elif result.level:
+            has_severity_in_properties = False
+            if result.properties:
+                props: PropertyBag | dict | None = result.properties
+                if isinstance(props, PropertyBag):
+                    props = props.model_dump(
+                        mode="json",
+                        exclude_unset=True,
+                        exclude_none=True,
+                    )
+
+                if hasattr(
+                    props, "issue_severity"
+                ) and props.issue_severity.upper() in [
+                    "INFO",
+                    "LOW",
+                    "MEDIUM",
+                    "HIGH",
+                    "CRITICAL",
+                ]:
+                    iss_sev_up = props.issue_severity.upper()
+                    if iss_sev_up == "CRITICAL":
+                        scanner_severity_count.critical += 1
+                    elif iss_sev_up == "HIGH":
+                        scanner_severity_count.high += 1
+                    elif iss_sev_up == "MEDIUM":
+                        scanner_severity_count.medium += 1
+                    elif iss_sev_up == "LOW":
+                        scanner_severity_count.low += 1
+                    else:
+                        scanner_severity_count.info += 1
+                    has_severity_in_properties = True
+
+            if not has_severity_in_properties:
+                level = str(result.level).lower()
+                if level == "error":
+                    scanner_severity_count.critical += 1
+                elif level == "warning":
+                    scanner_severity_count.medium += 1
+                elif level == "note":
+                    scanner_severity_count.low += 1
+                else:
+                    scanner_severity_count.info += 1
+
+    return scanner_severity_count
+
+
+def apply_suppressions_to_sarif(
+    sarif_report: SarifReport,
+    plugin_context: PluginContext,
+) -> SarifReport:
+    """
+    Apply suppressions to a SARIF report based on global ignore paths and suppression rules.
+
+    Args:
+        sarif_report: The SARIF report to modify
+        plugin_context: Plugin context containing configuration
+
+    Returns:
+        The modified SARIF report with suppressions applied
+    """
+    known_ignore_formatted: List[IgnorePathWithReason] = []
+    for item in KNOWN_IGNORE_PATHS:
+        known_ignore_formatted.append(
+            IgnorePathWithReason(
+                path=item,
+                reason="Known ignore path",
+            )
+        )
+        known_ignore_formatted.append(
+            IgnorePathWithReason(
+                path=f"**/{item}",
+                reason="Known ignore path",
+            )
+        )
+    ignore_paths = [
+        *(plugin_context.config.global_settings.ignore_paths or []),
+        *known_ignore_formatted,
+    ]
+
+    suppressions = plugin_context.config.global_settings.suppressions or []
+
+    # Check if ignore_suppressions flag is set
+    # ASH_LOGGER.info(plugin_context.model_dump_json(indent=2))
+    ignore_suppressions = (
+        hasattr(plugin_context, "ignore_suppressions")
+        and plugin_context.ignore_suppressions
+    )
+
+    if ignore_suppressions:
+        ASH_LOGGER.warning(
+            "Ignoring all suppression rules as requested by --ignore-suppressions flag"
+        )
+
+    # Note: Suppression expiration check is now handled by the EXECUTION_START event callback
+    # in automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker
+
+    if not sarif_report or not sarif_report.runs:
+        return sarif_report
+    for run in sarif_report.runs:
+        if not run.results:
+            continue
+
+        updated_results = []
+        for result in run.results:
+            is_in_ignorable_path = False
+            # Check if result location matches any ignore path
+            if result.locations:
+                for location in result.locations:
+                    if is_in_ignorable_path:
+                        continue
+                    if (
+                        location.physicalLocation
+                        and location.physicalLocation.root.artifactLocation
+                    ):
+                        uri = location.physicalLocation.root.artifactLocation.uri
+                        if uri:
+                            if Path(uri).resolve().is_relative_to(
+                                plugin_context.output_dir.resolve()
+                            ) and not Path(uri).resolve().is_relative_to(
+                                plugin_context.output_dir.joinpath(
+                                    ASH_WORK_DIR_NAME
+                                ).resolve()
+                            ):
+                                ASH_LOGGER.verbose(
+                                    f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'"
+                                )
+                                is_in_ignorable_path = True
+                                continue
+                            # Evaluate the global_settings.ignore_paths entries to see if this path matches an ignore_path
+                            for ignore_path in ignore_paths:
+                                # Check if the URI matches the ignore path pattern
+                                if path_matches_pattern(uri, ignore_path.path):
+                                    ASH_LOGGER.verbose(
+                                        f"Ignoring finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
+                                    )
+                                    is_in_ignorable_path = True
+                                    break  # No need to check other ignore paths
+
+            if is_in_ignorable_path:
+                continue
+            # Check if result matches any suppression rule (only if suppressions are not being ignored)
+            ASH_LOGGER.debug(
+                f"Suppression check: is_in_ignorable_path={is_in_ignorable_path}, suppressions={bool(suppressions)}, ignore_suppressions={ignore_suppressions}"
+            )
+            if suppressions and not ignore_suppressions:
+                # Convert SARIF result to FlatVulnerability for suppression matching
+                flat_finding = None
+                if result.ruleId and result.locations and len(result.locations) > 0:
+                    location = result.locations[0]
+                    if (
+                        location.physicalLocation
+                        and location.physicalLocation.root.artifactLocation
+                    ):
+                        uri = location.physicalLocation.root.artifactLocation.uri
+                        line_start = None
+                        line_end = None
+                        if (
+                            hasattr(location.physicalLocation.root, "region")
+                            and location.physicalLocation.root.region
+                        ):
+                            line_start = location.physicalLocation.root.region.startLine
+                            line_end = location.physicalLocation.root.region.endLine
+
+                        flat_finding = FlatVulnerability(
+                            id=get_finding_id(result.ruleId, uri, line_start, line_end),
+                            title=(
+                                result.message.root.text
+                                if result.message
+                                else "Unknown Issue"
+                            ),
+                            description=(
+                                result.message.root.text
+                                if result.message
+                                else "No description available"
+                            ),
+                            severity="MEDIUM",  # Default severity, not used for matching
+                            scanner=(
+                                run.tool.driver.name
+                                if run.tool and run.tool.driver
+                                else "unknown"
+                            ),
+                            scanner_type="SAST",  # Default type, not used for matching
+                            rule_id=result.ruleId,
+                            file_path=uri,
+                            line_start=line_start,
+                            line_end=line_end,
+                        )
+
+                if flat_finding:
+                    should_suppress, matching_suppression = should_suppress_finding(
+                        flat_finding, suppressions
+                    )
+                    if should_suppress:
+                        # Initialize suppressions list if it doesn't exist
+                        if not result.suppressions:
+                            result.suppressions = []
+                        if len(result.suppressions) >= 1:
+                            ASH_LOGGER.debug(
+                                f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues."
+                            )
+                            updated_results.append(result)
+                            continue
+                        # Add suppression
+                        reason = (
+                            matching_suppression and matching_suppression.reason
+                        ) or "No reason provided"
+                        ASH_LOGGER.verbose(
+                            f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
+                        )
+                        suppression = Suppression(
+                            kind=Kind1.external,
+                            justification=f"(ASH) Suppressing finding for rule '{result.ruleId}' in '{flat_finding.file_path}' with reason: {reason}",
+                        )
+                        result.suppressions.append(suppression)
+
+            # Add the result to the updated results list
+            updated_results.append(result)
+
+        sarif_report.runs[0].results = updated_results
+    return sarif_report

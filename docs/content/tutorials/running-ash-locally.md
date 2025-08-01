@@ -1,14 +1,43 @@
 # Running ASH Locally
 
-Please see the [Prerequisites](../docs/prerequisites.md) page to ensure your local workspace is configured as needed before continuing.
+Please see the [Installation Guide](../docs/installation-guide.md) page to ensure your local workspace is configured as needed before continuing.
 
-At a high-level, you need the ability to run `linux/amd64` containers in order to use ASH.
+ASH v3 can run in multiple modes: `local`, `container`, or `precommit`. This guide covers how to install and run ASH locally.
 
-## Linux or MacOS
+## Installation Options
 
-Clone the git repository into a folder.  For example:
+### Option 1: Using `uvx` (Recommended)
 
-``` sh
+```bash
+# Install uv if you don't have it
+curl -sSf https://astral.sh/uv/install.sh | sh
+
+# Create an alias for ASH
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
+
+# Add this alias to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+```
+
+### Option 2: Using `pipx`
+
+```bash
+# Install pipx if you don't have it
+python -m pip install --user pipx
+python -m pipx ensurepath
+
+# Install ASH
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
+```
+
+### Option 3: Using `pip`
+
+```bash
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
+```
+
+### Option 4: Clone the Repository (Legacy Method)
+
+```bash
 # Set up some variables
 REPO_DIR="${HOME}"/Documents/repos/reference
 REPO_NAME=automated-security-helper
@@ -20,44 +49,102 @@ mkdir -p ${REPO_DIR}
 git clone https://github.com/awslabs/automated-security-helper.git "${REPO_DIR}/${REPO_NAME}"
 
 # Set the repo path in your shell for easier access
-#
-# Add this (and the variable settings above) to
-# your ~/.bashrc, ~/.bash_profile, ~/.zshrc, or similar
-# start-up scripts so that the ash tool is in your PATH
-# after re-starting or starting a new shell.
-#
 export PATH="${PATH}:${REPO_DIR}/${REPO_NAME}"
 
-# Execute the ash tool
-ash --version
+# Add this to your shell profile for persistence
 ```
 
-## Windows
+## Running ASH
 
-**ASH** uses containers, `bash` shell scripts, and multiple background processes running in parallel to run the multiple
-source code security scanning tools that it uses.  Because of this, running `ash` from either a `PowerShell` or `cmd`
-shell on Windows is not possible.  Furthermore, due to reliance on running containers, usually with Docker Desktop
-when running on Windows, there is an implicit dependency on having installed, configured, and operational a WSL2
-(Windows System for Linux) environment on the Windows machine where `ash` will be run.
+After installation, you can run ASH in different modes:
 
-To use `ash` on Windows:
+### Local Mode (Default)
 
-* Install, configure, and test the [WSL 2 environment on Windows](https://learn.microsoft.com/en-us/windows/wsl/install)
-* Install, configure, and test [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/), using the WSL 2 environment
-* Use the [Windows Terminal](https://learn.microsoft.com/en-us/windows/terminal/install) program and open a command-line window to interact with the WSL 2 environment
-* Install and/or update the `git` client in the WSL 2 environment.  This should be pre-installed, but you may need to update the version
-  using the `apt-get update` command.
+Local mode runs scanners that are available in your PATH:
 
-Once the WSL2 command-line window is open, follow the steps above in [Getting Started - Linux or MacOS](#getting-started---linux-or-macos)
-to install and run `ash` in WSL2 on the Windows machine.
+```bash
+# Basic scan
+ash --source-dir /path/to/code
 
-To run `ash`, open a Windows Terminal shell into the WSL 2 environment and use that command-line shell to run the `ash` command.
+# Specify output directory
+ash --source-dir /path/to/code --output-dir /path/to/output
+```
 
-**Note**: when working this way, be sure to `git clone` any git repositories to be scanned into the WSL2 filesystem.
-Results are un-predictable if repositories or file sub-trees in the Windows filesystem are scanned using `ash`
-that is running in the WSL2 environment.
+### Container Mode
 
-**Tip**: If you are using Microsoft VSCode for development, it is possible to configure a "remote" connection
-[using VSCode into the WSL2 environment](https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-vscode).
-By doing this, you can host your git repositories in WSL2 and still
-work with them as you have in the past when they were in the Windows filesystem of your Windows machine.
+Container mode ensures all scanners are available by running in a container:
+
+```bash
+ash --mode container --source-dir /path/to/code
+```
+
+## Initializing Configuration
+
+Create a default configuration file:
+
+```bash
+ash config init
+```
+
+This creates `.ash/.ash.yaml` in your current directory with default settings.
+
+## Windows Support
+
+ASH v3 provides improved Windows support:
+
+### Local Mode on Windows
+
+ASH v3 runs natively on Windows with Python 3.10+:
+
+```powershell
+# Install uv if you don't have it
+irm https://astral.sh/uv/install.ps1 | iex
+
+# Create a function for ASH
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0 $args }
+
+# Use as normal
+ash --help
+```
+
+### Container Mode on Windows
+
+For container mode, you'll need:
+
+1. Windows Subsystem for Linux (WSL2) installed
+2. A container runtime like Docker Desktop with WSL2 integration enabled
+
+To use ASH in container mode on Windows:
+
+1. Install and configure [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install)
+2. Install and configure [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/) with WSL2 integration
+3. Open [Windows Terminal](https://learn.microsoft.com/en-us/windows/terminal/install) and connect to your WSL2 environment
+4. Install ASH using one of the methods above
+5. Run ASH with `--mode container` flag
+
+**Note**: When using container mode on Windows, clone repositories into the WSL2 filesystem for best results. Scanning Windows filesystem paths from WSL2 may produce unpredictable results.
+
+**Tip**: If you use VS Code, you can configure a [remote connection to WSL2](https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-vscode) to work with repositories stored in the WSL2 filesystem.
+
+## Viewing Results
+
+ASH v3 outputs results to `.ash/ash_output/` by default:
+
+- `ash_aggregated_results.json`: Complete machine-readable results
+- `reports/ash.summary.txt`: Human-readable text summary
+- `reports/ash.summary.md`: Markdown summary
+- `reports/ash.html`: Interactive HTML report
+
+You can also use the report command to view results:
+
+```bash
+ash report
+```
+
+## Next Steps
+
+After running ASH locally:
+
+1. Learn about [ASH's CLI options](../docs/cli-reference.md)
+2. Explore [configuration options](../docs/configuration-guide.md)
+3. Set up [pre-commit integration](./using-ash-with-pre-commit.md)

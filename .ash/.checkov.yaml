@@ -1,0 +1,7 @@
+block-list-secret-scan: []
+evaluate-variables: true
+external-modules-download-path: .external_modules
+mask: []
+secrets-history-timeout: 12h
+secrets-scan-file-type: []
+summary-position: top

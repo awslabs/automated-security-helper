@@ -1,0 +1,55 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  - repo: local
+    hooks:
+      - id: generate-schemas
+        name: Generate ASH JSON schemas
+        entry: uv run python -m automated_security_helper.schemas.generate_schemas
+        language: system
+        verbose: true
+        pass_filenames: false
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: pretty-format-json
+        exclude: ".vscode/.*"
+        args:
+          - "--autofix"
+          - "--indent=2"
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version.
+    rev: v0.11.8
+    hooks:
+      # Run the linter.
+      - id: ruff
+        args: [--fix]
+      # Run the formatter.
+      - id: ruff-format
+
+  # Local ASH development hooks to help validate ASH is running as expected with
+  # local versions
+  - repo: local
+    hooks:
+      - id: ash
+        name: (manual) ASH dev manual scan
+        description: Runs various code scanners from Python directly
+        entry: uv run ash --mode=precommit
+        pass_filenames: false
+        verbose: true
+        language: system
+        args:
+          - --output-dir=.ash/ash_output_precommit_local
+  # - repo: https://github.com/awslabs/automated-security-helper
+  #   rev: v3.0.0-beta
+  #   hooks:
+  #     - id: ash-simple-scan
+  #       args:
+  #         ## REQUIRED ARGS
+  #         # N/A - ASH pre-commit hooks include `--mode=precommit` by default.
+  #         # The only ARGS needed are custom args past what is available by default.
+  #         ## EXTRA ARGS (these are specific to this repo's usage of the hook and are not required)
+  #         # Default output-dir is `.ash/ash_output`, customize if preferred.
+  #         # This is to allow the pre-commit runs of ASH to not collide with the
+  #         # manual runs so results are retained independently.
+  #         - --output-dir=.ash/ash_output_precommit

@@ -1,29 +1,60 @@
-#checkov:skip=CKV_DOCKER_7: Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
-ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.10-bullseye
+#checkov:skip=CKV_DOCKER_7:Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
+ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-bullseye
 
-# First stage: Build poetry requirements
-FROM ${BASE_IMAGE} AS poetry-reqs
-ENV PYTHONDONTWRITEBYTECODE 1
-RUN apt-get update && \
+# First stage: Build UV requirements
+FROM ${BASE_IMAGE} AS uv-reqs
+
+ENV PYTHONDONTWRITEBYTECODE=1
+RUN apt-get clean && \
+    apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y python3-venv && \
+    apt-get install -y python3-venv git tree curl && \
     rm -rf /var/lib/apt/lists/*
-RUN python3 -m pip install -U pip poetry
+
+ARG INSTALL_ASH_REVISION="LOCAL"
+ARG ASH_REPO_CLONE_URL="https://github.com/awslabs/automated-security-helper.git"
+ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
+ENV ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
+
+# Install UV
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
 WORKDIR /src
-COPY pyproject.toml poetry.lock README.md ./
-COPY src/ src/
-RUN poetry build
+RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
+    git clone \
+        --branch ${INSTALL_ASH_REVISION} \
+        ${ASH_REPO_CLONE_URL} \
+        . || echo "Skipping clone of repo for LOCAL revision"
+
+COPY pyproject.toml* hatch_build.py* uv.lock* README.md* LICENSE* Dockerfile* ./
+COPY ci*/ ci/
+COPY automated_security_helper*/ automated_security_helper/
+RUN tree .
+RUN git status --short || true
+RUN uv build
+# RUN uv export --format requirements-txt --no-hashes > requirements.txt && \
+#     sed -i '/^-e \./d' requirements.txt && \
+#     sed -i '/^\./d' requirements.txt
 
 # Second stage: Core ASH image
 FROM ${BASE_IMAGE} AS core
 SHELL ["/bin/bash", "-c"]
+ENV SHELL="bash"
 ARG BUILD_DATE_EPOCH="-1"
 ARG OFFLINE="NO"
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
+ARG ASH_BIN_PATH="/.ash/bin"
 
+ARG INSTALL_ASH_REVISION="LOCAL"
+ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
+
+ENV ASH_BIN_PATH="${ASH_BIN_PATH}"
 ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
 ENV OFFLINE="${OFFLINE}"
 ENV OFFLINE_AT_BUILD_TIME="${OFFLINE}"
+ENV ASH_OFFLINE="${OFFLINE}"
+ENV ASH_OFFLINE_AT_BUILD_TIME="${OFFLINE}"
 ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
 ENV TZ=UTC
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -57,7 +88,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 #
-# Install nodejs@18 using latest recommended method
+# Install nodejs@20 using latest recommended method
 #
 RUN set -uex; \
     apt-get update; \
@@ -65,42 +96,44 @@ RUN set -uex; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
      | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
-    NODE_MAJOR=18; \
+    NODE_MAJOR=20; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
      > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
     apt-get -qy install nodejs;
 #
-# Install and upgrade pip
+# Install UV in the core stage
+#
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+#
+# Python (no-op other than updating pip --- Python deps managed via Poetry @ pyproject.toml)
 #
 RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py
 RUN python3 -m pip install --no-cache-dir --upgrade pip
 
-#
-# Git (git-secrets)
-#
-RUN git clone https://github.com/awslabs/git-secrets.git && \
-    cd git-secrets && \
-    make install
+# #
+# # Git (git-secrets)
+# #
+# RUN git clone https://github.com/awslabs/git-secrets.git && \
+#     cd git-secrets && \
+#     make install
+
 
 #
-# Python
-#
-RUN python3 -m pip install --no-cache-dir \
-    bandit \
-    nbconvert \
-    jupyterlab
-
-#
-# YAML (Checkov, cfn-nag)
+# cfn-nag
 #
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    python3 -m pip install checkov pathspec && \
     gem install cfn-nag
 
 #
-# JavaScript: (no-op --- node is already installed in the image, nothing else needed)
+# JavaScript:
 #
+RUN npm install -g npm
+RUN curl -o- -L https://yarnpkg.com/install.sh | bash
+RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
+
 
 #
 # Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
@@ -108,14 +141,15 @@ RUN echo "gem: --no-document" >> /etc/gemrc && \
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR}
+ENV PATH="/usr/local/bin:$PATH"
 
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | \
     sh -s -- -b /usr/local/bin
+RUN syft --version
 
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | \
     sh -s -- -b /usr/local/bin
-
-RUN python3 -m pip install semgrep
+RUN grype --version
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         grype db update && \
@@ -123,16 +157,9 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
     fi
 
-# Setting PYTHONPATH so Jinja2 can resolve correctly
-# IMPORTANT: This is predicated on the Python version that is installed!
-#            Changing the BASE_IMAGE may result in this breaking.
-ENV PYTHONPATH='/opt/bitnami/python/lib/python3.10/site-packages'
-
-#
-# Prerequisite installation complete, finishing up
-#
 #
 # Setting default WORKDIR to /src
+#
 WORKDIR /src
 
 #
@@ -140,35 +167,22 @@ WORKDIR /src
 #
 RUN mkdir -p /src && \
     mkdir -p /out && \
-    mkdir -p /ash/utils
+    mkdir -p /ash/utils && \
+    mkdir -p ${ASH_BIN_PATH}
 
-#
-# Install CDK Nag stub dependencies
-#
-# Update NPM to latest
-COPY ./utils/cdk-nag-scan /ash/utils/cdk-nag-scan/
 # Limit memory size available for Node to prevent segmentation faults during npm install
 ENV NODE_OPTIONS=--max_old_space_size=512
-RUN npm install -g npm pnpm yarn && \
-    cd /ash/utils/cdk-nag-scan && \
-    npm install --quiet
 
 #
 # COPY ASH source to /ash instead of / to isolate
 #
-COPY ./utils/cfn-to-cdk /ash/utils/cfn-to-cdk/
-COPY ./utils/*.* /ash/utils/
-COPY ./appsec_cfn_rules /ash/appsec_cfn_rules/
-COPY ./ash-multi /ash/ash
-COPY ./pyproject.toml /ash/pyproject.toml
-
-COPY --from=poetry-reqs /src/dist/*.whl .
-RUN python3 -m pip install *.whl && rm *.whl
+COPY --from=uv-reqs /src/dist/*.whl .
+RUN uv pip install --system *.whl && rm -rf *.whl
 
 #
 # Make sure the ash script is executable
 #
-RUN chmod -R 755 /ash && chmod -R 777 /src /out /deps
+RUN chmod -R 755 /ash && chmod -R 777 /src /out /deps ${ASH_BIN_PATH}
 
 #
 # Flag ASH as local execution mode since we are running in a container already
@@ -176,9 +190,15 @@ RUN chmod -R 755 /ash && chmod -R 777 /src /out /deps
 ENV _ASH_EXEC_MODE="local"
 
 #
-# Append /ash to PATH to allow calling `ash` directly
+# Install dependencies via ASH CLI into
 #
-ENV PATH="$PATH:/ash"
+RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
+ENV PATH="${ASH_BIN_PATH}:$PATH"
+
+#
+# Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
+#
+ENV ASH_IN_CONTAINER="YES"
 
 
 # CI stage -- any customizations specific to CI platform compatibility should be added
@@ -215,17 +235,12 @@ RUN adduser --disabled-password --disabled-login \
         --uid ${UID} --gid ${GID} \
         ${ASH_USER} && \
     mkdir -p ${ASHUSER_HOME}/.ssh && \
-    echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
-    echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=" >> ${ASHUSER_HOME}/.ssh/known_hosts && \
-    echo "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=" >> ${ASHUSER_HOME}/.ssh/known_hosts
+    cp ${HOME}/.ssh/known_hosts ${ASHUSER_HOME}/.ssh/known_hosts
 
 # Change ownership and permissions now that we are running with a non-root
 # user by default.
 RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out /deps && \
     chmod 750 -R ${ASHUSER_HOME} /src /out /deps
-
-# Setting default WORKDIR to ${ASHUSER_HOME}
-WORKDIR ${ASHUSER_HOME}
 
 USER ${UID}:${GID}
 
@@ -237,8 +252,11 @@ ENV HOME=${ASHUSER_HOME}
 ENV ASH_USER=${ASH_USER}
 ENV ASH_GROUP=${ASH_GROUP}
 
+ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
+RUN ash dependencies install --bin-path "${ASH_BIN_PATH}"
+
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
-    CMD type ash || exit 1
+    CMD command -v ash || exit 1
 
 ENTRYPOINT [ ]
 CMD [ "ash" ]

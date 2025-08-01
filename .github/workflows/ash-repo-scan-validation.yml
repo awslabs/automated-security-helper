@@ -1,0 +1,225 @@
+name: ASH - Scan Validation
+
+on:
+  push:
+    branches:
+      - "!main"
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch: {}
+
+env:
+  PYTHON_VERSION: "3.12"
+  COLUMNS: 160
+
+permissions:
+  contents: read
+
+jobs:
+  validate-scan-methods:
+    name: ASH Scan Test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux runners (x86)
+          - os: ubuntu-latest
+            method: bash
+            platform: linux/amd64
+          - os: ubuntu-latest
+            method: powershell
+            platform: linux/amd64
+          - os: ubuntu-latest
+            method: python-container
+            platform: linux/amd64
+          - os: ubuntu-latest
+            method: python-local
+            platform: linux/amd64
+
+          # Linux runners (ARM)
+          - os: ubuntu-24.04-arm
+            method: bash
+            platform: linux/aarch64
+          - os: ubuntu-24.04-arm
+            method: powershell
+            platform: linux/aarch64
+          - os: ubuntu-24.04-arm
+            method: python-container
+            platform: linux/aarch64
+          - os: ubuntu-24.04-arm
+            method: python-local
+            platform: linux/aarch64
+
+          # macOS runners
+          ### Disabled: Docker on the hosted MacOS runners isn't
+          ###           very well supported right now
+          # - os: macos-latest
+          #   method: bash
+          #   platform: darwin/amd64
+          # - os: macos-latest
+          #   method: powershell
+          #   platform: darwin/amd64
+          # - os: macos-latest
+          #   method: python-container
+          #   platform: darwin/amd64
+          - os: macos-latest
+            method: python-local
+            platform: darwin/amd64
+
+          # Windows runners
+          ### Disabled: Docker on the hosted Windows runners isn't
+          ###           very well supported right
+          # - os: windows-latest
+          #   method: powershell
+          #   platform: windows/amd64
+          # - os: windows-latest
+          #   method: python-container
+          #   platform: windows/amd64
+          ### Temp disabled to not impact others as this currently hangs
+          - os: windows-latest
+            method: python-local
+            platform: windows/amd64
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # - name: Install docker on MacOS
+      #   if: runner.os == 'macos' && matrix.method == 'python-local'
+      #   run: |
+      #     brew install docker
+      #     docker info
+
+      # - name: Set up Docker Buildx on MacOS
+      #   if: contains(matrix.os, 'macos') && matrix.method != 'python-local'
+      #   uses: docker/setup-buildx-action@v3
+
+      # - name: Set up Docker Buildx on Windows
+      #   if: contains(matrix.os, 'windows') && matrix.method != 'python-local'
+      #   uses: docker/setup-buildx-action@v3
+      #   with:
+      #     install: true
+
+      - name: Set up Docker Buildx on Linux
+        if: contains(matrix.os, 'ubuntu') && matrix.method != 'python-local'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create output directory
+        shell: bash
+        run: mkdir -p .ash/ash_output
+
+      # Call the appropriate workflow based on matrix.method
+      ############ Python #########
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        if: contains(matrix.method, 'python')
+        with:
+          enable-cache: true
+      - name: Set up Python
+        if: contains(matrix.method, 'python')
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+      - name: Install ASH Python package at commit SHA (shell)
+        if: contains(matrix.method, 'python') && !contains(matrix.os, 'windows')
+        run: |
+          echo "Installing ASH using Python on ${{ matrix.os }} (${{ matrix.platform }})"
+          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
+
+      - name: Update GITHUB_PATH with Python scripts path on Windows
+        if: contains(matrix.method, 'python') && matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
+          echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+
+      - name: Validate ASH using Python + Container
+        if: matrix.method == 'python-container'
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        shell: bash
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }})"
+          echo "ASH Version:"
+          ash --version
+          echo "ASH Help:"
+          ash --help
+          echo "ASH Scan Output:"
+          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions
+
+      - name: Validate ASH using Python Local
+        if: matrix.method == 'python-local'
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
+          echo "ASH Version:"
+          ash --version
+          echo "ASH Help:"
+          ash --help
+          echo "ASH Dependencies Install"
+          ash dependencies install
+          echo "ASH Config Get"
+          ash config get
+          echo "ASH Scan Output:"
+          ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
+
+      ############ PowerShell #########
+
+      - name: Validate ASH using PowerShell
+        if: matrix.method == 'powershell'
+        shell: pwsh
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
+          . ./utils/ash_helpers.ps1
+          Get-Help Invoke-ASH -Full
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions
+
+      ############ Bash #########
+
+      - name: Validate ASH using Bash
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        continue-on-error: true
+        timeout-minutes: 10
+        if: matrix.method == 'bash'
+        shell: bash
+        run: |
+          echo "Testing ASH using Bash on ${{ matrix.os }} (${{ matrix.platform }})"
+          chmod +x ./ash
+          echo "ASH Version:"
+          ./ash --version
+          echo "ASH Help:"
+          ./ash --help
+          echo "ASH Scan Output:"
+          ./ash --build-target ci --verbose --ignore-suppressions
+
+      - name: Verify scan completed
+        shell: pwsh
+        run: |
+          Write-Host "Verifying scan completed successfully on ${{ matrix.os }} using method '${{ matrix.method }}'"
+          $PathsToValidate = @(
+            ".ash/ash_output/ash_aggregated_results.json"
+            ".ash/ash_output/reports/ash.sarif"
+          )
+          foreach ($ValPath in $PathsToValidate) {
+            if (Test-Path $ValPath) {
+              Write-Host "$ValPath found"
+            } else {
+              Write-Host "$ValPath NOT found"
+              exit 1
+            }
+          }

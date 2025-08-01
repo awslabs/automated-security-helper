@@ -8,20 +8,21 @@ export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 
 # Set local variables
 SOURCE_DIR=""
-OUTPUT_DIR=""
-OUTPUT_DIR_SPECIFIED="NO"
+OUTPUT_DIR=".ash/ash_output"
 CONTAINER_UID_SPECIFIED="NO"
-CONTAINER_GID_SPEICIFED="NO"
+CONTAINER_GID_SPECIFIED="NO"
 OUTPUT_FORMAT="text"
 DOCKER_EXTRA_ARGS="${DOCKER_EXTRA_ARGS:-}"
 DOCKER_RUN_EXTRA_ARGS=""
 ASH_ARGS=""
+COLOR_OUTPUT="true"
 NO_BUILD="NO"
 NO_RUN="NO"
 DEBUG="NO"
 OFFLINE="NO"
 OFFLINE_SEMGREP_RULESETS="p/ci"
 TARGET_STAGE="non-root"
+INSTALL_ASH_REVISION="LOCAL"
 # Parse arguments
 while (("$#")); do
   case $1 in
@@ -32,7 +33,6 @@ while (("$#")); do
     --output-dir)
       shift
       OUTPUT_DIR="$1"
-      OUTPUT_DIR_SPECIFIED="YES"
       ;;
     --offline)
       OFFLINE="YES"
@@ -58,7 +58,7 @@ while (("$#")); do
       CONTAINER_UID_SPECIFIED="YES"
       CONTAINER_UID="$1"
       ;;
-    --container-gid | -u)
+    --container-gid | -g)
       shift
       CONTAINER_GID_SPECIFIED="YES"
       CONTAINER_GID="$1"
@@ -80,6 +80,10 @@ while (("$#")); do
       shift
       TARGET_STAGE="$1"
       ;;
+    --ash-revision | -rev)
+      shift
+      INSTALL_ASH_REVISION="$1"
+      ;;
     --help | -h)
       source "${ASH_ROOT_DIR}/ash-multi" --help
       exit 0
@@ -88,10 +92,9 @@ while (("$#")); do
       source "${ASH_ROOT_DIR}/ash-multi" --version
       exit 0
       ;;
-    --finch|-f)
-      # Show colored deprecation warning from entrypoint script and exit 1
-      source "${ASH_ROOT_DIR}/ash-multi" --finch
-      exit 1
+    --no-color | -c)
+      COLOR_OUTPUT="false"
+      ASH_ARGS="${ASH_ARGS} --no-color"
       ;;
     *)
       ASH_ARGS="${ASH_ARGS} $1"
@@ -108,10 +111,8 @@ fi
 
 # Resolve the absolute paths
 SOURCE_DIR="$(cd "$SOURCE_DIR"; pwd)"
-if [[ "${OUTPUT_DIR_SPECIFIED}" == "YES" ]]; then
-  mkdir -p "${OUTPUT_DIR}"
-  OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
-fi
+mkdir -p "${OUTPUT_DIR}"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
 
 #
 # Gather the UID and GID of the caller
@@ -160,6 +161,7 @@ else
         --target ${TARGET_STAGE} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         --build-arg OFFLINE="${OFFLINE}" \
+        --build-arg INSTALL_ASH_REVISION="${INSTALL_ASH_REVISION}" \
         --build-arg OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}" \
         --build-arg BUILD_DATE="$(date +%s)" \
         ${DOCKER_EXTRA_ARGS} \
@@ -169,27 +171,38 @@ else
     # Run the image if the --no-run flag is not set
     RC=0
     if [ "${NO_RUN}" = "NO" ]; then
-      MOUNT_SOURCE_DIR="--mount type=bind,source=${SOURCE_DIR},destination=/src"
-      MOUNT_OUTPUT_DIR=""
-      OUTPUT_DIR_OPTION=""
-      if [[ ${OUTPUT_DIR_SPECIFIED} = "YES" ]]; then
-        MOUNT_SOURCE_DIR="${MOUNT_SOURCE_DIR},readonly" # add readonly source mount when --output-dir is specified
-        MOUNT_OUTPUT_DIR="--mount type=bind,source=${OUTPUT_DIR},destination=/out"
-        OUTPUT_DIR_OPTION="--output-dir /out"
+
+
+      # Only make source dir readonly if output dir is not a subdirectory of source
+      # dir, otherwise writing to the output dir will fail due to attempting to write
+      # to a readonly fs.
+      SOURCE_READONLY=""
+      if [[ "${OUTPUT_DIR}" != "${SOURCE_DIR}"* ]]; then
+        # add readonly source mount when --output-dir is outside source dir
+        SOURCE_READONLY=",readonly"
+      fi
+      # Capture terminal size if tput is available so the container experience can be improved
+      if command -v tput >/dev/null 2>&1; then
+        DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -e COLUMNS=$(tput cols) -e LINES=$(tput lines)"
+      fi
+      if [[ "${COLOR_OUTPUT}" = "true" ]]; then
+        DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
       fi
       echo "Running ASH scan using built image..."
-      eval ${RESOLVED_OCI_RUNNER} run \
+      ${RESOLVED_OCI_RUNNER} run \
           --rm \
-          -e ACTUAL_SOURCE_DIR="${SOURCE_DIR}" \
-          -e ASH_DEBUG=${DEBUG} \
-          -e ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT} \
-          ${MOUNT_SOURCE_DIR} \
+          -e "ASH_ACTUAL_SOURCE_DIR=${SOURCE_DIR}" \
+          -e "ASH_ACTUAL_OUTPUT_DIR=${OUTPUT_DIR}" \
+          -e "ASH_DEBUG=${DEBUG}" \
+          -e "ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT}" \
+          --mount source="${SOURCE_DIR}",type=bind,destination=/src${SOURCE_READONLY} \
+          --mount source="${OUTPUT_DIR}",type=bind,destination=/out \
           ${MOUNT_OUTPUT_DIR} \
           ${DOCKER_RUN_EXTRA_ARGS} \
           ${ASH_IMAGE_NAME} \
             ash \
-              --source-dir /src  \
-              ${OUTPUT_DIR_OPTION}  \
+              --source-dir /src \
+              --output-dir /out \
               $ASH_ARGS
       RC=$?
     fi

@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "my-ash-plugins"
+version = "0.1.0"
+description = "Example external plugin package for ASH"
+authors = ["Amazon Web Services <aws-security-helper@amazon.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/awslabs/automated-security-helper"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+automated-security-helper = {path = "../../", develop = true}
+# automated-security-helper = "*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

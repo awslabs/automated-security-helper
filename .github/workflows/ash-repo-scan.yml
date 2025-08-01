@@ -1,0 +1,35 @@
+name: Run ASH
+on:
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch: {}
+env:
+  PYTHON_VERSION: "3.12"
+
+permissions:
+  contents: read
+
+jobs:
+  ash:
+    # uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.0.0-beta
+    uses: ./.github/workflows/run-ash-security-scan.yml
+    permissions:
+      contents: read # Required to read the repository contents in order to scan them with ASH
+      checks: write # Required for writing CI check runs
+      pull-requests: write # Required for writing comments with scan results to pull requests
+      security-events: write # Required for collection of SARIF code scanning results for GitHub Advanced Security checks
+    with:
+      # The `${{ github.head_ref || github.ref_name }}` is used within the ASH repo to
+      # ensure the current branch of ASH during a PR/non-main branch run is installed
+      # for the scan. For non-ASH repos that would like to override this value, please
+      # specify a tag from the ASH repo to use here.
+      ash-version: ${{ github.head_ref || github.ref_name }}
+      # This repo uses GitHub Advanced Security. If you do not use GitHub Advanced Security,
+      # it is recommended to set this to `false` to prevent failures during SARIF report
+      # collection.
+      collect-sarif-report: true
+      # Set this to `false` if you would prefer that ASH does not comment on PRs with the findings.
+      post-pr-comment: true
+      # Set this to `false` if you prefer less verbose log output
+      verbose: true

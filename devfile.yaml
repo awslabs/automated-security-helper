@@ -1,0 +1,20 @@
+schemaVersion: 2.0.0
+metadata:
+  name: python-project
+components:
+  - name: dev
+    container:
+      image: public.ecr.aws/aws-mde/universal-image:latest
+commands:
+  - id: install
+    exec:
+      component: dev
+      commandLine: "curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.cargo/env && uv sync"
+  - id: build
+    exec:
+      component: dev
+      commandLine: "uv build"
+  - id: test
+    exec:
+      component: dev
+      commandLine: "uv run pytest"
