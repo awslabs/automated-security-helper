@@ -1,7 +1,6 @@
 name: "ASH Security Scan"
-description: |-
-  Runs ASH aggregated security scan on a repository and generates various industry
-  standard report formats such as SARIF, OCSF, CycloneDX, JUnitXML, HTML, Markdown
+#  Runs ASH aggregated security scan on a repository and generates various industry
+#  standard report formats such as SARIF, OCSF, CycloneDX, JUnitXML, HTML, Markdown
 
 on:
   workflow_call:
