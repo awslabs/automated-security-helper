@@ -198,13 +198,17 @@ class TestOcsfReporterHelperMethods:
 
     def test_determine_status_from_suppressions_no_suppressions(self, reporter):
         """Test status determination when no suppressions are present."""
-        status_id, status_detail = reporter._determine_status_from_suppressions(None)
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
+            None
+        )
 
         assert status_id == StatusId.integer_1  # Active/Open
         assert status_detail is None
 
         # Test with empty list
-        status_id, status_detail = reporter._determine_status_from_suppressions([])
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
+            []
+        )
 
         assert status_id == StatusId.integer_1  # Active/Open
         assert status_detail is None
@@ -219,11 +223,11 @@ class TestOcsfReporterHelperMethods:
             )
         ]
 
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions
         )
 
-        assert status_id == StatusId.integer_4  # Suppressed/Closed
+        assert status_id == StatusId.integer_3  # Suppressed/Closed
         assert status_detail is not None
         assert "kind: inSource" in status_detail
         assert "state: accepted" in status_detail
@@ -246,11 +250,11 @@ class TestOcsfReporterHelperMethods:
             ),
         ]
 
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions
         )
 
-        assert status_id == StatusId.integer_4  # Suppressed/Closed
+        assert status_id == StatusId.integer_3  # Suppressed/Closed
         assert status_detail is not None
         assert "First suppression" in status_detail
         assert "Second suppression" in status_detail
@@ -262,11 +266,11 @@ class TestOcsfReporterHelperMethods:
             Suppression(kind=Kind1.inSource)  # Only kind, no state or justification
         ]
 
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions
         )
 
-        assert status_id == StatusId.integer_4  # Suppressed/Closed
+        assert status_id == StatusId.integer_3  # Suppressed/Closed
         assert status_detail is not None
         assert "kind: inSource" in status_detail
 
@@ -276,11 +280,11 @@ class TestOcsfReporterHelperMethods:
             Suppression(kind=Kind1.inSource)  # Minimal suppression with required field
         ]
 
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions
         )
 
-        assert status_id == StatusId.integer_4  # Suppressed/Closed
+        assert status_id == StatusId.integer_3  # Suppressed/Closed
         assert status_detail is not None
         assert "kind: inSource" in status_detail
 
@@ -288,46 +292,46 @@ class TestOcsfReporterHelperMethods:
         """Test status determination with all possible suppression states."""
         # Test accepted state
         suppressions_accepted = [Suppression(kind=Kind1.inSource, state=State.accepted)]
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions_accepted
         )
-        assert status_id == StatusId.integer_4
+        assert status_id == StatusId.integer_3
         assert "state: accepted" in status_detail
 
         # Test underReview state
         suppressions_review = [
             Suppression(kind=Kind1.inSource, state=State.underReview)
         ]
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions_review
         )
-        assert status_id == StatusId.integer_4
+        assert status_id == StatusId.integer_3
         assert "state: underReview" in status_detail
 
         # Test rejected state
         suppressions_rejected = [Suppression(kind=Kind1.inSource, state=State.rejected)]
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions_rejected
         )
-        assert status_id == StatusId.integer_4
+        assert status_id == StatusId.integer_3
         assert "state: rejected" in status_detail
 
     def test_determine_status_from_suppressions_all_kinds(self, reporter):
         """Test status determination with all possible suppression kinds."""
         # Test inSource kind
         suppressions_in_source = [Suppression(kind=Kind1.inSource)]
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions_in_source
         )
-        assert status_id == StatusId.integer_4
+        assert status_id == StatusId.integer_3
         assert "kind: inSource" in status_detail
 
         # Test external kind
         suppressions_external = [Suppression(kind=Kind1.external)]
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions_external
         )
-        assert status_id == StatusId.integer_4
+        assert status_id == StatusId.integer_3
         assert "kind: external" in status_detail
 
     def test_determine_status_from_suppressions_no_details(self, reporter):
@@ -336,11 +340,11 @@ class TestOcsfReporterHelperMethods:
             Suppression(kind=Kind1.inSource)  # Only required field
         ]
 
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions
         )
 
-        assert status_id == StatusId.integer_4  # Suppressed/Closed
+        assert status_id == StatusId.integer_3  # Suppressed/Closed
         assert status_detail == "kind: inSource"  # Only kind should be present
 
     def test_determine_status_from_suppressions_empty_justification(self, reporter):
@@ -353,11 +357,11 @@ class TestOcsfReporterHelperMethods:
             )
         ]
 
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions
         )
 
-        assert status_id == StatusId.integer_4  # Suppressed/Closed
+        assert status_id == StatusId.integer_3  # Suppressed/Closed
         assert status_detail is not None
         assert "kind: inSource" in status_detail
         assert "state: accepted" in status_detail
@@ -385,12 +389,12 @@ class TestOcsfReporterHelperMethods:
 
         suppressions = [MockSuppression()]
 
-        status_id, status_detail = reporter._determine_status_from_suppressions(
+        status_id, status_detail, status = reporter._determine_status_from_suppressions(
             suppressions
         )
 
         # Should still return suppressed status despite individual field errors
-        assert status_id == StatusId.integer_4  # Suppressed
+        assert status_id == StatusId.integer_3  # Suppressed
         assert status_detail is not None
         # Should contain the successfully extracted fields
         assert "state: accepted" in status_detail
@@ -446,7 +450,7 @@ class TestOcsfReporterHelperMethods:
         )
 
         assert finding.severity_id == SeverityId.integer_3  # MEDIUM for warning
-        assert finding.status_id == StatusId.integer_4  # Suppressed
+        assert finding.status_id == StatusId.integer_3  # Suppressed
         assert finding.status_detail is not None
         assert "False positive" in finding.status_detail
 
@@ -1166,7 +1170,7 @@ class TestOcsfReporterSeverityMapping:
 
         # Severity should still be HIGH even though finding is suppressed
         assert finding.severity_id == SeverityId.integer_4  # HIGH
-        assert finding.status_id == StatusId.integer_4  # Suppressed
+        assert finding.status_id == StatusId.integer_3  # Suppressed
         assert finding.vulnerabilities[0].severity == "ERROR"
 
     def test_severity_mapping_individual_finding_independence(
@@ -1363,9 +1367,10 @@ class TestOcsfReporterSeverityMapping:
         )
 
         # Second finding should be suppressed
-        assert findings[1]["status_id"] == 4  # StatusId.integer_4 (Suppressed)
+        assert findings[1]["status_id"] == 3  # StatusId.integer_3 (Suppressed)
         assert "status_detail" in findings[1]
         assert "False positive" in findings[1]["status_detail"]
+        assert "Suppressed" in findings[1]["status"]
 
     def test_report_unique_finding_identifiers(self, reporter, sample_ash_model):
         """Test that each finding gets a unique identifier."""
