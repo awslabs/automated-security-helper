@@ -283,6 +283,8 @@ scanners:
       custom_plugins: []  # Custom plugins to use
 ```
 
+If you have been using detect-secrets separately and have an existing baseline file you would like to use with ASH, ASH can automatically use it. ASH automatically searches your current directory and the ```.ash``` directory for a ```.secrets.baseline``` file. For more details on baseline files, refer to the ```detect-secrets``` [documentation](https://github.com/Yelp/detect-secrets/tree/master).
+
 ### Checkov
 
 ```yaml
