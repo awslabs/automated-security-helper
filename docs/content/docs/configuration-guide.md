@@ -256,7 +256,7 @@ scanners:
       # with version constraint >=1.7.0 for enhanced SARIF support
 ```
 
-If you have been using Bandit separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.bandit```, ```.bandit.toml```, or ```.bandit.yaml```, and will use the settings found in the file if it is detected. For more details on using a bandit configuration file, refer to the ```bandit``` [documentation](https://bandit.readthedocs.io/en/latest/config.html).
+If you have been using Bandit separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.bandit```, ```.bandit.toml```, or ```.bandit.yaml```, and will use the settings found in the file if it is detected. For more details on using a bandit configuration file, refer to the Bandit [documentation](https://bandit.readthedocs.io/en/latest/config.html).
 
 ### Semgrep
 
@@ -285,7 +285,7 @@ scanners:
       custom_plugins: []  # Custom plugins to use
 ```
 
-If you have been using detect-secrets separately and have an existing baseline file you would like to use with ASH, ASH can automatically use it. ASH automatically searches your current directory and the ```.ash``` directory for a ```.secrets.baseline``` file. For more details on baseline files, refer to the ```detect-secrets``` [documentation](https://github.com/Yelp/detect-secrets/tree/master).
+If you have been using detect-secrets separately and have an existing baseline file you would like to use with ASH, ASH can automatically use it. ASH automatically searches your current directory and the ```.ash``` directory for a ```.secrets.baseline``` file. For more details on baseline files, refer to the detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
 
 ### Checkov
 
@@ -303,6 +303,8 @@ scanners:
       # Note: Checkov is automatically downloaded and run via UV tool management
       # with version constraint >=3.2.0,<4.0.0 for enhanced stability
 ```
+
+If you have been using Checkov separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.checkov.yml``` or ```.checkov.yaml```, and will use the settings found in the file if it is detected. For more details on using a bandit configuration file, refer to the Checkov [documentation](https://github.com/bridgecrewio/checkov?tab=readme-ov-file#configuration-using-a-config-file).
 
 ## UV Tool Management
 
