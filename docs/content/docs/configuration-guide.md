@@ -256,6 +256,8 @@ scanners:
       # with version constraint >=1.7.0 for enhanced SARIF support
 ```
 
+If you have been using Bandit separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.bandit```, ```.bandit.toml```, or ```.bandit.yaml```, and will use the settings found in the file if it is detected. For more details on using a bandit configuration file, refer to the ```bandit``` [documentation](https://bandit.readthedocs.io/en/latest/config.html).
+
 ### Semgrep
 
 ```yaml
