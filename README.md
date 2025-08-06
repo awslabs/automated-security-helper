@@ -87,11 +87,19 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 ### Quick Install (Recommended)
 
 ```bash
-# Install with pipx (isolated environment)
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
+# Install uv on Linux/macOS if it isn't installed already
+curl -sSf https://astral.sh/uv/install.sh | sh
 
-# Use as normal
-ash --help
+# Create an alias for ASH
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
+```
+
+```powershell
+# Install uv on Windows with PowerShell if it isn't installed already
+irm https://astral.sh/uv/install.ps1 | iex
+
+# Create a function for ASH
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0 $args }
 ```
 
 ### Other Installation Methods
@@ -99,16 +107,14 @@ ash --help
 <details>
 <summary>Click to expand other installation options</summary>
 
-#### Using `uvx`
+#### Using `pipx`
 
 ```bash
-# Linux/macOS
-curl -sSf https://astral.sh/uv/install.sh | sh
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
+# Install with pipx (isolated environment)
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
 
-# Windows PowerShell
-irm https://astral.sh/uv/install.ps1 | iex
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0 $args }
+# Use as normal
+ash --help
 ```
 
 #### Using `pip`
