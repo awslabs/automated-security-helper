@@ -318,7 +318,23 @@ scanners:
       offline: false # Run in offline mode
 ```
 
-If you have been using Grype separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory, the ```.ash``` directory, and the ```.grype``` directory for a file named ```.grype.yaml```. The current directory will also be searched for a ```grype.yaml``` file. If any of these files are found,ASH will use the settings found in the file. For more details on using a Grype configuration file, refer to the Grype [documentation](https://github.com/anchore/grype?tab=readme-ov-file#configuration).
+If you have been using Grype separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory, the ```.ash``` directory, and the ```.grype``` directory for a file named ```.grype.yaml```. The current directory will also be searched for a ```grype.yaml``` file. If any of these files are found, ASH will use the settings found in the file. For more details on using a Grype configuration file, refer to the Grype [documentation](https://github.com/anchore/grype?tab=readme-ov-file#configuration).
+
+### Syft
+
+```yaml
+scanners:
+  syft:
+    enabled: true
+    options:
+      config_file: .grype.yaml # Specific path to grype configuration file
+      exclude: ['tests'] # List of files and directories to exclude from scans
+      additional_outputs: ["syft-json"] # List of additional output formats for Syft. Options: 
+      # "cyclonedx-json", "cyclonedx-xml","github-json", "spdx-json", 
+      # "spdx-tag-value", "syft-json", "syft-table", "syft-text"
+```
+
+If you have been using Syft separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory for a file named ```.syft.yaml``` or ```.syft.yml```. If either of these files are found, ASH will use the settings found in the file. For more details on using a Syft configuration file, refer to the Syft [documentation](https://github.com/anchore/syft/wiki/Configuration).
 
 ## UV Tool Management
 
