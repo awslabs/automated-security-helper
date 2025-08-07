@@ -116,7 +116,11 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip
 #
 # Install nbconvert for Jupyter notebook conversion
 #
-RUN python3 -m pip install --no-cache-dir nbconvert>=6.0.0 jupyter-core ipython
+RUN python3 -m pip install --no-cache-dir nbconvert>=6.0.0 jupyter-core ipython && \
+    # Ensure nbconvert is accessible and functional
+    python3 -m nbconvert --version && \
+    # Create symlink for easier access
+    ln -sf /usr/local/bin/jupyter-nbconvert /usr/local/bin/nbconvert || true
 
 # #
 # # Git (git-secrets)

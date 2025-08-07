@@ -103,66 +103,66 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         """Enhanced validation with explicit tool installation.
 
         This method implements the enhanced validation workflow that:
-        1. Checks if UV tool is available when required
-        2. Attempts explicit tool installation if needed
-        3. Falls back to existing validation methods
-        4. Provides comprehensive logging for troubleshooting
+        1. Prioritizes system-installed nbconvert (from Dockerfile)
+        2. Falls back to UV tool installation if system version not available
+        3. Provides comprehensive logging for troubleshooting
 
         Returns:
             True if converter is ready to use, False otherwise
         """
-        # First, try to detect system-installed nbconvert (which we installed in Dockerfile)
-        if self.config.options.fallback_to_system:
+        # First, always try to detect system-installed nbconvert (which we installed in Dockerfile)
+        try:
+            # Try multiple possible nbconvert commands in order of preference
+            for cmd_info in [
+                ("python3 -m nbconvert", ["python3", "-m", "nbconvert", "--version"]),
+                ("nbconvert", ["nbconvert", "--version"]),
+                ("jupyter-nbconvert", ["jupyter-nbconvert", "--version"]),
+            ]:
+                cmd_name, version_cmd = cmd_info
+                try:
+                    result = subprocess.run(
+                        version_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if result.returncode == 0:
+                        ASH_LOGGER.info(f"Found system nbconvert via: {cmd_name}")
+                        self.use_uv_tool = False  # Use direct execution instead
+                        self.command = cmd_name
+                        self.tool_version = result.stdout.strip()
+                        ASH_LOGGER.debug(f"nbconvert version: {self.tool_version}")
+                        return True
+                except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
+                    ASH_LOGGER.debug(f"Command {cmd_name} failed: {e}")
+                    continue
+        except Exception as e:
+            ASH_LOGGER.debug(f"System nbconvert check failed: {e}")
+
+        # If system nbconvert not found and UV tool is enabled, try UV tool approach
+        if self.use_uv_tool and self.config.options.fallback_to_system:
             try:
-                # Try multiple possible nbconvert commands
-                for cmd in ["python3 -m nbconvert", "nbconvert", "jupyter-nbconvert"]:
-                    try:
-                        if cmd.startswith("python3"):
-                            result = subprocess.run(
-                                cmd.split() + ["--version"],
-                                capture_output=True,
-                                text=True,
-                                timeout=10,
-                            )
-                        else:
-                            result = subprocess.run(
-                                [cmd, "--version"],
-                                capture_output=True,
-                                text=True,
-                                timeout=10,
-                            )
-                        if result.returncode == 0:
-                            ASH_LOGGER.debug(f"Found nbconvert via direct execution: {cmd}")
-                            self.use_uv_tool = False  # Use direct execution instead
-                            self.command = cmd if not cmd.startswith("python3") else "python3 -m nbconvert"
-                            self.tool_version = result.stdout.strip()
-                            return True
-                    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
-                        continue
-            except Exception as e:
-                ASH_LOGGER.debug(f"System nbconvert check failed: {e}")
-
-        # If system nbconvert not found, try UV tool approach
-        if self.use_uv_tool:
-            # Attempt explicit tool installation
-            installation_success = self._install_uv_tool(
-                timeout=self.config.options.install_timeout
-            )
-
-            if installation_success:
-                ASH_LOGGER.debug(f"UV tool installation successful for {self.command}")
-                # Update tool version after successful installation
-                self.tool_version = self._get_uv_tool_version(self.command)
-                return True
-            else:
-                ASH_LOGGER.warning(
-                    f"UV tool installation failed for {self.command}, attempting fallback validation"
+                # Attempt explicit tool installation
+                installation_success = self._install_uv_tool(
+                    timeout=self.config.options.install_timeout
                 )
 
-        ASH_LOGGER.warning(
-            f"Converter {self.command} is not available. "
+                if installation_success:
+                    ASH_LOGGER.debug(f"UV tool installation successful for {self.command}")
+                    # Update tool version after successful installation
+                    self.tool_version = self._get_uv_tool_version(self.command)
+                    return True
+                else:
+                    ASH_LOGGER.warning(
+                        f"UV tool installation failed for {self.command}, no fallback available"
+                    )
+            except Exception as e:
+                ASH_LOGGER.warning(f"UV tool installation error: {e}")
+
+        ASH_LOGGER.error(
+            f"Converter nbconvert is not available via any method. "
             f"Jupyter notebook conversion will be skipped. "
-            f"To fix this, install nbconvert: pip install nbconvert"
+            f"This should not happen in the Docker environment where nbconvert is pre-installed."
         )
         return False
 
