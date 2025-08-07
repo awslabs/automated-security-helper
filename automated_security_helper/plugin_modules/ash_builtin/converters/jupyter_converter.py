@@ -31,11 +31,15 @@ class JupyterConverterConfigOptions(ConverterOptionsBase):
         Field(
             description="Version constraint for nbconvert tool installation (e.g., '>=7.16.0'). If not specified, the latest version will be installed."
         ),
-    ] = ">=7.16.0,<8.0.0"
+    ] = ">=7.0.0"  # More flexible version constraint
     install_timeout: Annotated[
         int,
-        Field(description="Timeout in seconds for tool installation (default: 300)"),
-    ] = 300
+        Field(description="Timeout in seconds for tool installation (default: 600)"),
+    ] = 600  # Increased timeout for better reliability
+    fallback_to_system: Annotated[
+        bool,
+        Field(description="Whether to fallback to system-installed jupyter/nbconvert if UV installation fails"),
+    ] = True
 
 
 class JupyterConverterConfig(ConverterPluginConfigBase):
@@ -74,7 +78,8 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         Returns:
             Version constraint string for nbconvert (e.g., ">=7.16.0") or None for latest
         """
-        return self.config.options.tool_version
+        # Use a more flexible version constraint to avoid conflicts
+        return self.config.options.tool_version or ">=6.0.0,<8.0.0"
 
     def _get_tool_package_extras(self) -> Optional[List[str]]:
         """Get package extras for nbconvert installation.
@@ -91,57 +96,73 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         Returns:
             List of additional dependencies needed for nbconvert (jupyter for CLI access)
         """
-        return ["jupyter"]
+        # Install jupyter-core and ipython for better compatibility
+        return ["jupyter-core", "ipython"]
 
     def validate_plugin_dependencies(self) -> bool:
         """Enhanced validation with explicit tool installation.
 
         This method implements the enhanced validation workflow that:
-        1. Checks if UV tool is available when required
-        2. Attempts explicit tool installation if needed
-        3. Falls back to existing validation methods
-        4. Provides comprehensive logging for troubleshooting
+        1. Prioritizes system-installed nbconvert (from Dockerfile)
+        2. Falls back to UV tool installation if system version not available
+        3. Provides comprehensive logging for troubleshooting
 
         Returns:
             True if converter is ready to use, False otherwise
         """
-        if self.use_uv_tool:
-            # Attempt explicit tool installation
-            installation_success = self._install_uv_tool(
-                timeout=self.config.options.install_timeout
-            )
+        # First, always try to detect system-installed nbconvert (which we installed in Dockerfile)
+        try:
+            # Try multiple possible nbconvert commands in order of preference
+            for cmd_info in [
+                ("python3 -m nbconvert", ["python3", "-m", "nbconvert", "--version"]),
+                ("nbconvert", ["nbconvert", "--version"]),
+                ("jupyter-nbconvert", ["jupyter-nbconvert", "--version"]),
+            ]:
+                cmd_name, version_cmd = cmd_info
+                try:
+                    result = subprocess.run(
+                        version_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if result.returncode == 0:
+                        ASH_LOGGER.info(f"Found system nbconvert via: {cmd_name}")
+                        self.use_uv_tool = False  # Use direct execution instead
+                        self.command = cmd_name
+                        self.tool_version = result.stdout.strip()
+                        ASH_LOGGER.debug(f"nbconvert version: {self.tool_version}")
+                        return True
+                except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
+                    ASH_LOGGER.debug(f"Command {cmd_name} failed: {e}")
+                    continue
+        except Exception as e:
+            ASH_LOGGER.debug(f"System nbconvert check failed: {e}")
 
-            if installation_success:
-                ASH_LOGGER.debug(f"UV tool installation successful for {self.command}")
-                # Update tool version after successful installation
-                self.tool_version = self._get_uv_tool_version(self.command)
-                return True
-            else:
-                ASH_LOGGER.warning(
-                    f"UV tool installation failed for {self.command}, attempting fallback validation"
+        # If system nbconvert not found and UV tool is enabled, try UV tool approach
+        if self.use_uv_tool and self.config.options.fallback_to_system:
+            try:
+                # Attempt explicit tool installation
+                installation_success = self._install_uv_tool(
+                    timeout=self.config.options.install_timeout
                 )
 
-        # Fallback to checking if jupyter command is available via direct execution
-        try:
-            result = subprocess.run(
-                ["jupyter", "nbconvert", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                ASH_LOGGER.debug("Found jupyter nbconvert via direct execution")
-                return True
-        except (
-            subprocess.TimeoutExpired,
-            FileNotFoundError,
-            subprocess.SubprocessError,
-        ):
-            pass
+                if installation_success:
+                    ASH_LOGGER.debug(f"UV tool installation successful for {self.command}")
+                    # Update tool version after successful installation
+                    self.tool_version = self._get_uv_tool_version(self.command)
+                    return True
+                else:
+                    ASH_LOGGER.warning(
+                        f"UV tool installation failed for {self.command}, no fallback available"
+                    )
+            except Exception as e:
+                ASH_LOGGER.warning(f"UV tool installation error: {e}")
 
-        ASH_LOGGER.warning(
-            f"Converter {self.command} is not available. "
-            f"Jupyter notebook conversion will be skipped."
+        ASH_LOGGER.error(
+            f"Converter nbconvert is not available via any method. "
+            f"Jupyter notebook conversion will be skipped. "
+            f"This should not happen in the Docker environment where nbconvert is pre-installed."
         )
         return False
 
@@ -168,19 +189,19 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 ASH_LOGGER.debug("UV is not available for nbconvert execution")
                 return False
 
-            # Extract jupyter arguments (skip 'jupyter')
-            if len(cmd) < 1 or cmd[0] != "jupyter":
-                ASH_LOGGER.error(f"Invalid jupyter command format: {cmd}")
+            # Extract nbconvert arguments
+            if len(cmd) < 1 or cmd[0] != "nbconvert":
+                ASH_LOGGER.error(f"Invalid nbconvert command format: {cmd}")
                 return False
 
-            jupyter_args = cmd[1:]  # Skip 'jupyter'
+            nbconvert_args = cmd[1:]  # Skip 'nbconvert'
 
-            ASH_LOGGER.debug(f"Executing jupyter via UV with args: {jupyter_args}")
+            ASH_LOGGER.debug(f"Executing nbconvert via UV with args: {nbconvert_args}")
 
-            # Use UV tool runner to execute jupyter (nbconvert tool provides jupyter command)
+            # Use UV tool runner to execute nbconvert directly
             result = uv_runner.run_tool(
-                tool_name="jupyter",
-                args=jupyter_args,
+                tool_name="nbconvert",
+                args=nbconvert_args,
                 cwd=self.context.source_dir,
                 capture_output=True,
                 text=True,
@@ -191,24 +212,54 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             )
 
             if result.returncode == 0:
-                ASH_LOGGER.debug("jupyter execution via UV succeeded")
+                ASH_LOGGER.debug("nbconvert execution via UV succeeded")
                 return True
             else:
                 ASH_LOGGER.warning(
-                    f"jupyter execution via UV failed with exit code {result.returncode}"
+                    f"nbconvert execution via UV failed with exit code {result.returncode}"
                 )
                 if result.stderr:
-                    ASH_LOGGER.debug(f"jupyter stderr: {result.stderr}")
+                    ASH_LOGGER.debug(f"nbconvert stderr: {result.stderr}")
                 return False
 
         except UVToolRunnerError as e:
-            ASH_LOGGER.warning(f"UV tool runner error for jupyter: {e}")
+            ASH_LOGGER.warning(f"UV tool runner error for nbconvert: {e}")
+            # Try to install the tool if it's not available
+            if "not found" in str(e).lower() or "not installed" in str(e).lower():
+                ASH_LOGGER.info("Attempting to install nbconvert via UV...")
+                try:
+                    install_success = uv_runner.install_tool_with_version(
+                        tool_name="nbconvert",
+                        version_constraint=self._get_tool_version_constraint(),
+                        timeout=300,
+                        package_extras=self._get_tool_package_extras(),
+                        with_dependencies=self._get_tool_with_dependencies(),
+                    )
+                    if install_success:
+                        ASH_LOGGER.info("nbconvert installed successfully, retrying execution...")
+                        # Retry the execution after successful installation
+                        result = uv_runner.run_tool(
+                            tool_name="nbconvert",
+                            args=nbconvert_args,
+                            cwd=self.context.source_dir,
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            package_extras=self._get_tool_package_extras(),
+                            version_constraint=self._get_tool_version_constraint(),
+                            timeout=timeout,
+                        )
+                        if result.returncode == 0:
+                            ASH_LOGGER.debug("nbconvert execution via UV succeeded after installation")
+                            return True
+                except Exception as install_e:
+                    ASH_LOGGER.warning(f"Failed to install nbconvert via UV: {install_e}")
             return False
         except ImportError as e:
             ASH_LOGGER.warning(f"UV tool runner module not available: {e}")
             return False
         except Exception as e:
-            ASH_LOGGER.warning(f"Unexpected error during UV jupyter execution: {e}")
+            ASH_LOGGER.warning(f"Unexpected error during UV nbconvert execution: {e}")
             return False
 
     def convert(self) -> List[Path]:
@@ -274,43 +325,79 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     f"Converting {ipynb_file} to target_path: {Path(target_path).as_posix()}"
                 )
 
-                # Use CLI command similar to the original shell script
-                cmd = [
-                    "jupyter",
-                    "nbconvert",
-                    "--log-level",
-                    "WARN",
-                    "--to",
-                    "script",
-                    str(ipynb_file),
-                    "--output",
-                    str(
-                        target_path.with_suffix("")
-                    ),  # nbconvert adds .py automatically
-                ]
+                # Build command based on available nbconvert method
+                if self.use_uv_tool:
+                    cmd = [
+                        "nbconvert",
+                        "--log-level",
+                        "WARN",
+                        "--to",
+                        "script",
+                        str(ipynb_file),
+                        "--output",
+                        str(target_path.with_suffix("")),  # nbconvert adds .py automatically
+                    ]
+                elif self.command and self.command.startswith("python3"):
+                    cmd = [
+                        "python3",
+                        "-m",
+                        "nbconvert",
+                        "--log-level",
+                        "WARN",
+                        "--to",
+                        "script",
+                        str(ipynb_file),
+                        "--output",
+                        str(target_path.with_suffix("")),  # nbconvert adds .py automatically
+                    ]
+                else:
+                    cmd = [
+                        self.command or "nbconvert",
+                        "--log-level",
+                        "WARN",
+                        "--to",
+                        "script",
+                        str(ipynb_file),
+                        "--output",
+                        str(target_path.with_suffix("")),  # nbconvert adds .py automatically
+                    ]
 
                 # Execute using UV tool runner if available, otherwise direct execution
+                success = False
                 if self.use_uv_tool:
                     success = self._execute_nbconvert_via_uv(cmd, timeout=60)
                     if not success:
                         ASH_LOGGER.warning(
                             f"UV tool execution failed for {ipynb_file}, trying direct execution"
                         )
+                
+                # Try direct execution if UV failed or not available
+                if not success:
+                    try:
                         result = subprocess.run(
-                            cmd, capture_output=True, text=True, timeout=60
+                            cmd, capture_output=True, text=True, timeout=60, cwd=self.context.source_dir
                         )
                         if result.returncode != 0:
-                            raise subprocess.CalledProcessError(
-                                result.returncode, cmd, result.stdout, result.stderr
-                            )
-                else:
-                    result = subprocess.run(
-                        cmd, capture_output=True, text=True, timeout=60
-                    )
-                    if result.returncode != 0:
-                        raise subprocess.CalledProcessError(
-                            result.returncode, cmd, result.stdout, result.stderr
-                        )
+                            # Try alternative commands if the first one fails
+                            for alt_cmd in [["python3", "-m", "nbconvert"], ["jupyter-nbconvert"]]:
+                                try:
+                                    alt_full_cmd = alt_cmd + cmd[1:]  # Keep the same arguments
+                                    result = subprocess.run(
+                                        alt_full_cmd, capture_output=True, text=True, timeout=60, cwd=self.context.source_dir
+                                    )
+                                    if result.returncode == 0:
+                                        break
+                                except (FileNotFoundError, subprocess.SubprocessError):
+                                    continue
+                            
+                            if result.returncode != 0:
+                                raise subprocess.CalledProcessError(
+                                    result.returncode, cmd, result.stdout, result.stderr
+                                )
+                    except FileNotFoundError as e:
+                        ASH_LOGGER.error(f"nbconvert command not found: {e}")
+                        ASH_LOGGER.error(f"Please install nbconvert: pip install nbconvert")
+                        continue
 
                 # Check if the converted file was created
                 if target_path.exists():

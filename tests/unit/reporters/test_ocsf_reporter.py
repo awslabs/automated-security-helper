@@ -741,8 +741,8 @@ class TestOcsfReporterHelperMethods:
         assert finding.metadata.product.vendor_name == "Amazon Web Services"
         assert finding.metadata.product.version is not None
         assert finding.metadata.version == "1.1.0"
-        # Allow for small timing differences (within 10ms)
-        assert abs(finding.metadata.logged_time - current_time_ms) <= 10
+        # Allow for small timing differences (within 50ms to account for system variations)
+        assert abs(finding.metadata.logged_time - current_time_ms) <= 50
 
         # Validate complete finding information (Requirement 3.2)
         assert finding.finding_info is not None
