@@ -28,6 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sarif_utils import mask_secrets_in_sarif
 
 
 class BanditScannerConfigOptions(ScannerOptionsBase):
@@ -398,6 +399,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     ),
                 )
             ]
+            
+            # Mask secrets in the SARIF report before returning
+            sarif_report = mask_secrets_in_sarif(sarif_report)
+            
         except Exception as e:
             ASH_LOGGER.warning(f"Failed to parse Bandit results as SARIF: {str(e)}")
             sarif_report = bandit_results
