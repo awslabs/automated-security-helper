@@ -113,6 +113,11 @@ ENV PATH="/root/.local/bin:$PATH"
 RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py
 RUN python3 -m pip install --no-cache-dir --upgrade pip
 
+#
+# Install nbconvert for Jupyter notebook conversion
+#
+RUN python3 -m pip install --no-cache-dir nbconvert>=6.0.0 jupyter-core ipython
+
 # #
 # # Git (git-secrets)
 # #
