@@ -256,6 +256,8 @@ scanners:
       # with version constraint >=1.7.0 for enhanced SARIF support
 ```
 
+If you have been using Bandit separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.bandit```, ```.bandit.toml```, or ```.bandit.yaml```, and will use the settings found in the file if it is detected. For more details on using a Bandit configuration file, refer to the Bandit [documentation](https://bandit.readthedocs.io/en/latest/config.html).
+
 ### Semgrep
 
 ```yaml
@@ -283,6 +285,8 @@ scanners:
       custom_plugins: []  # Custom plugins to use
 ```
 
+If you have been using detect-secrets separately and have an existing baseline file you would like to use with ASH, ASH can automatically use it. ASH automatically searches your current directory and the ```.ash``` directory for a ```.secrets.baseline``` file. For more details on baseline files, refer to the detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
+
 ### Checkov
 
 ```yaml
@@ -299,6 +303,38 @@ scanners:
       # Note: Checkov is automatically downloaded and run via UV tool management
       # with version constraint >=3.2.0,<4.0.0 for enhanced stability
 ```
+
+If you have been using Checkov separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.checkov.yml``` or ```.checkov.yaml```, and will use the settings found in the file if it is detected. For more details on using a bandit configuration file, refer to the Checkov [documentation](https://github.com/bridgecrewio/checkov?tab=readme-ov-file#configuration-using-a-config-file).
+
+### Grype
+
+```yaml
+scanners:
+  grype:
+    enabled: true
+    options:
+      config_file: .grype.yaml # Specific path to grype configuration file
+      severity_threshold: MEDIUM # Options: ALL, LOW, MEDIUM, HIGH, CRITICAL
+      offline: false # Run in offline mode
+```
+
+If you have been using Grype separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory, the ```.ash``` directory, and the ```.grype``` directory for a file named ```.grype.yaml```. The current directory will also be searched for a ```grype.yaml``` file. If any of these files are found, ASH will use the settings found in the file. For more details on using a Grype configuration file, refer to the Grype [documentation](https://github.com/anchore/grype?tab=readme-ov-file#configuration).
+
+### Syft
+
+```yaml
+scanners:
+  syft:
+    enabled: true
+    options:
+      config_file: .grype.yaml # Specific path to grype configuration file
+      exclude: ['tests'] # List of files and directories to exclude from scans
+      additional_outputs: ["syft-json"] # List of additional output formats for Syft. Options: 
+      # "cyclonedx-json", "cyclonedx-xml","github-json", "spdx-json", 
+      # "spdx-tag-value", "syft-json", "syft-table", "syft-text"
+```
+
+If you have been using Syft separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory for a file named ```.syft.yaml``` or ```.syft.yml```. If either of these files are found, ASH will use the settings found in the file. For more details on using a Syft configuration file, refer to the Syft [documentation](https://github.com/anchore/syft/wiki/Configuration).
 
 ## UV Tool Management
 
