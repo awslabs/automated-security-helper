@@ -86,6 +86,8 @@ class UVToolRunner:
             for line in result.stdout.strip().split("\n"):
                 if line.strip():
                     tool_name = line.strip().split()[0]
+                    if tool_name == "-":
+                        tool_name = line.strip().split()[1]  # Add sub-commands too
                     tools.append(tool_name)
 
             return tools
@@ -103,14 +105,29 @@ class UVToolRunner:
         finally:
             return tool_name in installed_tools
 
-    def get_tool_version(self, tool_name: str) -> Optional[str]:
+    def get_tool_version(
+        self, tool_name: str, package_name: Optional[str] = None
+    ) -> Optional[str]:
         """Get version of a UV tool."""
         if not self.is_uv_available():
             return None
 
         try:
+            command = [self.uv_executable, "tool", "run"]
+
+            # Build command with --from parameter if extras specified
+            if package_name:
+                # Build the --from specification
+                command.extend(
+                    [
+                        "--from",
+                        package_name,
+                    ]
+                )
+
+            command.extend([tool_name, "--version"])
             result = subprocess.run(
-                [self.uv_executable, "tool", "run", tool_name, "--version"],
+                command,
                 capture_output=True,
                 text=True,
                 timeout=15,
@@ -128,11 +145,13 @@ class UVToolRunner:
 
         return None
 
-    def get_installed_tool_version(self, tool_name: str) -> Optional[str]:
+    def get_installed_tool_version(
+        self, tool_name: str, package_name: Optional[str] = None
+    ) -> Optional[str]:
         """Get version of an installed UV tool."""
         if not self.is_tool_installed(tool_name):
             return None
-        return self.get_tool_version(tool_name)
+        return self.get_tool_version(tool_name, package_name)
 
     def install_tool_with_version(
         self,
@@ -255,6 +274,7 @@ class UVToolRunner:
     def run_tool(
         self,
         tool_name: str,
+        package_name: Optional[str] | None = None,
         args: List[str] | None = None,
         cwd: Optional[Path] = None,
         capture_output: bool = True,
@@ -328,6 +348,14 @@ class UVToolRunner:
                 ]
             )
 
+        if package_name:
+            command.extend(
+                [
+                    "--from",
+                    package_name,
+                ]
+            )
+
         command.extend([tool_name, *args])
 
         # Use the centralized output handling if results_dir is provided
@@ -385,12 +413,16 @@ class UVToolRunner:
         except subprocess.CalledProcessError as e:
             raise UVToolRunnerError(f"UV tool run failed for {tool_name}: {e}")
 
-    def get_tool_installation_info(self, tool_name: str) -> Dict[str, Any]:
+    def get_tool_installation_info(
+        self, tool_name: str, package_name: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Get comprehensive installation information for a tool."""
         is_uv_installed = (
             self.is_tool_installed(tool_name) if self.is_uv_available() else False
         )
-        uv_version = self.get_tool_version(tool_name) if is_uv_installed else None
+        uv_version = (
+            self.get_tool_version(tool_name, package_name) if is_uv_installed else None
+        )
 
         # Simple pre-installed check
         import shutil
@@ -493,7 +525,9 @@ class UVToolRunner:
         except Exception:
             return False
 
-    def validate_cached_tool(self, tool_name: str) -> Dict[str, Any]:
+    def validate_cached_tool(
+        self, tool_name: str, package_name: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Validate that a cached tool is still functional."""
         validation_result = {
             "tool_name": tool_name,
@@ -504,7 +538,7 @@ class UVToolRunner:
 
         try:
             # Try to get version to validate functionality
-            version = self.get_tool_version(tool_name)
+            version = self.get_tool_version(tool_name, package_name)
             if version:
                 validation_result["is_functional"] = True
                 validation_result["version"] = version
