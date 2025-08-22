@@ -470,7 +470,7 @@ class UVToolRunner:
         """Get UV cache information for optimization purposes."""
         try:
             result = subprocess.run(
-                [self.uv_executable, "cache", "info"],
+                [self.uv_executable, "cache", "dir"],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -488,12 +488,10 @@ class UVToolRunner:
 
                 # Try to extract cache size and location if available
                 lines = result.stdout.strip().split("\n")
+                # The command returns only the cache path
                 for line in lines:
-                    if "cache" in line.lower() and (
-                        "size" in line.lower() or "location" in line.lower()
-                    ):
-                        cache_info["details"] = line.strip()
-                        break
+                    cache_info["details"] = line.strip()
+                    break
 
                 return cache_info
             else:
