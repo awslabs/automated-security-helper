@@ -2967,6 +2967,18 @@
           },
           "title": "Uv Tool Install Commands",
           "type": "array"
+        },
+        "uv_tool_package_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uv Tool Package Name"
         }
       },
       "title": "ScannerPluginBase",
