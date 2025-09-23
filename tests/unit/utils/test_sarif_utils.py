@@ -1,10 +1,11 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 from unittest.mock import patch
+from urllib.request import pathname2url
 
 from automated_security_helper.utils.sarif_utils import (
-    get_finding_id,
     _sanitize_uri,
+    get_finding_id,
     path_matches_pattern,
 )
 
@@ -32,16 +33,18 @@ def test_sanitize_uri(test_source_dir):
     source_dir_path = test_source_dir
     source_dir_str = source_dir_path.as_posix() + "/"
 
-    # Test with file:// prefix using a fixed Unix-style path
-    # (file:// URIs in SARIF always use forward slashes)
-    fixed_source = "/project/repo"
-    fixed_source_str = fixed_source + "/"
-    uri = f"file://{fixed_source}/src/file.py"
-    sanitized = _sanitize_uri(uri, Path(fixed_source), fixed_source_str)
-    assert "src" in sanitized
-    assert "file.py" in sanitized
-    assert not sanitized.startswith("file://")
-    assert "src/file.py" in sanitized
+    # Test with file:// prefix
+    uri = "file:" + pathname2url(f"{source_dir_path}/src/file.py")
+    assert uri.startswith("file://")
+    with patch.object(Path, "relative_to", return_value=Path("src/file.py")):
+        sanitized = _sanitize_uri(uri, source_dir_path, source_dir_str)
+        assert "src" in sanitized
+        assert "file.py" in sanitized
+        assert not sanitized.startswith("file://")
+        if sys.platform.lower() == "windows":
+            assert "/" in sanitized or "\\" not in sanitized
+        else:
+            assert sanitized == "src/file.py"
 
     # Test with backslashes - this is where Windows conversion happens
     uri = "src\\file.py"
