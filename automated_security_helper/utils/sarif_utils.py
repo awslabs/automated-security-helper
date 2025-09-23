@@ -5,6 +5,8 @@ import random
 from typing import List
 import uuid
 from pathlib import Path
+from urllib.request import url2pathname
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
@@ -68,8 +70,8 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
         return uri
 
     # Remove file:// prefix if present
-    if uri.startswith("file://"):
-        uri = uri[7:]
+    if uri.startswith("file:"):
+        uri = url2pathname(uri[5:])
 
     # Make path relative to source directory
     try:
