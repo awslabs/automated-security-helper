@@ -88,7 +88,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 
 ```bash
 # Install uv on Linux/macOS if it isn't installed already
-curl -sSf https://astral.sh/uv/install.sh | sh
+curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
 alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.0"
