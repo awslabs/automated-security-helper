@@ -129,13 +129,13 @@ jobs:
         if: contains(matrix.method, 'python') && !contains(matrix.os, 'windows')
         run: |
           echo "Installing ASH using Python on ${{ matrix.os }} (${{ matrix.platform }})"
-          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
+          pip install .
 
       - name: Update GITHUB_PATH with Python scripts path on Windows
         if: contains(matrix.method, 'python') && matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
+          pip install .
           echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
 
       - name: Validate ASH using Python + Container
