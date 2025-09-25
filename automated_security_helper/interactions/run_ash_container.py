@@ -78,17 +78,38 @@ def get_ash_revision() -> str | None:
         print(
             f"Found direct_url.json file for module @ {direct_url_json_path.as_posix()}"
         )
-        direct_url_json = json.loads(direct_url_json_path.read_text())
-        if isinstance(direct_url_json, dict) and "url" in direct_url_json:
-            if "vcs_info" in direct_url_json:
-                revision = (
-                    direct_url_json["vcs_info"]["requested_revision"]
-                    or ASH_REPO_LATEST_REVISION
-                )
-                return_val = revision
-                ASH_LOGGER.info(
-                    f"Resolved source revision for ASH to use during container image build: {return_val}"
-                )
+        try:
+            direct_url_json = json.loads(direct_url_json_path.read_text())
+            if isinstance(direct_url_json, dict) and "url" in direct_url_json:
+                url = direct_url_json["url"]
+                if url.startswith("file://"):
+                    ASH_LOGGER.info(
+                        "ASH installed from local file path, building with LOCAL source"
+                    )
+                    return "LOCAL"
+                elif "vcs_info" in direct_url_json and isinstance(
+                    direct_url_json["vcs_info"], dict
+                ):
+                    vcs_info = direct_url_json["vcs_info"]
+                    revision = (
+                        vcs_info.get("requested_revision")
+                        or vcs_info.get("commit_id")
+                        or ASH_REPO_LATEST_REVISION
+                    )
+                    return_val = revision
+                    ASH_LOGGER.info(
+                        f"Resolved source revision for ASH to use during container image build: {return_val}"
+                    )
+                else:
+                    ASH_LOGGER.warning(
+                        "direct_url.json exists but lacks vcs_info, falling back to latest revision"
+                    )
+                    return_val = ASH_REPO_LATEST_REVISION
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            ASH_LOGGER.warning(
+                f"Failed to parse direct_url.json: {e}, falling back to latest revision"
+            )
+            return_val = ASH_REPO_LATEST_REVISION
     else:
         return_val = ASH_REPO_LATEST_REVISION
 
