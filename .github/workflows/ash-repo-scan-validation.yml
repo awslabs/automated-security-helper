@@ -152,7 +152,7 @@ jobs:
           echo "ASH Help:"
           ash --help
           echo "ASH Scan Output:"
-          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL
+          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL --custom-containerfile ./Dockerfile
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'

@@ -14,9 +14,9 @@ on:
         default: "v3.0.0-beta"
         type: string
       ash-mode:
-        description: 'Mode to run ASH in. Defaults to "container". Use "local" to run in direct Python only. Be aware that running in local mode will not include any scanners that are not installed as Python dependencies of ASH itself.'
+        description: 'Mode to run ASH in. Defaults to "local" for CI compatibility. Use "container" for full scanner support.'
         required: false
-        default: "container"
+        default: "local"
         type: string
       config:
         description: "Path to the ASH config file, if any"
@@ -104,8 +104,7 @@ jobs:
           VERBOSE: ${{ inputs.verbose }}
         run: |-
           uvx --from ${ASH_UVX_SOURCE} ash \
-            --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose} \
-            --ash-revision-to-install LOCAL
+            --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose}
 
       - name: Show ASH Summary Report
         if: success() || failure()
