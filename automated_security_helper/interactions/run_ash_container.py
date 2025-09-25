@@ -358,20 +358,21 @@ def run_ash_container(
     )
 
     if resolved_revision == "LOCAL":
-        # Find the repository root by looking for key files
-        ash_repo_root = Path(__file__).parent.parent.parent
-        if not ash_repo_root.joinpath("Dockerfile").exists():
-            # If Dockerfile not found in expected location, search upwards
-            current_path = Path(__file__).resolve()
+        # For LOCAL builds, use current working directory as repository root
+        # This handles cases where ASH is installed via pip but we're running from the repo
+        dockerfile_path = Path.cwd().joinpath("Dockerfile")
+
+        # If not found in current directory, search upwards
+        if not dockerfile_path.exists():
+            current_path = Path.cwd().resolve()
             while current_path.parent != current_path:
                 if (
                     current_path.joinpath("Dockerfile").exists()
                     and current_path.joinpath("pyproject.toml").exists()
                 ):
-                    ash_repo_root = current_path
+                    dockerfile_path = current_path.joinpath("Dockerfile")
                     break
                 current_path = current_path.parent
-        dockerfile_path = ash_repo_root.joinpath("Dockerfile")
     else:
         dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
 
