@@ -70,7 +70,7 @@ on:
         type: string
 
 env:
-  ASH_UVX_SOURCE: git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }}
+  ASH_UVX_SOURCE: git+https://github.com/${{ github.repository }}@${{ github.sha }}
   ASH_OUTPUT_DIR: ${{ inputs.output-dir }}
   ASH_CONFIG: ${{ inputs.config }}
 
