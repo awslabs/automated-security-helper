@@ -356,11 +356,24 @@ def run_ash_container(
     resolved_revision = (
         ash_revision_to_install if ash_revision_to_install is not None else rev
     )
-    dockerfile_path = (
-        ASH_ASSETS_DIR.joinpath("Dockerfile")
-        if resolved_revision != "LOCAL"
-        else Path(__file__).parent.parent.parent.joinpath("Dockerfile")
-    )
+
+    if resolved_revision == "LOCAL":
+        # Find the repository root by looking for key files
+        ash_repo_root = Path(__file__).parent.parent.parent
+        if not ash_repo_root.joinpath("Dockerfile").exists():
+            # If Dockerfile not found in expected location, search upwards
+            current_path = Path(__file__).resolve()
+            while current_path.parent != current_path:
+                if (
+                    current_path.joinpath("Dockerfile").exists()
+                    and current_path.joinpath("pyproject.toml").exists()
+                ):
+                    ash_repo_root = current_path
+                    break
+                current_path = current_path.parent
+        dockerfile_path = ash_repo_root.joinpath("Dockerfile")
+    else:
+        dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
 
     if not dockerfile_path.exists():
         typer.secho(f"Dockerfile not found at {dockerfile_path}", fg=typer.colors.RED)
