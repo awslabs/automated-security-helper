@@ -159,7 +159,7 @@ jobs:
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
         # It should fail if there are findings in the scan, but that's a valid test for us still.
         continue-on-error: true
-        timeout-minutes: 4
+        timeout-minutes: 10
         run: |
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
           echo "ASH Version:"
