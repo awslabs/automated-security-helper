@@ -102,11 +102,10 @@ jobs:
           ASH_ARGS: ${{ inputs.ash-args }}
           FAIL_ON_FINDINGS_PARAM: ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}}
           VERBOSE: ${{ inputs.verbose }}
-          ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
         run: |-
           uvx --from ${ASH_UVX_SOURCE} ash \
             --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose} \
-            --custom-build-arg ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
+            --ash-revision-to-install LOCAL
 
       - name: Show ASH Summary Report
         if: success() || failure()
