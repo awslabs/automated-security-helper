@@ -94,6 +94,7 @@ def test_checkov_scanner_configure(test_plugin_context):
                 skip_path=[IgnorePathWithReason(path="tests/*", reason="Test files")],
                 frameworks=["terraform", "cloudformation"],
                 skip_frameworks=["secrets"],
+                skip_check=["CKV_AWS_20", "CKV_AWS_21"],
                 additional_formats=["json", "junitxml"],
             )
         ),
@@ -103,6 +104,7 @@ def test_checkov_scanner_configure(test_plugin_context):
     assert scanner.config.options.skip_path[0].path == "tests/*"
     assert "terraform" in scanner.config.options.frameworks
     assert "secrets" in scanner.config.options.skip_frameworks
+    assert scanner.config.options.skip_check == ["CKV_AWS_20", "CKV_AWS_21"]
     assert "json" in scanner.config.options.additional_formats
 
 
@@ -153,6 +155,23 @@ def test_process_config_options_frameworks(test_plugin_context):
     framework_args = [arg.key for arg in scanner.args.extra_args]
     assert "--framework" in framework_args
     assert "--skip-framework" in framework_args
+
+
+def test_process_config_options_skip_checks(test_plugin_context):
+    """Test processing of skip check options."""
+    scanner = CheckovScanner(
+        context=test_plugin_context,
+        config=CheckovScannerConfig(
+            options=CheckovScannerConfigOptions(
+                skip_check=["CKV_AWS_20"],
+            )
+        ),
+    )
+    scanner._process_config_options()
+
+    # Check that framework arguments were added
+    skip_args = [arg.key for arg in scanner.args.extra_args]
+    assert "--skip-check" in skip_args
 
 
 def test_process_config_options_skip_paths(test_plugin_context):

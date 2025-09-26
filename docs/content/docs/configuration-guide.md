@@ -296,6 +296,7 @@ scanners:
     options:
       framework: ['all']  # Frameworks to scan
       skip_frameworks: []  # Frameworks to exclude
+      skip_check: [] # Checks to exclude
       offline: false  # Run in offline mode
       additional_formats: ['cyclonedx_json']  # Additional output formats
       tool_version: null  # Version constraint (e.g., '>=3.2.0,<4.0.0')

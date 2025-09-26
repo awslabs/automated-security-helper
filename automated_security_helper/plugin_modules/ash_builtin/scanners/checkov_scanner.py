@@ -119,6 +119,12 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
             description="Specific frameworks to exclude with Checkov. Defaults to none."
         ),
     ] = []
+    skip_check: Annotated[
+        List[str],
+        Field(
+            description="Specific checks to exclude with Checkov. Defaults to none."
+        ),
+    ] = []
     tool_version: Annotated[
         str | None,
         Field(
@@ -267,6 +273,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         for item in self.config.options.skip_frameworks:
             self.args.extra_args.append(
                 ToolExtraArg(key="--skip-framework", value=item)
+            )
+        for item in self.config.options.skip_check:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--skip-check", value=item)
             )
 
         for item in KNOWN_IGNORE_PATHS:

@@ -275,6 +275,7 @@
                 "offline": false,
                 "severity_threshold": null,
                 "skip_frameworks": [],
+                "skip_check": [],
                 "skip_path": [],
                 "tool_version": null
               }
@@ -878,6 +879,7 @@
             "offline": false,
             "severity_threshold": null,
             "skip_frameworks": [],
+            "skip_check": [],
             "skip_path": [],
             "tool_version": null
           },
@@ -1056,6 +1058,15 @@
             "type": "string"
           },
           "title": "Skip Frameworks",
+          "type": "array"
+        },
+        "skip_check": {
+          "default": [],
+          "description": "Specific Checkov check IDs, BCcheck ID's, a severity level or a secret validation status to skip with Checkov. Can be specified multiple times.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Skip Check",
           "type": "array"
         },
         "skip_path": {
@@ -2614,6 +2625,7 @@
               "offline": false,
               "severity_threshold": null,
               "skip_frameworks": [],
+              "skip_check": [],
               "skip_path": [],
               "tool_version": null
             }
