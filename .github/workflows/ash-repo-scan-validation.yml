@@ -182,10 +182,6 @@ jobs:
             mkdir -p /c/tools
             mv trivy.exe /c/tools/
             
-            # Clean up
-            cd /github/workspace
-            rm -rf /tmp/trivy-install
-            
             # Add to PATH and verify
             echo "C:\tools" >> $GITHUB_PATH
             export PATH="/c/tools:$PATH"
