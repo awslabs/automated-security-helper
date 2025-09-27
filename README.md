@@ -1,6 +1,6 @@
 # ASH - Automated Security Helper
 
-[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml)
+[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan-validation.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan-validation.yml)
 [![ASH - Matrix Unit Tests](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml)
 
 ## Table of Contents
