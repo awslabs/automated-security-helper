@@ -53,6 +53,9 @@ class PluginBase(BaseModel):
     command: str | None = None
     uv_tool_install_commands: List[str] = []
 
+    # UV special use cases
+    uv_tool_package_name: str | None = None
+
     # Installation-related properties
     dependencies: Annotated[
         Dict[str, Dict[str, List[PluginDependency]]],
@@ -151,7 +154,9 @@ class PluginBase(BaseModel):
         ASH_LOGGER.trace(f"Using provided context for {self.__class__.__name__}")
         return self
 
-    def _get_uv_tool_version(self, tool_name: str) -> Optional[str]:
+    def _get_uv_tool_version(
+        self, tool_name: str, package_name: Optional[str] = None
+    ) -> Optional[str]:
         """Get version of a tool managed by UV.
 
         Args:
@@ -183,7 +188,7 @@ class PluginBase(BaseModel):
                 )
                 return None
 
-            version = runner.get_tool_version(tool_name)
+            version = runner.get_tool_version(tool_name, package_name)
             if version:
                 self._plugin_log(
                     f"Detected UV tool {tool_name} version: {version}",
@@ -472,12 +477,17 @@ class PluginBase(BaseModel):
         version_constraint = self._get_tool_version_constraint()
         package_extras = self._get_tool_package_extras()
 
+        # If package name is not provided, assume the same value for both
+        tool_name = (
+            self.uv_tool_package_name if self.uv_tool_package_name else self.command
+        )
+
         # Build tool specification with extras if provided
         if package_extras:
             extras_str = ",".join(package_extras)
-            base_spec = f"{self.command}[{extras_str}]"
+            base_spec = f"{tool_name}[{extras_str}]"
         else:
-            base_spec = self.command
+            base_spec = tool_name
 
         tool_spec = (
             f"{base_spec}{version_constraint}" if version_constraint else base_spec
@@ -629,12 +639,16 @@ class PluginBase(BaseModel):
             package_extras = self._get_tool_package_extras()
             with_dependencies = self._get_tool_with_dependencies()
 
+            tool_name = (
+                self.uv_tool_package_name if self.uv_tool_package_name else self.command
+            )
+
             # Log installation attempt details
             if package_extras:
                 extras_str = ",".join(package_extras)
-                base_spec = f"{self.command}[{extras_str}]"
+                base_spec = f"{tool_name}[{extras_str}]"
             else:
-                base_spec = self.command
+                base_spec = tool_name
 
             tool_spec = (
                 f"{base_spec}{version_constraint}" if version_constraint else base_spec
@@ -655,7 +669,9 @@ class PluginBase(BaseModel):
 
             if already_installed:
                 # Validate cached tool functionality
-                validation_result = runner.validate_cached_tool(self.command)
+                validation_result = runner.validate_cached_tool(
+                    self.command, self.uv_tool_package_name
+                )
 
                 if validation_result["is_functional"]:
                     self._plugin_log(
@@ -693,7 +709,7 @@ class PluginBase(BaseModel):
                 )
 
             success = runner.install_tool_with_version(
-                tool_name=self.command,
+                tool_name=tool_name,
                 version_constraint=version_constraint,
                 timeout=timeout,
                 retry_config=config,
@@ -714,7 +730,9 @@ class PluginBase(BaseModel):
 
             if success:
                 # Get installed version for confirmation
-                post_install_version = runner.get_installed_tool_version(self.command)
+                post_install_version = runner.get_installed_tool_version(
+                    self.command, package_extras
+                )
 
                 self._plugin_log(
                     f"[INSTALLATION_SUCCESS] Successfully installed UV tool '{self.command}'",
@@ -808,7 +826,9 @@ class PluginBase(BaseModel):
 
             except UVToolRunnerError:
                 # If we can't list tools, try to get version as fallback
-                version = runner.get_tool_version(self.command)
+                version = runner.get_tool_version(
+                    self.command, self.uv_tool_package_name
+                )
                 is_installed = version is not None
 
                 self._plugin_log(
@@ -855,7 +875,9 @@ class PluginBase(BaseModel):
             )
 
             runner = get_uv_tool_runner()
-            info = runner.get_tool_installation_info(self.command)
+            info = runner.get_tool_installation_info(
+                self.command, self.uv_tool_package_name
+            )
             info["tool_name"] = self.command
 
             self._plugin_log(

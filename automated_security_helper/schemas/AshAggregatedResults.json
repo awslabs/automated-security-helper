@@ -15806,6 +15806,18 @@
           },
           "title": "Uv Tool Install Commands",
           "type": "array"
+        },
+        "uv_tool_package_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uv Tool Package Name"
         }
       },
       "title": "ScannerPluginBase",
@@ -21187,7 +21199,7 @@
                 "supportedTaxonomies": [],
                 "taxa": [],
                 "translationMetadata": null,
-                "version": "3.0.0"
+                "version": "3.0.2"
               },
               "extensions": [],
               "properties": null

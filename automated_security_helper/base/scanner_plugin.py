@@ -113,10 +113,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         pass
 
     def _resolve_arguments(
-        self,
-        target: str | Path,
-        results_file: str | Path | None = None,
-        use_equal: bool = False,
+        self, target: str | Path, results_file: str | Path | None = None
     ) -> List[str]:
         """Resolve any configured options into command line arguments.
 
@@ -138,30 +135,25 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         ]
 
         for tool_extra_arg in self.args.extra_args:
-            if not use_equal:
-                args.append(tool_extra_arg.key)
-                args.append(tool_extra_arg.value)
-            else:
-                args.append(f"{tool_extra_arg.key}={tool_extra_arg.value}")
+            args.append(tool_extra_arg.key)
+            args.append(tool_extra_arg.value)
 
-        args.extend([self.args.scan_path_arg, Path(target).as_posix()])
-        output_path = (
-            Path(results_file).as_posix()
-            if results_file is not None
-            else (
-                Path(self.results_file).as_posix()
-                if self.results_file is not None
-                else None
-            )
+        args.extend(
+            [
+                self.args.scan_path_arg,
+                Path(target).as_posix(),
+                self.args.output_arg,
+                (
+                    Path(results_file).as_posix()
+                    if results_file is not None
+                    else (
+                        Path(self.results_file).as_posix()
+                        if self.results_file is not None
+                        else None
+                    )
+                ),
+            ]
         )
-        if not use_equal:
-            args.extend([self.args.output_arg, output_path])
-        else:
-            args.extend(
-                [
-                    f"{self.args.output_arg}={output_path}",
-                ]
-            )
         return [item for item in args if item is not None and str(item).strip() != ""]
 
     def _pre_scan(

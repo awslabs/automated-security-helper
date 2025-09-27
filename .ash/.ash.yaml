@@ -36,10 +36,6 @@ global_settings:
     - path: tests/unit/plugin_modules/ash_aws_plugins/test_cloudwatch_logs_reporter*
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive, dummy test data and not an actual secret.
-    - path: .github/workflows/run-ash-security-scan.yml
-      rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
-      reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars
-      expiration: "2025-10-01"
     - path: tests/**/*.py
       rule_id: B101
       reason: Assert usage expected with Pytest

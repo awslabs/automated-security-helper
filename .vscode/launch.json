@@ -104,7 +104,7 @@
       "program": "./automated_security_helper/cli/main.py",
       "request": "launch",
       "type": "debugpy"
-    },
+    },     
   ],
   "version": "0.2.0"
 }

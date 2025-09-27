@@ -1,9 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import importlib.metadata
+from automated_security_helper.utils.version_management import get_version
 
-try:
-    __version__ = importlib.metadata.version("automated_security_helper")
-except importlib.metadata.PackageNotFoundError:
-    __version__ = "3.0.0"  # Fallback version for development
+__version__ = get_version()

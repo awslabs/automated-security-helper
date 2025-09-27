@@ -74,7 +74,9 @@ async def test_mcp_get_scan_results():
 async def test_mcp_check_installation():
     """Test the mcp_check_installation function."""
     # Mock the get_ash_version function
-    mock_version = "3.0.0"
+    from automated_security_helper.utils.version_management import get_version
+
+    mock_version = get_version()
 
     # Mock the Path.exists and Path.is_dir methods
     mock_path = MagicMock()
@@ -84,7 +86,9 @@ async def test_mcp_check_installation():
     # Mock the asyncio.create_subprocess_exec function
     mock_process = AsyncMock()
     mock_process.returncode = 0
-    mock_process.communicate = AsyncMock(return_value=(b"ASH version 3.0.0", b""))
+    mock_process.communicate = AsyncMock(
+        return_value=(f"ASH version {mock_version}".encode(), b"")
+    )
 
     with (
         patch(
@@ -101,7 +105,7 @@ async def test_mcp_check_installation():
         # Check the result
         assert result["success"] is True
         assert result["installed"] is True
-        assert result["version"] == "3.0.0"
+        assert result["version"] == mock_version
         assert result["ash_command_available"] is True
         assert "ash_command_output" in result
         assert "timestamp" in result

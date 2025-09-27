@@ -78,17 +78,38 @@ def get_ash_revision() -> str | None:
         print(
             f"Found direct_url.json file for module @ {direct_url_json_path.as_posix()}"
         )
-        direct_url_json = json.loads(direct_url_json_path.read_text())
-        if isinstance(direct_url_json, dict) and "url" in direct_url_json:
-            if "vcs_info" in direct_url_json:
-                revision = (
-                    direct_url_json["vcs_info"]["requested_revision"]
-                    or ASH_REPO_LATEST_REVISION
-                )
-                return_val = revision
-                ASH_LOGGER.info(
-                    f"Resolved source revision for ASH to use during container image build: {return_val}"
-                )
+        try:
+            direct_url_json = json.loads(direct_url_json_path.read_text())
+            if isinstance(direct_url_json, dict) and "url" in direct_url_json:
+                url = direct_url_json["url"]
+                if url.startswith("file://"):
+                    ASH_LOGGER.info(
+                        "ASH installed from local file path, building with LOCAL source"
+                    )
+                    return "LOCAL"
+                elif "vcs_info" in direct_url_json and isinstance(
+                    direct_url_json["vcs_info"], dict
+                ):
+                    vcs_info = direct_url_json["vcs_info"]
+                    revision = (
+                        vcs_info.get("requested_revision")
+                        or vcs_info.get("commit_id")
+                        or ASH_REPO_LATEST_REVISION
+                    )
+                    return_val = revision
+                    ASH_LOGGER.info(
+                        f"Resolved source revision for ASH to use during container image build: {return_val}"
+                    )
+                else:
+                    ASH_LOGGER.warning(
+                        "direct_url.json exists but lacks vcs_info, falling back to latest revision"
+                    )
+                    return_val = ASH_REPO_LATEST_REVISION
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            ASH_LOGGER.warning(
+                f"Failed to parse direct_url.json: {e}, falling back to latest revision"
+            )
+            return_val = ASH_REPO_LATEST_REVISION
     else:
         return_val = ASH_REPO_LATEST_REVISION
 
@@ -335,11 +356,25 @@ def run_ash_container(
     resolved_revision = (
         ash_revision_to_install if ash_revision_to_install is not None else rev
     )
-    dockerfile_path = (
-        ASH_ASSETS_DIR.joinpath("Dockerfile")
-        if resolved_revision != "LOCAL"
-        else Path(__file__).parent.parent.parent.joinpath("Dockerfile")
-    )
+
+    if resolved_revision == "LOCAL":
+        # For LOCAL builds, use current working directory as repository root
+        # This handles cases where ASH is installed via pip but we're running from the repo
+        dockerfile_path = Path.cwd().joinpath("Dockerfile")
+
+        # If not found in current directory, search upwards
+        if not dockerfile_path.exists():
+            current_path = Path.cwd().resolve()
+            while current_path.parent != current_path:
+                if (
+                    current_path.joinpath("Dockerfile").exists()
+                    and current_path.joinpath("pyproject.toml").exists()
+                ):
+                    dockerfile_path = current_path.joinpath("Dockerfile")
+                    break
+                current_path = current_path.parent
+    else:
+        dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
 
     if not dockerfile_path.exists():
         typer.secho(f"Dockerfile not found at {dockerfile_path}", fg=typer.colors.RED)
