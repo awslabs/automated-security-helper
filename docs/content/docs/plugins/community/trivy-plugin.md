@@ -66,6 +66,13 @@ trivy version
 
 Add the Trivy plugin to your `.ash/.ash.yaml` configuration:
 
+```
+ash_plugin_modules:
+  - automated_security_helper.plugin_modules.ash_trivy_plugins
+```
+
+Configure the scanner based on your requirements:
+
 ```yaml
 scanners:
   trivy-repo:
