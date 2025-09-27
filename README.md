@@ -108,6 +108,8 @@ export PATH="${PATH}:${REPO_DIR}/${REPO_NAME}"
 
 # Execute the ash tool
 ash --version
+# Create an alias for ASH
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.1"
 ```
 
 ### Getting Started - Windows
@@ -140,10 +142,6 @@ that is running in the WSL 2 environment.
 By doing this, you can host your git repositories in WSL 2 and still
 work with them as you have in the past when they were in the Windows filesystem of your Windows machine.
 
-### Cloud9 Quickstart Guide
-
-Follow the instruction in the [quickstart page](/quickstart/README.md) to deploy an AWS Cloud9 Environment with ASH pre-installed.
-
 ## Using `ash` with `pre-commit`
 
 The `ash` tool can be used interactively on a workstation or run using the [`pre-commit`](https://pre-commit.com/) command.
@@ -175,15 +173,35 @@ To configure a git repository to use the `ash` hook, start with the following `p
 ```
 
 Once the `.pre-commit-hooks.yaml` file is updated, the `ash` tool can be run using the following command:
+# Create a function for ASH
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.1 $args }
+```
+
+### Other Installation Methods
+
+<details>
+<summary>Click to expand other installation options</summary>
+
+#### Using `pipx`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.0
+# Install with pipx (isolated environment)
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0,1
+
+# Use as normal
+ash --help
+```
+
+#### Using `pip`
+
+```bash
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.1
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.1
 cd automated-security-helper
 pip install .
 ```

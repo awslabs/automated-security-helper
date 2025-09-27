@@ -1,6 +1,6 @@
 [project]
 name = "automated-security-helper"
-version = "3.0.0"
+version = "3.0.1"
 description = "Automated Security Helper for GitHub Actions"
 authors = [
     { name = "Daniel Begimher", email = "dbbegimh@amazon.com" },
