@@ -118,7 +118,7 @@ def mock_ash_scan_results():
         "success": True,
         "exit_code": 0,
         "execution_time_seconds": 3.5,
-        "ash_version": "ASH version 3.0.1",
+        "ash_version": f"ASH version {__import__('automated_security_helper.utils.version_management', fromlist=['get_version']).get_version()}",
         "output_dir": "/.ash/mock_ash_output",
         "results": {
             "scanners": {
