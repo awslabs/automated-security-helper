@@ -1,77 +1,77 @@
 nav:
-    - Home: index.md
-    - Getting Started:
-          - Quick Start Guide: docs/quick-start-guide.md
-          - Installation Guide: docs/installation-guide.md
-          - Migrating from ASH v2 to v3: docs/migration-guide.md
-          - Troubleshooting UV Installation: docs/troubleshooting-uv-installation.md
-          - UV Tool Installation Guide: docs/uv-tool-installation-guide.md
-    - User Guide:
-          - Configuration: docs/configuration-guide.md
-          - CLI Reference: docs/cli-reference.md
-          - Suppressions: docs/suppressions.md
-          - Configuration Overrides: docs/config-overrides.md
-          - Scanner Statistics: user-guide/scanner-statistics.md
-    - Built-in Plugins:
-          - Overview: docs/plugins/builtin/index.md
-          - Scanners: docs/plugins/builtin/scanners.md
-          - Scanner Diagrams: docs/plugins/builtin/scanners-diagrams.md
-          - Reporters: docs/plugins/builtin/reporters.md
-          - Reporter Diagrams: docs/plugins/builtin/reporters-diagrams.md
-          - Converters: docs/plugins/builtin/converters.md
-          - Converter Diagrams: docs/plugins/builtin/converters-diagrams.md
-          - Event Handlers: docs/plugins/builtin/event-handlers.md
-          - Event Handler Diagrams: docs/plugins/builtin/event-handlers-diagrams.md
-    - AWS Plugins:
-          - Overview: docs/plugins/aws/index.md
-          - Security Hub Reporter: docs/plugins/aws/security-hub-reporter.md
-          - Security Hub Reporter Diagrams: docs/plugins/aws/security-hub-reporter-diagrams.md
-          - Bedrock Summary Reporter: docs/plugins/aws/bedrock-summary-reporter.md
-          - Bedrock Summary Reporter Diagrams: docs/plugins/aws/bedrock-summary-reporter-diagrams.md
-          - CloudWatch Logs Reporter: docs/plugins/aws/cloudwatch-logs-reporter.md
-          - CloudWatch Logs Reporter Diagrams: docs/plugins/aws/cloudwatch-logs-reporter-diagrams.md
-          - S3 Reporter: docs/plugins/aws/s3-reporter.md
-          - S3 Reporter Diagrams: docs/plugins/aws/s3-reporter-diagrams.md
-    - Community Plugins:
-          - Overview: docs/plugins/community/index.md
-          - Trivy Plugin: docs/plugins/community/trivy-plugin.md
-    - Tutorials:
-          - Running ASH Locally: tutorials/running-ash-locally.md
-          - Running ASH in CI: tutorials/running-ash-in-ci.md
-          - Using ASH with Pre-commit: tutorials/using-ash-with-pre-commit.md
-          - Using ASH with MCP: tutorials/using-ash-with-mcp.md
-          - MCP Streaming Guide: tutorials/mcp-streaming-guide.md
-    - Advanced Usage:
-          - Advanced Features: docs/advanced-usage.md
-          - MCP Server Guide: docs/mcp-server-guide.md
-          - MCP Performance and Scalability: docs/mcp-performance-scalability.md
-          - Plugin Development:
-                - Overview: docs/plugins/index.md
-                - Plugin Architecture: docs/plugins/architecture.md
-                - Development Guide: docs/plugins/development-guide.md
-                - Creating Plugins:
-                      - Scanner Plugins: docs/plugins/scanner-plugins.md
-                      - Scanner Plugin Diagrams: docs/plugins/scanner-plugins-diagrams.md
-                      - Reporter Plugins: docs/plugins/reporter-plugins.md
-                      - Reporter Plugin Diagrams: docs/plugins/reporter-plugins-diagrams.md
-                      - Converter Plugins: docs/plugins/converter-plugins.md
-                      - Converter Plugin Diagrams: docs/plugins/converter-plugins-diagrams.md
-                      - Event Subscribers: docs/plugins/event-subscribers.md
-                      - Event Subscriber Diagrams: docs/plugins/event-subscribers-diagrams.md
-                - Plugin Best Practices: docs/plugins/plugin-best-practices.md
-    - Developer Guide:
-          - Unified Metrics System: developer-guide/unified-metrics.md
-          - Scanner Validation System: developer-guide/scanner-validation-system.md
-          - UV Tool Management: developer-guide/uv-tool-management.md
-    - Contributing:
-          - How to Contribute: contributing.md
-          - Testing:
-                - Overview: docs/testing/index.md
-                - Test Organization: docs/testing/test_organization.md
-                - Writing Effective Tests: docs/testing/writing_effective_tests.md
-                - Test Selection: docs/testing/test_selection.md
-                - Parallel Testing: docs/testing/parallel_testing.md
-                - Test Utilities: docs/testing/test_utilities.md
-    - Reference:
-          - Support: docs/support.md
-          - FAQ: faq.md
+  - Home: index.md
+  - Getting Started:
+      - Quick Start Guide: docs/quick-start-guide.md
+      - Installation Guide: docs/installation-guide.md
+      - Migrating from ASH v2 to v3: docs/migration-guide.md
+      - Troubleshooting UV Installation: docs/troubleshooting-uv-installation.md
+      - UV Tool Installation Guide: docs/uv-tool-installation-guide.md
+  - User Guide:
+      - Configuration: docs/configuration-guide.md
+      - CLI Reference: docs/cli-reference.md
+      - Suppressions: docs/suppressions.md
+      - Configuration Overrides: docs/config-overrides.md
+      - Scanner Statistics: user-guide/scanner-statistics.md
+  - Built-in Plugins:
+      - Overview: docs/plugins/builtin/index.md
+      - Scanners: docs/plugins/builtin/scanners.md
+      - Scanner Diagrams: docs/plugins/builtin/scanners-diagrams.md
+      - Reporters: docs/plugins/builtin/reporters.md
+      - Reporter Diagrams: docs/plugins/builtin/reporters-diagrams.md
+      - Converters: docs/plugins/builtin/converters.md
+      - Converter Diagrams: docs/plugins/builtin/converters-diagrams.md
+      - Event Handlers: docs/plugins/builtin/event-handlers.md
+      - Event Handler Diagrams: docs/plugins/builtin/event-handlers-diagrams.md
+  - AWS Plugins:
+      - Overview: docs/plugins/aws/index.md
+      - Security Hub Reporter: docs/plugins/aws/security-hub-reporter.md
+      - Security Hub Reporter Diagrams: docs/plugins/aws/security-hub-reporter-diagrams.md
+      - Bedrock Summary Reporter: docs/plugins/aws/bedrock-summary-reporter.md
+      - Bedrock Summary Reporter Diagrams: docs/plugins/aws/bedrock-summary-reporter-diagrams.md
+      - CloudWatch Logs Reporter: docs/plugins/aws/cloudwatch-logs-reporter.md
+      - CloudWatch Logs Reporter Diagrams: docs/plugins/aws/cloudwatch-logs-reporter-diagrams.md
+      - S3 Reporter: docs/plugins/aws/s3-reporter.md
+      - S3 Reporter Diagrams: docs/plugins/aws/s3-reporter-diagrams.md
+  - Community Plugins:
+      - Overview: docs/plugins/community/index.md
+      - Trivy Plugin: docs/plugins/community/trivy-plugin.md
+  - Tutorials:
+      - Running ASH Locally: tutorials/running-ash-locally.md
+      - Running ASH in CI: tutorials/running-ash-in-ci.md
+      - Using ASH with Pre-commit: tutorials/using-ash-with-pre-commit.md
+      - Using ASH with MCP: tutorials/using-ash-with-mcp.md
+      - MCP Streaming Guide: tutorials/mcp-streaming-guide.md
+  - Advanced Usage:
+      - Advanced Features: docs/advanced-usage.md
+      - MCP Server Guide: docs/mcp-server-guide.md
+      - MCP Performance and Scalability: docs/mcp-performance-scalability.md
+      - Plugin Development:
+          - Overview: docs/plugins/index.md
+          - Plugin Architecture: docs/plugins/architecture.md
+          - Development Guide: docs/plugins/development-guide.md
+          - Creating Plugins:
+              - Scanner Plugins: docs/plugins/scanner-plugins.md
+              - Scanner Plugin Diagrams: docs/plugins/scanner-plugins-diagrams.md
+              - Reporter Plugins: docs/plugins/reporter-plugins.md
+              - Reporter Plugin Diagrams: docs/plugins/reporter-plugins-diagrams.md
+              - Converter Plugins: docs/plugins/converter-plugins.md
+              - Converter Plugin Diagrams: docs/plugins/converter-plugins-diagrams.md
+              - Event Subscribers: docs/plugins/event-subscribers.md
+              - Event Subscriber Diagrams: docs/plugins/event-subscribers-diagrams.md
+          - Plugin Best Practices: docs/plugins/plugin-best-practices.md
+  - Developer Guide:
+      - Unified Metrics System: developer-guide/unified-metrics.md
+      - Scanner Validation System: developer-guide/scanner-validation-system.md
+      - UV Tool Management: developer-guide/uv-tool-management.md
+  - Contributing:
+      - How to Contribute: contributing.md
+      - Testing:
+          - Overview: docs/testing/index.md
+          - Test Organization: docs/testing/test_organization.md
+          - Writing Effective Tests: docs/testing/writing_effective_tests.md
+          - Test Selection: docs/testing/test_selection.md
+          - Parallel Testing: docs/testing/parallel_testing.md
+          - Test Utilities: docs/testing/test_utilities.md
+  - Reference:
+      - Support: docs/support.md
+      - FAQ: faq.md

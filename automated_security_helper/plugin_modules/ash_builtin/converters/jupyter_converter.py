@@ -57,14 +57,17 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         if self.config is None:
             self.config = JupyterConverterConfig()
 
-        self.command = "nbconvert"
+        self.command = "jupyter-nbconvert"
+        self.uv_tool_package_name = "nbconvert"
         self.use_uv_tool = True  # Enable UV tool execution
 
         # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
 
         # Update tool version detection to work with explicit installation
-        self.tool_version = self._get_uv_tool_version("nbconvert")
+        self.tool_version = self._get_uv_tool_version(
+            self.command, self.uv_tool_package_name
+        )
 
         return super().model_post_init(context)
 
@@ -114,7 +117,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             if installation_success:
                 ASH_LOGGER.debug(f"UV tool installation successful for {self.command}")
                 # Update tool version after successful installation
-                self.tool_version = self._get_uv_tool_version(self.command)
+                self.tool_version = self._get_uv_tool_version(
+                    self.command, self.uv_tool_package_name
+                )
                 return True
             else:
                 ASH_LOGGER.warning(
@@ -173,20 +178,21 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 ASH_LOGGER.error(f"Invalid jupyter command format: {cmd}")
                 return False
 
-            jupyter_args = cmd[1:]  # Skip 'jupyter'
+            jupyter_args = cmd[2:]  # Skip 'jupyter' and 'nbconvert'
 
             ASH_LOGGER.debug(f"Executing jupyter via UV with args: {jupyter_args}")
 
             # Use UV tool runner to execute jupyter (nbconvert tool provides jupyter command)
             result = uv_runner.run_tool(
-                tool_name="jupyter",
+                tool_name=self.command,
+                package_name=self.uv_tool_package_name,
                 args=jupyter_args,
                 cwd=self.context.source_dir,
                 capture_output=True,
                 text=True,
                 check=False,
-                package_extras=self._get_tool_package_extras(),
-                version_constraint=self._get_tool_version_constraint(),
+                package_extras=None,
+                version_constraint=None,  # Passing this value will cause an error in uv. The version was validated previously
                 timeout=timeout,
             )
 

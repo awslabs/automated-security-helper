@@ -129,13 +129,13 @@ jobs:
         if: contains(matrix.method, 'python') && !contains(matrix.os, 'windows')
         run: |
           echo "Installing ASH using Python on ${{ matrix.os }} (${{ matrix.platform }})"
-          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
+          pip install .
 
       - name: Update GITHUB_PATH with Python scripts path on Windows
         if: contains(matrix.method, 'python') && matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          pip install git+https://github.com/awslabs/automated-security-helper@${{ github.head_ref || github.ref_name }}
+          pip install .
           echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
 
       - name: Validate ASH using Python + Container
@@ -152,14 +152,14 @@ jobs:
           echo "ASH Help:"
           ash --help
           echo "ASH Scan Output:"
-          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions
+          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL
 
       - name: Validate ASH using Python Local
         if: matrix.method == 'python-local'
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
         # It should fail if there are findings in the scan, but that's a valid test for us still.
         continue-on-error: true
-        timeout-minutes: 4
+        timeout-minutes: 10
         run: |
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
           echo "ASH Version:"

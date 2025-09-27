@@ -108,6 +108,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             ScannerError: If validation fails
         """
         found = find_executable(self.command)
+        if not found:
+            ASH_LOGGER.warning(
+                "Grype executable not found in PATH. Please ensure grype is installed."
+            )
         return found is not None
 
     def _process_config_options(self):
@@ -234,9 +238,37 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             grype_results = {}
             with open(results_file, mode="r", encoding="utf-8") as f:
                 grype_results = json.load(f)
+
+            ASH_LOGGER.debug(
+                f"Grype results structure: runs count = {len(grype_results.get('runs', []))}"
+            )
+
             try:
                 sarif_report: SarifReport = SarifReport.model_validate(grype_results)
-                sarif_report.runs[0].invocations = [
+
+                # Ensure we have at least one run before accessing it
+                if not sarif_report.runs:
+                    ASH_LOGGER.warning(
+                        "Grype SARIF report has no runs, creating empty run"
+                    )
+                    from automated_security_helper.schemas.sarif_schema_model import (
+                        Run,
+                        Tool,
+                        ToolComponent,
+                    )
+
+                    sarif_report.runs = [
+                        Run(
+                            tool=Tool(
+                                driver=ToolComponent(name="grype", version="unknown")
+                            ),
+                            results=[],
+                        )
+                    ]
+
+                # Safely access the first run
+                first_run = sarif_report.runs[0]
+                first_run.invocations = [
                     Invocation(
                         commandLine=final_args[0],
                         arguments=final_args[1:],
@@ -249,50 +281,59 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                             uri=get_shortest_name(input=target),
                         ),
                         properties=PropertyBag(
-                            tool=sarif_report.runs[0].tool,
+                            tool=first_run.tool,
                         ),
                     )
                 ]
 
                 clean_runs = []
                 for run in sarif_report.runs:
-                    if not run.results:
-                        continue
+                    # Always include runs, even if they have no results
                     clean_results = []
-                    for result in run.results:
-                        # Process locations
-                        if result.locations:
-                            for location in result.locations:
-                                if (
-                                    location.physicalLocation
-                                    and location.physicalLocation.root.artifactLocation
-                                ):
-                                    uri = location.physicalLocation.root.artifactLocation.uri
-                                    if uri:
-                                        uri = uri.lstrip("/")
-                                        location.physicalLocation.root.artifactLocation.uri = uri
+                    if run.results:
+                        for result in run.results:
+                            try:
+                                # Process locations
+                                if result.locations:
+                                    for location in result.locations:
+                                        if (
+                                            location.physicalLocation
+                                            and location.physicalLocation.root
+                                            and location.physicalLocation.root.artifactLocation
+                                        ):
+                                            uri = location.physicalLocation.root.artifactLocation.uri
+                                            if uri:
+                                                uri = uri.lstrip("/")
+                                                location.physicalLocation.root.artifactLocation.uri = uri
 
-                        # Process related locations if present
-                        if (
-                            hasattr(result, "relatedLocations")
-                            and result.relatedLocations
-                        ):
-                            for related in result.relatedLocations:
+                                # Process related locations if present
                                 if (
-                                    related.physicalLocation
-                                    and related.physicalLocation.root.artifactLocation
+                                    hasattr(result, "relatedLocations")
+                                    and result.relatedLocations
                                 ):
-                                    uri = related.physicalLocation.root.artifactLocation.uri
-                                    if uri:
-                                        uri = uri.lstrip("/")
-                                        related.physicalLocation.root.artifactLocation.uri = uri
+                                    for related in result.relatedLocations:
+                                        if (
+                                            related.physicalLocation
+                                            and related.physicalLocation.root
+                                            and related.physicalLocation.root.artifactLocation
+                                        ):
+                                            uri = related.physicalLocation.root.artifactLocation.uri
+                                            if uri:
+                                                uri = uri.lstrip("/")
+                                                related.physicalLocation.root.artifactLocation.uri = uri
 
-                        # Process analysis target if present
-                        if result.analysisTarget and result.analysisTarget.uri:
-                            uri = result.analysisTarget.uri
-                            uri = uri.lstrip("/")
-                            result.analysisTarget.uri = uri
-                        clean_results.append(result)
+                                # Process analysis target if present
+                                if result.analysisTarget and result.analysisTarget.uri:
+                                    uri = result.analysisTarget.uri
+                                    uri = uri.lstrip("/")
+                                    result.analysisTarget.uri = uri
+                                clean_results.append(result)
+                            except Exception as e:
+                                ASH_LOGGER.warning(
+                                    f"Error processing Grype result: {e}"
+                                )
+                                # Still append the result even if processing failed
+                                clean_results.append(result)
 
                     run.results = clean_results
                     clean_runs.append(run)
@@ -301,6 +342,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 ASH_LOGGER.warning(
                     f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}"
                 )
+                ASH_LOGGER.debug(f"Grype SARIF processing error details: {e}")
+                # Return the raw results if SARIF processing fails
                 sarif_report = grype_results
 
             return sarif_report
