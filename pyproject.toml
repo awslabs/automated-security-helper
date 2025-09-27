@@ -1,54 +1,42 @@
 [project]
 name = "automated-security-helper"
-version = "3.0.1"
+version = "3.0.2"
 description = "Automated Security Helper for GitHub Actions"
-authors = [
-    { name = "Daniel Begimher", email = "dbbegimh@amazon.com" },
-    { name = "Madison Steiner", email = "awsmadi@amazon.com" },
-    { name = "Nate Ferrell", email = "nateferl@amazon.com" },
-    { name = "Nathan Bates", email = "nbb@amazon.com" },
-    { name = "Rafael Pereyra", email = "rapg@amazon.com" },
-    { name = "Tim Hahn", email = "timhahn@amazon.com" },
-]
 requires-python = ">=3.10,<4"
 readme = "README.md"
 license = "Apache-2.0"
-classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-]
-dependencies = [
-    "uv>=0.7.0",
-    "requests>=2.28.0,<3.0.0",
-    "attrs>=23.1.0,<26.0.0",
-    "jsonschema>=4.17.0,<5.0.0",
-    "importlib-metadata>=6.0.0,<8.0.0",
-    "cattrs>=22.1.0,<25.0.0",
-    "docker>=6.0.1,<8.0.0",
-    "GitPython>=3.1.30,<4.0.0",
-    "gitdb>=4.0.1,<5.0.0",
-    "pyrsistent>=0.18.0,<1.0.0",
-    "pydantic[email]>=2.11.3,<3",
-    "typer>=0.16.0,<0.17",
-    "rich>=13.5.3,<14",
-    "pathspec>=0.12.1,<0.13",
-    "defusedxml>=0.7.1,<0.8",
-    "junitparser>=3.2.0,<4",
-    "textual>=3.2.0,<4",
-    "detect-secrets>=1.5.0,<2",
-    "aws-cdk-lib>=2.150.0,<3.0.0",
-    "cdk-nag>=2.28.0,<3.0.0",
-    "constructs>=10.3.0,<11.0.0",
-    "boto3>=1.34.0,<2.0.0",
-    "cfn-flip>=1.3.0,<2",
-    "mcp>=1.12.1",
-    "toml>=0.10.2,<1.0.0",
-]
+classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12",]
+dependencies = [ "uv>=0.7.0", "requests>=2.28.0,<3.0.0", "attrs>=23.1.0,<26.0.0", "jsonschema>=4.17.0,<5.0.0", "importlib-metadata>=6.0.0,<8.0.0", "cattrs>=22.1.0,<25.0.0", "docker>=6.0.1,<8.0.0", "GitPython>=3.1.30,<4.0.0", "gitdb>=4.0.1,<5.0.0", "pyrsistent>=0.18.0,<1.0.0", "pydantic[email]>=2.11.3,<3", "typer>=0.16.0,<0.17", "rich>=13.5.3,<14", "pathspec>=0.12.1,<0.13", "defusedxml>=0.7.1,<0.8", "junitparser>=3.2.0,<4", "textual>=3.2.0,<4", "detect-secrets>=1.5.0,<2", "aws-cdk-lib>=2.150.0,<3.0.0", "cdk-nag>=2.28.0,<3.0.0", "constructs>=10.3.0,<11.0.0", "boto3>=1.34.0,<2.0.0", "cfn-flip>=1.3.0,<2", "mcp>=1.12.1", "toml>=0.10.2,<1.0.0",]
+[[project.authors]]
+name = "Daniel Begimher"
+email = "dbbegimh@amazon.com"
+
+[[project.authors]]
+name = "Madison Steiner"
+email = "awsmadi@amazon.com"
+
+[[project.authors]]
+name = "Nate Ferrell"
+email = "nateferl@amazon.com"
+
+[[project.authors]]
+name = "Nathan Bates"
+email = "nbb@amazon.com"
+
+[[project.authors]]
+name = "Rafael Pereyra"
+email = "rapg@amazon.com"
+
+[[project.authors]]
+name = "Tim Hahn"
+email = "timhahn@amazon.com"
+
+[dependency-groups]
+dev = [ "ruff>=0.11.2,<1.0.0", "pytest>=8.3.5,<9.0.0", "pytest-cov>=6.1.0,<7.0.0", "pytest-mock>=3.14.0,<4.0.0", "mypy>=1.15.0,<2.0.0", "types-pyyaml>=6.0.12.20250402", "lazydocs>=0.4.8,<1.0.0", "mkdocs>=1.6.1,<2.0.0", "mkdocs-material>=9.6.11,<10.0.0", "pymdown-extensions>=10.14.3,<11.0.0", "mkdocstrings[python]>=0.29.1,<1.0.0", "mkdocs-autorefs>=1.4.1,<2.0.0", "pytest-asyncio>=0.26.0,<1.0.0", "types-boto3[essential, logs, s3, securityhub, securitylake, sts]>=1.35.49,<2.0.0", "mkdocs-awesome-nav>=3.1.2,<4.0.0", "mkdocs-mermaid2-plugin>=1.2.1,<2.0.0", "pytest-xdist>=3.7.0,<4.0.0", "toml>=0.10.2", "hatchling>=1.27.0", "mcp>=1.10.1",]
+
+[build-system]
+requires = [ "hatchling",]
+build-backend = "hatchling.build"
 
 [project.urls]
 Repository = "https://github.com/awslabs/automated-security-helper"
@@ -58,76 +46,11 @@ ash = "automated_security_helper.cli.main:app"
 ashv3 = "automated_security_helper.cli.main:app"
 automated-security-helper = "automated_security_helper.cli.main:app"
 
-
-[dependency-groups]
-dev = [
-    "ruff>=0.11.2,<1.0.0",
-    "pytest>=8.3.5,<9.0.0",
-    "pytest-cov>=6.1.0,<7.0.0",
-    "pytest-mock>=3.14.0,<4.0.0",
-    "mypy>=1.15.0,<2.0.0",
-    "types-pyyaml>=6.0.12.20250402",
-    "lazydocs>=0.4.8,<1.0.0",
-    "mkdocs>=1.6.1,<2.0.0",
-    "mkdocs-material>=9.6.11,<10.0.0",
-    "pymdown-extensions>=10.14.3,<11.0.0",
-    "mkdocstrings[python]>=0.29.1,<1.0.0",
-    "mkdocs-autorefs>=1.4.1,<2.0.0",
-    "pytest-asyncio>=0.26.0,<1.0.0",
-    "types-boto3[essential, logs, s3, securityhub, securitylake, sts]>=1.35.49,<2.0.0",
-    "mkdocs-awesome-nav>=3.1.2,<4.0.0",
-    "mkdocs-mermaid2-plugin>=1.2.1,<2.0.0",
-    "pytest-xdist>=3.7.0,<4.0.0",
-    "toml>=0.10.2",
-    "hatchling>=1.27.0",
-    "mcp>=1.10.1",
-]
-
 [tool.uv]
-# UV-specific configuration settings
-dev-dependencies = [
-    # Development dependencies are managed via dependency-groups above
-]
-
-# Configure UV workspace settings
-workspace = { members = ["."] }
-
-# Configure UV tool settings for CLI tools
-[tool.uv.sources]
-# Future CLI tool specifications can be added here
-
-[tool.hatch.build.targets.sdist.hooks.custom]
-path = "hatch_build.py"
-
-[tool.hatch.build.targets.wheel.hooks.custom]
-path = "hatch_build.py"
-
-[tool.hatch.build.targets.wheel]
-include = [
-    "automated_security_helper",
-    "automated_security_helper/assets",
-    "automated_security_helper/assets/ASH_INSTALLED_REVISION",
-    "automated_security_helper/assets/Dockerfile",
-]
-force-include = { "automated_security_helper/assets/Dockerfile" = "automated_security_helper/assets/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION" = "automated_security_helper/assets/ASH_INSTALLED_REVISION" }
-
-[tool.hatch.build.targets.sdist]
-include = [
-    "automated_security_helper",
-    "Dockerfile",
-    "automated_security_helper/assets/ASH_INSTALLED_REVISION",
-    "automated_security_helper/assets/Dockerfile",
-]
-force-include = { "automated_security_helper/assets/Dockerfile" = "automated_security_helper/assets/Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION" = "automated_security_helper/assets/ASH_INSTALLED_REVISION" }
-
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+dev-dependencies = []
 
 [tool.mypy]
-plugins = ["pydantic.mypy"]
-
+plugins = [ "pydantic.mypy",]
 follow_imports = "silent"
 warn_redundant_casts = true
 warn_unused_ignores = true
@@ -139,3 +62,28 @@ disallow_untyped_defs = true
 init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
+
+[tool.uv.workspace]
+members = [ ".",]
+
+[tool.uv.sources]
+
+[tool.hatch.build.targets.sdist]
+include = [ "automated_security_helper", "Dockerfile", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
+
+[tool.hatch.build.targets.wheel]
+include = [ "automated_security_helper", "automated_security_helper/assets", "automated_security_helper/assets/ASH_INSTALLED_REVISION", "automated_security_helper/assets/Dockerfile",]
+
+[tool.hatch.build.targets.sdist.force-include]
+"automated_security_helper/assets/Dockerfile" = "automated_security_helper/assets/Dockerfile"
+"automated_security_helper/assets/ASH_INSTALLED_REVISION" = "automated_security_helper/assets/ASH_INSTALLED_REVISION"
+
+[tool.hatch.build.targets.wheel.force-include]
+"automated_security_helper/assets/Dockerfile" = "automated_security_helper/assets/Dockerfile"
+"automated_security_helper/assets/ASH_INSTALLED_REVISION" = "automated_security_helper/assets/ASH_INSTALLED_REVISION"
+
+[tool.hatch.build.targets.sdist.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
