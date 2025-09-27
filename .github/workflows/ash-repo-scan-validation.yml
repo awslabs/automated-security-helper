@@ -171,11 +171,19 @@ jobs:
             echo "Installing Trivy on Windows..."
             # Download and install Trivy for Windows using the official endpoint
             curl -sfL -o trivy.zip "https://get.trivy.dev/trivy?type=zip&os=windows&arch=amd64"
-            unzip trivy.zip
             
-            # Create tools directory and move trivy
+            # Create temporary directory for extraction to avoid conflicts
+            mkdir -p /tmp/trivy-install
+            cd /tmp/trivy-install
+            unzip /github/workspace/trivy.zip
+            
+            # Create tools directory and move only the trivy executable
             mkdir -p /c/tools
             mv trivy.exe /c/tools/
+            
+            # Clean up
+            cd /github/workspace
+            rm -rf /tmp/trivy-install
             rm trivy.zip
             
             # Add to PATH and verify
