@@ -75,6 +75,12 @@ global_settings:
     - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
       path: ".ash/ash_output*/scanners/*.json"
       reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
+    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen1"
+      path: automated_security_helper/utils/subprocess_utils.py
+      reason: "False positive - ASH requires Python 3.10+, compatibility with Python3.6 and less is not required"
+    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen2"
+      path: automated_security_helper/utils/subprocess_utils.py
+      reason: "False positive - ASH requires Python 3.10+, compatibility with Python3.6 and less is not required"
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

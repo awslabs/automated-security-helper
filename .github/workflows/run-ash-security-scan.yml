@@ -1,8 +1,10 @@
 name: "ASH Security Scan"
-description: |-
-  Runs ASH aggregated security scan on a repository and generates various industry
-  standard report formats such as SARIF, OCSF, CycloneDX, JUnitXML, HTML, Markdown
-
+#  Runs ASH aggregated security scan on a repository and generates various industry
+#  standard report formats such as SARIF, OCSF, CycloneDX, JUnitXML, HTML, Markdown
+permissions:
+  contents: read # Required to read the repository contents in order to scan them with ASH
+  checks: write # Required for writing CI check runs
+  pull-requests: write # Required for writing comments with scan results to pull requests
 on:
   workflow_call:
     inputs:
@@ -95,23 +97,28 @@ jobs:
       - name: Run ASH
         id: ash
         shell: bash
+        env:
+          ASH_MODE: ${{ inputs.ash-mode }}
+          ASH_ARGS: ${{ inputs.ash-args }}
+          FAIL_ON_FINDINGS_PARAM: ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}}
+          VERBOSE: ${{ inputs.verbose }}
         run: |-
-          uvx --from $ASH_UVX_SOURCE ash \
-            --source-dir . --output-dir ${{ inputs.output-dir }} ${{ inputs.ash-args }} --no-progress --build-target ci ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}} --mode ${{ inputs.ash-mode }} ${{ inputs.verbose && '--verbose' }}
+          uvx --from ${ASH_UVX_SOURCE} ash \
+            --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose}
 
       - name: Show ASH Summary Report
         if: success() || failure()
         shell: bash
         run: |-
-          uvx --from $ASH_UVX_SOURCE ash \
-            --output-dir "$ASH_OUTPUT_DIR" report
+          uvx --from ${ASH_UVX_SOURCE} ash \
+            --output-dir "${ASH_OUTPUT_DIR}" report
 
       - name: Update step summary
         if: success() || failure()
         shell: bash
         run: |-
-          cat "$ASH_OUTPUT_DIR/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
-          tree "$ASH_OUTPUT_DIR"
+          cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
+          tree "${ASH_OUTPUT_DIR}"
 
       - name: Post ASH MarkdownReporter output as PR comment
         uses: mshick/add-pr-comment@v2
