@@ -48,9 +48,19 @@ sudo yum -y install trivy
 ```
 
 **Using Binary Releases:**
+
+*Linux/macOS:*
 ```bash
 # Download and install from GitHub releases
 curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+```
+
+*Windows:*
+```bash
+# Download and install using the official endpoint
+curl -sfL -o trivy.zip "https://get.trivy.dev/trivy?type=zip&os=windows&arch=amd64"
+unzip trivy.zip
+# Move trivy.exe to a directory in your PATH
 ```
 
 ### Verification
