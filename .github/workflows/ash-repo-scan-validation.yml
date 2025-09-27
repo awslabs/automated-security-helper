@@ -174,8 +174,9 @@ jobs:
             
             # Create temporary directory for extraction to avoid conflicts
             mkdir -p /tmp/trivy-install
+            mv trivy.zip /tmp/trivy-install/
             cd /tmp/trivy-install
-            unzip /github/workspace/trivy.zip
+            unzip trivy.zip
             
             # Create tools directory and move only the trivy executable
             mkdir -p /c/tools
@@ -184,7 +185,6 @@ jobs:
             # Clean up
             cd /github/workspace
             rm -rf /tmp/trivy-install
-            rm trivy.zip
             
             # Add to PATH and verify
             echo "C:\tools" >> $GITHUB_PATH
