@@ -41,7 +41,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
@@ -70,7 +70,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
       - name: Run ASH scan
         run: ash --mode container
       - name: Upload scan results
@@ -99,7 +99,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
       - name: Run ASH scan
         run: ash --mode local
       - name: Add PR comment
@@ -132,7 +132,7 @@ jobs:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
     - ash --mode local
   artifacts:
     paths:
@@ -150,7 +150,7 @@ ash-scan-container:
     DOCKER_TLS_CERTDIR: "/certs"
   script:
     - apk add --no-cache python3 py3-pip git
-    - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+    - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
     - ash --mode container
   artifacts:
     paths:
@@ -169,7 +169,7 @@ phases:
     runtime-versions:
       python: 3.10
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
 
   build:
     commands:
@@ -190,7 +190,7 @@ phases:
     runtime-versions:
       python: 3.10
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
 
   pre_build:
     commands:
@@ -220,7 +220,7 @@ pipeline {
     stages {
         stage('Install ASH') {
             steps {
-                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2'
+                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3'
             }
         }
         stage('Run ASH Scan') {
@@ -251,7 +251,7 @@ pipeline {
         stage('Install ASH') {
             steps {
                 sh 'apk add --no-cache python3 py3-pip git'
-                sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2'
+                sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3'
             }
         }
         stage('Run ASH Scan') {
@@ -282,7 +282,7 @@ jobs:
       - checkout
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
       - run:
           name: Run ASH scan
           command: ash --mode local
@@ -309,7 +309,7 @@ jobs:
       - checkout
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
       - run:
           name: Run ASH scan
           command: ash --mode container

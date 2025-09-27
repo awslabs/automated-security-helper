@@ -21,6 +21,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.secret_masking import mask_secret_in_text
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -386,6 +387,10 @@ class AshAggregatedResults(BaseModel):
                             result.message.root, "text"
                         ):
                             description = result.message.root.text
+                    
+                    # Mask secrets in the description based on rule ID
+                    if description and result.ruleId:
+                        description = mask_secret_in_text(description, result.ruleId)
 
                     # Extract location information
                     file_path = None
