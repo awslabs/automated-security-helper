@@ -74,7 +74,7 @@ async def test_mcp_get_scan_results():
 async def test_mcp_check_installation():
     """Test the mcp_check_installation function."""
     # Mock the get_ash_version function
-    mock_version = "3.0.0"
+    mock_version = "3.0.1"
 
     # Mock the Path.exists and Path.is_dir methods
     mock_path = MagicMock()
