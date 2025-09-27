@@ -1,6 +1,6 @@
 # ASH - Automated Security Helper
 
-[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan-validation.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan-validation.yml)
+[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml)
 [![ASH - Matrix Unit Tests](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml)
 
 ## Table of Contents
@@ -87,94 +87,19 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 ### Quick Install (Recommended)
 
 ```bash
-# Set up some variables
-REPO_DIR="${HOME}"/Documents/repos/reference
-REPO_NAME=automated-security-helper
+# Install uv on Linux/macOS if it isn't installed already
+curl -sSfL https://astral.sh/uv/install.sh | sh
 
-# Create a folder to hold reference git repositories
-mkdir -p ${REPO_DIR}
-
-# Clone the repository into the reference area
-git clone https://github.com/awslabs/automated-security-helper "${REPO_DIR}/${REPO_NAME}"
-
-# Set the repo path in your shell for easier access
-#
-# Add this (and the variable settings above) to
-# your ~/.bashrc, ~/.bash_profile, ~/.zshrc, or similar
-# start-up scripts so that the ash tool is in your PATH
-# after re-starting or starting a new shell.
-#
-export PATH="${PATH}:${REPO_DIR}/${REPO_NAME}"
-
-# Execute the ash tool
-ash --version
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.2"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.0"
 ```
 
-### Getting Started - Windows
+```powershell
+# Install uv on Windows with PowerShell if it isn't installed already
+irm https://astral.sh/uv/install.ps1 | iex
 
-**ASH** uses containers, `bash` shell scripts, and multiple background processes running in parallel to run the multiple
-source code security scanning tools that it uses.  Because of this, running `ash` from either a `PowerShell` or `cmd`
-shell on Windows is not possible.  Furthermore, due to reliance on running containers, usually with Docker Desktop
-when running on Windows, there is an implicit dependency on having installed, configured, and operational a
-Windows Subsystem for Linux (WSL) 2 environment on the Windows machine where `ash` will be run.
-
-To use `ash` on Windows:
-
-- Install, configure, and test the [WSL 2 environment on Windows](https://learn.microsoft.com/en-us/windows/wsl/install)
-- Install, configure, and test [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/), using the WSL 2 environment
-- Use the [Windows Terminal](https://learn.microsoft.com/en-us/windows/terminal/install) program and open a command-line window to interact with the WSL 2 environment
-- Install and/or update the `git` client in the WSL 2 environment.  This should be pre-installed, but you may need to update the version
-  using the `apt-get update` command.
-
-Once the WSL2 command-line window is open, follow the steps above in [Getting Started - Linux or MacOS](#getting-started---linux-or-macos)
-to install and run `ash` in WSL 2 on the Windows machine.
-
-To run `ash`, open a Windows Terminal shell into the WSL 2 environment and use that command-line shell to run the `ash` command.
-
-**Note**: when working this way, be sure to `git clone` any git repositories to be scanned into the WSL 2 filesystem.
-Results are un-predictable if repositories or file sub-trees in the Windows filesystem are scanned using `ash`
-that is running in the WSL 2 environment.
-
-**Tip**: If you are using Microsoft VSCode for development, it is possible to configure a "remote" connection
-[using VSCode into the WSL2 environment](https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-vscode).
-By doing this, you can host your git repositories in WSL 2 and still
-work with them as you have in the past when they were in the Windows filesystem of your Windows machine.
-
-## Using `ash` with `pre-commit`
-
-The `ash` tool can be used interactively on a workstation or run using the [`pre-commit`](https://pre-commit.com/) command.
-If `pre-commit` is used to run `ash`, then the `pre-commit` processing takes care of installing
-a copy of the `ash` git repository and setting up to run the `ash` program from that installed
-repository.  Using `pre-commit` still requires usage of WSL 2 when running on Windows.
-
-Using `ash` as a [`pre-commit`](https://pre-commit.com/) hook enables development teams to use the `ash` tool
-in two ways.  First, developers can use `ash` as a part of their local development process on whatever
-development workstation or environment they are using.  Second, `ash` can be run in a build automation stage
-by running `pre-commit run --hook-stage manual ash` in build automation stage.
-When using `pre-commit`, run the `pre-commit` commands while in a folder/directory within the git repository that is
-configured with `pre-commit` hooks.
-
-Refer to the [pre-commit-hooks](./.pre-commit-hooks.yaml) file for information about the `pre-commit`
-hook itself.
-
-To configure a git repository to use the `ash` hook, start with the following `pre-commit-config` configuration:
-
-```yaml
-  - repo: git@github.com:awslabs/automated-security-helper.git
-    rev: '1.1.0-e-01Dec2023' # update with the latest tagged version in the repository
-    hooks:
-    - id: ash
-      name: scan files using ash
-      stages: [ manual ]
-      # uncomment the line below if using "finch" on MacOS
-      # args: [ "-f" ]
-```
-
-Once the `.pre-commit-hooks.yaml` file is updated, the `ash` tool can be run using the following command:
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.2 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.0 $args }
 ```
 
 ### Other Installation Methods
@@ -195,13 +120,13 @@ ash --help
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.0.2
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.1.0
 cd automated-security-helper
 pip install .
 ```
@@ -540,6 +465,8 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for security is
 
 ## License
 
-This library is licensed under the Apache 2.0 License. See the LICENSE file.
+This library is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file.
+
+## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=awslabs/automated-security-helper&type=Date)](https://www.star-history.com/#awslabs/automated-security-helper&Date)
