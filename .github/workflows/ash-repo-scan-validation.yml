@@ -191,12 +191,37 @@ jobs:
             ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL
           fi
 
-      - name: Validate ASH using Python Local
-        if: matrix.method == 'python-local'
+      - name: Validate ASH using Python Local (Windows)
+        if: matrix.method == 'python-local' && runner.os == 'Windows'
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
         # It should fail if there are findings in the scan, but that's a valid test for us still.
         continue-on-error: true
         timeout-minutes: 10
+        shell: pwsh
+        run: |
+          Write-Host "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
+          Write-Host "ASH Version:"
+          ash --version
+          Write-Host "ASH Help:"
+          ash --help
+          Write-Host "ASH Dependencies Install"
+          ash dependencies install
+          Write-Host "ASH Config Get"
+          ash config get
+          Write-Host "ASH Scan Output:"
+          if ("${{ matrix.config_file }}" -eq "community") {
+            ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions --config .ash/.ash_community_plugins.yaml
+          } else {
+            ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
+          }
+
+      - name: Validate ASH using Python Local (Unix)
+        if: matrix.method == 'python-local' && runner.os != 'Windows'
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: bash
         run: |
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           echo "ASH Version:"

@@ -181,6 +181,6 @@ scanners:
       disable_telemetry: true
 converters:
   archive:
-    enabled: false
+    enabled: true # Disable once #197 is fixed, not required for the test
   jupyter:
     enabled: false
