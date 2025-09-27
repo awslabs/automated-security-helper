@@ -145,6 +145,52 @@ jobs:
         shell: bash
         run: mkdir -p .ash/ash_output
 
+      # Install community plugin tools when using community config
+      - name: Install Community Plugin Tools
+        if: matrix.config_file == 'community'
+        shell: bash
+        run: |
+          echo "Installing tools needed for community plugins..."
+
+          # Install Trivy based on the operating system
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo "Installing Trivy on Linux..."
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+            
+            # Verify installation
+            trivy version
+            
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            echo "Installing Trivy on macOS..."
+            brew install trivy
+            
+            # Verify installation
+            trivy version
+            
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "Installing Trivy on Windows..."
+            # Download and install Trivy for Windows
+            TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | grep tag_name | cut -d '"' -f 4 | sed 's/v//')
+            curl -sfL -o trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_${TRIVY_VERSION}_Windows-64bit.tar.gz"
+            tar -xzf trivy.tar.gz
+            
+            # Create tools directory and move trivy
+            mkdir -p /c/tools
+            mv trivy.exe /c/tools/
+            rm trivy.tar.gz
+            
+            # Add to PATH and verify
+            echo "C:\tools" >> $GITHUB_PATH
+            export PATH="/c/tools:$PATH"
+            trivy version
+            
+          else
+            echo "Unsupported operating system: $RUNNER_OS"
+            exit 1
+          fi
+
+          echo "Community plugin tools installation completed successfully!"
+
       # Call the appropriate workflow based on matrix.method
       ############ Python #########
       - name: Install uv
