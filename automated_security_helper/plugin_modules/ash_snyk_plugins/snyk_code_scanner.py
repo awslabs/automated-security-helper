@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, List, Literal
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -117,6 +117,40 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         return super()._process_config_options()
 
+    def _resolve_arguments(
+        self, target: Path, results_file: Path | None = None
+    ) -> List[str]:
+        """Resolve arguments for Snyk code test command.
+
+        Args:
+            target: Target to scan
+            results_file: Path to results file
+
+        Returns:
+            List[str]: Arguments to pass to Snyk
+        """
+        # Process configuration options to populate extra_args
+        self._process_config_options()
+
+        # Start with base command and subcommands
+        args = [self.command, *self.subcommands]
+
+        # Add extra args (like severity threshold)
+        for tool_extra_arg in self.args.extra_args:
+            if tool_extra_arg.value is not None:
+                args.extend([tool_extra_arg.key, str(tool_extra_arg.value)])
+            else:
+                args.append(tool_extra_arg.key)
+
+        # Add target path
+        args.append(Path(target).as_posix())
+
+        # Add SARIF output argument with equal sign format (required by Snyk)
+        if results_file is not None:
+            args.append(f"--sarif-file-output={Path(results_file).as_posix()}")
+
+        return args
+
     def scan(
         self,
         target: Path,
@@ -184,7 +218,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             target_results_dir.mkdir(exist_ok=True, parents=True)
 
             final_args = self._resolve_arguments(
-                target=target, results_file=results_file, use_equal=True
+                target=target, results_file=results_file
             )
 
             self._plugin_log(
