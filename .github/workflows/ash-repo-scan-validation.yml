@@ -1,4 +1,4 @@
-name: ASH - Scan Validation
+name: ASH - Cross-Platform Scan Validation (Bash/PowerShell/Python/Container)
 
 on:
   push:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   validate-scan-methods:
-    name: ASH Scan Test${{ matrix.config_file && format(' ({0})', matrix.config_file == 'community' && 'Community Plugins' || matrix.config_file) || '' }}
+    name: ASH Scan Test (${{ matrix.os }}, ${{ matrix.method }}, ${{ matrix.platform }})${{ matrix.config_file && format(' - {0}', matrix.config_file == 'community' && 'Community Plugins' || matrix.config_file) || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -257,10 +257,22 @@ jobs:
         shell: bash
         run: |
           echo "Checking for plugin execution errors..."
-          ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+          # Ensure ash is in PATH
+          export PATH="$HOME/.local/bin:$PATH"
+          which ash || echo "ASH not found in PATH, checking python -m"
+          
+          # Try ash command first, fallback to python -m if needed
+          if command -v ash >/dev/null 2>&1; then
+            ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+            REPORT_CMD="ash report --format text"
+          else
+            ERROR_COUNT=$(python -m automated_security_helper report --format text | grep ERROR | wc -l)
+            REPORT_CMD="python -m automated_security_helper report --format text"
+          fi
+          
           if [ "$ERROR_COUNT" -gt 1 ]; then
             echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-            ash report --format text | grep ERROR | tail -n +2
+            $REPORT_CMD | grep ERROR | tail -n +2
             exit 1
           else
             echo "SUCCESS: No plugin execution errors found"
@@ -372,13 +384,25 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "Checking for plugin execution errors..."
-          $ErrorOutput = ash report --format text | Select-String "ERROR"
-          if ($ErrorOutput -and $ErrorOutput.Count -gt 1) {
-            Write-Host "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-            $ErrorOutput | Select-Object -Skip 1
-            exit 1
+          $ResultsFile = ".ash/ash_output/ash_aggregated_results.json"
+          if (Test-Path $ResultsFile) {
+            $Results = Get-Content $ResultsFile | ConvertFrom-Json
+            $ErrorCount = 0
+            foreach ($Scanner in $Results.scanners.PSObject.Properties) {
+              if ($Scanner.Value.result -eq "ERROR") {
+                $ErrorCount++
+                Write-Host "ERROR: Scanner $($Scanner.Name) failed with error"
+              }
+            }
+            if ($ErrorCount -gt 0) {
+              Write-Host "ERROR: Found $ErrorCount plugin execution errors"
+              exit 1
+            } else {
+              Write-Host "SUCCESS: No plugin execution errors found"
+            }
           } else {
-            Write-Host "SUCCESS: No plugin execution errors found"
+            Write-Host "ERROR: Results file not found at $ResultsFile"
+            exit 1
           }
 
       ############ Bash #########
@@ -411,10 +435,10 @@ jobs:
         shell: bash
         run: |
           echo "Checking for plugin execution errors..."
-          ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+          ERROR_COUNT=$(./ash report --format text | grep ERROR | wc -l)
           if [ "$ERROR_COUNT" -gt 1 ]; then
             echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-            ash report --format text | grep ERROR | tail -n +2
+            ./ash report --format text | grep ERROR | tail -n +2
             exit 1
           else
             echo "SUCCESS: No plugin execution errors found"
