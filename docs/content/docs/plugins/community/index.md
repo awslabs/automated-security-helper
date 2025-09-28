@@ -6,6 +6,7 @@ This section is dedicated to community-developed plugins for ASH. Community plug
 
 ### Security Scanners
 
+- **[Snyk Code Plugin](snyk-plugin.md)** - Integrates Snyk Code for static application security testing (SAST) of source code vulnerabilities
 - **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
 
 ## Contributing a Community Plugin

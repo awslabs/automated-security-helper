@@ -149,8 +149,18 @@ jobs:
       - name: Install Community Plugin Tools
         if: matrix.config_file == 'community'
         shell: bash
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           echo "Installing tools needed for community plugins..."
+
+          # Install Snyk CLI (cross-platform via npm)
+          echo "Installing Snyk CLI..."
+          npm install -g snyk
+
+          # Verify Snyk installation
+          snyk version
+          echo "Snyk CLI installation completed!"
 
           # Install Trivy based on the operating system
           if [[ "$RUNNER_OS" == "Linux" ]]; then

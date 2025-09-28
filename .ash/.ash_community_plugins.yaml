@@ -3,6 +3,7 @@ project_name: automated-security-helper
 fail_on_findings: true
 #ash_plugin_modules: []
 ash_plugin_modules:
+  - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
 external_reports_to_include: []
 global_settings:
@@ -170,6 +171,9 @@ scanners:
     enabled: false
   semgrep:
     enabled: false
+  snyk-code:
+    enabled: true
+    severity_threshold: "MEDIUM"
   syft:
     enabled: false
   trivy-repo:
