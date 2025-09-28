@@ -27,6 +27,7 @@ from automated_security_helper.utils.suppression_matcher import (
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
+from automated_security_helper.utils.secret_masking import mask_secret_in_text
 
 
 def get_finding_id(
@@ -338,6 +339,42 @@ def get_severity_metrics_from_sarif(
                     scanner_severity_count.info += 1
 
     return scanner_severity_count
+
+
+def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:
+    """
+    Mask secrets in SARIF report messages based on rule IDs.
+    
+    Args:
+        sarif_report: The SARIF report to modify
+        
+    Returns:
+        The modified SARIF report with secrets masked
+    """
+    if not sarif_report or not sarif_report.runs:
+        return sarif_report
+        
+    for run in sarif_report.runs:
+        if not run.results:
+            continue
+            
+        for result in run.results:
+            if result.message and result.ruleId:
+                # Mask secrets in message text
+                if hasattr(result.message, "text") and result.message.text:
+                    result.message.text = mask_secret_in_text(
+                        result.message.text, result.ruleId
+                    )
+                elif (
+                    hasattr(result.message, "root")
+                    and hasattr(result.message.root, "text")
+                    and result.message.root.text
+                ):
+                    result.message.root.text = mask_secret_in_text(
+                        result.message.root.text, result.ruleId
+                    )
+    
+    return sarif_report
 
 
 def apply_suppressions_to_sarif(
