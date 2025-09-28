@@ -23,9 +23,9 @@ ENV PATH="/root/.local/bin:$PATH"
 WORKDIR /src
 RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
     git clone \
-        --branch ${INSTALL_ASH_REVISION} \
-        ${ASH_REPO_CLONE_URL} \
-        . || echo "Skipping clone of repo for LOCAL revision"
+    --branch ${INSTALL_ASH_REVISION} \
+    ${ASH_REPO_CLONE_URL} \
+    . || echo "Skipping clone of repo for LOCAL revision"
 
 COPY pyproject.toml* hatch_build.py* uv.lock* README.md* LICENSE* Dockerfile* ./
 COPY ci*/ ci/
@@ -79,12 +79,12 @@ RUN mkdir -p ${HOME}/.ssh && \
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y \
-      curl \
-      python3-venv \
-      git \
-      ripgrep \
-      ruby-dev \
-      tree && \
+    curl \
+    python3-venv \
+    git \
+    ripgrep \
+    ruby-dev \
+    tree && \
     rm -rf /var/lib/apt/lists/*
 
 #
@@ -95,10 +95,10 @@ RUN set -uex; \
     apt-get install -y ca-certificates curl gnupg; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+    | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
     NODE_MAJOR=20; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
-     > /etc/apt/sources.list.d/nodesource.list; \
+    > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
     apt-get -qy install nodejs;
 #
@@ -152,10 +152,14 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh |
 RUN grype --version
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
-        grype db update && \
-        mkdir -p ${SEMGREP_RULES_CACHE_DIR} && \
-        for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
+    grype db update && \
+    mkdir -p ${SEMGREP_RULES_CACHE_DIR} && \
+    for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
     fi
+
+RUN curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | \
+    sh -s -- -b /usr/local/bin 
+RUN trivy --version
 
 #
 # Setting default WORKDIR to /src
@@ -232,8 +236,8 @@ ARG ASHUSER_HOME=/home/${ASH_USER}
 # ignore a failure to add the group
 RUN addgroup --gid ${GID} ${ASH_GROUP} || :
 RUN adduser --disabled-password --disabled-login \
-        --uid ${UID} --gid ${GID} \
-        ${ASH_USER} && \
+    --uid ${UID} --gid ${GID} \
+    ${ASH_USER} && \
     mkdir -p ${ASHUSER_HOME}/.ssh && \
     cp ${HOME}/.ssh/known_hosts ${ASHUSER_HOME}/.ssh/known_hosts
 
