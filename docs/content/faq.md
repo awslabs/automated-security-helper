@@ -23,13 +23,13 @@ No. ASH is designed to help identify common security issues early in the develop
 You have several options:
 ```bash
 # Using uvx (recommended)
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.2"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.0.3"
 
 # Using pipx
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
 
 # Using pip
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.2
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.0.3
 ```
 
 ### What are the prerequisites for ASH v3?
