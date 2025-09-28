@@ -257,8 +257,10 @@ jobs:
         shell: bash
         run: |
           echo "Checking for plugin execution errors..."
-          if ash report --format text | grep ERROR; then
-            echo "ERROR: Found plugin execution errors in the scan results"
+          ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+          if [ "$ERROR_COUNT" -gt 1 ]; then
+            echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+            ash report --format text | grep ERROR | tail -n +2
             exit 1
           else
             echo "SUCCESS: No plugin execution errors found"
@@ -296,9 +298,9 @@ jobs:
         run: |
           Write-Host "Checking for plugin execution errors..."
           $ErrorOutput = ash report --format text | Select-String "ERROR"
-          if ($ErrorOutput) {
-            Write-Host "ERROR: Found plugin execution errors in the scan results"
-            Write-Host $ErrorOutput
+          if ($ErrorOutput -and $ErrorOutput.Count -gt 1) {
+            Write-Host "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+            $ErrorOutput | Select-Object -Skip 1
             exit 1
           } else {
             Write-Host "SUCCESS: No plugin execution errors found"
@@ -335,8 +337,10 @@ jobs:
         shell: bash
         run: |
           echo "Checking for plugin execution errors..."
-          if ash report --format text | grep ERROR; then
-            echo "ERROR: Found plugin execution errors in the scan results"
+          ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+          if [ "$ERROR_COUNT" -gt 1 ]; then
+            echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+            ash report --format text | grep ERROR | tail -n +2
             exit 1
           else
             echo "SUCCESS: No plugin execution errors found"
@@ -369,9 +373,9 @@ jobs:
         run: |
           Write-Host "Checking for plugin execution errors..."
           $ErrorOutput = ash report --format text | Select-String "ERROR"
-          if ($ErrorOutput) {
-            Write-Host "ERROR: Found plugin execution errors in the scan results"
-            Write-Host $ErrorOutput
+          if ($ErrorOutput -and $ErrorOutput.Count -gt 1) {
+            Write-Host "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+            $ErrorOutput | Select-Object -Skip 1
             exit 1
           } else {
             Write-Host "SUCCESS: No plugin execution errors found"
@@ -407,8 +411,10 @@ jobs:
         shell: bash
         run: |
           echo "Checking for plugin execution errors..."
-          if ash report --format text | grep ERROR; then
-            echo "ERROR: Found plugin execution errors in the scan results"
+          ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+          if [ "$ERROR_COUNT" -gt 1 ]; then
+            echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+            ash report --format text | grep ERROR | tail -n +2
             exit 1
           else
             echo "SUCCESS: No plugin execution errors found"
