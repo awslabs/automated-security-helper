@@ -35,6 +35,9 @@ nav:
   - Community Plugins:
       - Overview: docs/plugins/community/index.md
       - Trivy Plugin: docs/plugins/community/trivy-plugin.md
+      - Snyk Plugin:
+          - Snyk Plugin: docs/plugins/community/snyk-plugin.md
+          - CICD Setup guide: docs/plugins/community/snyk-plugin-setup.md
   - Tutorials:
       - Running ASH Locally: tutorials/running-ash-locally.md
       - Running ASH in CI: tutorials/running-ash-in-ci.md
