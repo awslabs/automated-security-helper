@@ -460,3 +460,48 @@ jobs:
               exit 1
             }
           }
+
+      - name: Validate GitLab SAST Report Schema Compliance
+        shell: bash
+        run: |
+          echo "Validating GitLab SAST report schema compliance..."
+
+          # Check if any GitLab SAST reports were generated
+          GITLAB_REPORTS=$(find .ash/ash_output -name "*.gl-sast-report.json" 2>/dev/null || true)
+
+          if [ -z "$GITLAB_REPORTS" ]; then
+            echo "No GitLab SAST reports found to validate"
+            exit 0
+          fi
+
+          echo "Found GitLab SAST reports to validate:"
+          echo "$GITLAB_REPORTS"
+
+          # Install ajv-cli for JSON schema validation
+          echo "Installing ajv-cli for schema validation..."
+          npm install -g ajv-cli
+
+          # Download the GitLab SAST schema
+          echo "Downloading GitLab SAST schema..."
+          curl -o gitlab-sast-schema.json "https://gitlab.com/gitlab-org/security-products/security-report-schemas/-/raw/master/dist/sast-report-format.json"
+
+          # Validate each GitLab SAST report against the schema
+          echo "Validating reports against schema..."
+          VALIDATION_FAILED=false
+
+          for report in $GITLAB_REPORTS; do
+            echo "Validating $report..."
+            if ajv validate -s gitlab-sast-schema.json -d "$report"; then
+              echo "✓ $report passed schema validation"
+            else
+              echo "✗ $report failed schema validation"
+              VALIDATION_FAILED=true
+            fi
+          done
+
+          if [ "$VALIDATION_FAILED" = true ]; then
+            echo "ERROR: One or more GitLab SAST reports failed schema validation"
+            exit 1
+          else
+            echo "SUCCESS: All GitLab SAST reports passed schema validation"
+          fi

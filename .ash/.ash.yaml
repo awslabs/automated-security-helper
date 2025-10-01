@@ -154,6 +154,8 @@ reporters:
     enabled: false
   yaml:
     enabled: false
+  gitlab-sast:
+    enabled: true
 scanners:
   bandit:
     enabled: true

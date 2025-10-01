@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from typing import Literal, TYPE_CHECKING
 
 from automated_security_helper.core.constants import ASH_REPO_URL
@@ -128,11 +129,69 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                         end_line=result_location.end_line,
                     )
                     ASH_LOGGER.trace(f"Finding ID: {finding_id}")
+                    # Prepare details field with GitLab SAST schema compliance
+                    details_dict = {}
+                    if result.properties:
+                        # Get the raw properties dict
+                        props_dict = result.properties.model_dump(
+                            by_alias=True,
+                            exclude_none=True,
+                            exclude_unset=True,
+                            mode="json",
+                        )
+
+                        # Convert all properties to proper detail_type format
+                        for key, value in props_dict.items():
+                            # Create a human-readable name for the detail
+                            detail_name = key.replace("_", " ").title()
+
+                            if key == "tags" and isinstance(value, list):
+                                # Convert tags array to named_list format
+                                tags_items = {}
+                                for i, tag in enumerate(value):
+                                    tags_items[f"tag_{i}"] = {
+                                        "name": f"Tag {i + 1}",
+                                        "type": "text",
+                                        "value": str(tag),
+                                    }
+                                details_dict[key] = {
+                                    "name": detail_name,
+                                    "type": "named-list",
+                                    "items": tags_items,
+                                }
+                            elif isinstance(value, (str, int, float, bool)):
+                                # Convert simple values to text detail_type
+                                details_dict[key] = {
+                                    "name": detail_name,
+                                    "type": "text",
+                                    "value": str(value),
+                                }
+                            elif isinstance(value, dict):
+                                # Convert dict to named_list detail_type
+                                dict_items = {}
+                                for sub_key, sub_value in value.items():
+                                    dict_items[sub_key] = {
+                                        "name": sub_key.replace("_", " ").title(),
+                                        "type": "text",
+                                        "value": str(sub_value),
+                                    }
+                                details_dict[key] = {
+                                    "name": detail_name,
+                                    "type": "named-list",
+                                    "items": dict_items,
+                                }
+                            else:
+                                # Fallback for other types
+                                details_dict[key] = {
+                                    "name": detail_name,
+                                    "type": "text",
+                                    "value": str(value),
+                                }
+
                     vuln = gl_sast.Vulnerability(
                         id=finding_id,
                         name=result.ruleId,
                         location=result_location,
-                        category="sast",
                         description=result.message.root.text,
                         severity=severity_id,
                         identifiers=[
@@ -157,16 +216,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                                 ),
                             )
                         ],
-                        details=(
-                            result.properties.model_dump(
-                                by_alias=True,
-                                exclude_none=True,
-                                exclude_unset=True,
-                                mode="json",
-                            )
-                            if result.properties
-                            else {}
-                        ),
+                        details=details_dict,
                         links=(
                             [
                                 gl_sast.Link(
@@ -180,6 +230,8 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                     )
 
                     vulnerabilities.append(vuln)
+
+            schema_url = "https://gitlab.com/gitlab-org/security-products/security-report-schemas/-/raw/master/dist/sast-report-format.json"
 
             report = gl_sast.GitlabSastReport(
                 scan=gl_sast.Scan(
@@ -205,16 +257,24 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                     start_time=report_time_iso,
                     end_time=report_time_iso,
                     status=gl_status,
-                    message="Scan completed successfully",
                 ),
+                schema_=schema_url,
                 vulnerabilities=vulnerabilities,
-                version=get_ash_version(),
+                version="15.2.3",
             )
-            return report.model_dump_json(
+
+            # Serialize to JSON first
+            report_json = report.model_dump_json(
                 by_alias=True,
                 exclude_none=True,
                 exclude_unset=True,
             )
+
+            # Parse JSON and add $schema field for IDE validation
+            report_dict = json.loads(report_json)
+            report_dict["$schema"] = schema_url
+
+            return json.dumps(report_dict, separators=(",", ":"))
 
         except Exception as e:
             ASH_LOGGER.error(f"Failed to create GitLab SAST report: {str(e)}")
