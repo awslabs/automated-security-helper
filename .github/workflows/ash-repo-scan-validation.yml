@@ -1,4 +1,4 @@
-name: ASH - Scan Validation
+name: ASH - Cross-Platform Scan Validation (Bash/PowerShell/Python/Container)
 
 on:
   push:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   validate-scan-methods:
-    name: ASH Scan Test${{ matrix.config_file && format(' ({0})', matrix.config_file == 'community' && 'Community Plugins' || matrix.config_file) || '' }}
+    name: ASH Scan Test (${{ matrix.os }}, ${{ matrix.method }}, ${{ matrix.platform }})${{ matrix.config_file && format(' - {0}', matrix.config_file == 'community' && 'Community Plugins' || matrix.config_file) || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -149,8 +149,18 @@ jobs:
       - name: Install Community Plugin Tools
         if: matrix.config_file == 'community'
         shell: bash
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           echo "Installing tools needed for community plugins..."
+
+          # Install Snyk CLI (cross-platform via npm)
+          echo "Installing Snyk CLI..."
+          npm install -g snyk
+
+          # Verify Snyk installation
+          snyk version
+          echo "Snyk CLI installation completed!"
 
           # Install Trivy based on the operating system
           if [[ "$RUNNER_OS" == "Linux" ]]; then
@@ -227,6 +237,8 @@ jobs:
         shell: bash
         continue-on-error: true
         timeout-minutes: 10
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           echo "ASH Version:"
@@ -240,6 +252,32 @@ jobs:
             ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL
           fi
 
+      - name: Validate No Plugin Errors (Python Container)
+        if: matrix.method == 'python-container'
+        shell: bash
+        run: |
+          echo "Checking for plugin execution errors..."
+          # Ensure ash is in PATH
+          export PATH="$HOME/.local/bin:$PATH"
+          which ash || echo "ASH not found in PATH, checking python -m"
+
+          # Try ash command first, fallback to python -m if needed
+          if command -v ash >/dev/null 2>&1; then
+            ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+            REPORT_CMD="ash report --format text"
+          else
+            ERROR_COUNT=$(python -m automated_security_helper report --format text | grep ERROR | wc -l)
+            REPORT_CMD="python -m automated_security_helper report --format text"
+          fi
+
+          if [ "$ERROR_COUNT" -gt 1 ]; then
+            echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+            $REPORT_CMD | grep ERROR | tail -n +2
+            exit 1
+          else
+            echo "SUCCESS: No plugin execution errors found"
+          fi
+
       - name: Validate ASH using Python Local (Windows)
         if: matrix.method == 'python-local' && runner.os == 'Windows'
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
@@ -247,6 +285,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         shell: pwsh
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           Write-Host "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           Write-Host "ASH Version:"
@@ -264,6 +304,20 @@ jobs:
             ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
           }
 
+      - name: Validate No Plugin Errors (Python Local Windows)
+        if: matrix.method == 'python-local' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "Checking for plugin execution errors..."
+          $ErrorOutput = ash report --format text | Select-String "ERROR"
+          if ($ErrorOutput -and $ErrorOutput.Count -gt 1) {
+            Write-Host "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+            $ErrorOutput | Select-Object -Skip 1
+            exit 1
+          } else {
+            Write-Host "SUCCESS: No plugin execution errors found"
+          }
+
       - name: Validate ASH using Python Local (Unix)
         if: matrix.method == 'python-local' && runner.os != 'Windows'
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
@@ -271,6 +325,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         shell: bash
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           echo "ASH Version:"
@@ -288,6 +344,20 @@ jobs:
             ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
           fi
 
+      - name: Validate No Plugin Errors (Python Local Unix)
+        if: matrix.method == 'python-local' && runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "Checking for plugin execution errors..."
+          ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+          if [ "$ERROR_COUNT" -gt 1 ]; then
+            echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+            ash report --format text | grep ERROR | tail -n +2
+            exit 1
+          else
+            echo "SUCCESS: No plugin execution errors found"
+          fi
+
       ############ PowerShell #########
 
       - name: Validate ASH using PowerShell
@@ -297,6 +367,8 @@ jobs:
         # It should fail if there are findings in the scan, but that's a valid test for us still.
         continue-on-error: true
         timeout-minutes: 10
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           . ./utils/ash_helpers.ps1
@@ -305,6 +377,32 @@ jobs:
             Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions -ConfigFile ".ash/.ash_community_plugins.yaml"
           } else {
             Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions
+          }
+
+      - name: Validate No Plugin Errors (PowerShell)
+        if: matrix.method == 'powershell'
+        shell: pwsh
+        run: |
+          Write-Host "Checking for plugin execution errors..."
+          $ResultsFile = ".ash/ash_output/ash_aggregated_results.json"
+          if (Test-Path $ResultsFile) {
+            $Results = Get-Content $ResultsFile | ConvertFrom-Json
+            $ErrorCount = 0
+            foreach ($Scanner in $Results.scanners.PSObject.Properties) {
+              if ($Scanner.Value.result -eq "ERROR") {
+                $ErrorCount++
+                Write-Host "ERROR: Scanner $($Scanner.Name) failed with error"
+              }
+            }
+            if ($ErrorCount -gt 0) {
+              Write-Host "ERROR: Found $ErrorCount plugin execution errors"
+              exit 1
+            } else {
+              Write-Host "SUCCESS: No plugin execution errors found"
+            }
+          } else {
+            Write-Host "ERROR: Results file not found at $ResultsFile"
+            exit 1
           }
 
       ############ Bash #########
@@ -316,6 +414,8 @@ jobs:
         timeout-minutes: 10
         if: matrix.method == 'bash'
         shell: bash
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           echo "Testing ASH using Bash on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           chmod +x ./ash
@@ -328,6 +428,20 @@ jobs:
             ./ash --build-target ci --verbose --ignore-suppressions --config .ash/.ash_community_plugins.yaml
           else
             ./ash --build-target ci --verbose --ignore-suppressions
+          fi
+
+      - name: Validate No Plugin Errors (Bash)
+        if: matrix.method == 'bash'
+        shell: bash
+        run: |
+          echo "Checking for plugin execution errors..."
+          ERROR_COUNT=$(./ash report --format text | grep ERROR | wc -l)
+          if [ "$ERROR_COUNT" -gt 1 ]; then
+            echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+            ./ash report --format text | grep ERROR | tail -n +2
+            exit 1
+          else
+            echo "SUCCESS: No plugin execution errors found"
           fi
 
       - name: Verify scan completed
