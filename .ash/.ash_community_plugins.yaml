@@ -1,10 +1,9 @@
 # yaml-language-server: $schema=../automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
-ash_plugin_modules: []
-# ash_plugin_modules:
-#   - automated_security_helper.plugin_modules.ash_aws_plugins
-#   - automated_security_helper.plugin_modules.ash_trivy_plugins
+#ash_plugin_modules: []
+ash_plugin_modules:
+  - automated_security_helper.plugin_modules.ash_trivy_plugins
 external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
@@ -76,28 +75,6 @@ global_settings:
     - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
       path: ".ash/ash_output*/scanners/*.json"
       reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
-    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen1"
-      path: automated_security_helper/utils/subprocess_utils.py
-      reason: "False positive - ASH requires Python 3.10+, compatibility with Python3.6 and less is not required"
-    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen2"
-      path: automated_security_helper/utils/subprocess_utils.py
-      reason: "False positive - ASH requires Python 3.10+, compatibility with Python3.6 and less is not required"
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: automated_security_helper/utils/secret_masking.py
-      reason: "False positive - Secret found message string"
-      line_start: 37
-      line_end: 37
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: automated_security_helper/utils/secret_masking.py
-      reason: "False positive - Secret found message string"
-      line_start: 46
-      line_end: 46
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: tests/unit/utils/test_secret_masking.py
-      reason: "False positive - Multiple ocurrences of the keyword due to the nature of the test suite"
-    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
-      path: tests/unit/utils/test_secret_masking.py
-      reason: "False positive - Multiple ocurrences of the keyword due to the nature of the test suite"
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
@@ -156,13 +133,13 @@ reporters:
     enabled: false
 scanners:
   bandit:
-    enabled: true
+    enabled: false
     options:
       confidence_level: all
       ignore_nosec: false
       config_file: .ash/bandit.yaml
   cdk-nag:
-    enabled: true
+    enabled: false
     options:
       nag_packs:
         AwsSolutionsChecks: true
@@ -171,9 +148,9 @@ scanners:
         NIST80053R5Checks: true
         PCIDSS321Checks: true
   cfn-nag:
-    enabled: true
+    enabled: false
   checkov:
-    enabled: true
+    enabled: false
     options:
       frameworks:
         - all
@@ -182,21 +159,28 @@ scanners:
       config_file: .ash/.checkov.yaml
       severity_threshold: LOW
   detect-secrets:
-    enabled: true
+    enabled: false
   npm-audit:
-    enabled: true
+    enabled: false
   grype:
-    enabled: true
+    enabled: false
     options:
       config_file: .ash/.grype.yaml
   opengrep:
-    enabled: true
+    enabled: false
   semgrep:
-    enabled: true
+    enabled: false
   syft:
+    enabled: false
+  trivy-repo:
     enabled: true
+    options:
+      scanners: ["vuln", "misconfig", "secret", "license"]
+      ignore_unfixed: false
+      license_full: false
+      disable_telemetry: true
 converters:
   archive:
-    enabled: true
+    enabled: true # Disable once #197 is fixed, not required for the test
   jupyter:
-    enabled: true
+    enabled: false

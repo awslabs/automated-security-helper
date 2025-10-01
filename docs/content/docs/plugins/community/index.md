@@ -2,9 +2,15 @@
 
 This section is dedicated to community-developed plugins for ASH. Community plugins extend ASH's functionality with additional scanners, reporters, converters, and event handlers developed by the community.
 
+## Available Community Plugins
+
+### Security Scanners
+
+- **[Trivy Plugin](trivy-plugin.md)** - Integrates Aquasec's Trivy for vulnerability, misconfiguration, secret, and license scanning
+
 ## Contributing a Community Plugin
 
-Currently, there are no community plugins listed. We encourage the community to develop and share plugins that extend ASH's capabilities.
+We encourage the community to develop and share plugins that extend ASH's capabilities.
 
 To contribute a community plugin:
 

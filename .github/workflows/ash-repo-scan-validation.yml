@@ -18,68 +18,101 @@ permissions:
 
 jobs:
   validate-scan-methods:
-    name: ASH Scan Test
+    name: ASH Scan Test${{ matrix.config_file && format(' ({0})', matrix.config_file == 'community' && 'Community Plugins' || matrix.config_file) || '' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux runners (x86)
+          # Linux runners (x86) - Default Config
           - os: ubuntu-latest
             method: bash
             platform: linux/amd64
+            config_file: default
           - os: ubuntu-latest
             method: powershell
             platform: linux/amd64
+            config_file: default
           - os: ubuntu-latest
             method: python-container
             platform: linux/amd64
+            config_file: default
           - os: ubuntu-latest
             method: python-local
             platform: linux/amd64
+            config_file: default
 
-          # Linux runners (ARM)
+          # Linux runners (ARM) - Default Config
           - os: ubuntu-24.04-arm
             method: bash
             platform: linux/aarch64
+            config_file: default
           - os: ubuntu-24.04-arm
             method: powershell
             platform: linux/aarch64
+            config_file: default
           - os: ubuntu-24.04-arm
             method: python-container
             platform: linux/aarch64
+            config_file: default
           - os: ubuntu-24.04-arm
             method: python-local
             platform: linux/aarch64
+            config_file: default
 
-          # macOS runners
+          # macOS runners - Default Config
           ### Disabled: Docker on the hosted MacOS runners isn't
           ###           very well supported right now
           # - os: macos-latest
           #   method: bash
           #   platform: darwin/amd64
+          #   config_file: default
           # - os: macos-latest
           #   method: powershell
           #   platform: darwin/amd64
+          #   config_file: default
           # - os: macos-latest
           #   method: python-container
           #   platform: darwin/amd64
+          #   config_file: default
           - os: macos-latest
             method: python-local
             platform: darwin/amd64
+            config_file: default
 
-          # Windows runners
+          # Windows runners - Default Config
           ### Disabled: Docker on the hosted Windows runners isn't
           ###           very well supported right
           # - os: windows-latest
           #   method: powershell
           #   platform: windows/amd64
+          #   config_file: default
           # - os: windows-latest
           #   method: python-container
           #   platform: windows/amd64
+          #   config_file: default
           ### Temp disabled to not impact others as this currently hangs
           - os: windows-latest
             method: python-local
             platform: windows/amd64
+            config_file: default
+
+          # Community Plugins Validation - Essential platforms only
+          - os: ubuntu-latest
+            method: python-local
+            platform: linux/amd64
+            config_file: community
+          - os: ubuntu-24.04-arm
+            method: python-local
+            platform: linux/aarch64
+            config_file: community
+          - os: macos-latest
+            method: python-local
+            platform: darwin/amd64
+            config_file: community
+          - os: windows-latest
+            method: python-local
+            platform: windows/amd64
+            config_file: community
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -111,6 +144,55 @@ jobs:
       - name: Create output directory
         shell: bash
         run: mkdir -p .ash/ash_output
+
+      # Install community plugin tools when using community config
+      - name: Install Community Plugin Tools
+        if: matrix.config_file == 'community'
+        shell: bash
+        run: |
+          echo "Installing tools needed for community plugins..."
+
+          # Install Trivy based on the operating system
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo "Installing Trivy on Linux..."
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+            
+            # Verify installation
+            trivy version
+            
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            echo "Installing Trivy on macOS..."
+            brew install trivy
+            
+            # Verify installation
+            trivy version
+            
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "Installing Trivy on Windows..."
+            # Download and install Trivy for Windows using the official endpoint
+            curl -sfL -o trivy.zip "https://get.trivy.dev/trivy?type=zip&os=windows&arch=amd64"
+            
+            # Create temporary directory for extraction to avoid conflicts
+            mkdir -p /tmp/trivy-install
+            mv trivy.zip /tmp/trivy-install/
+            cd /tmp/trivy-install
+            unzip trivy.zip
+            
+            # Create tools directory and move only the trivy executable
+            mkdir -p /c/tools
+            mv trivy.exe /c/tools/
+            
+            # Add to PATH and verify
+            echo "C:\tools" >> $GITHUB_PATH
+            export PATH="/c/tools:$PATH"
+            trivy version
+            
+          else
+            echo "Unsupported operating system: $RUNNER_OS"
+            exit 1
+          fi
+
+          echo "Community plugin tools installation completed successfully!"
 
       # Call the appropriate workflow based on matrix.method
       ############ Python #########
@@ -146,22 +228,51 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: |
-          echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }})"
+          echo "Testing ASH using Python (Container) on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           echo "ASH Version:"
           ash --version
           echo "ASH Help:"
           ash --help
           echo "ASH Scan Output:"
-          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL
+          if [ "${{ matrix.config_file }}" = "community" ]; then
+            ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL --config .ash/.ash_community_plugins.yaml
+          else
+            ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL
+          fi
 
-      - name: Validate ASH using Python Local
-        if: matrix.method == 'python-local'
+      - name: Validate ASH using Python Local (Windows)
+        if: matrix.method == 'python-local' && runner.os == 'Windows'
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
         # It should fail if there are findings in the scan, but that's a valid test for us still.
         continue-on-error: true
         timeout-minutes: 10
+        shell: pwsh
         run: |
-          echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }})"
+          Write-Host "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
+          Write-Host "ASH Version:"
+          ash --version
+          Write-Host "ASH Help:"
+          ash --help
+          Write-Host "ASH Dependencies Install"
+          ash dependencies install
+          Write-Host "ASH Config Get"
+          ash config get
+          Write-Host "ASH Scan Output:"
+          if ("${{ matrix.config_file }}" -eq "community") {
+            ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions --config .ash/.ash_community_plugins.yaml
+          } else {
+            ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
+          }
+
+      - name: Validate ASH using Python Local (Unix)
+        if: matrix.method == 'python-local' && runner.os != 'Windows'
+        # We're not worried if the scan failed, we are validating that it produces the outputs expected.
+        # It should fail if there are findings in the scan, but that's a valid test for us still.
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          echo "Testing ASH using Python (Local) on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           echo "ASH Version:"
           ash --version
           echo "ASH Help:"
@@ -171,7 +282,11 @@ jobs:
           echo "ASH Config Get"
           ash config get
           echo "ASH Scan Output:"
-          ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
+          if [ "${{ matrix.config_file }}" = "community" ]; then
+            ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions --config .ash/.ash_community_plugins.yaml
+          else
+            ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
+          fi
 
       ############ PowerShell #########
 
@@ -183,10 +298,14 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: |
-          Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }})"
+          Write-Host "Testing ASH using PowerShell on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           . ./utils/ash_helpers.ps1
           Get-Help Invoke-ASH -Full
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions
+          if ("${{ matrix.config_file }}" -eq "community") {
+            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions -ConfigFile ".ash/.ash_community_plugins.yaml"
+          } else {
+            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions
+          }
 
       ############ Bash #########
 
@@ -198,19 +317,23 @@ jobs:
         if: matrix.method == 'bash'
         shell: bash
         run: |
-          echo "Testing ASH using Bash on ${{ matrix.os }} (${{ matrix.platform }})"
+          echo "Testing ASH using Bash on ${{ matrix.os }} (${{ matrix.platform }}) with config: ${{ matrix.config_file }}"
           chmod +x ./ash
           echo "ASH Version:"
           ./ash --version
           echo "ASH Help:"
           ./ash --help
           echo "ASH Scan Output:"
-          ./ash --build-target ci --verbose --ignore-suppressions
+          if [ "${{ matrix.config_file }}" = "community" ]; then
+            ./ash --build-target ci --verbose --ignore-suppressions --config .ash/.ash_community_plugins.yaml
+          else
+            ./ash --build-target ci --verbose --ignore-suppressions
+          fi
 
       - name: Verify scan completed
         shell: pwsh
         run: |
-          Write-Host "Verifying scan completed successfully on ${{ matrix.os }} using method '${{ matrix.method }}'"
+          Write-Host "Verifying scan completed successfully on ${{ matrix.os }} using method '${{ matrix.method }}' with config: ${{ matrix.config_file }}"
           $PathsToValidate = @(
             ".ash/ash_output/ash_aggregated_results.json"
             ".ash/ash_output/reports/ash.sarif"
