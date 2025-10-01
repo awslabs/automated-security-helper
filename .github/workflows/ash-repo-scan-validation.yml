@@ -491,7 +491,7 @@ jobs:
 
           for report in $GITLAB_REPORTS; do
             echo "Validating $report..."
-            if ajv validate -s gitlab-sast-schema.json -d "$report"; then
+            if ajv validate -s gitlab-sast-schema.json -d "$report" --strict=false --all-errors; then
               echo "✓ $report passed schema validation"
             else
               echo "✗ $report failed schema validation"
