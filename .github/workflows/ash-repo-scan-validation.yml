@@ -260,7 +260,7 @@ jobs:
           # Ensure ash is in PATH
           export PATH="$HOME/.local/bin:$PATH"
           which ash || echo "ASH not found in PATH, checking python -m"
-          
+
           # Try ash command first, fallback to python -m if needed
           if command -v ash >/dev/null 2>&1; then
             ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
@@ -269,7 +269,7 @@ jobs:
             ERROR_COUNT=$(python -m automated_security_helper report --format text | grep ERROR | wc -l)
             REPORT_CMD="python -m automated_security_helper report --format text"
           fi
-          
+
           if [ "$ERROR_COUNT" -gt 1 ]; then
             echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
             $REPORT_CMD | grep ERROR | tail -n +2
