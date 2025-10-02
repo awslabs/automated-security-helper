@@ -11,7 +11,7 @@ on:
       ash-version:
         description: "ASH tag or branch to use. Defaults to a beta release until ASHv3 is released."
         required: false
-        default: "v3.0.0-beta"
+        default: "main"
         type: string
       ash-mode:
         description: 'Mode to run ASH in. Defaults to "local" for CI compatibility. Use "container" for full scanner support.'

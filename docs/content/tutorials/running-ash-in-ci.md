@@ -41,7 +41,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
@@ -70,7 +70,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
       - name: Run ASH scan
         run: ash --mode container
       - name: Upload scan results
@@ -99,7 +99,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
       - name: Run ASH scan
         run: ash --mode local
       - name: Add PR comment
@@ -132,7 +132,7 @@ jobs:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
     - ash --mode local
   artifacts:
     paths:
@@ -150,8 +150,32 @@ ash-scan-container:
     DOCKER_TLS_CERTDIR: "/certs"
   script:
     - apk add --no-cache python3 py3-pip git
-    - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
+    - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
     - ash --mode container
+  artifacts:
+    paths:
+      - .ash/ash_output
+```
+
+### Gitlab Security Dashboard
+
+According to Gitlab [documentation](https://docs.gitlab.com/user/application_security/sast/#understanding-the-results),
+if any of the jobs in a pipeline fails, the results will **not** be visible in the Security Dashboard.
+
+> A pipeline consists of multiple jobs, including SAST and DAST scanning. If any job fails to finish for any reason,
+> the security dashboard does not show SAST scanner output. For example, if the SAST job finishes but the DAST
+> job fails, the security dashboard does not show SAST results. On failure, the analyzer outputs an exit code.
+
+If you want to see the results of ASH in Gitlab's Security Dashboard, you must pass the `--no-fail-on-findings` to ASH.
+
+Example using local mode:
+
+```yaml
+ash-scan:
+  image: python:3.10
+  script:
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
+    - ash --mode local --no-fail-on-findings
   artifacts:
     paths:
       - .ash/ash_output
@@ -169,7 +193,7 @@ phases:
     runtime-versions:
       python: 3.10
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
 
   build:
     commands:
@@ -190,7 +214,7 @@ phases:
     runtime-versions:
       python: 3.10
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
 
   pre_build:
     commands:
@@ -220,7 +244,7 @@ pipeline {
     stages {
         stage('Install ASH') {
             steps {
-                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0'
+                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1'
             }
         }
         stage('Run ASH Scan') {
@@ -251,7 +275,7 @@ pipeline {
         stage('Install ASH') {
             steps {
                 sh 'apk add --no-cache python3 py3-pip git'
-                sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0'
+                sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1'
             }
         }
         stage('Run ASH Scan') {
@@ -282,7 +306,7 @@ jobs:
       - checkout
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
       - run:
           name: Run ASH scan
           command: ash --mode local
@@ -309,7 +333,7 @@ jobs:
       - checkout
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.0
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.1
       - run:
           name: Run ASH scan
           command: ash --mode container
