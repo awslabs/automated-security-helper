@@ -1,0 +1,394 @@
+# Running ASH in CI
+
+This guide explains how to integrate ASH v3 into various CI/CD platforms.
+
+## Continuous Integration (CI) Execution
+
+ASH supports running in CI environments as an executable container (e.g., via `docker run`) as well as via Container Job mechanisms, depending on CI platform support.
+
+### Building ASH Container Images for CI Usage
+
+Building ASH images for use in CI platforms requires targeting the `ci` stage of the `Dockerfile`:
+
+```bash
+# Via ash CLI
+ash build-image --build-target ci
+
+# Via docker or other OCI CLI
+docker build --tag automated-security-helper:ci --target ci .
+```
+
+## GitHub Actions
+
+### Basic Integration
+
+```yaml
+name: ASH Security Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install ASH
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+      - name: Run ASH scan
+        run: ash --mode local
+      - name: Upload scan results
+        uses: actions/upload-artifact@v3
+        with:
+          name: ash-results
+          path: .ash/ash_output
+```
+
+### Using Container Mode
+
+```yaml
+name: ASH Security Scan (Container)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install ASH
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+      - name: Run ASH scan
+        run: ash --mode container
+      - name: Upload scan results
+        uses: actions/upload-artifact@v3
+        with:
+          name: ash-results
+          path: .ash/ash_output
+```
+
+### Adding Scan Results to PR Comments
+
+```yaml
+name: ASH Security Scan with PR Comments
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install ASH
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+      - name: Run ASH scan
+        run: ash --mode local
+      - name: Add PR comment
+        uses: actions/github-script@v6
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const reportPath = '.ash/ash_output/reports/ash.summary.md';
+
+            if (fs.existsSync(reportPath)) {
+              const reportContent = fs.readFileSync(reportPath, 'utf8');
+              const issueNumber = context.issue.number;
+
+              github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: reportContent
+              });
+            }
+```
+
+## GitLab CI
+
+### Basic Integration
+
+```yaml
+ash-scan:
+  image: python:3.10
+  script:
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+    - ash --mode local
+  artifacts:
+    paths:
+      - .ash/ash_output
+```
+
+### Using Container Mode
+
+```yaml
+ash-scan-container:
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - apk add --no-cache python3 py3-pip git
+    - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+    - ash --mode container
+  artifacts:
+    paths:
+      - .ash/ash_output
+```
+
+### Gitlab Security Dashboard
+
+According to Gitlab [documentation](https://docs.gitlab.com/user/application_security/sast/#understanding-the-results),
+if any of the jobs in a pipeline fails, the results will **not** be visible in the Security Dashboard.
+
+> A pipeline consists of multiple jobs, including SAST and DAST scanning. If any job fails to finish for any reason,
+> the security dashboard does not show SAST scanner output. For example, if the SAST job finishes but the DAST
+> job fails, the security dashboard does not show SAST results. On failure, the analyzer outputs an exit code.
+
+If you want to see the results of ASH in Gitlab's Security Dashboard, you must pass the `--no-fail-on-findings` to ASH.
+
+Example using local mode:
+
+```yaml
+ash-scan:
+  image: python:3.10
+  script:
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+    - ash --mode local --no-fail-on-findings
+  artifacts:
+    paths:
+      - .ash/ash_output
+```
+
+## AWS CodeBuild
+
+### Basic Integration
+
+```yaml
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.10
+    commands:
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+
+  build:
+    commands:
+      - ash --mode local
+
+artifacts:
+  files:
+    - .ash/ash_output/**/*
+```
+
+### Using Container Mode
+
+```yaml
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.10
+    commands:
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+
+  pre_build:
+    commands:
+      - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
+      - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
+
+  build:
+    commands:
+      - ash --mode container
+
+artifacts:
+  files:
+    - .ash/ash_output/**/*
+```
+
+## Jenkins
+
+### Jenkinsfile (Declarative Pipeline)
+
+```groovy
+pipeline {
+    agent {
+        docker {
+            image 'python:3.10'
+        }
+    }
+    stages {
+        stage('Install ASH') {
+            steps {
+                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}'
+            }
+        }
+        stage('Run ASH Scan') {
+            steps {
+                sh 'ash --mode local'
+            }
+        }
+    }
+    post {
+        always {
+            archiveArtifacts artifacts: '.ash/ash_output/**/*', allowEmptyArchive: true
+        }
+    }
+}
+```
+
+### Using Container Mode
+
+```groovy
+pipeline {
+    agent {
+        docker {
+            image 'docker:20.10.16'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
+        }
+    }
+    stages {
+        stage('Install ASH') {
+            steps {
+                sh 'apk add --no-cache python3 py3-pip git'
+                sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}'
+            }
+        }
+        stage('Run ASH Scan') {
+            steps {
+                sh 'ash --mode container'
+            }
+        }
+    }
+    post {
+        always {
+            archiveArtifacts artifacts: '.ash/ash_output/**/*', allowEmptyArchive: true
+        }
+    }
+}
+```
+
+## CircleCI
+
+### Basic Integration
+
+```yaml
+version: 2.1
+jobs:
+  scan:
+    docker:
+      - image: cimg/python:3.10
+    steps:
+      - checkout
+      - run:
+          name: Install ASH
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+      - run:
+          name: Run ASH scan
+          command: ash --mode local
+      - store_artifacts:
+          path: .ash/ash_output
+          destination: ash-results
+
+workflows:
+  version: 2
+  scan-workflow:
+    jobs:
+      - scan
+```
+
+### Using Container Mode
+
+```yaml
+version: 2.1
+jobs:
+  scan:
+    machine:
+      image: ubuntu-2204:current
+    steps:
+      - checkout
+      - run:
+          name: Install ASH
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+      - run:
+          name: Run ASH scan
+          command: ash --mode container
+      - store_artifacts:
+          path: .ash/ash_output
+          destination: ash-results
+
+workflows:
+  version: 2
+  scan-workflow:
+    jobs:
+      - scan
+```
+
+## Best Practices for CI Integration
+
+1. **Fail builds on critical findings**:
+   ```bash
+   ash --mode local --fail-on-findings
+   ```
+
+2. **Use specific scanners for faster CI runs**:
+   ```bash
+   ash --mode local --scanners bandit,semgrep,detect-secrets
+   ```
+
+3. **Generate CI-friendly reports**:
+   ```bash
+   ash --mode local --output-formats sarif,markdown,json
+   ```
+
+4. **Cache container images** to speed up builds:
+   ```yaml
+   # GitHub Actions example
+   - name: Cache ASH container
+     uses: actions/cache@v3
+     with:
+       path: /var/lib/docker
+       key: ${{ runner.os }}-ash-container
+   ```
+
+5. **Set severity thresholds** appropriate for your CI pipeline:
+   ```bash
+   ash --config-overrides 'global_settings.severity_threshold=HIGH'
+   ```
+
+## ASH Execution Environment Viability
+
+If you are unsure whether ASH will run in your CI environment, the primary requirement is the ability to run Linux containers for container mode. For local mode, you only need Python 3.10+.
+
+For container mode, ensure your CI environment:
+1. Has a container runtime installed (Docker, Podman, etc.)
+2. Has permissions to run containers
+3. Has sufficient disk space for container images
+
+For local mode, ensure your CI environment:
+1. Has Python 3.10+ installed
+2. Has permissions to install Python packages
