@@ -163,11 +163,11 @@ class ReportMetadata(BaseModel):
             default_factory=dict,
             description="Summary of ASH component validation results for the report",
         ),
-    ] = {}
+    ]
     execution_discrepancy_report: Annotated[
         Dict[str, Any],
         Field(default_factory=dict, description="Discrepancy report for ASH execution"),
-    ] = {}
+    ]
 
     @field_validator("project_name")
     @classmethod
@@ -269,7 +269,7 @@ class AshAggregatedResults(BaseModel):
             description="List of validation checkpoints captured during the scan process for debugging and monitoring.",
             default_factory=list,
         ),
-    ] = []
+    ]
 
     @field_validator("ash_config")
     def validate_ash_config(cls, v: Any):
@@ -387,7 +387,7 @@ class AshAggregatedResults(BaseModel):
                             result.message.root, "text"
                         ):
                             description = result.message.root.text
-                    
+
                     # Mask secrets in the description based on rule ID
                     if description and result.ruleId:
                         description = mask_secret_in_text(description, result.ruleId)
