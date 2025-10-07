@@ -117,7 +117,7 @@ class ASHScanOrchestrator(BaseModel):
     metadata: Annotated[
         Dict[str, Any] | None,
         Field(default_factory=dict, description="Additional metadata for the scan"),
-    ] = None
+    ]
 
     # Core components
     execution_engine: Annotated[ScanExecutionEngine | None, Field()] = None
@@ -143,7 +143,7 @@ class ASHScanOrchestrator(BaseModel):
             description="List of Python modules to import containing ASH plugins and/or event subscribers",
             default_factory=list,
         ),
-    ] = []
+    ]
 
     def model_post_init(self, context):
         """Post initialization configuration."""
