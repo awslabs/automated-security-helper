@@ -93,8 +93,5 @@ plugins:
 ash --plugins my-plugin
 ```
 
-### Security Warning
-
-Ensure that the package that you trust the package installed for your Plugin. ASH doesn't distribute any
-plugins as packages, instead ASH plugins are part of the repository and available in the
-`automated_security_helper/plugin_modules` folder.
+> [!CAUTION]
+> **Community Plugin Security**: Community plugins are third-party packages that you install separately (e.g., via `pip install`). Always verify the source and trustworthiness of these packages before installation. ASH's built-in plugins are included directly in the ASH repository under `automated_security_helper/plugin_modules` and don't require separate package installation.
