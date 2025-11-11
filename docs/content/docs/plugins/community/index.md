@@ -84,7 +84,6 @@ plugins:
 
 - Feature 1: Description
 - Feature 2: Description
--
 
 ### Example Usage
 
@@ -93,5 +92,4 @@ plugins:
 ash --plugins my-plugin
 ```
 
-> [!CAUTION]
-> **Community Plugin Security**: Community plugins are third-party packages that you install separately (e.g., via `pip install`). Always verify the source and trustworthiness of these packages before installation. ASH's built-in plugins are included directly in the ASH repository under `automated_security_helper/plugin_modules` and don't require separate package installation.
+> [!CAUTION] > **Community Plugin Security**: Community plugins are third-party packages that you install separately (e.g., via `pip install`). Always verify the source and trustworthiness of these packages before installation. ASH's built-in plugins are included directly in the ASH repository under `automated_security_helper/plugin_modules` and don't require separate package installation.
