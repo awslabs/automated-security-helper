@@ -12,7 +12,7 @@ global_settings:
     - path: uv.lock
       rule_id: GHSA-2c2j-9gv5-cj73-starlette
       reason: Pending fixed version compatibility from mcp package that depends on starlette
-      expiration: "2025-11-01"
+      expiration: "2025-12-01"
     - path: tests/integration/cli/test_mcp_file_tracking_integration.py
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive.
@@ -40,7 +40,7 @@ global_settings:
     - path: .github/workflows/run-ash-security-scan.yml
       rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
       reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars
-      expiration: "2025-11-01"
+      expiration: "2025-12-01"
     - path: tests/**/*.py
       rule_id: B101
       reason: Assert usage expected with Pytest

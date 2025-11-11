@@ -46,52 +46,55 @@ When you submit a PR to add your plugin to this documentation, the ASH team will
 
 ## Example Plugin Documentation Template
 
-```markdown
-  ## Plugin Name
+Replace `<my-plugin-package-name>` with the actual name of the plugin package you are creating.
 
-  **Description**: Brief description of what the plugin does and its key features.
-  *Description**: Brief description of what the plugin does and its key features.
+````markdown
+## Plugin Name
 
-  **Repository**: [Link to GitHub/GitLab/etc. repository](https://github.com/username/plugin-repo)
+**Description**: Brief description of what the plugin does and its key features.
+\*Description\*\*: Brief description of what the plugin does and its key features.
 
-  **Author**: Your Name or Organization
+**Repository**: [Link to GitHub/GitLab/etc. repository](https://github.com/username/plugin-repo)
 
-  **License**: License type (e.g., Apache 2.0, MIT)
+**Author**: Your Name or Organization
 
-  ### Installation
+**License**: License type (e.g., Apache 2.0, MIT)
 
-  ```bash
-  # Installation instructions
-  pip install ash-plugin-name
-  ```
+### Installation
 
-  ### Configuration
+```bash
+# Installation instructions
+pip install <my-plugin-package-name>
+```
+````
 
-  ```yaml
-  # Example configuration in .ash.yaml
-  plugins:
-    my-plugin:
-      enabled: true
-      options:
-        option1: value1
-        option2: value2
-  ```
+### Configuration
 
-  ### Features
-
-  - Feature 1: Description
-  - Feature 2: Description
-  -
-  ### Example Usage
-
-  ```bash
-  # Example command line usage
-  ash --plugins my-plugin
-  ```
-
-  ### Screenshots/Examples
-
-  [Optional screenshots or example outputs]
+```yaml
+# Example configuration in .ash.yaml
+plugins:
+  my-plugin:
+    enabled: true
+    options:
+      option1: value1
+      option2: value2
 ```
 
-We look forward to seeing your contributions to the ASH ecosystem!
+### Features
+
+- Feature 1: Description
+- Feature 2: Description
+-
+
+### Example Usage
+
+```bash
+# Example command line usage
+ash --plugins my-plugin
+```
+
+### Security Warning
+
+Ensure that the package that you trust the package installed for your Plugin. ASH doesn't distribute any
+plugins as packages, instead ASH plugins are part of the repository and available in the
+`automated_security_helper/plugin_modules` folder.
