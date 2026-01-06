@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+import datetime
 from unittest.mock import patch, MagicMock
 
 
@@ -287,12 +288,14 @@ def test_apply_suppressions_with_rule_match(mock_should_suppress, mock_check):
 def test_apply_suppressions_with_expiring_suppressions(mock_check):
     """Test applying suppressions with expiring suppressions."""
     # Mock expiring suppressions
+    current_year = datetime.date.today().year
+
     mock_check.return_value = [
         AshSuppression(
             rule_id="TEST001",
             path="to/test.py",
             reason="Expiring",
-            expiration="2025-12-31",
+            expiration=f"{current_year}-12-31",
         )
     ]
 
@@ -306,7 +309,7 @@ def test_apply_suppressions_with_expiring_suppressions(mock_check):
             rule_id="TEST001",
             path="to/test.py",
             reason="Expiring",
-            expiration="2025-12-31",
+            expiration=f"{current_year}-12-31",
         )
     ]
     plugin_context.ignore_suppressions = False
