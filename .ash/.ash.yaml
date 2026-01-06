@@ -9,10 +9,6 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
-    - path: uv.lock
-      rule_id: GHSA-2c2j-9gv5-cj73-starlette
-      reason: Pending fixed version compatibility from mcp package that depends on starlette
-      expiration: "2025-12-01"
     - path: tests/integration/cli/test_mcp_file_tracking_integration.py
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive.
