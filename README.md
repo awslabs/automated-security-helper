@@ -1,7 +1,7 @@
 # ASH - Automated Security Helper
 
-[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan.yml)
-[![ASH - Matrix Unit Tests](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-unit-tests.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-unit-tests.yml)
+[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml)
+[![ASH - Matrix Unit Tests](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml)
 
 ## Table of Contents
 - [Table of Contents](#table-of-contents)
@@ -91,7 +91,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.3"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.4"
 ```
 
 ```powershell
@@ -99,7 +99,7 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.3 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.4 $args }
 ```
 
 ### Other Installation Methods
@@ -120,13 +120,13 @@ ash --help
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.3
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.4
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.1.3
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.1.4
 cd automated-security-helper
 pip install .
 ```

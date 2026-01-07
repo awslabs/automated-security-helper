@@ -48,13 +48,13 @@ export PATH="${PATH}:/path/to/automated-security-helper"
 
 ```bash
 # Option 1: Using uvx (recommended) -- add to shell profile
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.3"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.4"
 
 # Option 2: Using pipx
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.1.3
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.1.4
 
 # Option 3: Using pip
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.3
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.4
 ```
 
 ## Tool Management Changes

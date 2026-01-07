@@ -13,7 +13,7 @@ ASH v3 can run in multiple modes: `local`, `container`, or `precommit`. This gui
 curl -sSf https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.3"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.4"
 
 # Add this alias to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 ```
@@ -26,13 +26,13 @@ python -m pip install --user pipx
 python -m pipx ensurepath
 
 # Install ASH
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.1.3
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.1.4
 ```
 
 ### Option 3: Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.3
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.4
 ```
 
 ### Option 4: Clone the Repository (Legacy Method)
@@ -101,7 +101,7 @@ ASH v3 runs natively on Windows with Python 3.10+:
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.3 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.4 $args }
 
 # Use as normal
 ash --help
