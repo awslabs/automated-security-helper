@@ -65,6 +65,10 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
 
     def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model as JSON string with comprehensive statistics."""
+        # Ensure config is properly typed if it was passed as a dictionary
+        if isinstance(self.config, dict):
+            self.config = FlatJSONReporterConfig.model_validate(self.config)
+        
         # Use the content emitter to get report data
         emitter = ReportContentEmitter(model)
 
