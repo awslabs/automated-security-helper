@@ -65,13 +65,6 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = []
 
-    metrics: Annotated[
-        Literal["auto", "on", "off"],
-        Field(
-            description="Configures how usage metrics are sent to the Opengrep server.",
-        ),
-    ] = "auto"
-
     offline: Annotated[
         bool,
         Field(
@@ -213,14 +206,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 ]
             )
         if self.config.options.offline:
-            # In offline mode, use metrics=off
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--metrics",
-                    value="off",
-                )
-            )
-
             # Validate offline mode requirements
             from automated_security_helper.utils.offline_mode_validator import (
                 validate_opengrep_offline_mode,
@@ -280,12 +265,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 ToolExtraArg(
                     key="--config",
                     value=self.config.options.config,
-                )
-            )
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--metrics",
-                    value=self.config.options.metrics,
                 )
             )
 
