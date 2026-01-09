@@ -89,8 +89,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["opengrep"] = "opengrep"
-    # Enabled by default on Windows as Semgrep does not support Windows directly
-    enabled: bool = platform.system().lower().startswith("win")
+    enabled: bool = True
     options: Annotated[
         OpengrepScannerConfigOptions, Field(description="Configure Opengrep scanner")
     ] = OpengrepScannerConfigOptions()
