@@ -225,7 +225,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 ]
                 if opengrep_rules:
                     ASH_LOGGER.info(
-                        f"engrep offline mode: Found {len(opengrep_rules)} rule files in cache"
+                        f"Opengrep offline mode: Found {len(opengrep_rules)} rule files in cache"
                     )
                     self.args.extra_args.extend(
                         [
