@@ -80,7 +80,7 @@ ash [options]
 | `--ash-plugin-modules`        | List of Python modules to import containing ASH plugins |                       | `ASH_PLUGIN_MODULES`    |
 | `--scanners`                  | Specific scanner names to run                           | All enabled scanners  | `ASH_SCANNERS`          |
 | `--exclude-scanners`          | Specific scanner names to exclude                       | None                  | `ASH_EXCLUDED_SCANNERS` |
-| `--output-formats`, `-f`      | Output formats (comma-separated)                        | Default formats       |                         |
+| `--output-formats`, `-f`      | Output formats (comma-separated). Available: text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom | Default formats       |                         |
 | `--strategy`                  | Whether to run scanners in parallel or sequential       | `parallel`            |                         |
 | `--log-level`                 | Set the log level                                       | `INFO`                |                         |
 | `--fail-on-findings`          | Exit with non-zero code if findings are found           | From config           |                         |
@@ -113,7 +113,7 @@ ash --source-dir ./my-project --output-dir ./scan-results
 ash --config-overrides 'scanners.bandit.enabled=true' --config-overrides 'global_settings.severity_threshold=MEDIUM'
 
 # Scan with specific output formats
-ash --output-formats json,sarif,html,markdown
+ash --output-formats flat-json,sarif,html,markdown
 
 # Scan in precommit mode (faster)
 ash --mode precommit

@@ -104,7 +104,7 @@ def run_ash_scan_cli_command(
             "--formats",
             "--format",
             "-f",
-            help="The output formats to use (comma-separated)",
+            help=f"The output formats to use (comma-separated). Available formats: {', '.join([f.value for f in ExportFormat])}",
         ),
     ] = [],
     cleanup: Annotated[
