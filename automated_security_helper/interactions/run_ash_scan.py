@@ -478,7 +478,6 @@ def run_ash_scan(
         )
     )
 
-    print("DEBUG ==== automated_security_helper/interactions/run_ash_scan.py#L481")
 
     # Get the count of actionable findings from unified metrics
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
