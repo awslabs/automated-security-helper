@@ -2128,7 +2128,7 @@
         },
         "metrics": {
           "default": "auto",
-          "description": "Configures how usage metrics are sent to the Opengrep server.",
+          "description": "Configures how usage metrics are sent to the OpenGrep server.",
           "enum": [
             "auto",
             "on",
