@@ -10905,7 +10905,7 @@
         },
         "metrics": {
           "default": "auto",
-          "description": "Configures how usage metrics are sent to the Opengrep server.",
+          "description": "Configures how usage metrics are sent to the OpenGrep server.",
           "enum": [
             "auto",
             "on",
@@ -21199,7 +21199,7 @@
                 "supportedTaxonomies": [],
                 "taxa": [],
                 "translationMetadata": null,
-                "version": "3.1.2"
+                "version": "3.1.6"
               },
               "extensions": [],
               "properties": null
