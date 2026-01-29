@@ -109,9 +109,6 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         """
         found = find_executable(self.command)
         if not found:
-            # If not found but we have non-empty custom install commands, return True to allow installation
-            if self._has_install_commands():
-                return True
             ASH_LOGGER.warning(
                 "Grype executable not found in PATH. Please ensure grype is installed."
             )

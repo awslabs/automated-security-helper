@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import platform
 import subprocess
 from typing import Annotated, List, Literal
 
@@ -96,7 +97,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
     name: Literal["opengrep"] = "opengrep"
-    enabled: bool = True
+    enabled: bool = platform.system().lower() != "windows"
     options: Annotated[
         OpengrepScannerConfigOptions, Field(description="Configure Opengrep scanner")
     ] = OpengrepScannerConfigOptions()
@@ -193,14 +194,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         """
         found = find_executable(self.command)
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
-
-        # If not found but we have non-empty custom install commands, return True to allow installation
-        if found is None and self._has_install_commands():
-            ASH_LOGGER.verbose(
-                "Opengrep not found but custom install commands configured"
-            )
-            return True
-
         return found is not None
 
     def _has_install_commands(self) -> bool:

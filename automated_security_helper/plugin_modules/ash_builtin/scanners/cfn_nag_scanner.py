@@ -119,11 +119,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             ScannerError: If validation fails
         """
         found = find_executable(self.command)
-
-        # If not found but we have non-empty custom install commands, return True to allow installation
-        if found is None and self._has_install_commands():
-            return True
-
         return found is not None
 
     def _has_install_commands(self) -> bool:

@@ -113,10 +113,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 stdout_preference="return",
             ).get("stdout", "1.0.0")
 
-        # If not found but we have non-empty custom install commands, return True to allow installation
-        if found is None and self._has_install_commands():
-            return True
-
         return found is not None
 
     def _has_install_commands(self) -> bool:
