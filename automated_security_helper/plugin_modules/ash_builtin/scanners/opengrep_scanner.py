@@ -269,6 +269,11 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         return True
 
     def _process_config_options(self):
+        # Remove any existing metrics flags to ensure clean state
+        self.args.extra_args = [
+            arg for arg in self.args.extra_args if arg.key != "--metrics"
+        ]
+
         ash_stargrep_rules = [
             item
             for item in ASH_ASSETS_DIR.joinpath("ash_stargrep_rules").glob("*")
