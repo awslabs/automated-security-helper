@@ -97,14 +97,14 @@ def run_ash_scan_cli_command(
         ),
     ] = True,
     output_formats: Annotated[
-        List[ExportFormat],
+        List[str],
         typer.Option(
             "--output-formats",
             "--output-format",
             "--formats",
             "--format",
             "-f",
-            help="The output formats to use",
+            help=f"The output formats to use (comma-separated). Available formats: {', '.join([f.value for f in ExportFormat])}",
         ),
     ] = [],
     cleanup: Annotated[
@@ -339,6 +339,20 @@ def run_ash_scan_cli_command(
         ]
     )
 
+    # Parse comma-separated output formats
+    parsed_output_formats = []
+    for item in output_formats:
+        for fmt in item.split(','):
+            fmt = fmt.strip()
+            if fmt:
+                try:
+                    parsed_output_formats.append(ExportFormat(fmt))
+                except ValueError:
+                    valid_formats = [f.value for f in ExportFormat]
+                    raise typer.BadParameter(
+                        f"'{fmt}' is not a valid format. Valid formats are: {', '.join(valid_formats)}"
+                    )
+
     # Call run_ash_scan with all parameters
     run_ash_scan(
         source_dir=source_dir,
@@ -350,7 +364,7 @@ def run_ash_scan_cli_command(
         scanners=scanners,
         exclude_scanners=exclude_scanners,
         progress=cli_final_show_progress,
-        output_formats=output_formats,
+        output_formats=parsed_output_formats,
         cleanup=cleanup,
         phases=phases,
         inspect=inspect,
