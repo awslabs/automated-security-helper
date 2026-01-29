@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
-import platform
+import subprocess
 from typing import Annotated, List, Literal
 
 from pydantic import Field, model_validator
@@ -68,7 +68,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
     metrics: Annotated[
         Literal["auto", "on", "off"],
         Field(
-            description="Configures how usage metrics are sent to the OpenGrep server.",
+            description="Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is >= 1.7.0.",
         ),
     ] = "auto"
 
@@ -91,7 +91,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         Field(
             description="Version of OpenGrep to use.",
         ),
-    ] = "v1.1.5"
+    ] = "v1.15.1"
 
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
@@ -195,6 +195,55 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
         return found is not None
 
+    def _get_opengrep_version(self) -> tuple[int, int, int] | None:
+        """Get the installed Opengrep version.
+
+        Returns:
+            Tuple of (major, minor, patch) version numbers, or None if unable to determine
+        """
+        try:
+            result = subprocess.run(
+                [self.command, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                # Parse version from output like "opengrep 1.6.0" or "v1.6.0"
+                version_str = result.stdout.strip().split()[-1].lstrip("v")
+                parts = version_str.split(".")
+                if len(parts) >= 3:
+                    return (int(parts[0]), int(parts[1]), int(parts[2]))
+        except Exception as e:
+            ASH_LOGGER.verbose(f"Unable to determine Opengrep version: {e}")
+        return None
+
+    def _should_use_metrics_flag(self) -> bool:
+        """Determine if --metrics flag should be used based on version.
+
+        Returns:
+            True if --metrics flag should be used (version < 1.7.0), False otherwise
+        """
+        version = self._get_opengrep_version()
+        if version is None:
+            # Unable to determine version, assume older version for compatibility
+            ASH_LOGGER.verbose(
+                "Unable to determine Opengrep version, assuming --metrics is supported"
+            )
+            return True
+
+        # --metrics deprecated in v1.7.0+
+        if version >= (1, 7, 0):
+            ASH_LOGGER.verbose(
+                f"Opengrep version {'.'.join(map(str, version))} detected, skipping --metrics flag"
+            )
+            return False
+
+        ASH_LOGGER.verbose(
+            f"Opengrep version {'.'.join(map(str, version))} detected, using --metrics flag"
+        )
+        return True
+
     def _process_config_options(self):
         ash_stargrep_rules = [
             item
@@ -213,13 +262,14 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 ]
             )
         if self.config.options.offline:
-            # In offline mode, use metrics=off
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--metrics",
-                    value="off",
+            # In offline mode, use metrics=off (only if version supports it)
+            if self._should_use_metrics_flag():
+                self.args.extra_args.append(
+                    ToolExtraArg(
+                        key="--metrics",
+                        value="off",
+                    )
                 )
-            )
             # Validate offline mode requirements
             from automated_security_helper.utils.offline_mode_validator import (
                 validate_opengrep_offline_mode,
@@ -281,12 +331,14 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                     value=self.config.options.config,
                 )
             )
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--metrics",
-                    value=self.config.options.metrics,
+            # Only add metrics flag if version supports it
+            if self._should_use_metrics_flag():
+                self.args.extra_args.append(
+                    ToolExtraArg(
+                        key="--metrics",
+                        value=self.config.options.metrics,
+                    )
                 )
-            )
 
         # Add exclude patterns
         for exclude_pattern in self.config.options.exclude:

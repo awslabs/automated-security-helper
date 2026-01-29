@@ -1550,7 +1550,7 @@
               }
             },
             "opengrep": {
-              "enabled": false,
+              "enabled": true,
               "name": "opengrep",
               "options": {
                 "config": "auto",
@@ -1564,7 +1564,7 @@
                 "patterns": [],
                 "severity": [],
                 "severity_threshold": null,
-                "version": "v1.1.5"
+                "version": "v1.15.1"
               }
             },
             "semgrep": {
@@ -10841,7 +10841,7 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {
-          "default": false,
+          "default": true,
           "title": "Enabled",
           "type": "boolean"
         },
@@ -10865,7 +10865,7 @@
             "patterns": [],
             "severity": [],
             "severity_threshold": null,
-            "version": "v1.1.5"
+            "version": "v1.15.1"
           },
           "description": "Configure Opengrep scanner"
         }
@@ -10905,7 +10905,7 @@
         },
         "metrics": {
           "default": "auto",
-          "description": "Configures how usage metrics are sent to the OpenGrep server.",
+          "description": "Configures how usage metrics are sent to the OpenGrep server. Deprecated in Opengrep v1.7.0+. This configuration is ignored if the installed version is >= 1.7.0.",
           "enum": [
             "auto",
             "on",
@@ -10964,7 +10964,7 @@
           "title": "Severity Threshold"
         },
         "version": {
-          "default": "v1.1.5",
+          "default": "v1.15.1",
           "description": "Version of OpenGrep to use.",
           "title": "Version",
           "type": "string"
@@ -15506,7 +15506,7 @@
         "opengrep": {
           "$ref": "#/$defs/OpengrepScannerConfig",
           "default": {
-            "enabled": false,
+            "enabled": true,
             "name": "opengrep",
             "options": {
               "config": "auto",
@@ -15520,7 +15520,7 @@
               "patterns": [],
               "severity": [],
               "severity_threshold": null,
-              "version": "v1.1.5"
+              "version": "v1.15.1"
             }
           },
           "description": "Configure the options for Opengrep"
