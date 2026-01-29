@@ -72,9 +72,9 @@ def test_should_use_metrics_flag_newer_version(opengrep_scanner):
 
 
 def test_should_use_metrics_flag_unknown_version(opengrep_scanner):
-    """Test metrics flag defaults to True when version cannot be determined."""
+    """Test metrics flag defaults to False when version cannot be determined."""
     with patch.object(opengrep_scanner, "_get_opengrep_version", return_value=None):
-        assert opengrep_scanner._should_use_metrics_flag() is True
+        assert opengrep_scanner._should_use_metrics_flag() is False
 
 
 def test_process_config_options_offline_old_version(test_plugin_context):

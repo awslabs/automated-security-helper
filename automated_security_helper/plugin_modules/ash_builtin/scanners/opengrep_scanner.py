@@ -243,11 +243,11 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
         """
         version = self._get_opengrep_version()
         if version is None:
-            # Unable to determine version, assume older version for compatibility
+            # Unable to determine version - default version (v1.15.1) doesn't support --metrics
             ASH_LOGGER.verbose(
-                "Unable to determine Opengrep version, assuming --metrics is supported"
+                "Unable to determine Opengrep version, assuming --metrics is NOT supported (default version >= 1.7.0)"
             )
-            return True
+            return False
 
         # --metrics deprecated in v1.7.0+
         if version >= (1, 7, 0):
