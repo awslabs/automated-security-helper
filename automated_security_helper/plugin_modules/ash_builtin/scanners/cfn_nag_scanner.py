@@ -120,6 +120,19 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         """
         found = find_executable(self.command)
         return found is not None
+
+    def _has_install_commands(self) -> bool:
+        """Check if scanner has non-empty custom install commands."""
+        import platform
+        import struct
+
+        system = platform.system().lower()
+        arch = "amd64" if struct.calcsize("P") * 8 == 64 else "arm64"
+
+        if system in self.custom_install_commands:
+            if arch in self.custom_install_commands[system]:
+                return len(self.custom_install_commands[system][arch]) > 0
+        return False
         # try:
         #     tool_version = self._run_subprocess(
         #         command=[self.command, "--version"],

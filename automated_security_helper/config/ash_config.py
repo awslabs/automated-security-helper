@@ -644,6 +644,7 @@ class AshConfig(BaseModel):
             | NpmAuditScannerConfig
             | SemgrepScannerConfig
             | SyftScannerConfig
+            | OpengrepScannerConfig
         )
         for scanner in self.scanners.model_dump(by_alias=True).values():
             sname = (
