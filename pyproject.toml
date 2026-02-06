@@ -77,8 +77,7 @@ ash = "automated_security_helper.cli.main:app"
 ashv3 = "automated_security_helper.cli.main:app"
 automated-security-helper = "automated_security_helper.cli.main:app"
 
-[tool.uv]
-dev-dependencies = []
+
 
 [tool.mypy]
 plugins = [ "pydantic.mypy",]
