@@ -1,0 +1,150 @@
+# Running ASH Locally
+
+Please see the [Installation Guide](../docs/installation-guide.md) page to ensure your local workspace is configured as needed before continuing.
+
+ASH v3 can run in multiple modes: `local`, `container`, or `precommit`. This guide covers how to install and run ASH locally.
+
+## Installation Options
+
+### Option 1: Using `uvx` (Recommended)
+
+```bash
+# Install uv if you don't have it
+curl -sSf https://astral.sh/uv/install.sh | sh
+
+# Create an alias for ASH
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
+
+# Add this alias to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+```
+
+### Option 2: Using `pipx`
+
+```bash
+# Install pipx if you don't have it
+python -m pip install --user pipx
+python -m pipx ensurepath
+
+# Install ASH
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+```
+
+### Option 3: Using `pip`
+
+```bash
+pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+```
+
+### Option 4: Clone the Repository (Legacy Method)
+
+```bash
+# Set up some variables
+REPO_DIR="${HOME}"/Documents/repos/reference
+REPO_NAME=automated-security-helper
+
+# Create a folder to hold reference git repositories
+mkdir -p ${REPO_DIR}
+
+# Clone the repository into the reference area
+git clone https://github.com/awslabs/automated-security-helper.git "${REPO_DIR}/${REPO_NAME}"
+
+# Set the repo path in your shell for easier access
+export PATH="${PATH}:${REPO_DIR}/${REPO_NAME}"
+
+# Add this to your shell profile for persistence
+```
+
+## Running ASH
+
+After installation, you can run ASH in different modes:
+
+### Local Mode (Default)
+
+Local mode runs scanners that are available in your PATH:
+
+```bash
+# Basic scan
+ash --source-dir /path/to/code
+
+# Specify output directory
+ash --source-dir /path/to/code --output-dir /path/to/output
+```
+
+### Container Mode
+
+Container mode ensures all scanners are available by running in a container:
+
+```bash
+ash --mode container --source-dir /path/to/code
+```
+
+## Initializing Configuration
+
+Create a default configuration file:
+
+```bash
+ash config init
+```
+
+This creates `.ash/.ash.yaml` in your current directory with default settings.
+
+## Windows Support
+
+ASH v3 provides improved Windows support:
+
+### Local Mode on Windows
+
+ASH v3 runs natively on Windows with Python 3.10+:
+
+```powershell
+# Install uv if you don't have it
+irm https://astral.sh/uv/install.ps1 | iex
+
+# Create a function for ASH
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} $args }
+
+# Use as normal
+ash --help
+```
+
+### Container Mode on Windows
+
+For container mode, you'll need:
+
+1. Windows Subsystem for Linux (WSL2) installed
+2. A container runtime like Docker Desktop with WSL2 integration enabled
+
+To use ASH in container mode on Windows:
+
+1. Install and configure [WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install)
+2. Install and configure [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/) with WSL2 integration
+3. Open [Windows Terminal](https://learn.microsoft.com/en-us/windows/terminal/install) and connect to your WSL2 environment
+4. Install ASH using one of the methods above
+5. Run ASH with `--mode container` flag
+
+**Note**: When using container mode on Windows, clone repositories into the WSL2 filesystem for best results. Scanning Windows filesystem paths from WSL2 may produce unpredictable results.
+
+**Tip**: If you use VS Code, you can configure a [remote connection to WSL2](https://learn.microsoft.com/en-us/windows/wsl/tutorials/wsl-vscode) to work with repositories stored in the WSL2 filesystem.
+
+## Viewing Results
+
+ASH v3 outputs results to `.ash/ash_output/` by default:
+
+- `ash_aggregated_results.json`: Complete machine-readable results
+- `reports/ash.summary.txt`: Human-readable text summary
+- `reports/ash.summary.md`: Markdown summary
+- `reports/ash.html`: Interactive HTML report
+
+You can also use the report command to view results:
+
+```bash
+ash report
+```
+
+## Next Steps
+
+After running ASH locally:
+
+1. Learn about [ASH's CLI options](../docs/cli-reference.md)
+2. Explore [configuration options](../docs/configuration-guide.md)
+3. Set up [pre-commit integration](./using-ash-with-pre-commit.md)
