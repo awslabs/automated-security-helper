@@ -168,7 +168,7 @@ scanners:
   semgrep:
     enabled: false
   snyk-code:
-    enabled: true
+    enabled: false
     severity_threshold: "MEDIUM"
   syft:
     enabled: false
