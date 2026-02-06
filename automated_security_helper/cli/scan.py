@@ -293,7 +293,10 @@ def run_ash_scan_cli_command(
     ] = [],
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
-    if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "scan"]:
+    # Skip if this is tab completion or if a subcommand was invoked
+    # When invoked_subcommand is not None, it means we're in the callback and a subcommand
+    # (like 'scan') will handle the actual execution with the correct arguments
+    if ctx.resilient_parsing or ctx.invoked_subcommand is not None:
         return
 
     if version:
