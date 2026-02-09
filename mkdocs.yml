@@ -10,7 +10,9 @@ site_dir: "public"
 # use_directory_urls: true
 
 plugins:
-  - privacy
+  - privacy:
+      assets_exclude:
+        - 'github.com/*/actions/workflows/*'
   - search
   - awesome-nav
   - autorefs
