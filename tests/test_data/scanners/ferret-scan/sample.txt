@@ -1,0 +1,428 @@
+This is a comprehensive test file for ferret-scan with various confidence levels.
+
+=====================================================================
+HIGH CONFIDENCE EXAMPLES (Should detect with 90%+ confidence)
+=====================================================================
+
+Credit Card Numbers (Valid with correct checksums):
+4532 0151 9562 0486 (Visa)
+5425 2334 3010 9903 (MasterCard)
+3714 496353 98431 (American Express)
+6011 6011 6011 6611 (Discover)
+3530 1113 3330 0000 (JCB)
+
+Customer payment information:
+Please charge Visa card 4539 7469 3419 6337 for the full amount.
+The MasterCard ending in 8412 (5321 4567 8901 8412) has been approved for $250.
+AMEX: 3782 822463 10005 - CVC: 1234 - Expiration: 12/25
+Discover card 6011 0009 9013 9424 authorized for recurring payments with CVV 123.
+JCB cardholder name: John Smith, card number: 3566 0020 2036 0505
+
+Passport Numbers (Valid formats):
+C01234567 (US passport)
+123456789 (UK passport)
+AB123456 (Canadian passport)
+DE1234567 (EU passport)
+P<USASMITH<<JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+P<GBRJONES<<SARAH<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+Travel documentation:
+US Passport #C05678901 issued on 2020-01-15, expires 2030-01-14
+UK Passport: 987654321 - Name: Emma Watson - DOB: 15/04/1990
+Canadian passport AB654321 presented at border control for verification
+German passport DE9876543 with Schengen visa attached
+Machine Readable Zone: P<FRAMARTIN<<PIERRE<<<<<<<<<<<<<<<<<<<<<<<<<
+
+=====================================================================
+MEDIUM CONFIDENCE EXAMPLES (Should detect with 60-89% confidence)
+=====================================================================
+
+Credit Card Numbers (Valid format but failing some checks):
+4111 1111 1111 1111 (Visa test card - fails test number check)
+5500 0000 0000 0004 (MasterCard test card - fails test number check)
+3782 8224 6310 005 (AmEx with wrong length)
+6011 0000 0000 0004 (Discover with sequential digits)
+
+Payment processing notes:
+The customer attempted to use card 4111 1111 1111 1111 but it was declined.
+Test transaction with MasterCard 5500 0000 0000 0004 completed successfully.
+CCID verification failed for American Express 3782 8224 6310 005.
+Please update billing information for Discover 6011 0000 0000 0004.
+
+Passport Numbers (Valid format but suspicious):
+A00000000 (US test passport)
+000000000 (UK with sequential digits)
+AA000000 (Canadian with sequential digits)
+XX0000000 (EU with suspicious pattern)
+
+Travel document verification:
+Test passport A00000000 used for system validation.
+Suspicious UK passport 000000000 flagged for secondary inspection.
+Canadian temporary document AA000000 requires additional verification.
+Unusual pattern detected in passport XX0000000 - refer to supervisor.
+
+=====================================================================
+LOW CONFIDENCE EXAMPLES (Should detect with <60% confidence)
+=====================================================================
+
+Credit Card Numbers (Poor format or multiple failures):
+4111-1111-1111-1112 (Invalid checksum)
+5555 5555 5555 5555 (Repeated digits)
+1234 5678 9012 3456 (Sequential digits)
+0000 0000 0000 0000 (All zeros)
+
+Questionable payment entries:
+The form contained what appears to be an invalid card: 4111-1111-1111-1112
+Customer entered 5555 5555 5555 5555 which is clearly not a valid card number.
+Sequential digits 1234 5678 9012 3456 entered in payment field - likely placeholder.
+Test data 0000 0000 0000 0000 should be removed from production database.
+
+Passport Numbers (Poor format):
+A1234567 (US passport with wrong length)
+12345678 (UK passport with wrong length)
+A1234 (Generic format, too short)
+PASSPORT123 (Invalid format with text)
+
+Document processing issues:
+US passport A1234567 rejected - incorrect format (missing digit).
+UK travel document 12345678 returned for reissuance due to format error.
+Partial passport number A1234 provided - request complete information.
+Invalid entry "PASSPORT123" detected in passport field of application.
+
+=====================================================================
+FALSE POSITIVES (Should NOT be detected or have very low confidence)
+=====================================================================
+
+Product Codes and SKUs:
+SKU12345
+UPC123456789012
+EAN1234567890123
+
+Inventory management:
+Order contains SKU12345 (Wireless Headphones) - 3 units at $49.99 each.
+Scan UPC123456789012 to update inventory count in system.
+European product with EAN1234567890123 requires different packaging.
+
+Part Numbers and Serial Numbers:
+ABC-1234
+XYZ-5678-90
+SN-1234567890
+
+Manufacturing records:
+Component ABC-1234 installed in assembly line B on 2023-05-12.
+Replacement part XYZ-5678-90 shipped to customer under warranty.
+Device with serial number SN-1234567890 registered for extended support.
+
+Random Numbers and Identifiers:
+12345-67890
+ID: 1234567890
+REF# 1234-5678-90
+
+Reference information:
+Transaction 12345-67890 completed successfully on May 15.
+User ID: 1234567890 accessed the system at 14:32:45.
+Please reference REF# 1234-5678-90 in all correspondence about this matter.
+
+Phone Numbers:
++1 (555) 123-4567
+555.123.4567
+1-800-123-4567
+
+Contact details:
+For customer support, call +1 (555) 123-4567 during business hours.
+Technical assistance available at 555.123.4567, Monday through Friday.
+Toll-free ordering line: 1-800-123-4567 open 24/7.
+
+Dates and Times:
+12/34/5678
+2023-01-15T14:30:45
+01/15/2023 14:30:45
+
+Scheduling information:
+Event scheduled for 2023-01-15T14:30:45 in the main conference room.
+Appointment confirmed for 01/15/2023 14:30:45 with Dr. Smith.
+Meeting minutes from 12/15/2022 approved by the board.
+
+Code Snippets:
+var cardNumber = "4111111111111111"; // This is a comment, not a real card
+const passportId = "A12345678"; // This is a variable, not a real passport
+
+Development notes:
+```javascript
+// Test data for payment processing
+var cardNumber = "4111111111111111"; 
+var expiryDate = "12/25";
+var cvv = "123";
+
+// User identification mock
+const passportId = "A12345678"; 
+const userId = "USER9876";
+```
+
+=====================================================================
+EDGE CASES (Testing boundary conditions)
+=====================================================================
+
+Almost Credit Cards:
+3141 5926 5358 9793 (Pi digits, looks like AmEx)
+2718 2818 2845 9045 (e digits, looks like card)
+1234 5678 9012 3456 (Sequential, looks like card)
+
+Mathematical constants:
+The first digits of pi (3141 5926 5358 9793) are used in the algorithm.
+Euler's number beginning with 2718 2818 2845 9045 appears in the calculation.
+Sequential pattern 1234 5678 9012 3456 used as initialization vector.
+
+Almost Passports:
+A12345678X (Extra character)
+123-456-789 (Dashes in UK format)
+AB-123456 (Dashes in Canadian format)
+
+Document format variations:
+The system rejected A12345678X as an invalid passport format (extra character).
+UK reference number 123-456-789 is not a passport but a tax identifier.
+Format AB-123456 represents a driver's license, not a passport.
+
+Mixed in Text:
+My credit card is 4532015195620486 and my passport is C01234567.
+The test card 4111111111111111 should not be used in production.
+For testing, use passport A00000000 or credit card 5500000000000004.
+
+Email excerpts:
+Subject: Payment Confirmation
+Body: Thank you for your purchase. Your Visa card 4539 1523 6789 1234 has been charged $125.99.
+
+Subject: Travel Documentation Required
+Body: Please bring your passport (C01234567) to the embassy appointment on Tuesday.
+
+Subject: Test Environment Setup
+Body: Use test credit card 4111 1111 1111 1111 and test passport A00000000 for all QA scenarios.
+
+=====================================================================
+FORMATTING VARIATIONS (Testing different formats of the same data)
+=====================================================================
+
+Credit Card Spacing Variations:
+4532015195620486 (No spaces)
+4532-0151-9562-0486 (Dashes)
+4532 0151 9562 0486 (Spaces)
+4532.0151.9562.0486 (Dots)
+
+Passport Formatting:
+A12345678 (Standard)
+A 12345678 (With space)
+A-12345678 (With dash)
+
+=====================================================================
+CONTEXTUAL EXAMPLES (With positive and negative context indicators)
+=====================================================================
+
+Positive Credit Card Context:
+Please process payment using Visa 4024 0071 5336 7634 with CVV 123.
+The customer provided MasterCard 5413 7213 3454 1212 for the transaction.
+AMEX 3715 699214 91000 authorized for $1,299.99 purchase.
+Payment method: Discover 6011 1234 4321 1234, expiration date: 09/25.
+Charge the JCB card 3566 1111 1111 1113 for the annual subscription fee.
+
+Negative Credit Card Context:
+MD5 hash: 4916613774911218 for the configuration file.
+UUID for this session: 4532-0151-9562-0486 stored in cookies.
+Binary representation: 5425233430109903 converted to hexadecimal.
+The mathematical constant 3714496353984310 used in the algorithm.
+Database record ID: 6011601160116611 in the transactions table.
+
+Positive Passport Context:
+Passport verification: C01234567 (USA) confirmed valid until 2028.
+UK border control scanned passport 123456789 upon arrival.
+Canadian citizen with passport AB123456 approved for visa extension.
+German passport DE1234567 presented for Schengen area entry.
+Machine readable zone begins with P<USASMITH<<JOHN<<<<<<<<<<<<<<<.
+
+Negative Passport Context:
+Product serial number: C01234567 registered for warranty.
+Customer account 123456789 created on January 15.
+Project code AB123456 assigned to the development team.
+Model number DE1234567 listed in parts catalog.
+Barcode format: P<USASMITH<<JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<<<<.
+
+Mixed Context Examples:
+The customer's Visa (4024 0071 5336 7634) was declined, but their UUID 4111-1111-1111-1111 was valid.
+Please verify passport C01234567 and the MD5 hash 5425233430109903 for authentication.
+Transaction with AMEX 3715 699214 91000 approved; reference ID: A12345678.
+The product serial number 6011601160116611 doesn't match the customer's Discover card ending in 6611.
+Database record with UUID 123456789 contains passport information for user AB123456.
+
+=====================================================================
+INDUSTRY-SPECIFIC EXAMPLES
+=====================================================================
+
+E-commerce:
+Cart #45678 - Payment: Visa 4539 9123 4567 8901 - Shipping to: 123 Main St
+Order confirmation #A12345 - MasterCard 5236 7812 3456 7890 - $432.15
+Payment declined: AMEX 3715 123456 78901 - Reason: Insufficient funds
+Subscription renewal: Discover 6011 2345 6789 0123 - Next billing date: 06/15/2023
+
+Healthcare:
+Patient ID: 12345678 - Insurance card: 9876543210 - DOB: 04/15/1985
+Medical record #MR98765 - Last visit: 03/12/2023 - Provider ID: DR12345
+Insurance claim #IC876543 - Group number: GRP12345 - Member ID: MEM987654
+Prescription #RX123456 - Refills: 3 - Provider NPI: 1234567890
+
+Banking:
+Account #AC123456789 - Routing #987654321 - Transaction ID: TX987654321
+Wire transfer to account 12345678901234 at bank code BANKUS12
+SWIFT code: BOFAUS3N - IBAN: US12345678901234567890
+ACH payment from account ending in 7890 for $1,234.56
+
+Travel:
+Booking reference: XYZ123 - Passport: DE5678901 - Visa type: Tourist
+Flight #AA1234 - Seat: 15A - Frequent flyer #: FF123456789
+Hotel confirmation #HBK987654 - Room type: Deluxe - Check-in: 07/15/2023
+Car rental agreement #CR54321 - License: DL123456789 - Vehicle: Toyota Camry
+
+=====================================================================
+INTERNATIONAL EXAMPLES
+=====================================================================
+
+European Formats:
+IBAN: FR76 3000 6000 0112 3456 7890 189
+German ID card: L01X00T47
+Italian Codice Fiscale: RSSMRA85T10A562S
+Spanish NIE: X-1234567-Z
+
+Asian Formats:
+Japanese My Number: 1234 5678 9012
+Chinese ID: 110101199001011234
+South Korean RRN: 850101-1234567
+Indian Aadhaar: 1234 5678 9012
+
+North American Formats:
+Canadian SIN: 123-456-789
+Mexican CURP: BAJS701201HDFNTN09
+US SSN: 123-45-6789
+
+=====================================================================
+MIXED DATA SCENARIOS (Multiple types in context)
+=====================================================================
+
+Customer Records:
+Name: John Smith
+DOB: 01/15/1980
+Passport: C01234567
+Credit Card: 4111 1111 1111 1111
+Account ID: ACC123456
+Phone: +1 (555) 123-4567
+
+Travel Booking:
+Passenger: Sarah Johnson
+Passport #: 123456789
+Payment: MasterCard 5425 2334 3010 9903
+Booking Reference: BK987654
+Flight: BA1234
+Seat: 23F
+
+Online Purchase:
+Order #: ORD123456
+Customer ID: CUST987654
+Payment Method: Visa 4532 0151 9562 0486
+Shipping Address: 123 Main St, Anytown, ST 12345
+Tracking Number: TRK987654321
+Product SKU: SKU12345
+
+Technical Support:
+Ticket #: TICK123456
+User ID: USER987654
+Device SN: SN-1234567890
+IP Address: 192.168.1.1
+MAC Address: 00:1A:2B:3C:4D:5E
+System UUID: 6011-6011-6011-6611
+
+=====================================================================
+NEGATIVE EXAMPLES WITH SIMILAR PATTERNS
+=====================================================================
+
+Numbers that look like credit cards but aren't:
+Invoice #4111222233334444 generated on 05/15/2023
+Product model 5425-2334-3010-9903 discontinued in 2022
+Network node ID 3714-4963-5398-431 assigned to east region
+Configuration hash: 6011601160116611 (base16 encoded)
+
+Numbers that look like passports but aren't:
+Employee ID: C01234567 assigned to new hire
+Document reference: 123456789-REV2
+Project code: AB123456-PHASE1
+Asset tag: DE1234567-IT-LAPTOP
+Barcode format: P<USA12345<PRODUCT<<<<<<<<<<<<<<<<<<<<
+
+=====================================================================
+OBFUSCATED EXAMPLES (Attempts to hide sensitive data)
+=====================================================================
+
+Partially masked credit cards:
+Card: 4532 **** **** 0486
+XXXX-XXXX-XXXX-9903
+5425 2334 3010 ****
+3714 49**** 98431
+Last 4 digits: 6611
+
+Partially masked passports:
+Passport: C0******7
+ID: ******6789
+Document: AB******
+Travel document: ****4567
+P<USAS*****JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+Encoded or transformed:
+Base64: NDUzMjAxNTE5NTYyMDQ4Ng== (encoded credit card)
+Reversed: 6840295151023354 (reversed credit card)
+ROT13: P01234567 (simple cipher on passport)
+Hex: 43303132333435363738 (hex encoded passport)
+
+=====================================================================
+MULTI-LANGUAGE EXAMPLES
+=====================================================================
+
+Spanish context:
+Número de tarjeta de crédito: 4532 0151 9562 0486 para la reserva
+Pasaporte español: 123456789 válido hasta 2025
+Por favor, cargue €50 a la tarjeta Visa 4024 0071 5336 7634
+
+French context:
+Carte de crédit: 5425 2334 3010 9903 pour le paiement
+Numéro de passeport français: 12AB34567 délivré à Paris
+Veuillez traiter le paiement avec la carte 4539 7469 3419 6337
+
+German context:
+Kreditkartennummer: 3714 496353 98431 für die Buchung
+Deutscher Reisepass: DE1234567 gültig bis 2028
+Bitte belasten Sie die Mastercard 5321 4567 8901 8412 mit €100
+
+Japanese context:
+クレジットカード番号：6011 6011 6011 6611 で支払い
+パスポート番号：TZ1234567 有効期限：2026年
+JCBカード：3530 1113 3330 0000 で予約を確認しました
+
+=====================================================================
+SPECIAL CASES AND COMBINATIONS
+=====================================================================
+
+Multiple cards in sequence:
+Customer has Visa 4532 0151 9562 0486, MasterCard 5425 2334 3010 9903, and AMEX 3714 496353 98431 on file.
+
+Multiple passports in sequence:
+Family passports: C01234567 (father), 123456789 (mother), AB123456 (child)
+
+Mixed sensitive data:
+Employee record: SSN 123-45-6789, Passport C01234567, Corporate card 4532 0151 9562 0486
+
+Embedded in longer text:
+The transaction was processed using card number 4111111111111111 which was later found to be fraudulent. The suspect presented passport A00000000 at the border checkpoint.
+
+With special characters:
+Credit card: 4532•0151•9562•0486
+Passport: C/01234567
+ID: AB:123456
+
+=====================================================================
+END OF TEST FILE
+=====================================================================

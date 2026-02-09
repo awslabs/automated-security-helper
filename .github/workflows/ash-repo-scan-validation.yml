@@ -202,6 +202,14 @@ jobs:
             exit 1
           fi
 
+          # Install ferret-scan (cross-platform via pip)
+          echo "Installing ferret-scan..."
+          pip install ferret-scan
+
+          # Verify ferret-scan installation
+          ferret-scan --version
+          echo "ferret-scan installation completed!"
+
           echo "Community plugin tools installation completed successfully!"
 
       # Call the appropriate workflow based on matrix.method

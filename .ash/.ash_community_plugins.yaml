@@ -5,6 +5,7 @@ fail_on_findings: true
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
+  - automated_security_helper.plugin_modules.ash_ferret_plugins
 external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
@@ -172,6 +173,12 @@ scanners:
     severity_threshold: "MEDIUM"
   syft:
     enabled: false
+  ferret-scan:
+    enabled: true
+    options:
+      confidence_levels: "all"
+      checks: "all"
+      recursive: true
   trivy-repo:
     enabled: true
     options:
