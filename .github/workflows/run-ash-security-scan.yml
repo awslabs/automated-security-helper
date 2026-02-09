@@ -112,17 +112,17 @@ jobs:
       - name: Install Grype
         if: inputs.install-grype
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b /usr/local/bin
 
       - name: Install Syft
         if: inputs.install-syft
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b /usr/local/bin
 
       - name: Install OpenGrep
         if: inputs.install-opengrep
         run: |
-          pip install opengrep
+          curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh | bash
 
       - name: Run ASH
         id: ash
