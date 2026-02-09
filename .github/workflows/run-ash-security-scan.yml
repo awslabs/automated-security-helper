@@ -68,6 +68,21 @@ on:
         required: false
         default: "3.12"
         type: string
+      install-grype:
+        description: "Whether to install Grype scanner"
+        required: false
+        default: false
+        type: boolean
+      install-syft:
+        description: "Whether to install Syft scanner"
+        required: false
+        default: false
+        type: boolean
+      install-opengrep:
+        description: "Whether to install OpenGrep scanner"
+        required: false
+        default: false
+        type: boolean
 
 env:
   ASH_UVX_SOURCE: git+https://github.com/${{ github.repository }}@${{ github.sha }}
@@ -93,6 +108,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
+
+      - name: Install Grype
+        if: inputs.install-grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Install Syft
+        if: inputs.install-syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Install OpenGrep
+        if: inputs.install-opengrep
+        run: |
+          pip install opengrep
 
       - name: Run ASH
         id: ash
