@@ -192,14 +192,19 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 
 ## ASH Conventions
 
-### Inherited from ASH (Do NOT configure at plugin level)
+### Hardcoded by Plugin (Do NOT configure at plugin level)
 
-| Feature | ASH Flag | Plugin Behavior |
-|---------|----------|-----------------|
-| Debug mode | `--debug` | Not passed to ferret-scan; ASH manages logging |
-| Verbose mode | `--verbose` | Not passed to ferret-scan; ASH manages logging |
-| Output format | N/A | Always SARIF (hardcoded) |
-| Color output | N/A | Always `--no-color` (ASH handles formatting) |
+| Feature | Plugin Behavior |
+|---------|-----------------|
+| Output format | Always SARIF (hardcoded via `--format sarif`) |
+| Color output | Always `--no-color` (ASH handles formatting) |
+| Debug mode | Never passed to ferret-scan (unsupported option — ASH does not propagate log levels to plugins) |
+| Verbose mode | Never passed to ferret-scan (unsupported option — ASH does not propagate log levels to plugins) |
+
+### Managed by ASH Framework (not plugin-controlled)
+
+| Feature | ASH Flag | Notes |
+|---------|----------|-------|
 | Suppressions | `.ash/suppressions.yaml` | ASH manages centrally |
 | Output directory | `--output-dir` | Uses `.ash/ash_output/scanners/ferret-scan/` |
 | Offline mode | `ASH_OFFLINE=true` | Respects environment variable |
@@ -454,9 +459,11 @@ The SARIF output file is written to:
 
 For example: `.ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif`
 
-### 6. Empty Directory Handling
+### 6. Edge Case: Empty and Missing Target Directories
 
-Empty or non-existent target directories return `True` (skip), not `False` (failure). This is intentional - there's nothing to scan.
+**Empty directory**: The plugin invokes ferret-scan, which produces a SARIF file with `results: null`. ASH completes with 0 actionable findings. No crash, no error — graceful skip.
+
+**Missing directory**: ASH itself throws `FileNotFoundError` before any plugin is invoked (the framework calls `os.chdir(source_dir)` in `run_ash_scan.py`). This is an ASH-level issue, not a plugin concern. The plugin's own `scan()` method also guards against this by returning `True` (skip) for non-existent paths, but that code path is never reached when running through `ash scan`.
 
 ### 7. Pydantic Model Validator Timing
 
@@ -652,9 +659,17 @@ rm /tmp/test-ash-config.yaml
 
 ```bash
 mkdir -p /tmp/empty-test-dir
-uv run ash scan --source-dir /tmp/empty-test-dir --scanners ferret-scan 2>&1
-# Expected: Should skip gracefully with appropriate message
+uv run ash scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
+# Expected: ferret-scan completes with 0 findings, SARIF has results: null, no crash
 rmdir /tmp/empty-test-dir
+```
+
+#### 9a. Missing Directory Handling
+
+```bash
+uv run ash scan --source-dir /tmp/this-does-not-exist --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
+# Expected: ASH framework throws FileNotFoundError (os.chdir fails before plugin runs)
+# This is an ASH-level issue, not a plugin concern
 ```
 
 #### 10. Missing Binary Handling
