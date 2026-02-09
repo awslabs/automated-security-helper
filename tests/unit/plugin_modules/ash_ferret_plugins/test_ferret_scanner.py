@@ -83,20 +83,20 @@ class TestFerretScanScannerUnsupportedOptions:
         assert "ASH requires SARIF format" in str(exc_info.value)
 
     def test_unsupported_option_debug_raises_error(self):
-        """Test that using 'debug' option raises an error."""
+        """Test that using bare 'debug' option raises an error (must use ferret_debug)."""
         with pytest.raises(ValueError) as exc_info:
             FerretScannerConfigOptions(debug=True)
         
         assert "Unsupported option 'debug'" in str(exc_info.value)
-        assert "not applicable in ASH integration" in str(exc_info.value)
+        assert "ferret_debug" in str(exc_info.value)
 
     def test_unsupported_option_verbose_raises_error(self):
-        """Test that using 'verbose' option raises an error."""
+        """Test that using bare 'verbose' option raises an error (must use ferret_verbose)."""
         with pytest.raises(ValueError) as exc_info:
             FerretScannerConfigOptions(verbose=True)
         
         assert "Unsupported option 'verbose'" in str(exc_info.value)
-        assert "not applicable in ASH integration" in str(exc_info.value)
+        assert "ferret_verbose" in str(exc_info.value)
 
     def test_unsupported_option_web_raises_error(self):
         """Test that using 'web' option raises an error."""
@@ -316,12 +316,10 @@ class TestFerretScanScannerASHConventions:
         assert no_color_arg is not None
 
     def test_never_passes_debug_or_verbose_to_ferret_scan(self, mock_plugin_context):
-        """Test that --debug and --verbose are never passed to ferret-scan.
+        """Test that --debug and --verbose are not passed by default.
         
-        ASH manages its own logging independently. Passing debug/verbose to the
-        underlying tool is unreliable because ASH_LOGGER.level doesn't reflect
-        the user's intended verbosity (it's always set to TRACE at the root).
-        This is consistent with Semgrep, Checkov, Grype, and detect-secrets.
+        When ferret_debug/ferret_verbose are not set (defaults to False),
+        the flags should not appear in the CLI args.
         """
         scanner = FerretScanScanner(context=mock_plugin_context)
         scanner._process_config_options()
@@ -332,6 +330,26 @@ class TestFerretScanScannerASHConventions:
         
         assert debug_arg is None
         assert verbose_arg is None
+
+    def test_ferret_debug_passes_debug_flag(self, mock_plugin_context):
+        """Test that ferret_debug=True passes --debug to ferret-scan."""
+        scanner = FerretScanScanner(context=mock_plugin_context)
+        scanner.config.options.ferret_debug = True
+        scanner._process_config_options()
+
+        extra_args = scanner.args.extra_args
+        debug_arg = next((arg for arg in extra_args if arg.key == "--debug"), None)
+        assert debug_arg is not None
+
+    def test_ferret_verbose_passes_verbose_flag(self, mock_plugin_context):
+        """Test that ferret_verbose=True passes --verbose to ferret-scan."""
+        scanner = FerretScanScanner(context=mock_plugin_context)
+        scanner.config.options.ferret_verbose = True
+        scanner._process_config_options()
+
+        extra_args = scanner.args.extra_args
+        verbose_arg = next((arg for arg in extra_args if arg.key == "--verbose"), None)
+        assert verbose_arg is not None
 
 
 @pytest.mark.unit

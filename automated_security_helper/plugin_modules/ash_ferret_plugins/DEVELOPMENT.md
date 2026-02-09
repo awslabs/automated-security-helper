@@ -130,14 +130,16 @@ self.args = ToolArgs(
 
 ### 2. Debug/Verbose Handling
 
-Debug and verbose flags are **not** passed down to ferret-scan. ASH manages its own
-logging independently of the underlying scanner tools. This is consistent with how
-other built-in scanners (Semgrep, Checkov, Grype, detect-secrets) handle logging.
+Bare `debug` and `verbose` options are blocked to avoid confusion with ASH's own
+`--debug`/`--verbose` flags. Instead, use `ferret_debug` and `ferret_verbose` to
+control ferret-scan's own log output independently of ASH logging.
 
-**Why**: ASH's logger level is always TRACE (5). Actual filtering happens at the
-RichHandler (console) level, so individual plugins cannot reliably detect the user's
-intended log level. Passing `--debug`/`--verbose` to ferret-scan would be misleading
-since ASH already controls what the user sees.
+- `ferret_debug: true` → passes `--debug` to ferret-scan (shows preprocessing and validation flow)
+- `ferret_verbose: true` → passes `--verbose` to ferret-scan (shows detailed finding info)
+
+**Why the prefix**: ASH's logger level is always TRACE (5). Actual filtering happens at the
+RichHandler (console) level, so ASH's `--debug`/`--verbose` flags don't propagate to plugins.
+The `ferret_` prefix makes it explicit that these control the ferret-scan binary, not ASH.
 
 ### 3. Version Compatibility Checking
 
@@ -174,7 +176,8 @@ A Pydantic model validator prevents use of incompatible options:
 ```python
 UNSUPPORTED_FERRET_OPTIONS = {
     "format": "ASH requires SARIF format...",
-    "debug": "Debug mode is not applicable in ASH integration. ASH manages its own logging...",
+    "debug": "Use 'ferret_debug: true' instead...",
+    "verbose": "Use 'ferret_verbose: true' instead...",
     # ... more options
 }
 
@@ -198,8 +201,6 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 |---------|-----------------|
 | Output format | Always SARIF (hardcoded via `--format sarif`) |
 | Color output | Always `--no-color` (ASH handles formatting) |
-| Debug mode | Never passed to ferret-scan (unsupported option — ASH does not propagate log levels to plugins) |
-| Verbose mode | Never passed to ferret-scan (unsupported option — ASH does not propagate log levels to plugins) |
 
 ### Managed by ASH Framework (not plugin-controlled)
 
@@ -221,8 +222,12 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 | `exclude_patterns` | Glob patterns to exclude | `[]` |
 | `show_match` | Display matched text in findings | `false` |
 | `enable_preprocessors` | Extract text from documents | `true` |
+| `ferret_debug` | Enable ferret-scan's own debug logging (preprocessing/validation flow) | `false` |
+| `ferret_verbose` | Enable ferret-scan's own verbose output (detailed finding info) | `false` |
 | `tool_version` | Version constraint for installation | `">=0.1.0,<2.0.0"` |
 | `skip_version_check` | Bypass version validation | `false` |
+
+Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--debug`/`--verbose` flags. Use the `ferret_` prefixed versions instead.
 
 ## Version Compatibility
 
@@ -290,7 +295,7 @@ def test_unsupported_option_new_option_raises_error(self):
 | Redaction | `enable_redaction`, `redaction_*`, `memory_scrub` | Post-processing, not scanning |
 | Suppressions | `generate_suppressions`, `show_suppressed`, `suppressions_file` | ASH manages centrally |
 | Utility modes | `extract_text` | Not a scanning mode |
-| Logging | `debug`, `verbose` | Not applicable; ASH manages its own logging |
+| Logging | `debug`, `verbose` | Use `ferret_debug`/`ferret_verbose` instead (avoids confusion with ASH flags) |
 
 ## Testing
 
@@ -442,13 +447,14 @@ The version check runs during `validate_plugin_dependencies()`, not during scann
 
 The config file discovery has a specific priority order. If a user specifies `config_file` but it doesn't exist, the plugin will NOT fall back to auto-discovery - it will return `None` and log a warning.
 
-### 4. Debug/Verbose Not Passed to ferret-scan
+### 4. Debug/Verbose: ferret_ Prefix Required
 
-The plugin does **not** pass `--debug` or `--verbose` to ferret-scan. ASH's logger
-level is always TRACE (5) — actual filtering happens at the RichHandler level, so
-plugins cannot reliably detect the user's intended verbosity. This is consistent
-with all other built-in scanners. See the investigation doc at
-`docs/_investigation/log-level-file-handler-disclosure.md` for full details.
+Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--debug`/`--verbose`.
+Use `ferret_debug: true` and `ferret_verbose: true` to control ferret-scan's own output.
+
+ASH's logger level is always TRACE (5) — actual filtering happens at the RichHandler level,
+so ASH's flags don't propagate to plugins. The `ferret_` prefix makes the intent explicit.
+See `docs/_investigation/log-level-file-handler-disclosure.md` for full details.
 
 ### 5. SARIF Output File Location
 
@@ -535,8 +541,8 @@ Before releasing changes to the ferret-scan plugin, perform these manual tests t
 The project includes comprehensive test data for ferret-scan at:
 ```
 tests/test_data/scanners/ferret-scan/
-├── sample.txt       # Text file with various sensitive data patterns
-└── 10-MB-Test.docx  # Large document for preprocessor testing
+├── sample.txt                # Text file with various sensitive data patterns
+└── synthetic-pii-test.docx   # Synthetic document for preprocessor testing (generated, Apache-2.0)
 ```
 
 The `sample.txt` file contains examples across confidence levels:
@@ -598,20 +604,24 @@ cat .ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif | jq '[.runs[0
 # Expected: Various rule IDs for credit cards, passports, etc.
 ```
 
-#### 4. ASH Debug Mode (Plugin Does NOT Pass --debug)
+#### 4. Ferret-Scan Debug Mode (ferret_debug)
 
 ```bash
-# Run with ASH debug mode — ferret-scan itself won't receive --debug
-uv run ash --debug scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan 2>&1
-# Expected: ASH debug output visible, but ferret-scan runs without --debug flag
+# Enable ferret-scan's own debug output (independent of ASH logging)
+uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
+    --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
+    -o ferret_debug=true 2>&1
+# Expected: ferret-scan debug output showing preprocessing and validation flow
 ```
 
-#### 5. ASH Verbose Mode (Plugin Does NOT Pass --verbose)
+#### 5. Ferret-Scan Verbose Mode (ferret_verbose)
 
 ```bash
-# Run with ASH verbose mode — ferret-scan itself won't receive --verbose
-uv run ash --verbose scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan 2>&1
-# Expected: ASH verbose output visible, but ferret-scan runs without --verbose flag
+# Enable ferret-scan's own verbose output (independent of ASH logging)
+uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
+    --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
+    -o ferret_verbose=true 2>&1
+# Expected: ferret-scan verbose output with detailed finding info
 ```
 
 #### 6. Custom Configuration Options
@@ -638,8 +648,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 #### 8. Unsupported Option Error
 
 ```bash
-# Test that unsupported options raise clear errors
-# Create a config file with unsupported option
+# Test that bare 'debug' is blocked (must use ferret_debug)
 cat > /tmp/test-ash-config.yaml << 'EOF'
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_ferret_plugins
@@ -647,11 +656,11 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      debug: true  # This should fail
+      debug: true  # This should fail — use ferret_debug instead
 EOF
 
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --config /tmp/test-ash-config.yaml 2>&1
-# Expected: Error message about unsupported 'debug' option
+# Expected: Error message about unsupported 'debug' option, suggesting ferret_debug
 rm /tmp/test-ash-config.yaml
 ```
 
@@ -715,7 +724,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners fer
 # Test text extraction from Office documents
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --scanners ferret-scan \
     --config-overrides "scanners.ferret-scan.options.enable_preprocessors=true"
-# Expected: Should scan both sample.txt and extract text from 10-MB-Test.docx
+# Expected: Should scan both sample.txt and extract text from synthetic-pii-test.docx
 ```
 
 ### Quick Smoke Test Script

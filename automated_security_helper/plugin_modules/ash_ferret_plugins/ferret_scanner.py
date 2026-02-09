@@ -81,10 +81,11 @@ RECOMMENDED_VERSION = "1.0.0"
 #   --extract-text
 #       Reason: This is a utility mode, not a scanning mode.
 #
-# DEBUG/VERBOSE OPTIONS (Not applicable):
+# DEBUG/VERBOSE OPTIONS (Use ferret_ prefix):
 #   --debug, --verbose
-#       Reason: ASH manages its own logging. These ferret-scan options are not
-#       applicable in the ASH integration context.
+#       Reason: Bare 'debug'/'verbose' are blocked to avoid confusion with
+#       ASH's own --debug/--verbose flags. Use 'ferret_debug'/'ferret_verbose'
+#       instead to control ferret-scan's own log output independently.
 # ============================================================================
 
 # List of unsupported ferret-scan options that should not be used
@@ -112,9 +113,9 @@ UNSUPPORTED_FERRET_OPTIONS = {
     # Text extraction mode - not scanning
     "extract_text": "Text extraction mode is not supported. Use ferret-scan CLI directly for text extraction.",
     
-    # Debug/verbose - not applicable in ASH context
-    "debug": "Debug mode is not applicable in ASH integration. ASH manages its own logging.",
-    "verbose": "Verbose mode is not applicable in ASH integration. ASH manages its own logging.",
+    # Debug/verbose - use ferret_debug/ferret_verbose instead
+    "debug": "Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.",
+    "verbose": "Use 'ferret_verbose: true' instead. Bare 'verbose' is blocked to avoid confusion with ASH's --verbose flag.",
 }
 
 
@@ -183,7 +184,7 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
     - enable_redaction and related: Post-processing not supported
     - generate_suppressions and related: ASH has its own suppression system
     - extract_text: Utility mode not supported
-    - debug/verbose: Not applicable; ASH manages its own logging
+    - debug/verbose: Use ferret_debug/ferret_verbose instead (avoids confusion with ASH flags)
     """
 
     confidence_levels: Annotated[
@@ -255,6 +256,23 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
             "This allows scanning content within binary document formats."
         ),
     ] = True
+
+    # Ferret-scan's own log level controls (independent of ASH logging)
+    ferret_debug: Annotated[
+        bool,
+        Field(
+            description="Enable ferret-scan's debug logging (shows preprocessing and "
+            "validation flow). This controls ferret-scan's own output, not ASH logging."
+        ),
+    ] = False
+
+    ferret_verbose: Annotated[
+        bool,
+        Field(
+            description="Enable ferret-scan's verbose output (detailed finding info). "
+            "This controls ferret-scan's own output, not ASH logging."
+        ),
+    ] = False
 
     # Version control options
     tool_version: Annotated[
@@ -337,7 +355,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     
     ASH Convention Compliance:
     - Output format: Always SARIF (required by ASH for aggregation)
-    - Debug/verbose: Not passed to ferret-scan; ASH manages its own logging
+    - Debug/verbose: Use ferret_debug/ferret_verbose to control ferret-scan's own output
     - Offline mode: Respects ASH_OFFLINE environment variable
     - Output directory: Uses ASH conventions (.ash/ash_output/scanners/ferret-scan/)
     - Suppressions: Managed by ASH centrally (not ferret-scan's suppression system)
@@ -526,10 +544,9 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         Note: This method clears extra_args before populating them to prevent
         argument duplication when called multiple times (e.g., via _resolve_arguments).
         
-        Debug/verbose flags are NOT passed to ferret-scan. ASH handles its own
-        logging independently of the underlying tool's verbosity. This is consistent
-        with how other built-in scanners (Semgrep, Checkov, Grype, detect-secrets)
-        handle logging.
+        Debug/verbose flags are passed to ferret-scan only when explicitly enabled
+        via ferret_debug/ferret_verbose options. These control ferret-scan's own
+        output independently of ASH's logging level.
         """
         # Clear extra_args to prevent duplication on repeated calls
         self.args.extra_args = []
@@ -589,6 +606,17 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         if options.enable_preprocessors:
             self.args.extra_args.append(
                 ToolExtraArg(key="--enable-preprocessors", value=None)
+            )
+
+        # Ferret-scan's own debug/verbose (independent of ASH logging)
+        if options.ferret_debug:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--debug", value=None)
+            )
+
+        if options.ferret_verbose:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--verbose", value=None)
             )
 
         # Always disable color in ferret-scan output (ASH handles formatting)

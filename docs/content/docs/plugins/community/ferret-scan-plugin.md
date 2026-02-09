@@ -21,13 +21,26 @@ The Ferret Scan plugin enables ASH to leverage Ferret's powerful sensitive data 
 
 This plugin follows ASH conventions for consistent behavior across all scanners:
 
-### Inherited from ASH (Do NOT configure at plugin level)
+### Hardcoded by Plugin (Do NOT configure at plugin level)
 
 | Feature | ASH Convention | Notes |
 |---------|---------------|-------|
-| **Debug Mode** | `ash --debug` | Not passed to ferret-scan; ASH manages its own logging |
-| **Verbose Mode** | `ash --verbose` | Not passed to ferret-scan; ASH manages its own logging |
 | **Output Format** | Always SARIF | Required by ASH for result aggregation |
+| **Color Output** | Always `--no-color` | ASH handles formatting |
+
+### Ferret-Scan Log Controls
+
+| Option | Description |
+|--------|-------------|
+| `ferret_debug: true` | Enables ferret-scan's own debug output (preprocessing/validation flow) |
+| `ferret_verbose: true` | Enables ferret-scan's own verbose output (detailed finding info) |
+
+Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--debug`/`--verbose` flags.
+
+### Managed by ASH Framework
+
+| Feature | ASH Convention | Notes |
+|---------|---------------|-------|
 | **Output Directory** | `.ash/ash_output/scanners/ferret-scan/` | Follows ASH conventions |
 | **Offline Mode** | `ASH_OFFLINE=true` | Respects ASH offline mode |
 | **Suppressions** | `.ash/suppressions.yaml` | Managed centrally by ASH |
@@ -39,7 +52,7 @@ The following ferret-scan CLI options are **NOT supported** and will raise an er
 | Option | Reason |
 |--------|--------|
 | `format`, `output_format` | ASH requires SARIF format |
-| `debug`, `verbose` | Not applicable; ASH manages its own logging independently |
+| `debug`, `verbose` | Use `ferret_debug`/`ferret_verbose` instead (avoids confusion with ASH flags) |
 | `web`, `port` | Web server mode not applicable |
 | `enable_redaction`, `redaction_*`, `memory_scrub` | Post-processing, not scanning |
 | `generate_suppressions`, `show_suppressed`, `suppressions_file` | ASH manages suppressions |
@@ -139,11 +152,11 @@ uv run ash --scanners ferret-scan
 # Scan specific directory
 uv run ash --source-dir /path/to/project --scanners ferret-scan
 
-# Run with debug mode (not passed to ferret-scan; ASH manages its own logging)
-uv run ash --scanners ferret-scan --debug
+# Run with ferret-scan's own debug output
+uv run ash --scanners ferret-scan -o ferret_debug=true
 
-# Run with verbose mode (not passed to ferret-scan; ASH manages its own logging)
-uv run ash --scanners ferret-scan --verbose
+# Run with ferret-scan's own verbose output
+uv run ash --scanners ferret-scan -o ferret_verbose=true
 ```
 
 ### Run Without Configuration File
@@ -186,6 +199,8 @@ scanners:
 | `exclude_patterns` | list | `[]` | Glob patterns to exclude |
 | `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning below) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents (PDF, Office) |
+| `ferret_debug` | bool | `false` | Enable ferret-scan's own debug logging (preprocessing/validation flow) |
+| `ferret_verbose` | bool | `false` | Enable ferret-scan's own verbose output (detailed finding info) |
 | `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=1.0.0,<2.0.0`, `==1.2.0`) |
 | `skip_version_check` | bool | `false` | Skip version compatibility check (use with caution) |
 
@@ -196,8 +211,8 @@ The following options are **not supported** because they conflict with ASH conve
 | Option | Error Message |
 |--------|--------------|
 | `format`, `output_format` | "ASH requires SARIF format for result aggregation" |
-| `debug` | "Debug mode is not applicable in ASH integration. ASH manages its own logging" |
-| `verbose` | "Verbose mode is not applicable in ASH integration. ASH manages its own logging" |
+| `debug` | "Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag." |
+| `verbose` | "Use 'ferret_verbose: true' instead. Bare 'verbose' is blocked to avoid confusion with ASH's --verbose flag." |
 | `web`, `port` | "Web server mode is not supported in ASH integration" |
 | `enable_redaction`, `redaction_output_dir`, `redaction_strategy`, `redaction_audit_log`, `memory_scrub` | "Redaction is not supported in ASH integration" |
 | `generate_suppressions`, `show_suppressed`, `suppressions_file` | "ASH manages suppressions centrally" |
@@ -248,7 +263,7 @@ scanners:
         - ".git/**"
 ```
 
-Note: Do NOT configure `debug`, `verbose`, `format`, or suppression options at the plugin level. These are managed by ASH globally.
+Note: Do NOT configure bare `debug`, `verbose`, `format`, or suppression options at the plugin level. Use `ferret_debug`/`ferret_verbose` for ferret-scan's own log output. Other options are managed by ASH globally.
 
 ### Version Pinning
 
@@ -460,13 +475,17 @@ pip install ferret-scan
 If you see an error like:
 ```
 ValueError: Unsupported option 'debug' in ferret-scan plugin configuration. 
-Debug mode is not applicable in ASH integration. ASH manages its own logging.
+Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.
 ```
 
-This means you're trying to use an option that conflicts with ASH conventions. Remove the option from your configuration. ASH manages its own logging independently of scanner tools:
-```bash
-# Instead of configuring debug in plugin options, use:
-uv run ash --scanners ferret-scan --debug
+This means you used a bare option name that's blocked. Use the `ferret_` prefixed version instead:
+```yaml
+scanners:
+  ferret-scan:
+    enabled: true
+    options:
+      ferret_debug: true    # Correct
+      ferret_verbose: true  # Correct
 ```
 
 **Empty directory warnings**:
@@ -480,14 +499,14 @@ ferret-scan --format sarif --file /path/to/test/file
 
 ### Debug Mode
 
-Enable verbose logging to troubleshoot issues:
+Enable ferret-scan's own debug/verbose output to troubleshoot issues:
 
 ```bash
-# Use ASH's global debug flag (not passed to ferret-scan; ASH manages its own logging)
-uv run ash --scanners ferret-scan --debug
+# Enable ferret-scan's debug output (shows preprocessing and validation flow)
+uv run ash --scanners ferret-scan -o ferret_debug=true
 
-# Or use verbose mode
-uv run ash --scanners ferret-scan --verbose
+# Enable ferret-scan's verbose output (shows detailed finding info)
+uv run ash --scanners ferret-scan -o ferret_verbose=true
 ```
 
 ## Integration Examples
