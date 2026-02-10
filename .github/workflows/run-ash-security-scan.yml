@@ -123,6 +123,7 @@ jobs:
         if: inputs.install-opengrep
         run: |
           curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh | bash
+          echo "$HOME/.opengrep/cli/latest" >> $GITHUB_PATH
 
       - name: Run ASH
         id: ash
