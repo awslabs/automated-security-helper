@@ -33,3 +33,7 @@ jobs:
       post-pr-comment: true
       # Set this to `false` if you prefer less verbose log output
       verbose: true
+      # Install Grype and Syft for comprehensive vulnerability scanning
+      install-grype: true
+      install-syft: true
+      install-opengrep: true

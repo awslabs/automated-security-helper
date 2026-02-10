@@ -79,16 +79,24 @@ def update_version_in_pyproject(new_version: str) -> bool:
         project_root = get_project_root()
         pyproject_path = project_root / "pyproject.toml"
 
+        # Read the file as text to preserve formatting
         with open(pyproject_path, "r", encoding="utf-8") as f:
-            pyproject_data = toml.load(f)
+            content = f.read()
 
-        if "project" not in pyproject_data:
-            pyproject_data["project"] = {}
+        # Replace version using regex to preserve formatting
+        import re
 
-        pyproject_data["project"]["version"] = new_version
+        pattern = r'(version\s*=\s*")([^"]+)(")'
+        match = re.search(pattern, content)
 
+        if not match:
+            return False
+
+        new_content = re.sub(pattern, rf"\g<1>{new_version}\g<3>", content)
+
+        # Write back
         with open(pyproject_path, "w", encoding="utf-8") as f:
-            toml.dump(pyproject_data, f)
+            f.write(new_content)
 
         return True
     except Exception:
