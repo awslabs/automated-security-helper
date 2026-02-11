@@ -91,7 +91,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.11"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.12"
 ```
 
 ```powershell
@@ -99,7 +99,7 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.11 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.1.12 $args }
 ```
 
 ### Other Installation Methods
@@ -120,13 +120,13 @@ ash --help
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.11
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.12
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.1.11
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.1.12
 cd automated-security-helper
 pip install .
 ```
