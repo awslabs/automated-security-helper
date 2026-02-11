@@ -5,6 +5,7 @@
 
 import json
 import pytest
+from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
 from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
@@ -452,7 +453,7 @@ class TestFerretScanScannerArgumentResolution:
         assert "--format" in args
         assert "sarif" in args
         assert "--file" in args
-        assert str(mock_target_directory) in args[-1]
+        assert Path(mock_target_directory).as_posix() in args[-1]
 
     def test_resolve_arguments_with_options(self, mock_plugin_context, mock_target_directory, custom_ferret_config):
         """Test argument resolution with custom options."""
