@@ -532,7 +532,7 @@ profiles:
     verbose: true
     no_color: false
     recursive: true
-    description: "Enhanced credit card detection supporting multiple formats: dash-separated (4532-0151-1283-0366), space-separated (4532 0151 1283 0366), no separators (4532015112830366), XML/HTML contexts, and quoted strings"
+    description: "Enhanced credit card detection supporting multiple formats: dash-separated, space-separated, no separators, XML/HTML contexts, and quoted strings"
 
   # Passport scan profile - only scan for passport numbers
   passport:

@@ -946,3 +946,28 @@ class TestFerretScanScannerVersionSupport:
             # Should log warning about skipping
             log_calls = [str(call) for call in mock_log.call_args_list]
             assert any("skip_version_check=true" in call for call in log_calls)
+
+
+@pytest.mark.unit
+class TestFerretPluginValidation:
+    """Run the pre-push validation script as a test to catch regressions."""
+
+    def test_validate_ferret_plugin_passes(self):
+        """Ensure all validation checks pass.
+
+        This runs scripts/validate_ferret_plugin.py which checks for known
+        CI failure patterns: SECRET-SECRET-KEYWORD variable names, hardcoded
+        PII, hex entropy strings, glob exclude syntax, Windows paths, multiple
+        --exclude args, ferret in .ash.yaml, and config override conflicts.
+        """
+        import subprocess
+
+        result = subprocess.run(
+            ["python", "scripts/validate_ferret_plugin.py"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Validation script failed:\n{result.stdout}\n{result.stderr}"
+        )

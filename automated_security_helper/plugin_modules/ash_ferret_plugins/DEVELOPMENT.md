@@ -494,6 +494,16 @@ patterns set via ASH plugin options may be silently ignored if `use_default_conf
 is `true` (the default). Set `use_default_config: false` in the ASH config to ensure
 CLI arguments take full effect.
 
+### 11. `SECRET-SECRET-KEYWORD` Triggers on Variable Names, Not Values
+
+The `SECRET-SECRET-KEYWORD` detection rule matches on variable/key **names** like
+`API_KEY`, `SECRET`, `PASSWORD`, `TOKEN`, `PRIVATE_KEY`, etc. — regardless of the
+assigned value. Even `API_KEY = "placeholder"` or `API_KEY = "test"` will be flagged.
+
+This applies to Python source, YAML config, markdown documentation, and any other
+scanned file type. The fix is to rename the variable to something neutral (e.g.,
+`SETTING`, `CONFIG_VALUE`, `TEST_PARAM`) in test fixtures and documentation examples.
+
 ## False Positive Suppression and CI
 
 ### The `--ignore-suppressions` Problem
@@ -514,8 +524,10 @@ Instead of adding suppressions for test data, eliminate the trigger:
 | Problem | Solution |
 |---------|----------|
 | Dummy secrets in test fixtures (e.g., `SETTING = "test_value"`) | Use inert placeholders: `SETTING = "placeholder"` |
+| Variable names that match secret keywords (e.g., `API_KEY`, `SECRET`, `PASSWORD`, `TOKEN`) | Rename to neutral names: `SETTING`, `CONFIG_VALUE`, `TEST_PARAM`. The `SECRET-SECRET-KEYWORD` rule triggers on the variable/key **name**, not the value — even `API_KEY = "placeholder"` will be flagged. |
 | Hardcoded credit card numbers in test data generators | Use generator functions with `random.seed()` for reproducibility |
 | Hex-like strings that trigger entropy detectors | Generate values at runtime, not as string literals in source |
+| Documentation examples containing secret-like patterns | Use neutral variable names in code examples too — markdown is scanned the same as source code |
 
 ### Test Data Generator (`scripts/generate_test_docx.py`)
 
@@ -542,6 +554,72 @@ They work for local scans and for CI runs that don't use `--ignore-suppressions`
 For the CI code scanning annotations (which use `--ignore-suppressions`), these
 findings will appear but the CI workflow itself uses `continue-on-error: true` on
 the scan step — so they show as annotations, not as blocking failures.
+
+### Pre-Push Validation Script (`scripts/validate_ferret_plugin.py`)
+
+Run this before pushing to catch known CI failure patterns locally:
+
+```bash
+uv run python scripts/validate_ferret_plugin.py
+```
+
+The script checks for:
+
+| Check | What it catches |
+|-------|-----------------|
+| `SECRET-SECRET-KEYWORD` | Variable names like `API_KEY`, `PASSWORD`, `TOKEN` that trigger secret detection regardless of value |
+| `HARDCODED-PII` | Credit card numbers or SSNs as string literals in source |
+| `HEX-HIGH-ENTROPY-STRING` | Long hex strings (32+ chars) that trigger entropy detectors |
+| `EXCLUDE-GLOB-SYNTAX` | Exclude patterns using `**/` glob syntax instead of simple names (ferret-scan doesn't support globs) |
+| `TEST-COUNT` | Ensures the unit test count hasn't regressed below 67 |
+| `WINDOWS-PATH` | `str(Path)` instead of `Path.as_posix()` in CLI argument building — backslashes break ferret-scan on Windows |
+| `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `--exclude` args instead of joining into one comma-separated value |
+| `FERRET-IN-ASH-YAML` | ferret-scan registered in `.ash.yaml` instead of `.ash_community_plugins.yaml` (it's a community plugin) |
+| `CONFIG-OVERRIDE-EXCLUDES` | `exclude_patterns` set but `use_default_config` not `false` — the bundled config will silently override CLI excludes |
+
+These checks mirror what CI's `--ignore-suppressions` scan will flag. Passing this
+script locally means no surprises on the PR.
+
+The script also runs automatically as a unit test (`TestFerretPluginValidation::test_validate_ferret_plugin_passes`),
+so any regression will fail the test suite in CI.
+
+#### Adding a New Check
+
+When you discover a new CI failure pattern, add a check to the script:
+
+1. Add a new numbered section in `scripts/validate_ferret_plugin.py` following the existing pattern
+2. Define a regex or file-scanning function
+3. Decorate it with `@check("CHECK-NAME: description")`
+4. Use `fail(check_name, filepath, line_num, message)` to report issues
+5. Update `EXPECTED_MIN_TESTS` if you added new unit tests
+6. Update this table in DEVELOPMENT.md
+
+Example skeleton:
+
+```python
+# ----------------------------------------------------------------------------
+# 10. Your new check description
+# ----------------------------------------------------------------------------
+
+@check("NEW-CHECK: brief description of what it catches")
+def check_new_thing():
+    for filepath in ALL_FILES:
+        if filepath.suffix not in (".py", ".md", ".yaml", ".yml"):
+            continue
+        lines = filepath.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines, 1):
+            if some_bad_pattern.search(line):
+                fail(
+                    "NEW-CHECK",
+                    filepath.relative_to(PROJECT_ROOT),
+                    i,
+                    f"Description of what's wrong: {line.strip()[:80]}",
+                )
+```
+
+Run `uv run python scripts/validate_ferret_plugin.py` to verify your new check works,
+then run `uv run pytest tests/unit/plugin_modules/ash_ferret_plugins/ -v --no-cov -n 0`
+to confirm the test suite still passes.
 
 ## Bundled Config File (`ferret-config.yaml`) Safety
 
