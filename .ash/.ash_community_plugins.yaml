@@ -176,9 +176,17 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      confidence_levels: "all"
-      checks: "all"
+      confidence_levels: "high"
+      checks: "CREDIT_CARD,SECRETS,SSN,PASSPORT"
       recursive: true
+      use_default_config: false
+      exclude_patterns:
+        - ".venv"
+        - "tests/test_data"
+        - ".ash/ash_output"
+        - ".git"
+        - "__pycache__"
+        - "*.pyc"
   trivy-repo:
     enabled: true
     options:

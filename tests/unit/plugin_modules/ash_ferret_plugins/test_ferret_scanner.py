@@ -241,12 +241,11 @@ class TestFerretScannerConfigProcessing:
         extra_args = scanner.args.extra_args
         exclude_args = [arg for arg in extra_args if arg.key == "--exclude"]
 
-        # Should have at least 3 exclude patterns
-        assert len(exclude_args) >= 3
-        exclude_values = [arg.value for arg in exclude_args]
-        assert "*.log" in exclude_values
-        assert "node_modules/**" in exclude_values
-        assert "vendor/**" in exclude_values
+        # Should have exactly 1 exclude arg with comma-separated patterns
+        assert len(exclude_args) == 1
+        assert "*.log" in exclude_args[0].value
+        assert "node_modules/**" in exclude_args[0].value
+        assert "vendor/**" in exclude_args[0].value
 
     def test_process_show_match_option(self, mock_plugin_context):
         """Test show_match option processing."""

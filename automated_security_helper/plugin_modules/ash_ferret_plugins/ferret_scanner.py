@@ -584,10 +584,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 ToolExtraArg(key="--profile", value=options.profile)
             )
 
-        # Exclude patterns
-        for pattern in options.exclude_patterns:
+        # Exclude patterns (ferret-scan expects a single comma-separated value)
+        if options.exclude_patterns:
             self.args.extra_args.append(
-                ToolExtraArg(key="--exclude", value=pattern)
+                ToolExtraArg(key="--exclude", value=",".join(options.exclude_patterns))
             )
 
         # Show match (tool-specific behavior option)
