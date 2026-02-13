@@ -498,7 +498,9 @@ CLI arguments take full effect.
 
 The `SECRET-SECRET-KEYWORD` detection rule matches on variable/key **names** like
 `API_KEY`, `SECRET`, `PASSWORD`, `TOKEN`, `PRIVATE_KEY`, etc. — regardless of the
-assigned value. Even `API_KEY = "placeholder"` or `API_KEY = "test"` will be flagged.
+assigned value. For example, `API_KEY` `=` `"placeholder"` will be flagged even
+though the value is inert. The detector matches the keyword name next to an
+assignment operator.
 
 This applies to Python source, YAML config, markdown documentation, and any other
 scanned file type. The fix is to rename the variable to something neutral (e.g.,
@@ -524,7 +526,7 @@ Instead of adding suppressions for test data, eliminate the trigger:
 | Problem | Solution |
 |---------|----------|
 | Dummy secrets in test fixtures (e.g., `SETTING = "test_value"`) | Use inert placeholders: `SETTING = "placeholder"` |
-| Variable names that match secret keywords (e.g., `API_KEY`, `SECRET`, `PASSWORD`, `TOKEN`) | Rename to neutral names: `SETTING`, `CONFIG_VALUE`, `TEST_PARAM`. The `SECRET-SECRET-KEYWORD` rule triggers on the variable/key **name**, not the value — even `API_KEY = "placeholder"` will be flagged. |
+| Variable names that match secret keywords (e.g., names like `API_KEY`, `SECRET`, `PASSWORD`, `TOKEN`) | Rename to neutral names: `SETTING`, `CONFIG_VALUE`, `TEST_PARAM`. The rule triggers on the keyword **name** next to `=` or `:` — e.g., `API_KEY` `=` `"anything"` will be flagged. |
 | Hardcoded credit card numbers in test data generators | Use generator functions with `random.seed()` for reproducibility |
 | Hex-like strings that trigger entropy detectors | Generate values at runtime, not as string literals in source |
 | Documentation examples containing secret-like patterns | Use neutral variable names in code examples too — markdown is scanned the same as source code |
