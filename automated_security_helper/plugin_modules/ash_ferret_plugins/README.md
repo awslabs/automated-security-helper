@@ -49,8 +49,8 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      confidence_levels: "all"
-      checks: "all"
+      confidence_levels: "high"
+      checks: "CREDIT_CARD,SECRETS,SSN,PASSPORT"
 ```
 
 #### Option 2: Command Line Flag
@@ -124,10 +124,25 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      confidence_levels: "all"  # high, medium, low, or combinations
-      checks: "all"             # or specific: CREDIT_CARD,EMAIL,SECRETS
+      confidence_levels: "high"       # high, medium, low, or combinations
+      checks: "CREDIT_CARD,SECRETS,SSN,PASSPORT"  # or "all" for everything
       recursive: true
+      use_default_config: false       # disable bundled config to let CLI args take effect
+      exclude_patterns:
+        - ".venv"
+        - ".git"
+        - "node_modules"
 ```
+
+> **Note on `use_default_config`**: The bundled `ferret-config.yaml` is a comprehensive
+> reference config. When loaded via `--config`, ferret-scan's config file settings can
+> override CLI arguments like `--exclude`. Set `use_default_config: false` if you want
+> full control via ASH plugin options. Alternatively, keep it enabled and use `profile`
+> to select a specific scanning profile from the bundled config.
+
+> **Note on `exclude_patterns`**: Ferret-scan uses simple directory/file name matching
+> for excludes, not glob patterns. Use `.venv` instead of `.venv/**`. Patterns are
+> passed as a comma-separated `--exclude` value to the ferret-scan CLI.
 
 ### Configuration Options
 
@@ -139,7 +154,7 @@ scanners:
 | `config_file` | string | `null` | Path to custom Ferret YAML config file |
 | `use_default_config` | bool | `true` | Use the default config bundled with this plugin |
 | `profile` | string | `null` | Profile name from config file |
-| `exclude_patterns` | list | `[]` | Glob patterns to exclude |
+| `exclude_patterns` | list | `[]` | Patterns to exclude from scanning (directory names or file patterns, e.g., `.venv`, `*.log`) |
 | `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning above) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents |
 | `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=1.0.0,<2.0.0`) |
@@ -204,8 +219,8 @@ scanners:
       enable_preprocessors: true  # Extract text from PDFs, Office docs
       exclude_patterns:
         - "*.log"
-        - "node_modules/**"
-        - "vendor/**"
+        - "node_modules"
+        - "vendor"
 ```
 
 ### Version Pinning
