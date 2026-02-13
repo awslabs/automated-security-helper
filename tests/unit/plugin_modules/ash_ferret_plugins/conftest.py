@@ -143,7 +143,7 @@ def mock_target_directory(tmp_path):
     target_dir.mkdir()
 
     # Create some test files that ferret-scan would analyze
-    (target_dir / "config.py").write_text('API_KEY = "placeholder"')
+    (target_dir / "config.py").write_text('SETTING = "placeholder"')
     (target_dir / "data.txt").write_text("Some text with potential PII")
     (target_dir / "README.md").write_text("# Test Project")
 

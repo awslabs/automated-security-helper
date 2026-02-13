@@ -513,7 +513,7 @@ Instead of adding suppressions for test data, eliminate the trigger:
 
 | Problem | Solution |
 |---------|----------|
-| Dummy API keys in test fixtures (e.g., `API_KEY = "test_key_12345"`) | Use inert placeholders: `API_KEY = "placeholder"` |
+| Dummy secrets in test fixtures (e.g., `SETTING = "test_value"`) | Use inert placeholders: `SETTING = "placeholder"` |
 | Hardcoded credit card numbers in test data generators | Use generator functions with `random.seed()` for reproducibility |
 | Hex-like strings that trigger entropy detectors | Generate values at runtime, not as string literals in source |
 
