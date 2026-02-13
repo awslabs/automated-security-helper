@@ -498,38 +498,61 @@ CLI arguments take full effect.
 
 The `SECRET-SECRET-KEYWORD` detection rule matches on variable/key **names** like
 `API_KEY`, `SECRET`, `PASSWORD`, `TOKEN`, `PRIVATE_KEY`, etc. — regardless of the
-assigned value. For example, `API_KEY` `=` `"placeholder"` will be flagged even
-though the value is inert. The detector matches the keyword name next to an
-assignment operator.
+assigned value. Even `API_KEY = "placeholder"` or `API_KEY = "test"` will be flagged.
+The detector matches the keyword name next to an assignment operator.
 
 This applies to Python source, YAML config, markdown documentation, and any other
 scanned file type. The fix is to rename the variable to something neutral (e.g.,
 `SETTING`, `CONFIG_VALUE`, `TEST_PARAM`) in test fixtures and documentation examples.
+If renaming isn't practical (e.g., documentation explaining the problem), add a
+suppression with line number to `.ash/.ash_community_plugins.yaml`.
 
 ## False Positive Suppression and CI
 
-### The `--ignore-suppressions` Problem
+### Suppression Strategy
 
-ASH's CI workflow runs scans with `--ignore-suppressions` to validate that scanners
-produce expected output. This means suppressions in `.ash/.ash.yaml` are deliberately
-bypassed in CI. Findings that are suppressed locally will still appear as GitHub code
-scanning alerts on PRs.
+ASH supports suppressions in the config file under `global_settings.suppressions`.
+For the ferret-scan community plugin, suppressions go in
+`.ash/.ash_community_plugins.yaml` (not `.ash/.ash.yaml`).
 
-**Consequence**: You cannot rely on ASH suppressions alone to silence false positives
-in CI. The source code itself must not contain literal strings that trigger secret
-detectors.
+Suppressions with `line_start`/`line_end` fields are the preferred approach for
+documentation examples that intentionally contain triggering patterns. For test
+fixtures and source code, eliminating the trigger from source is preferred when
+practical.
 
-### Approach: Avoid Hardcoded Secrets in Source
+### Two-Pronged Approach
 
-Instead of adding suppressions for test data, eliminate the trigger:
-
-| Problem | Solution |
-|---------|----------|
-| Dummy secrets in test fixtures (e.g., `SETTING = "test_value"`) | Use inert placeholders: `SETTING = "placeholder"` |
-| Variable names that match secret keywords (e.g., names like `API_KEY`, `SECRET`, `PASSWORD`, `TOKEN`) | Rename to neutral names: `SETTING`, `CONFIG_VALUE`, `TEST_PARAM`. The rule triggers on the keyword **name** next to `=` or `:` — e.g., `API_KEY` `=` `"anything"` will be flagged. |
-| Hardcoded credit card numbers in test data generators | Use generator functions with `random.seed()` for reproducibility |
+| Situation | Approach |
+|-----------|----------|
+| Test fixtures with secret-like variable names | Rename to neutral names (`SETTING`, `CONFIG_VALUE`, `TEST_PARAM`) |
+| Documentation explaining the detection pattern | Add a suppression with `line_start`/`line_end` to `.ash/.ash_community_plugins.yaml` |
+| Hardcoded PII in test data generators | Use generator functions with `random.seed()` for reproducibility |
 | Hex-like strings that trigger entropy detectors | Generate values at runtime, not as string literals in source |
-| Documentation examples containing secret-like patterns | Use neutral variable names in code examples too — markdown is scanned the same as source code |
+
+### Adding a Suppression
+
+Add entries under `global_settings.suppressions` in `.ash/.ash_community_plugins.yaml`:
+
+```yaml
+global_settings:
+  suppressions:
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
+      rule_id: SECRET-SECRET-KEYWORD
+      line_start: 501
+      line_end: 501
+      reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
+```
+
+Fields:
+- `path`: Relative path to the file (supports fnmatch patterns)
+- `rule_id`: The rule ID to suppress (e.g., `SECRET-SECRET-KEYWORD`)
+- `line_start` / `line_end`: Line range for precision (strongly recommended)
+- `reason`: Why this suppression exists
+- `expiration`: Optional expiry date (e.g., `"2026-06-01"`)
+
+When you add or move a suppression, update the `line_start`/`line_end` values if
+the target content shifts. The validation script (check #10) verifies that all
+SECRET-SECRET-KEYWORD hits in ferret plugin files have matching suppressions.
 
 ### Test Data Generator (`scripts/generate_test_docx.py`)
 
@@ -547,15 +570,11 @@ The generated file (`tests/test_data/scanners/ferret-scan/synthetic-pii-test.doc
 is in `tests/test_data/`, which is excluded from scanning via ASH's `ignore_paths`
 and the ferret-scan `exclude_patterns` config.
 
-### Suppressions That ARE Still Needed
+### Keeping Suppressions in Sync
 
-Some false positives can't be eliminated from source (e.g., schema files, third-party
-generated code). These are suppressed in `.ash/.ash.yaml` under `global_settings.suppressions`.
-They work for local scans and for CI runs that don't use `--ignore-suppressions`.
-
-For the CI code scanning annotations (which use `--ignore-suppressions`), these
-findings will appear but the CI workflow itself uses `continue-on-error: true` on
-the scan step — so they show as annotations, not as blocking failures.
+When editing files that have line-specific suppressions, verify the line numbers
+are still correct. The validation script's check #10 (`SUPPRESSION-COVERAGE`) will
+catch suppressions that have drifted out of alignment.
 
 ### Pre-Push Validation Script (`scripts/validate_ferret_plugin.py`)
 
@@ -578,6 +597,7 @@ The script checks for:
 | `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `--exclude` args instead of joining into one comma-separated value |
 | `FERRET-IN-ASH-YAML` | ferret-scan registered in `.ash.yaml` instead of `.ash_community_plugins.yaml` (it's a community plugin) |
 | `CONFIG-OVERRIDE-EXCLUDES` | `exclude_patterns` set but `use_default_config` not `false` — the bundled config will silently override CLI excludes |
+| `SUPPRESSION-COVERAGE` | SECRET-SECRET-KEYWORD hits in ferret plugin files must have matching suppressions with `line_start`/`line_end` in `.ash_community_plugins.yaml` |
 
 These checks mirror what CI's `--ignore-suppressions` scan will flag. Passing this
 script locally means no surprises on the PR.

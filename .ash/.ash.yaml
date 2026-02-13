@@ -33,12 +33,31 @@ global_settings:
     - path: tests/unit/plugin_modules/ash_aws_plugins/test_cloudwatch_logs_reporter*
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive, dummy test data and not an actual secret.
-    - path: tests/unit/plugin_modules/ash_ferret_plugins/conftest.py
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive, dummy test data and not an actual secret.
+      line_start: 501
+      line_end: 501
+      reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
+      rule_id: B404
+      line_start: 9
+      line_end: 9
+      reason: Subprocess module required — ferret-scan is an external CLI tool invoked via subprocess with list args (no shell=True).
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
+      rule_id: B603
+      line_start: 430
+      line_end: 430
+      reason: Subprocess calls use list args (no shell=True) with validated inputs. ferret-scan binary path comes from shutil.which().
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
+      rule_id: B607
+      line_start: 430
+      line_end: 430
+      reason: Partial executable path resolved via shutil.which() in validate_plugin_dependencies(). Standard ASH scanner pattern.
     - path: scripts/generate_test_docx.py
-      rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      reason: False positive, synthetic credit card numbers used to generate test data for ferret-scan plugin testing.
+      rule_id: B311
+      line_start: 1
+      line_end: 203
+      reason: Standard random is intentional — generates synthetic test data with random.seed(42) for reproducibility, not used for security/crypto.
     - path: .github/workflows/run-ash-security-scan.yml
       rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
       reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars

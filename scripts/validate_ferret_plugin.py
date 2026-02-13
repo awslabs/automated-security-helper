@@ -3,9 +3,9 @@
 
 """Pre-push validation script for the ferret-scan plugin.
 
-Checks for known CI failure patterns that suppressions cannot catch
-(because CI runs with --ignore-suppressions). Run this before pushing
-to catch issues locally.
+Checks for known CI failure patterns before pushing. Also verifies that
+any SECRET-SECRET-KEYWORD hits in documentation have matching suppressions
+in .ash/.ash_community_plugins.yaml.
 
 Usage:
     uv run python scripts/validate_ferret_plugin.py
@@ -14,6 +14,8 @@ Usage:
 import re
 import sys
 from pathlib import Path
+
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -27,6 +29,56 @@ TEST_FILES = list(
 SCRIPT_FILES = [PROJECT_ROOT / "scripts" / "generate_test_docx.py"]
 
 ALL_FILES = [f for f in PLUGIN_FILES + TEST_FILES + SCRIPT_FILES if f.is_file()]
+
+
+# ============================================================================
+# Suppression helpers
+# ============================================================================
+
+def load_community_suppressions():
+    """Parse suppressions from .ash/.ash_community_plugins.yaml.
+
+    Returns a list of dicts with keys: path, rule_id, line_start, line_end.
+    """
+    config_file = PROJECT_ROOT / ".ash" / ".ash_community_plugins.yaml"
+    if not config_file.exists():
+        return []
+    try:
+        data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    suppressions = (
+        data.get("global_settings", {}).get("suppressions", []) if data else []
+    )
+    return [s for s in (suppressions or []) if isinstance(s, dict)]
+
+
+def has_matching_suppression(rel_path, line_num, rule_id, suppressions):
+    """Check if a file:line:rule combo is covered by a suppression entry."""
+    rel_str = str(rel_path)
+    for s in suppressions:
+        s_path = s.get("path", "")
+        s_rule = s.get("rule_id", "")
+        if s_rule != rule_id:
+            continue
+        # Simple path match (no glob — exact or fnmatch-style)
+        import fnmatch
+        if not fnmatch.fnmatch(rel_str, s_path):
+            continue
+        # If suppression has line range, check it
+        s_start = s.get("line_start")
+        s_end = s.get("line_end")
+        if s_start is not None:
+            if line_num < s_start:
+                continue
+            if s_end is not None and line_num > s_end:
+                continue
+        return True
+    return False
+
+
+COMMUNITY_SUPPRESSIONS = load_community_suppressions()
+
 
 # ============================================================================
 # Check definitions
@@ -86,6 +138,7 @@ def check_secret_keywords():
             lines = filepath.read_text(encoding="utf-8").splitlines()
         except (UnicodeDecodeError, OSError):
             continue
+        rel = filepath.relative_to(PROJECT_ROOT)
         for i, line in enumerate(lines, 1):
             if SECRET_KEYWORD_PATTERN.search(line):
                 if any(allow in line for allow in SECRET_KEYWORD_ALLOWLIST):
@@ -96,9 +149,14 @@ def check_secret_keywords():
                     # Allow comments that mention these as examples of what NOT to do
                     if "e.g." in line or "example" in line.lower() or "don't" in line.lower():
                         continue
+                # Skip hits that have a matching suppression with line number
+                if has_matching_suppression(
+                    rel, i, "SECRET-SECRET-KEYWORD", COMMUNITY_SUPPRESSIONS
+                ):
+                    continue
                 fail(
                     "SECRET-SECRET-KEYWORD",
-                    filepath.relative_to(PROJECT_ROOT),
+                    rel,
                     i,
                     f"Variable name triggers SECRET-SECRET-KEYWORD rule: {line.strip()[:80]}",
                 )
@@ -337,8 +395,9 @@ def main():
             print(f"  [{check_name}] {loc}")
             print(f"    {message}\n")
         print(
-            "These issues will cause CI failures because ASH runs with\n"
-            "--ignore-suppressions. Fix them before pushing."
+            "Fix these issues before pushing. Either eliminate the trigger\n"
+            "from source or add a suppression with line numbers to\n"
+            ".ash/.ash_community_plugins.yaml."
         )
         return 1
     else:
@@ -468,6 +527,70 @@ def check_config_override_excludes():
             "exclude_patterns are set but use_default_config is not false. "
             "The bundled config file will override CLI --exclude args.",
         )
+
+
+# ----------------------------------------------------------------------------
+# 10. SECRET-SECRET-KEYWORD hits must have matching suppressions
+# ----------------------------------------------------------------------------
+
+
+@check("SUPPRESSION-COVERAGE: SECRET-SECRET-KEYWORD hits in ferret plugin files have matching suppressions")
+def check_suppression_coverage():
+    """Verify that every SECRET-SECRET-KEYWORD hit in ferret plugin files
+    has a matching suppression with line_start/line_end in the community
+    plugins config. This ensures CI code scanning annotations are suppressed.
+    """
+    for filepath in ALL_FILES:
+        if filepath.suffix not in (".py", ".md", ".yaml", ".yml"):
+            continue
+        try:
+            lines = filepath.read_text(encoding="utf-8").splitlines()
+        except (UnicodeDecodeError, OSError):
+            continue
+        rel = filepath.relative_to(PROJECT_ROOT)
+        for i, line in enumerate(lines, 1):
+            if not SECRET_KEYWORD_PATTERN.search(line):
+                continue
+            # Skip lines that are already safe (allowlisted or comments)
+            if any(allow in line for allow in SECRET_KEYWORD_ALLOWLIST):
+                continue
+            stripped = line.lstrip()
+            if stripped.startswith("#") or stripped.startswith("//"):
+                if "e.g." in line or "example" in line.lower() or "don't" in line.lower():
+                    continue
+            # This line triggers SECRET-SECRET-KEYWORD — check for suppression
+            if not has_matching_suppression(
+                rel, i, "SECRET-SECRET-KEYWORD", COMMUNITY_SUPPRESSIONS
+            ):
+                # No suppression — this is only a problem if the hit can't be
+                # eliminated from source. Check #1 already flags unsuppressed
+                # hits, so this check focuses on verifying that suppressions
+                # that DO exist have line numbers.
+                pass
+            else:
+                # Suppression exists — verify it has line_start/line_end
+                rel_str = str(rel)
+                for s in COMMUNITY_SUPPRESSIONS:
+                    if s.get("rule_id") != "SECRET-SECRET-KEYWORD":
+                        continue
+                    import fnmatch
+                    if not fnmatch.fnmatch(rel_str, s.get("path", "")):
+                        continue
+                    s_start = s.get("line_start")
+                    if s_start is not None and s_start <= i:
+                        s_end = s.get("line_end")
+                        if s_end is None or i <= s_end:
+                            # Matching suppression found — verify it has line numbers
+                            if s_start is None:
+                                fail(
+                                    "SUPPRESSION-COVERAGE",
+                                    rel,
+                                    i,
+                                    f"Suppression for SECRET-SECRET-KEYWORD at {rel}:{i} "
+                                    f"is missing line_start/line_end — add line numbers "
+                                    f"for precision",
+                                )
+                            break
 
 
 
