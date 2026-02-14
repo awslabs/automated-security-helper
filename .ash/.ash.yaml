@@ -58,6 +58,16 @@ global_settings:
       line_start: 1
       line_end: 203
       reason: Standard random is intentional — generates synthetic test data with random.seed(42) for reproducibility, not used for security/crypto.
+    - path: tests/unit/plugin_modules/ash_ferret_plugins/conftest.py
+      rule_id: SECRET-SECRET-KEYWORD
+      line_start: 146
+      line_end: 146
+      reason: False positive — SETTING = "placeholder" uses a neutral variable name.
+    - path: scripts/generate_test_docx.py
+      rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      line_start: 175
+      line_end: 177
+      reason: False positive — runtime-generated synthetic credit card numbers from seeded random for test data.
     - path: .github/workflows/run-ash-security-scan.yml
       rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
       reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars
