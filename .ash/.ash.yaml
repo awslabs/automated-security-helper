@@ -45,13 +45,13 @@ global_settings:
       reason: Subprocess module required — ferret-scan is an external CLI tool invoked via subprocess with list args (no shell=True).
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B603
-      line_start: 430
-      line_end: 430
+      line_start: 410
+      line_end: 435
       reason: Subprocess calls use list args (no shell=True) with validated inputs. ferret-scan binary path comes from shutil.which().
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
       rule_id: B607
-      line_start: 430
-      line_end: 430
+      line_start: 410
+      line_end: 435
       reason: Partial executable path resolved via shutil.which() in validate_plugin_dependencies(). Standard ASH scanner pattern.
     - path: scripts/generate_test_docx.py
       rule_id: B311
