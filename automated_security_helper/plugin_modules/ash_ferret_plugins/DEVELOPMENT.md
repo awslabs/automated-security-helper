@@ -505,15 +505,16 @@ This applies to Python source, YAML config, markdown documentation, and any othe
 scanned file type. The fix is to rename the variable to something neutral (e.g.,
 `SETTING`, `CONFIG_VALUE`, `TEST_PARAM`) in test fixtures and documentation examples.
 If renaming isn't practical (e.g., documentation explaining the problem), add a
-suppression with line number to `.ash/.ash_community_plugins.yaml`.
+suppression with line number to both `.ash/.ash.yaml` and `.ash/.ash_community_plugins.yaml`.
 
 ## False Positive Suppression and CI
 
 ### Suppression Strategy
 
 ASH supports suppressions in the config file under `global_settings.suppressions`.
-For the ferret-scan community plugin, suppressions go in
-`.ash/.ash_community_plugins.yaml` (not `.ash/.ash.yaml`).
+Ferret-scan suppressions must be added to **both** `.ash/.ash.yaml` and
+`.ash/.ash_community_plugins.yaml` — the PR scan workflow uses `.ash.yaml`
+while the community validation workflow uses `.ash_community_plugins.yaml`.
 
 Suppressions with `line_start`/`line_end` fields are the preferred approach for
 documentation examples that intentionally contain triggering patterns. For test
@@ -525,13 +526,14 @@ practical.
 | Situation | Approach |
 |-----------|----------|
 | Test fixtures with secret-like variable names | Rename to neutral names (`SETTING`, `CONFIG_VALUE`, `TEST_PARAM`) |
-| Documentation explaining the detection pattern | Add a suppression with `line_start`/`line_end` to `.ash/.ash_community_plugins.yaml` |
+| Documentation explaining the detection pattern | Add a suppression with `line_start`/`line_end` to both `.ash/.ash.yaml` and `.ash/.ash_community_plugins.yaml` |
 | Hardcoded PII in test data generators | Use generator functions with `random.seed()` for reproducibility |
 | Hex-like strings that trigger entropy detectors | Generate values at runtime, not as string literals in source |
 
 ### Adding a Suppression
 
-Add entries under `global_settings.suppressions` in `.ash/.ash_community_plugins.yaml`:
+Add entries under `global_settings.suppressions` in **both** `.ash/.ash.yaml` and
+`.ash/.ash_community_plugins.yaml`:
 
 ```yaml
 global_settings:
@@ -573,8 +575,8 @@ and the ferret-scan `exclude_patterns` config.
 ### Keeping Suppressions in Sync
 
 When editing files that have line-specific suppressions, verify the line numbers
-are still correct. The validation script's check #10 (`SUPPRESSION-COVERAGE`) will
-catch suppressions that have drifted out of alignment.
+are still correct in **both** config files. The validation script's check #10
+(`SUPPRESSION-COVERAGE`) will catch suppressions that have drifted out of alignment.
 
 ### Pre-Push Validation Script (`scripts/validate_ferret_plugin.py`)
 
