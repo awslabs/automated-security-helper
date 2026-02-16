@@ -11,11 +11,10 @@ Usage:
     uv run python scripts/validate_ferret_plugin.py
 """
 
+import fnmatch
 import re
 import sys
 from pathlib import Path
-
-import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -38,19 +37,76 @@ ALL_FILES = [f for f in PLUGIN_FILES + TEST_FILES + SCRIPT_FILES if f.is_file()]
 def load_community_suppressions():
     """Parse suppressions from .ash/.ash_community_plugins.yaml.
 
+    Uses simple line-by-line parsing (no PyYAML dependency) to extract
+    suppression entries from the global_settings.suppressions list.
+
     Returns a list of dicts with keys: path, rule_id, line_start, line_end.
     """
     config_file = PROJECT_ROOT / ".ash" / ".ash_community_plugins.yaml"
     if not config_file.exists():
         return []
     try:
-        data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-    except Exception:
+        lines = config_file.read_text(encoding="utf-8").splitlines()
+    except (UnicodeDecodeError, OSError):
         return []
-    suppressions = (
-        data.get("global_settings", {}).get("suppressions", []) if data else []
-    )
-    return [s for s in (suppressions or []) if isinstance(s, dict)]
+
+    suppressions = []
+    in_suppressions = False
+    current = None
+
+    for line in lines:
+        stripped = line.strip()
+        # Detect start of suppressions list
+        if stripped == "suppressions:":
+            in_suppressions = True
+            continue
+        if not in_suppressions:
+            continue
+        # End of suppressions block: non-indented, non-comment, non-empty line
+        # that isn't a list item or a key-value under a list item
+        if stripped and not stripped.startswith("#") and not stripped.startswith("-") and ":" in stripped:
+            # Check indent level — suppressions items are deeply indented
+            indent = len(line) - len(line.lstrip())
+            if indent <= 2:
+                # We've left the suppressions block
+                if current:
+                    suppressions.append(current)
+                break
+        # New list item
+        if stripped.startswith("- "):
+            if current:
+                suppressions.append(current)
+            current = {}
+            # Parse inline key: value on the same line as "-"
+            rest = stripped[2:].strip()
+            if ":" in rest:
+                k, _, v = rest.partition(":")
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k in ("path", "rule_id", "reason", "expiration"):
+                    current[k] = v
+                elif k in ("line_start", "line_end"):
+                    try:
+                        current[k] = int(v)
+                    except ValueError:
+                        current[k] = v
+        elif current is not None and ":" in stripped and not stripped.startswith("#"):
+            # Continuation key: value under current list item
+            k, _, v = stripped.partition(":")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k in ("path", "rule_id", "reason", "expiration"):
+                current[k] = v
+            elif k in ("line_start", "line_end"):
+                try:
+                    current[k] = int(v)
+                except ValueError:
+                    current[k] = v
+
+    if current:
+        suppressions.append(current)
+
+    return suppressions
 
 
 def has_matching_suppression(rel_path, line_num, rule_id, suppressions):
@@ -61,8 +117,6 @@ def has_matching_suppression(rel_path, line_num, rule_id, suppressions):
         s_rule = s.get("rule_id", "")
         if s_rule != rule_id:
             continue
-        # Simple path match (no glob — exact or fnmatch-style)
-        import fnmatch
         if not fnmatch.fnmatch(rel_str, s_path):
             continue
         # If suppression has line range, check it
@@ -573,7 +627,6 @@ def check_suppression_coverage():
                 for s in COMMUNITY_SUPPRESSIONS:
                     if s.get("rule_id") != "SECRET-SECRET-KEYWORD":
                         continue
-                    import fnmatch
                     if not fnmatch.fnmatch(rel_str, s.get("path", "")):
                         continue
                     s_start = s.get("line_start")
