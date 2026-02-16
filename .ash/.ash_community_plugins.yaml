@@ -10,6 +10,11 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
+      rule_id: SECRET-SECRET-KEYWORD
+      line_start: 501
+      line_end: 501
+      reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
     - path: tests/integration/cli/test_mcp_file_tracking_integration.py
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive.

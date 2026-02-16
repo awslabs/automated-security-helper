@@ -498,7 +498,7 @@ CLI arguments take full effect.
 
 The `SECRET-SECRET-KEYWORD` detection rule matches on variable/key **names** like
 `API_KEY`, `SECRET`, `PASSWORD`, `TOKEN`, `PRIVATE_KEY`, etc. — regardless of the
-assigned value. Even `API_KEY` `= "placeholder"` or `API_KEY` `= "test"` will be flagged.
+assigned value. Even `API_KEY = "placeholder"` or `API_KEY = "test"` will be flagged.
 The detector matches the keyword name next to an assignment operator.
 
 This applies to Python source, YAML config, markdown documentation, and any other
