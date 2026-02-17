@@ -186,7 +186,8 @@ class ASHScanOrchestrator(BaseModel):
                     "ash_aggregated_results.json",
                     "ash-ignore-report.txt",
                     "ash-scan-set-files-list.txt",
-                    # "ash.log",
+                    "ash.log",
+                    "ash.log.jsonl",
                 ]
             ]:
                 ASH_LOGGER.debug(f"Removing old file: {old_file}")

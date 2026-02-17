@@ -76,7 +76,7 @@
       "args": [
         "--verbose",
         "--scanners",
-        "snyk-code,bandit",
+        "detect-secrets",
         "--config-overrides",
         "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
       ],

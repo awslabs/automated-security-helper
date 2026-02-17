@@ -144,6 +144,8 @@ def run_ash_scan(
         not in ["YES", "1", "TRUE"],
         use_color=color,
         simple_format=simple_logging,  # Pass the simple flag to the logger
+        truncate_log=existing_results
+        is None,  # Don't truncate when using existing results
     )
     # Initialize results as None at the start to avoid UnboundLocalError
     results = None
@@ -477,7 +479,6 @@ def run_ash_scan(
             else True
         )
     )
-
 
     # Get the count of actionable findings from unified metrics
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)

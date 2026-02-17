@@ -442,6 +442,8 @@ def get_logger(
     show_progress: bool = True,
     use_color: bool = True,
     simple_format: bool = False,
+    file_log_level: str | int | None = None,
+    truncate_log: bool = True,
 ) -> logging.Logger:
     # Configure Windows-safe logging early
     configure_windows_safe_logging()
@@ -586,15 +588,26 @@ def get_logger(
         # # Determine log path/file name; create output_dir if necessary
         # now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-        # Create JSONLines/JSONL file handler for logging to a file (log all five levels)
+        # Determine file log level (default to INFO to avoid huge log files)
+        final_file_log_level = (
+            file_log_level if file_log_level is not None else logging.INFO
+        )
+
+        # Create JSONLines/JSONL file handler for logging to a file
         if log_format in ["JSONL", "BOTH"]:
             jsonl_log_file = Path(output_dir).joinpath(f"{name}.log.jsonl")
             jsonl_log_file.parent.mkdir(parents=True, exist_ok=True)
-            jsonl_log_file.touch(exist_ok=True)
+            # Truncate the file if requested (default), otherwise append
+            if truncate_log:
+                jsonl_log_file.write_text("")  # Clear the file
+            else:
+                jsonl_log_file.touch(
+                    exist_ok=True
+                )  # Create if doesn't exist, but don't truncate
 
             jsonl_file_handler = logging.FileHandler(jsonl_log_file.as_posix())
             logger.verbose("Logging to JSONL file: %s", jsonl_log_file.as_posix())
-            jsonl_file_handler.setLevel(logging.DEBUG)
+            jsonl_file_handler.setLevel(final_file_log_level)
             jsonl_file_handler.setFormatter(
                 JsonFormatter(
                     {
@@ -612,15 +625,21 @@ def get_logger(
                 )
             )
             logger.addHandler(jsonl_file_handler)
-        # Create tabular file handler for logging to a file (log all five levels)
+        # Create tabular file handler for logging to a file
         if log_format in ["TABULAR", "BOTH"]:
             tab_log_file = Path(output_dir).joinpath(f"{name}.log")
             tab_log_file.parent.mkdir(parents=True, exist_ok=True)
-            tab_log_file.touch(exist_ok=True)
+            # Truncate the file if requested (default), otherwise append
+            if truncate_log:
+                tab_log_file.write_text("")  # Clear the file
+            else:
+                tab_log_file.touch(
+                    exist_ok=True
+                )  # Create if doesn't exist, but don't truncate
 
             tab_file_handler = logging.FileHandler(tab_log_file.as_posix())
             logger.verbose("Logging to tabular file: %s", tab_log_file.as_posix())
-            tab_file_handler.setLevel(logging.DEBUG)
+            tab_file_handler.setLevel(final_file_log_level)
             tab_file_handler.setFormatter(
                 logging.Formatter(
                     fmt="%(asctime)s\t%(levelname)s\t%(filename)s:%(lineno)d\t%(message)s "
