@@ -278,14 +278,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     else scan_set(
                         source=self.context.source_dir,
                         output=self.context.output_dir,
-                        # filter_pattern=r"\.(yaml|yml|json)$",
                     )
                 )
-                if Path(item).name
-                not in [
-                    "ash_aggregated_results.json",
-                    *KNOWN_LOCKFILE_NAMES,
-                ]
+                if Path(item).name not in [*KNOWN_LOCKFILE_NAMES]
+                and "/.ash/" not in str(item)
             ]
             if len(scannable) == 0:
                 message = f"There were no scannable files found in target '{target}'"
