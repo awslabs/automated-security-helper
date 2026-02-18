@@ -1,0 +1,963 @@
+# Ferret Scanner Configuration File
+# This file defines default settings and profiles for different scanning scenarios
+#
+# Platform-specific configuration examples:
+# - ferret-windows.yaml: Windows-specific configuration with platform optimizations
+# - ferret-powershell.yaml: PowerShell integration configuration
+# - ferret-enterprise-windows.yaml: Enterprise Windows deployment configuration
+# - ferret-dev-windows.yaml: Windows development environment configuration
+
+# Default settings applied when no profile is specified
+defaults:
+  format: text # Output format: text, json, csv, yaml, junit, gitlab-sast
+  confidence_levels: all # Confidence levels to display: high, medium, low, or combinations
+  checks:
+    all # Specific checks to run: CREDIT_CARD, EMAIL, INTELLECTUAL_PROPERTY, IP_ADDRESS, METADATA, PASSPORT, PERSON_NAME, PHONE, SECRETS, SOCIAL_MEDIA, SSN, or combinations
+    # GENAI_DISABLED: COMPREHEND_PII also available with --enable-genai
+  verbose: false # Display detailed information for each finding
+  debug: false # Enable debug logging to show preprocessing and validation flow
+  no_color: false # Disable colored output
+  recursive: false # Recursively scan directories
+  enable_preprocessors: true # Enable text extraction from documents (PDF, Office files) (default: true)
+  show_match: false # Display the actual matched text in findings
+  quiet: false # Suppress progress output (useful for scripts and CI/CD)
+  show_suppressed: false # Include suppressed findings in output with suppression details
+  generate_suppressions: false # Generate suppression rules for all findings
+  # GENAI_DISABLED: max_cost: 0                 # Maximum cost limit for GenAI services (0 = no limit)
+  # GENAI_DISABLED: estimate_only: false        # Show cost estimate and exit without processing
+
+# Preprocessor configurations
+preprocessors:
+  # Text extraction from documents
+  text_extraction:
+    enabled: true # Enable text extraction preprocessor
+    types: # Types of text extraction to perform
+      - pdf # Extract text from PDF documents
+      - office # Extract text from Office documents (DOCX, XLSX, PPTX, ODT, ODS, ODP)
+
+  # GENAI_DISABLED: Amazon Textract OCR (requires --enable-genai flag)
+  # GENAI_DISABLED: WARNING: Using Textract will send your files to AWS and incur costs
+  # GENAI_DISABLED: textract:
+  # GENAI_DISABLED:   enabled: false            # Disabled by default, enabled with --enable-genai flag
+  # GENAI_DISABLED:   region: us-east-1         # AWS region for Textract service
+
+  # GENAI_DISABLED: Amazon Transcribe for audio file transcription (requires --enable-genai flag)
+  # GENAI_DISABLED: WARNING: Using Transcribe will send your files to AWS and incur costs
+  # GENAI_DISABLED: transcribe:
+  # GENAI_DISABLED:   enabled: false            # Disabled by default, enabled with --enable-genai flag
+  # GENAI_DISABLED:   region: us-east-1         # AWS region for Transcribe service
+  # GENAI_DISABLED:   bucket: ""                # S3 bucket name for audio uploads (optional, creates temporary bucket if not specified)
+
+  # GENAI_DISABLED: Amazon Comprehend for PII detection (requires --enable-genai flag)
+  # GENAI_DISABLED: WARNING: Using Comprehend will send your text to AWS and incur costs
+  # GENAI_DISABLED: comprehend:
+  # GENAI_DISABLED:   enabled: false            # Disabled by default, enabled with --enable-genai flag
+  # GENAI_DISABLED:   region: us-east-1         # AWS region for Comprehend service
+
+  # Enhanced Metadata extraction with preprocessor-aware validation and intelligent file type filtering
+  # Automatically enabled when preprocessors are enabled
+  # Features intelligent content routing, file type filtering, and type-specific validation patterns
+  #
+  # File Type Filtering (Performance Optimization):
+  # - Automatically processes files that can contain metadata: images, documents, audio, video
+  # - Automatically skips plain text files: .txt, .py, .js, .json, .md, .log, .csv, .xml, .html, .yaml, etc.
+  # - Results in 20-30% performance improvement for workloads with many plain text files
+  # - Eliminates false positives from analyzing text content as metadata
+  #
+  # Supports multiple file types with specialized validation:
+  # - Images: JPG, JPEG, TIFF, TIF, PNG, GIF, BMP, WEBP
+  #   Extracts EXIF data, camera information, GPS coordinates, timestamps, etc.
+  #   Enhanced validation: GPS data (+60% confidence), device info (+40%), creator info (+30%)
+  # GENAI_DISABLED:   With --enable-genai: Also extracts text using Amazon Textract OCR
+  # - Office Documents: DOCX, XLSX, PPTX, ODT, ODS, ODP
+  #   Extracts author, creator, company, modification history, document properties, etc.
+  #   Enhanced validation: Manager info (+40% confidence), comments (+50%), author info (+30%)
+  # - PDF Documents: PDF
+  #   Extracts author, creator, producer, creation dates, document properties, etc.
+  #   Enhanced validation: Same as office documents with document-specific patterns
+  # GENAI_DISABLED:   With --enable-genai: Also extracts text from scanned/image-based PDFs using Amazon Textract OCR
+  # - Audio Files: MP3, FLAC, WAV, M4A
+  #   Extracts artist, performer, composer, album info, ID3 tags, etc.
+  #   Enhanced validation: Contact info (+50% confidence), management (+40%), artist info (+30%)
+  # - Video Files: MP4, MOV, M4V
+  #   Extracts GPS coordinates, device info, creator details, production info, etc.
+  #   Enhanced validation: GPS data (+60% confidence), location info (+50%), device info (+40%)
+
+# Redaction configurations
+redaction:
+  enabled: false # Enable redaction of sensitive data (can be overridden with --enable-redaction)
+  output_dir: "./redacted" # Directory where redacted files will be stored
+  strategy: "format_preserving" # Default redaction strategy: simple, format_preserving, or synthetic
+  audit_log_file: "" # Path to save redaction audit log file (JSON format for compliance)
+  memory_scrub: true # Enable secure memory scrubbing after processing sensitive data
+  audit_trail: true # Enable audit trail generation for redaction operations
+
+  # Strategy-specific configurations
+  strategies:
+    simple:
+      replacement: "[HIDDEN]" # Text to replace sensitive data with
+
+    format_preserving:
+      preserve_length: true # Maintain original text length
+      preserve_format: true # Maintain original text format (e.g., XXX-XX-XXXX for SSN)
+
+    synthetic:
+      secure: true # Use cryptographically secure synthetic data generation
+
+# Validator-specific configurations
+validators:
+  # Intellectual property validator configuration
+  intellectual_property:
+    # Internal company URL patterns to detect
+    # IMPORTANT: Internal URL detection requires explicit configuration
+    # Configure patterns specific to your organization's infrastructure
+    #
+    # Pattern Categories:
+    # 1. Cloud Infrastructure - AWS, Azure, GCP service URLs
+    # 2. Corporate Networks - Internal domains and naming conventions
+    # 3. Development Environments - Dev, staging, test environments
+    # 4. Private Networks - RFC 1918 private IP ranges
+    # 5. Organization-Specific - Custom domains and subdomains
+    #
+    # Pattern Format: Regular expressions using escaped forward slashes
+    # Example: "http[s]?:\\/\\/.*\\.internal\\..*" matches https://wiki.internal.company.com
+    #
+    # Migration Note: Previously hardcoded patterns must now be explicitly configured
+    # See INTERNAL_URL_MIGRATION_GUIDE.md for migration assistance
+    internal_urls:
+      # ========================================
+      # CLOUD INFRASTRUCTURE PATTERNS
+      # ========================================
+
+      # Amazon Web Services (AWS) Patterns
+      # Core AWS services that commonly appear in internal documentation
+      - "http[s]?:\\/\\/s3\\.amazonaws\\.com" # AWS S3 main endpoint
+      - "http[s]?:\\/\\/.*\\.s3\\.amazonaws\\.com" # S3 bucket-specific URLs
+      - "http[s]?:\\/\\/.*\\.s3-.*\\.amazonaws\\.com" # S3 regional endpoints
+      # - "http[s]?:\\/\\/.*\\.cloudfront\\.net"                # CloudFront distributions
+      # - "http[s]?:\\/\\/.*\\.execute-api\\..*\\.amazonaws\\.com" # API Gateway endpoints
+      # - "http[s]?:\\/\\/.*\\.elb\\.amazonaws\\.com"           # Classic Load Balancers
+      # - "http[s]?:\\/\\/.*\\.elb\\..*\\.amazonaws\\.com"      # Application/Network Load Balancers
+      # - "http[s]?:\\/\\/.*\\.lambda\\..*\\.amazonaws\\.com"   # Lambda function URLs
+      # - "http[s]?:\\/\\/.*\\.rds\\.amazonaws\\.com"           # RDS database endpoints
+      # - "http[s]?:\\/\\/.*\\.elasticache\\..*\\.amazonaws\\.com" # ElastiCache endpoints
+      # - "http[s]?:\\/\\/.*\\.es\\.amazonaws\\.com"            # Elasticsearch Servicefe
+
+      # Microsoft Azure Patterns
+      # Uncomment and customize if you use Microsoft Azure
+      # - "http[s]?:\\/\\/.*\\.blob\\.core\\.windows\\.net"    # Azure Blob Storage
+      # - "http[s]?:\\/\\/.*\\.file\\.core\\.windows\\.net"    # Azure File Storage
+      # - "http[s]?:\\/\\/.*\\.table\\.core\\.windows\\.net"   # Azure Table Storage
+      # - "http[s]?:\\/\\/.*\\.queue\\.core\\.windows\\.net"   # Azure Queue Storage
+      # - "http[s]?:\\/\\/.*\\.azurewebsites\\.net"            # Azure Web Apps
+      # - "http[s]?:\\/\\/.*\\.azure-api\\.net"                # Azure API Management
+      # - "http[s]?:\\/\\/.*\\.azureedge\\.net"                # Azure CDN
+      # - "http[s]?:\\/\\/.*\\.servicebus\\.windows\\.net"     # Azure Service Bus
+      # - "http[s]?:\\/\\/.*\\.database\\.windows\\.net"       # Azure SQL Database
+      # - "http[s]?:\\/\\/.*\\.vault\\.azure\\.net"            # Azure Key Vault
+
+      # Google Cloud Platform (GCP) Patterns
+      # Uncomment and customize if you use Google Cloud
+      # - "http[s]?:\\/\\/storage\\.googleapis\\.com"          # Google Cloud Storage
+      # - "http[s]?:\\/\\/.*\\.storage\\.googleapis\\.com"     # GCS bucket URLs
+      # - "http[s]?:\\/\\/.*\\.appspot\\.com"                  # Google App Engine
+      # - "http[s]?:\\/\\/.*\\.run\\.app"                      # Google Cloud Run
+      # - "http[s]?:\\/\\/.*\\.cloudfunctions\\.net"           # Google Cloud Functions
+      # - "http[s]?:\\/\\/.*\\.firebaseapp\\.com"              # Firebase Hosting
+      # - "http[s]?:\\/\\/.*\\.web\\.app"                      # Firebase Web App
+      # - "http[s]?:\\/\\/.*\\.googleapis\\.com"               # Google APIs
+
+      # ========================================
+      # CORPORATE NETWORK PATTERNS
+      # ========================================
+
+      # Standard Corporate Domain Patterns
+      # These patterns match common corporate naming conventions
+      - "http[s]?:\\/\\/.*\\.internal\\..*" # Generic .internal domains
+      - "http[s]?:\\/\\/.*\\.corp\\..*" # Generic .corp domains
+      - "http[s]?:\\/\\/.*-internal\\..*" # URLs with -internal suffix
+      - "http[s]?:\\/\\/.*internal-.*" # URLs with internal- prefix
+      # - "http[s]?:\\/\\/.*\\.company\\.com"                   # Replace 'company' with your domain
+      # - "http[s]?:\\/\\/.*\\.company\\.local"                 # Local domain suffix
+      # - "http[s]?:\\/\\/.*\\.company\\.lan"                   # LAN domain suffix
+
+      # Common Internal Service Patterns
+      # Typical internal services found in corporate environments
+      # - "http[s]?:\\/\\/intranet\\..*"                        # Intranet portals
+      # - "http[s]?:\\/\\/wiki\\..*"                            # Internal wikis
+      # - "http[s]?:\\/\\/docs\\..*"                            # Documentation sites
+      # - "http[s]?:\\/\\/confluence\\..*"                      # Atlassian Confluence
+      # - "http[s]?:\\/\\/jira\\..*"                            # Atlassian Jira
+      # - "http[s]?:\\/\\/gitlab\\..*"                          # GitLab instances
+      # - "http[s]?:\\/\\/jenkins\\..*"                         # Jenkins CI/CD
+      # - "http[s]?:\\/\\/nexus\\..*"                           # Sonatype Nexus
+      # - "http[s]?:\\/\\/artifactory\\..*"                     # JFrog Artifactory
+      # - "http[s]?:\\/\\/vault\\..*"                           # HashiCorp Vault
+      # - "http[s]?:\\/\\/consul\\..*"                          # HashiCorp Consul
+
+      # ========================================
+      # DEVELOPMENT ENVIRONMENT PATTERNS
+      # ========================================
+
+      # Environment-Specific Patterns
+      # Uncomment if you want to detect development/staging URLs
+      # These patterns help identify non-production environments
+      # - "http[s]?:\\/\\/.*-dev\\..*"                          # Development environments
+      # - "http[s]?:\\/\\/.*-staging\\..*"                      # Staging environments
+      # - "http[s]?:\\/\\/.*-test\\..*"                         # Test environments
+      # - "http[s]?:\\/\\/.*-qa\\..*"                           # QA environments
+      # - "http[s]?:\\/\\/.*-uat\\..*"                          # User Acceptance Testing
+      # - "http[s]?:\\/\\/.*-sandbox\\..*"                      # Sandbox environments
+      # - "http[s]?:\\/\\/dev-.*"                               # Dev prefix
+      # - "http[s]?:\\/\\/staging-.*"                           # Staging prefix
+      # - "http[s]?:\\/\\/test-.*"                              # Test prefix
+      # - "http[s]?:\\/\\/qa-.*"                                # QA prefix
+      # - "http[s]?:\\/\\/uat-.*"                               # UAT prefix
+      # - "http[s]?:\\/\\/sandbox-.*"                           # Sandbox prefix
+
+      # Branch/Feature Environment Patterns
+      # For organizations using dynamic environments per feature branch
+      # - "http[s]?:\\/\\/.*-pr-\\d+\\..*"                      # Pull request environments
+      # - "http[s]?:\\/\\/.*-branch-.*\\..*"                    # Branch-specific environments
+      # - "http[s]?:\\/\\/.*-feature-.*\\..*"                   # Feature branch environments
+      # - "http[s]?:\\/\\/review-.*\\..*"                       # Review environments
+
+      # ========================================
+      # PRIVATE NETWORK PATTERNS
+      # ========================================
+
+      # Private IP Address Ranges (RFC 1918)
+      # Uncomment if you want to detect private IP URLs
+      # These patterns match private network ranges commonly used in corporate environments
+      # - "http[s]?:\\/\\/10\\..*"                              # Class A private (10.0.0.0/8)
+      # - "http[s]?:\\/\\/172\\.(1[6-9]|2[0-9]|3[0-1])\\..*"   # Class B private (172.16.0.0/12)
+      # - "http[s]?:\\/\\/192\\.168\\..*"                       # Class C private (192.168.0.0/16)
+      # - "http[s]?:\\/\\/localhost"                            # Localhost
+      # - "http[s]?:\\/\\/127\\..*"                             # Loopback addresses (127.0.0.0/8)
+
+      # Link-Local and Special Use Addresses
+      # - "http[s]?:\\/\\/169\\.254\\..*"                       # Link-local addresses (169.254.0.0/16)
+      # - "http[s]?:\\/\\/\\[::1\\]"                            # IPv6 localhost
+      # - "http[s]?:\\/\\/\\[fc00:.*\\]"                        # IPv6 unique local addresses
+      # - "http[s]?:\\/\\/\\[fd00:.*\\]"                        # IPv6 unique local addresses
+
+      # ========================================
+      # ORGANIZATION-SPECIFIC PATTERNS
+      # ========================================
+
+      # Technology Company Patterns
+      # Example patterns for technology companies
+      # - "http[s]?:\\/\\/.*\\.eng\\..*"                        # Engineering domains
+      # - "http[s]?:\\/\\/.*\\.dev\\..*"                        # Development domains
+      # - "http[s]?:\\/\\/.*\\.ops\\..*"                        # Operations domains
+      # - "http[s]?:\\/\\/.*\\.infra\\..*"                      # Infrastructure domains
+      # - "http[s]?:\\/\\/.*\\.platform\\..*"                   # Platform domains
+      # - "http[s]?:\\/\\/.*\\.tools\\..*"                      # Internal tools
+      # - "http[s]?:\\/\\/.*\\.metrics\\..*"                    # Metrics and monitoring
+      # - "http[s]?:\\/\\/.*\\.logs\\..*"                       # Logging systems
+
+      # Financial Services Patterns
+      # Example patterns for financial institutions
+      # - "http[s]?:\\/\\/.*\\.bank\\.internal"                 # Banking systems
+      # - "http[s]?:\\/\\/.*\\.trading\\.internal"              # Trading systems
+      # - "http[s]?:\\/\\/.*\\.risk\\.internal"                 # Risk management
+      # - "http[s]?:\\/\\/.*\\.compliance\\.internal"           # Compliance systems
+      # - "http[s]?:\\/\\/.*\\.audit\\.internal"                # Audit systems
+      # - "http[s]?:\\/\\/.*\\.finserv\\..*"                    # Financial services
+
+      # Healthcare Organization Patterns
+      # Example patterns for healthcare organizations
+      # - "http[s]?:\\/\\/.*\\.health\\.internal"               # Health systems
+      # - "http[s]?:\\/\\/.*\\.medical\\.internal"              # Medical systems
+      # - "http[s]?:\\/\\/.*\\.hipaa\\..*"                      # HIPAA-compliant systems
+      # - "http[s]?:\\/\\/ehr\\..*"                             # Electronic Health Records
+      # - "http[s]?:\\/\\/patient\\..*"                         # Patient management systems
+      # - "http[s]?:\\/\\/.*\\.clinic\\..*"                     # Clinic systems
+
+      # Manufacturing/Industrial Patterns
+      # Example patterns for manufacturing organizations
+      # - "http[s]?:\\/\\/.*\\.plant\\..*"                      # Manufacturing plants
+      # - "http[s]?:\\/\\/.*\\.factory\\..*"                    # Factory systems
+      # - "http[s]?:\\/\\/.*\\.scada\\..*"                      # SCADA systems
+      # - "http[s]?:\\/\\/.*\\.mes\\..*"                        # Manufacturing Execution Systems
+      # - "http[s]?:\\/\\/.*\\.erp\\..*"                        # Enterprise Resource Planning
+      # - "http[s]?:\\/\\/.*\\.plm\\..*"                        # Product Lifecycle Management
+
+      # Educational Institution Patterns
+      # Example patterns for universities and schools
+      # - "http[s]?:\\/\\/.*\\.edu\\.internal"                  # Educational domains
+      # - "http[s]?:\\/\\/.*\\.campus\\..*"                     # Campus systems
+      # - "http[s]?:\\/\\/.*\\.student\\..*"                    # Student systems
+      # - "http[s]?:\\/\\/.*\\.faculty\\..*"                    # Faculty systems
+      # - "http[s]?:\\/\\/.*\\.research\\..*"                   # Research systems
+      # - "http[s]?:\\/\\/lms\\..*"                             # Learning Management Systems
+
+      # Government/Public Sector Patterns
+      # Example patterns for government organizations
+      # - "http[s]?:\\/\\/.*\\.gov\\.internal"                  # Government internal
+      # - "http[s]?:\\/\\/.*\\.agency\\..*"                     # Agency systems
+      # - "http[s]?:\\/\\/.*\\.classified\\..*"                 # Classified systems
+      # - "http[s]?:\\/\\/.*\\.secure\\..*"                     # Secure systems
+      # - "http[s]?:\\/\\/.*\\.fed\\..*"                        # Federal systems
+
+      # Retail/E-commerce Patterns
+      # Example patterns for retail organizations
+      # - "http[s]?:\\/\\/.*\\.retail\\.internal"               # Retail systems
+      # - "http[s]?:\\/\\/.*\\.pos\\..*"                        # Point of Sale systems
+      # - "http[s]?:\\/\\/.*\\.inventory\\..*"                  # Inventory management
+      # - "http[s]?:\\/\\/.*\\.warehouse\\..*"                  # Warehouse systems
+      # - "http[s]?:\\/\\/.*\\.supply\\..*"                     # Supply chain systems
+      # - "http[s]?:\\/\\/.*\\.logistics\\..*"                  # Logistics systems
+
+    # Custom intellectual property patterns
+    # These patterns detect various types of intellectual property references
+    intellectual_property_patterns:
+      # Patent number patterns (US, European, Japanese, Chinese, WIPO)
+      patent: "\\b(US|EP|JP|CN|WO)[ -]?(\\d{1,3}[,.]?\\d{3}[,.]?\\d{3}|\\d{1,3}[,.]?\\d{3}[,.]?\\d{2}[A-Z]\\d?)\\b"
+
+      # Trademark patterns (™, ®, (TM), (R), and text variations)
+      trademark: "\\b(\\w+\\s*[™®]|\\w+\\s*\\(TM\\)|\\w+\\s*\\(R\\)|\\w+\\s+Trademark|\\w+\\s+Registered\\s+Trademark)\\b"
+
+      # Copyright patterns (©, (c), (C), Copyright with years)
+      copyright: "(©|\\(c\\)|\\(C\\)|Copyright|\\bCopyright\\b)\\s*\\d{4}[-,]?(\\d{4})?\\s+[A-Za-z0-9\\s\\.,]+"
+
+      # Trade secret and confidentiality patterns
+      trade_secret: "\\b(Confidential|Trade\\s+Secret|Proprietary|Company\\s+Confidential|Internal\\s+Use\\s+Only|Restricted|Classified)\\b"
+
+  # Social media validator configuration
+  # Detects social media profiles, usernames, and handles across major platforms
+  social_media:
+    # Platform-specific pattern groups
+    # Each platform has its own pattern group for targeted detection
+    platform_patterns:
+      # LinkedIn patterns - professional networking platform
+      linkedin:
+        - "(?i)https?://(?:www\\.)?linkedin\\.com/in/[a-zA-Z0-9_-]+" # Profile URLs
+        - "(?i)https?://(?:www\\.)?linkedin\\.com/company/[a-zA-Z0-9_-]+" # Company pages
+        - "(?i)https?://(?:www\\.)?linkedin\\.com/pub/[a-zA-Z0-9_/-]+" # Public profile URLs
+
+      # Twitter/X patterns - microblogging platform
+      twitter:
+        - "(?i)https?://(?:www\\.)?(twitter|x)\\.com/[a-zA-Z0-9_]+" # Profile URLs
+        - "(?i)@[a-zA-Z0-9_]{1,15}\\b" # Handle references (@username)
+
+      # GitHub patterns - code repository platform
+      github:
+        - "(?i)https?://(?:www\\.)?github\\.com/[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_.-]+)?" # User/repo URLs
+        - "(?i)https?://[a-zA-Z0-9_-]+\\.github\\.io" # GitHub Pages domains
+
+      # Facebook patterns - social networking platform
+      facebook:
+        - "(?i)https?://(?:www\\.)?(facebook|fb)\\.com/[a-zA-Z0-9._-]+" # Profile URLs
+        - "(?i)https?://(?:www\\.)?facebook\\.com/profile\\.php\\?id=\\d+" # Numeric ID profiles
+
+      # Instagram patterns - photo sharing platform
+      instagram:
+        - "(?i)https?://(?:www\\.)?instagram\\.com/[a-zA-Z0-9_.]+/" # Profile URLs
+        - "(?i)https?://(?:www\\.)?instagr\\.am/[a-zA-Z0-9_.]+/" # Short domain
+
+      # YouTube patterns - video sharing platform
+      youtube:
+        - "(?i)https?://(?:www\\.)?youtube\\.com/(?:user|c|channel)/[a-zA-Z0-9_-]+" # Channel URLs
+        - "(?i)https?://(?:www\\.)?youtube\\.com/@[a-zA-Z0-9_-]+" # Handle format
+
+      # TikTok patterns - short video platform
+      tiktok:
+        - "(?i)https?://(?:www\\.)?tiktok\\.com/@[a-zA-Z0-9_.]+/" # Profile URLs
+        - "(?i)https?://(?:www\\.)?tiktok\\.com/t/[a-zA-Z0-9]+" # Short URLs
+
+      # Additional platforms
+      discord:
+        - "(?i)https?://(?:www\\.)?discord\\.gg/[a-zA-Z0-9]+" # Server invites
+        - "(?i)discord\\.com/users/\\d+" # User references
+
+      reddit:
+        - "(?i)https?://(?:www\\.)?reddit\\.com/u(?:ser)?/[a-zA-Z0-9_-]+" # User profiles
+        - "(?i)https?://(?:www\\.)?reddit\\.com/r/[a-zA-Z0-9_]+" # Subreddit references
+
+    # Contextual analysis keywords
+    # These keywords help improve confidence scoring based on surrounding text
+    positive_keywords:
+      - "profile"
+      - "social media"
+      - "follow me"
+      - "connect with me"
+      - "find me on"
+      - "social"
+      - "networking"
+      - "contact"
+
+    negative_keywords:
+      - "example"
+      - "test"
+      - "placeholder"
+      - "demo"
+      - "sample"
+      - "fake"
+      - "mock"
+      - "template"
+
+    # Platform-specific context keywords for enhanced accuracy
+    platform_keywords:
+      linkedin:
+        - "professional"
+        - "career"
+        - "network"
+        - "business"
+        - "work"
+        - "job"
+      twitter:
+        - "tweet"
+        - "follow"
+        - "retweet"
+        - "hashtag"
+        - "mention"
+      github:
+        - "repository"
+        - "code"
+        - "project"
+        - "commit"
+        - "pull request"
+        - "open source"
+      facebook:
+        - "friend"
+        - "like"
+        - "share"
+        - "post"
+        - "page"
+      instagram:
+        - "photo"
+        - "picture"
+        - "image"
+        - "story"
+        - "reel"
+      youtube:
+        - "video"
+        - "channel"
+        - "subscribe"
+        - "watch"
+        - "playlist"
+
+# Suppression configuration
+suppressions:
+  file: ".ferret-scan-suppressions.yaml" # Path to suppression configuration file
+  generate_on_scan: false # Generate suppression rules for all findings during scan
+  show_suppressed: false # Include suppressed findings in output
+
+# GENAI_DISABLED: Cost control settings for GenAI services
+# GENAI_DISABLED: NOTE: These settings only apply when --enable-genai flag is used
+# GENAI_DISABLED: cost_control:
+# GENAI_DISABLED:   max_cost: 0                            # Maximum cost limit for GenAI services (0 = no limit)
+# GENAI_DISABLED:   estimate_only: false                   # Show cost estimate and exit without processing
+# GENAI_DISABLED:   prompt_for_costs: true                 # Prompt user before incurring any GenAI costs
+
+# GENAI_DISABLED: GenAI service configuration
+# GENAI_DISABLED: genai:
+# GENAI_DISABLED:   services: "all"                        # Comma-separated list: textract, transcribe, comprehend, or 'all'
+# GENAI_DISABLED:   region: "us-east-1"                    # Default AWS region for all GenAI services
+
+# Profiles for different scanning scenarios
+profiles:
+  # Quick scan profile - only high confidence matches, minimal output
+  quick:
+    format: text
+    confidence_levels: high
+    checks: CREDIT_CARD,SECRETS,SSN,EMAIL,PERSON_NAME # Focus on most critical data types
+    verbose: false
+    no_color: false
+    recursive: false
+    quiet: true
+    show_match: false
+    enable_preprocessors: false # Skip document processing for speed (use false to disable, true is default)
+    description: "Quick scan focusing on critical data types with minimal processing"
+
+  # Thorough scan profile - all confidence levels, verbose output, recursive scanning
+  thorough:
+    format: text
+    confidence_levels: all
+    checks: all
+    verbose: true
+    no_color: false
+    recursive: true
+    enable_preprocessors: true
+    description: "Thorough scan with all confidence levels, recursive scanning, and text extraction"
+
+  # Debug profile - enables debug logging to show preprocessing and validation flow
+  debug:
+    format: yaml # YAML format is more readable for debugging
+    confidence_levels: all
+    checks: all
+    verbose: true
+    debug: true
+    no_color: false
+    recursive: true
+    enable_preprocessors: true
+    show_match: true # Show actual matches for debugging
+    show_suppressed: true # Show suppressed findings for debugging
+    description: "Debug mode with detailed logging and comprehensive output for troubleshooting"
+
+  # CI/CD pipeline profile - JUnit XML output for integration with CI/CD systems
+  ci:
+    format: junit
+    confidence_levels: high,medium
+    checks: all
+    verbose: true
+    no_color: true
+    recursive: true
+    enable_preprocessors: true
+    quiet: true
+    show_suppressed: false
+    generate_suppressions: false
+    description: "CI/CD pipeline profile with JUnit XML output for test result integration"
+
+  # GitLab Security Scanner profile - GitLab SAST report format for Security Dashboard integration
+  gitlab-security:
+    format: gitlab-sast
+    confidence_levels: all
+    checks: all
+    verbose: false
+    no_color: true
+    recursive: true
+    enable_preprocessors: true
+    quiet: true
+    show_suppressed: false
+    generate_suppressions: false
+    description: "GitLab Security Scanner profile with SAST report format for GitLab Security Dashboard and merge request widgets"
+
+  # Credit card scan profile - only scan for credit card numbers
+  credit-card:
+    format: text
+    confidence_levels: all
+    checks: CREDIT_CARD
+    verbose: true
+    no_color: false
+    recursive: true
+    description: "Enhanced credit card detection supporting multiple formats: dash-separated, space-separated, no separators, XML/HTML contexts, and quoted strings"
+
+  # Passport scan profile - only scan for passport numbers
+  passport:
+    format: text
+    confidence_levels: all
+    checks: PASSPORT
+    verbose: true
+    no_color: false
+    recursive: true
+    description: "Scan only for passport numbers"
+
+  # Person name scan profile - only scan for person names
+  person-name:
+    format: text
+    confidence_levels: all
+    checks: PERSON_NAME
+    verbose: true
+    no_color: false
+    recursive: true
+    show_match: true # Show actual names found for analysis
+    description: "Scan only for person names using optimized database-first processing with embedded name databases (98% performance improvement)"
+
+  # Enhanced metadata scan profile - focus on metadata validation with preprocessor awareness
+  enhanced-metadata:
+    format: yaml # YAML format shows detailed metadata including preprocessor context
+    confidence_levels: all
+    checks: METADATA
+    verbose: true
+    debug: true # Enable debug output to show content routing and validation decisions
+    no_color: false
+    recursive: true
+    show_match: true # Show actual metadata content for analysis
+    description: "Enhanced metadata validation with intelligent file type filtering, preprocessor-aware patterns, and detailed debugging"
+
+  # Intellectual property scan profile - only scan for IP references
+  intellectual-property:
+    format: text
+    confidence_levels: all
+    checks: INTELLECTUAL_PROPERTY
+    verbose: true
+    no_color: false
+    recursive: true
+    description: "Scan only for intellectual property references"
+    # Profile-specific validator configurations that override the defaults
+    validators:
+      intellectual_property:
+        # Example: Technology company internal URL patterns
+        # This profile demonstrates how to
+
+  # Pre-commit profile - optimized for pre-commit hooks
+  precommit:
+    format: text
+    confidence_levels: high,medium
+    checks: CREDIT_CARD,SECRETS,SSN,PASSPORT,EMAIL,PERSON_NAME # Focus on critical data types
+    verbose: false
+    debug: false
+    no_color: true
+    recursive: false
+    quiet: true
+    show_match: false
+    enable_preprocessors: true
+    show_suppressed: false
+    generate_suppressions: false
+    description: "Optimized for pre-commit hooks with concise output and critical data type focus"
+
+  # Social media scan profile - focus on social media detection
+  social-media:
+    format: text
+    confidence_levels: all
+    checks: SOCIAL_MEDIA
+    verbose: true
+    no_color: false
+    recursive: true
+    show_match: true # Show actual social media handles/URLs found
+    description: "Scan only for social media profiles, usernames, and handles across major platforms"
+
+  # GENAI_DISABLED: GenAI profile - enables all AWS AI services for advanced analysis
+  # GENAI_DISABLED: WARNING: This profile will send files to AWS and incur costs
+  # GENAI_DISABLED: genai:
+  # GENAI_DISABLED:   format: text
+  # GENAI_DISABLED:   confidence_levels: all
+  # GENAI_DISABLED:   checks: all
+  # GENAI_DISABLED:   verbose: true
+  # GENAI_DISABLED:   no_color: false
+  # GENAI_DISABLED:   recursive: true
+  # GENAI_DISABLED:   enable_preprocessors: true
+  # GENAI_DISABLED:   enable_genai: true
+  # GENAI_DISABLED:   max_cost: 10.0
+  # GENAI_DISABLED:   estimate_only: false
+  # GENAI_DISABLED:   description: "Advanced scan with all AWS AI services: Textract OCR, Transcribe, and Comprehend PII (requires AWS credentials, costs apply)"
+
+  # Company-specific profile with custom internal URLs and patterns
+  company-specific:
+    format: text
+    confidence_levels: all
+    checks: INTELLECTUAL_PROPERTY
+    verbose: true
+    no_color: false
+    recursive: true
+    description: "Company-specific intellectual property scan with comprehensive internal patterns"
+    validators:
+      intellectual_property:
+        # Example: Large enterprise internal URL patterns
+        # This profile shows comprehensive patterns for a large organization
+        internal_urls:
+          # Corporate infrastructure
+          - "http[s]?:\\/\\/company-wiki\\.internal" # Corporate wiki
+          - "http[s]?:\\/\\/docs\\.company\\.com" # Documentation portal
+          - "http[s]?:\\/\\/code\\.company\\.com" # Source code repositories
+          - "http[s]?:\\/\\/jira\\.company\\.com" # Issue tracking
+          - "http[s]?:\\/\\/confluence\\.company\\.com" # Collaboration platform
+          - "http[s]?:\\/\\/.*\\.company-internal\\.com" # All company-internal subdomains
+          - "http[s]?:\\/\\/.*\\.corp\\.company\\.com" # Corporate network
+          - "http[s]?:\\/\\/.*\\.company\\.local" # Local domain
+          # Business applications
+          - "http[s]?:\\/\\/erp\\.company\\.com" # Enterprise Resource Planning
+          - "http[s]?:\\/\\/crm\\.company\\.com" # Customer Relationship Management
+          - "http[s]?:\\/\\/hr\\.company\\.com" # Human Resources systems
+          - "http[s]?:\\/\\/finance\\.company\\.com" # Financial systems
+          - "http[s]?:\\/\\/procurement\\.company\\.com" # Procurement systems
+          # Development environments
+          - "http[s]?:\\/\\/.*-dev\\.company\\.com" # Development environments
+          - "http[s]?:\\/\\/.*-staging\\.company\\.com" # Staging environments
+          - "http[s]?:\\/\\/.*-test\\.company\\.com" # Test environments
+          # Regional offices (example for multinational company)
+          - "http[s]?:\\/\\/.*\\.us\\.company\\.com" # US operations
+          - "http[s]?:\\/\\/.*\\.eu\\.company\\.com" # European operations
+          - "http[s]?:\\/\\/.*\\.apac\\.company\\.com" # Asia-Pacific operations
+        # Custom intellectual property patterns specific to this company
+        intellectual_property_patterns:
+          # Enhanced trade secret patterns for this organization
+          trade_secret: "\\b(Company\\s+Confidential|Internal\\s+Use\\s+Only|Restricted\\s+Access|Classified\\s+Information|Proprietary\\s+to\\s+Company|Company\\s+Proprietary|Confidential\\s+and\\s+Proprietary)\\b"
+          # Custom copyright pattern including company name
+          copyright: "(©|\\(c\\)|\\(C\\)|Copyright|\\bCopyright\\b)\\s*\\d{4}[-,]?(\\d{4})?\\s+(Company\\s+Name|Company\\s+Inc|[A-Za-z0-9\\s\\.,]+)"
+
+  # GENAI_DISABLED: Cost-aware GenAI profile - limits spending on AWS services
+  # GENAI_DISABLED: cost-aware-genai:
+  # GENAI_DISABLED:   format: json
+  # GENAI_DISABLED:   confidence_levels: all
+  # GENAI_DISABLED:   checks: all
+  # GENAI_DISABLED:   verbose: true
+  # GENAI_DISABLED:   no_color: true
+  # GENAI_DISABLED:   recursive: true
+  # GENAI_DISABLED:   enable_preprocessors: true
+  # GENAI_DISABLED:   enable_genai: true
+  # GENAI_DISABLED:   max_cost: 5.0
+
+  # Redaction profile - scan and redact sensitive data with format preservation
+  redaction:
+    format: text
+    confidence_levels: high,medium
+    checks: all
+    verbose: true
+    no_color: false
+    recursive: true
+    enable_preprocessors: true
+    description: "Scan and redact sensitive data with format-preserving strategy"
+    redaction:
+      enabled: true
+      output_dir: "./redacted"
+      strategy: "format_preserving"
+      index_file: "./redaction-index.json"
+
+  # Secure redaction profile - maximum security with synthetic data replacement
+  secure-redaction:
+    format: json
+    confidence_levels: all
+    checks: all
+    verbose: true
+    no_color: true
+    recursive: true
+    enable_preprocessors: true
+    description: "Maximum security redaction with synthetic data replacement"
+    redaction:
+      enabled: true
+      output_dir: "./secure-redacted"
+      strategy: "synthetic"
+      index_file: "./secure-redaction-index.json"
+    # GENAI_DISABLED: estimate_only: false
+    # GENAI_DISABLED: description: "GenAI scanning with cost controls ($5 limit)"
+
+  # GENAI_DISABLED: Estimate-only profile - shows costs without processing
+  # GENAI_DISABLED: cost-estimate:
+  # GENAI_DISABLED:   format: text
+  # GENAI_DISABLED:   confidence_levels: all
+  # GENAI_DISABLED:   checks: all
+  # GENAI_DISABLED:   verbose: false
+  # GENAI_DISABLED:   no_color: false
+  # GENAI_DISABLED:   recursive: true
+  # GENAI_DISABLED:   enable_preprocessors: true
+  # GENAI_DISABLED:   enable_genai: true
+  # GENAI_DISABLED:   estimate_only: true
+  # GENAI_DISABLED:   description: "Show GenAI cost estimates without processing files"
+
+  # Security audit profile - focused on security-sensitive data types
+  security-audit:
+    format: json
+    confidence_levels: medium,high # Exclude low confidence to reduce noise
+    checks: SECRETS,CREDIT_CARD,SSN,PASSPORT,INTELLECTUAL_PROPERTY
+    verbose: true
+    no_color: true
+    recursive: true
+    enable_preprocessors: true
+    show_match: false # Don't show actual sensitive data in logs
+    quiet: false
+    description: "Security-focused scan for audit and compliance purposes"
+
+  # Comprehensive profile - all features enabled with suppression support
+  comprehensive:
+    format: yaml
+    confidence_levels: all
+    checks: all
+    verbose: true
+    no_color: false
+    recursive: true
+    enable_preprocessors: true
+    show_match: true
+    show_suppressed: true
+    generate_suppressions: false
+    description: "Comprehensive scan with all features and suppression support"
+
+  # JSON API profile - structured JSON output for programmatic consumption
+  json-api:
+    format: json
+    confidence_levels: all
+    checks: all
+    verbose: true
+    no_color: true
+    recursive: true
+    enable_preprocessors: true
+    show_match: true
+    description: "Structured JSON output for APIs and programmatic processing"
+
+  # CSV export profile - spreadsheet-friendly output for analysis
+  csv-export:
+    format: csv
+    confidence_levels: all
+    checks: all
+    verbose: false
+    no_color: true
+    recursive: true
+    enable_preprocessors: true
+    quiet: true
+    description: "CSV format for spreadsheet analysis and reporting"
+
+  # Silent profile - minimal output for automated systems
+  silent:
+    format: json
+    confidence_levels: high
+    checks: all
+    verbose: false
+    no_color: true
+    recursive: true
+    enable_preprocessors: true
+    quiet: true
+    show_suppressed: false
+    description: "Silent operation for automated systems and scripts"
+
+  # Financial services profile - patterns for banking/finance industry
+  financial-services:
+    format: json
+    confidence_levels: all
+    checks: INTELLECTUAL_PROPERTY,CREDIT_CARD,SSN,SECRETS
+    verbose: true
+    no_color: true
+    recursive: true
+    description: "Financial services scan with comprehensive industry-specific patterns"
+    validators:
+      intellectual_property:
+        internal_urls:
+          # Core banking systems
+          - "http[s]?:\\/\\/.*\\.bank\\.internal" # Banking systems
+          - "http[s]?:\\/\\/.*\\.banking\\.internal" # Banking infrastructure
+          - "http[s]?:\\/\\/core-banking\\..*" # Core banking platform
+          - "http[s]?:\\/\\/.*\\.corebank\\..*" # Core banking services
+          # Trading and investment systems
+          - "http[s]?:\\/\\/.*\\.trading\\.internal" # Trading systems
+          - "http[s]?:\\/\\/.*\\.investment\\.internal" # Investment platforms
+          - "http[s]?:\\/\\/.*\\.portfolio\\.internal" # Portfolio management
+          - "http[s]?:\\/\\/.*\\.wealth\\.internal" # Wealth management
+          # Risk and compliance systems
+          - "http[s]?:\\/\\/.*\\.risk\\.internal" # Risk management
+          - "http[s]?:\\/\\/.*\\.compliance\\.internal" # Compliance systems
+          - "http[s]?:\\/\\/.*\\.audit\\.internal" # Audit systems
+          - "http[s]?:\\/\\/.*\\.regulatory\\.internal" # Regulatory reporting
+          - "http[s]?:\\/\\/.*\\.aml\\.internal" # Anti-Money Laundering
+          - "http[s]?:\\/\\/.*\\.kyc\\.internal" # Know Your Customer
+          # Financial services infrastructure
+          - "http[s]?:\\/\\/.*\\.finserv\\..*" # Financial services
+          - "http[s]?:\\/\\/.*\\.payments\\.internal" # Payment processing
+          - "http[s]?:\\/\\/.*\\.clearing\\.internal" # Clearing systems
+          - "http[s]?:\\/\\/.*\\.settlement\\.internal" # Settlement systems
+          - "http[s]?:\\/\\/.*\\.swift\\.internal" # SWIFT messaging
+          # Customer-facing systems
+          - "http[s]?:\\/\\/.*\\.retail\\.internal" # Retail banking
+          - "http[s]?:\\/\\/.*\\.commercial\\.internal" # Commercial banking
+          - "http[s]?:\\/\\/.*\\.private\\.internal" # Private banking
+          - "http[s]?:\\/\\/.*\\.corporate\\.internal" # Corporate banking
+
+  # Healthcare profile - patterns for healthcare organizations
+  healthcare:
+    format: json
+    confidence_levels: all
+    checks: INTELLECTUAL_PROPERTY,SSN,PHONE,EMAIL
+    verbose: true
+    no_color: true
+    recursive: true
+    description: "Healthcare scan with comprehensive HIPAA-focused patterns"
+    validators:
+      intellectual_property:
+        internal_urls:
+          # Core healthcare systems
+          - "http[s]?:\\/\\/.*\\.health\\.internal" # Health systems
+          - "http[s]?:\\/\\/.*\\.medical\\.internal" # Medical systems
+          - "http[s]?:\\/\\/.*\\.healthcare\\.internal" # Healthcare infrastructure
+          - "http[s]?:\\/\\/.*\\.hospital\\.internal" # Hospital systems
+          # Electronic Health Records (EHR) systems
+          - "http[s]?:\\/\\/ehr\\..*" # EHR systems
+          - "http[s]?:\\/\\/.*\\.ehr\\..*" # EHR subdomains
+          - "http[s]?:\\/\\/emr\\..*" # Electronic Medical Records
+          - "http[s]?:\\/\\/.*\\.emr\\..*" # EMR subdomains
+          # Patient management systems
+          - "http[s]?:\\/\\/patient\\..*" # Patient portals
+          - "http[s]?:\\/\\/.*\\.patient\\..*" # Patient management
+          - "http[s]?:\\/\\/.*\\.patients\\..*" # Patient systems
+          - "http[s]?:\\/\\/portal\\..*" # Patient portals
+          # HIPAA compliance and security
+          - "http[s]?:\\/\\/.*-hipaa\\..*" # HIPAA-compliant systems
+          - "http[s]?:\\/\\/.*\\.hipaa\\..*" # HIPAA infrastructure
+          - "http[s]?:\\/\\/.*\\.secure\\..*" # Secure medical systems
+          - "http[s]?:\\/\\/.*\\.phi\\..*" # Protected Health Information
+          # Clinical and medical facilities
+          - "http[s]?:\\/\\/.*\\.clinic\\..*" # Clinic systems
+          - "http[s]?:\\/\\/.*\\.clinics\\..*" # Multi-clinic systems
+          - "http[s]?:\\/\\/.*\\.lab\\..*" # Laboratory systems
+          - "http[s]?:\\/\\/.*\\.labs\\..*" # Laboratory networks
+          - "http[s]?:\\/\\/.*\\.radiology\\..*" # Radiology systems
+          - "http[s]?:\\/\\/.*\\.pharmacy\\..*" # Pharmacy systems
+          # Healthcare administration
+          - "http[s]?:\\/\\/.*\\.billing\\..*" # Medical billing
+          - "http[s]?:\\/\\/.*\\.claims\\..*" # Insurance claims
+          - "http[s]?:\\/\\/.*\\.insurance\\..*" # Insurance systems
+          - "http[s]?:\\/\\/.*\\.scheduling\\..*" # Appointment scheduling
+
+  # Startup profile - patterns for smaller organizations
+  startup:
+    format: text
+    confidence_levels: all
+    checks: INTELLECTUAL_PROPERTY,SECRETS
+    verbose: true
+    no_color: false
+    recursive: true
+    description: "Startup-focused scan with simple internal patterns optimized for small teams"
+    validators:
+      intellectual_property:
+        internal_urls:
+          # Core startup infrastructure (simple and focused)
+          - "http[s]?:\\/\\/.*\\.startup\\.com" # Main company domain
+          - "http[s]?:\\/\\/internal\\.startup\\.com" # Internal portal
+          - "http[s]?:\\/\\/team\\.startup\\.com" # Team collaboration
+          - "http[s]?:\\/\\/docs\\.startup\\.com" # Documentation
+          - "http[s]?:\\/\\/wiki\\.startup\\.com" # Company wiki
+          - "http[s]?:\\/\\/api\\.startup\\.com" # Internal APIs
+          # Development and local environments (common in startups)
+          - "http[s]?:\\/\\/localhost" # Local development
+          - "http[s]?:\\/\\/127\\..*" # Loopback addresses
+          - "http[s]?:\\/\\/192\\.168\\..*" # Local network
+          - "http[s]?:\\/\\/.*\\.local" # Local domain
+          - "http[s]?:\\/\\/.*\\.dev" # Development domain
+          # Common startup tools and services
+          - "http[s]?:\\/\\/slack\\.startup\\.com" # Team communication
+          - "http[s]?:\\/\\/notion\\.startup\\.com" # Documentation/wiki
+          - "http[s]?:\\/\\/github\\.startup\\.com" # Source control
+          - "http[s]?:\\/\\/gitlab\\.startup\\.com" # Alternative source control
+          # Simple staging/testing (typical for startups)
+          - "http[s]?:\\/\\/staging\\.startup\\.com" # Staging environment
+          - "http[s]?:\\/\\/test\\.startup\\.com" # Test environment
+          - "http[s]?:\\/\\/demo\\.startup\\.com" # Demo environment
+
+  # Multi-cloud profile - patterns for organizations using multiple cloud providers
+  multi-cloud:
+    format: yaml
+    confidence_levels: all
+    checks: INTELLECTUAL_PROPERTY
+    verbose: true
+    no_color: false
+    recursive: true
+    description: "Multi-cloud environment scan covering AWS, Azure, and GCP"
+    validators:
+      intellectual_property:
+        internal_urls:
+          # AWS patterns
+          - "http[s]?:\\/\\/.*\\.s3\\.amazonaws\\.com"
+          - "http[s]?:\\/\\/.*\\.cloudfront\\.net"
+          - "http[s]?:\\/\\/.*\\.elb\\.amazonaws\\.com"
+          # Azure patterns
+          - "http[s]?:\\/\\/.*\\.blob\\.core\\.windows\\.net"
+          - "http[s]?:\\/\\/.*\\.azurewebsites\\.net"
+          - "http[s]?:\\/\\/.*\\.azureedge\\.net"
+          # GCP patterns
+          - "http[s]?:\\/\\/.*\\.appspot\\.com"
+          - "http[s]?:\\/\\/.*\\.run\\.app"
+          - "http[s]?:\\/\\/storage\\.googleapis\\.com"
+          # Corporate patterns
+          - "http[s]?:\\/\\/.*\\.company\\.com"
+          - "http[s]?:\\/\\/.*\\.internal\\..*"
+
+  # Development environment profile - patterns for dev/test environments
+  development:
+    format: text
+    confidence_levels: medium,high
+    checks: INTELLECTUAL_PROPERTY,SECRETS
+    verbose: true
+    no_color: false
+    recursive: true
+    description: "Development environment scan with dev/test patterns"
+    validators:
+      intellectual_property:
+        internal_urls:
+          - "http[s]?:\\/\\/.*-dev\\..*"
+          - "http[s]?:\\/\\/.*-staging\\..*"
+          - "http[s]?:\\/\\/.*-test\\..*"
+          - "http[s]?:\\/\\/dev-.*"
+          - "http[s]?:\\/\\/staging-.*"
+          - "http[s]?:\\/\\/test-.*"
+          - "http[s]?:\\/\\/localhost"
+          - "http[s]?:\\/\\/127\\..*"
+          - "http[s]?:\\/\\/192\\.168\\..*"
