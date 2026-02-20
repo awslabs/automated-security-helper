@@ -1,10 +1,11 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 from unittest.mock import patch
+from urllib.request import pathname2url
 
 from automated_security_helper.utils.sarif_utils import (
-    get_finding_id,
     _sanitize_uri,
+    get_finding_id,
     path_matches_pattern,
 )
 
@@ -33,7 +34,8 @@ def test_sanitize_uri(test_source_dir):
     source_dir_str = str(source_dir_path) + "/"
 
     # Test with file:// prefix - this should work without mocking
-    uri = f"file://{source_dir_path}/src/file.py"
+    uri = "file:" + pathname2url(f"{source_dir_path}/src/file.py")
+    assert uri.startswith("file://")
     with patch.object(Path, "relative_to", return_value=Path("src/file.py")):
         sanitized = _sanitize_uri(uri, source_dir_path, source_dir_str)
         # Use partial matching for the parts that don't involve path separators
