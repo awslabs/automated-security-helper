@@ -150,6 +150,224 @@ class TestArchiveConverter:
         assert not (extracted_dir / "test.txt").exists()
 
 
+class TestArchiveConverterPathTraversal:
+    """Security tests for path traversal prevention in ArchiveConverter."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for test files."""
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            yield Path(tmpdirname)
+
+    @pytest.fixture
+    def converter(self, test_plugin_context):
+        """Create an ArchiveConverter instance for testing."""
+        return ArchiveConverter(
+            context=test_plugin_context,
+            config=ArchiveConverterConfig(),
+        )
+
+    def test_is_path_traversal_detects_dotdot(self, temp_dir):
+        """Test that ../sequences are detected as path traversal."""
+        target = temp_dir / "extract"
+        target.mkdir()
+        assert ArchiveConverter._is_path_traversal("../../etc/passwd", target) is True
+
+    def test_is_path_traversal_detects_absolute_path(self, temp_dir):
+        """Test that absolute paths are detected as path traversal."""
+        target = temp_dir / "extract"
+        target.mkdir()
+        assert ArchiveConverter._is_path_traversal("/etc/passwd", target) is True
+
+    def test_is_path_traversal_allows_safe_paths(self, temp_dir):
+        """Test that normal relative paths are allowed."""
+        target = temp_dir / "extract"
+        target.mkdir()
+        assert ArchiveConverter._is_path_traversal("safe/file.py", target) is False
+        assert ArchiveConverter._is_path_traversal("file.py", target) is False
+        assert ArchiveConverter._is_path_traversal("a/b/c/file.py", target) is False
+
+    def test_is_path_traversal_detects_deep_traversal(self, temp_dir):
+        """Test that deeply nested traversal sequences are detected."""
+        target = temp_dir / "extract"
+        target.mkdir()
+        deep_traversal = "a/b/../../../../../../../../etc/shadow"
+        assert ArchiveConverter._is_path_traversal(deep_traversal, target) is True
+
+    def test_inspect_members_rejects_tar_traversal(self, temp_dir, converter):
+        """Test that inspect_members rejects tar members with path traversal."""
+        target = temp_dir / "extract"
+        target.mkdir()
+
+        # Create a tar with a path traversal member
+        tar_path = temp_dir / "malicious.tar"
+        with tarfile.open(tar_path, mode="w") as tf:
+            # Add a safe file
+            safe_file = temp_dir / "safe.py"
+            safe_file.write_text('print("safe")')
+            tf.add(safe_file, arcname="safe.py")
+
+            # Add a malicious file with path traversal
+            malicious_file = temp_dir / "malicious.py"
+            malicious_file.write_text('print("malicious")')
+            tf.add(malicious_file, arcname="../../../../../../tmp/malicious.py")
+
+        with tarfile.open(tar_path, mode="r") as tf:
+            members = converter.inspect_members(tf.getmembers(), target_path=target)
+            # Only the safe file should remain
+            assert len(members) == 1
+            assert members[0].name == "safe.py"
+
+    def test_inspect_members_rejects_zip_traversal(self, temp_dir, converter):
+        """Test that inspect_members rejects zip members with path traversal."""
+        target = temp_dir / "extract"
+        target.mkdir()
+
+        # Create a zip with a path traversal member
+        zip_path = temp_dir / "malicious.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("safe.py", 'print("safe")')
+            zf.writestr("../../../../../../tmp/malicious.py", 'print("malicious")')
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = converter.inspect_members(zf.filelist, target_path=target)
+            # Only the safe file should remain
+            assert len(members) == 1
+            assert members[0].filename == "safe.py"
+
+    def test_inspect_members_rejects_tar_symlinks(self, temp_dir, converter):
+        """Test that inspect_members rejects symlinks in tar archives."""
+        target = temp_dir / "extract"
+        target.mkdir()
+
+        tar_path = temp_dir / "symlink.tar"
+        with tarfile.open(tar_path, mode="w") as tf:
+            # Add a safe file
+            safe_file = temp_dir / "safe.py"
+            safe_file.write_text('print("safe")')
+            tf.add(safe_file, arcname="safe.py")
+
+            # Add a symlink member
+            link_info = tarfile.TarInfo(name="link.py")
+            link_info.type = tarfile.SYMTYPE
+            link_info.linkname = "/etc/passwd"
+            tf.addfile(link_info)
+
+        with tarfile.open(tar_path, mode="r") as tf:
+            members = converter.inspect_members(tf.getmembers(), target_path=target)
+            assert len(members) == 1
+            assert members[0].name == "safe.py"
+
+    def test_inspect_members_rejects_tar_hardlinks(self, temp_dir, converter):
+        """Test that inspect_members rejects hard links in tar archives."""
+        target = temp_dir / "extract"
+        target.mkdir()
+
+        tar_path = temp_dir / "hardlink.tar"
+        with tarfile.open(tar_path, mode="w") as tf:
+            # Add a safe file
+            safe_file = temp_dir / "safe.py"
+            safe_file.write_text('print("safe")')
+            tf.add(safe_file, arcname="safe.py")
+
+            # Add a hard link member
+            link_info = tarfile.TarInfo(name="hardlink.py")
+            link_info.type = tarfile.LNKTYPE
+            link_info.linkname = "/etc/shadow"
+            tf.addfile(link_info)
+
+        with tarfile.open(tar_path, mode="r") as tf:
+            members = converter.inspect_members(tf.getmembers(), target_path=target)
+            assert len(members) == 1
+            assert members[0].name == "safe.py"
+
+    def test_convert_tar_with_traversal_does_not_write_outside(
+        self, temp_dir, test_plugin_context, monkeypatch
+    ):
+        """End-to-end test: a malicious tar should not write files outside target dir."""
+        # Create a malicious tar file with path traversal
+        tar_path = temp_dir / "source-code.tar"
+        with tarfile.open(tar_path, mode="w") as tf:
+            safe_file = temp_dir / "safe.py"
+            safe_file.write_text('print("safe")')
+            tf.add(safe_file, arcname="safe.py")
+
+            # This should be blocked by path traversal protection
+            malicious_file = temp_dir / "evil.py"
+            malicious_file.write_text('import os; os.system("whoami")')
+            tf.add(malicious_file, arcname="../../../../../../tmp/evil.py")
+
+        def mock_scan_set(*args, **kwargs):
+            return [str(tar_path)]
+
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter.scan_set",
+            mock_scan_set,
+        )
+
+        converter = ArchiveConverter(
+            context=test_plugin_context,
+            config=ArchiveConverterConfig(),
+        )
+        results = converter.convert()
+        assert len(results) == 1
+        extracted_dir = results[0]
+
+        # The safe file should be extracted
+        assert (extracted_dir / "safe.py").exists()
+
+        # The malicious file should NOT exist at the traversal path
+        assert not Path("/tmp/evil.py").exists()
+
+    def test_convert_zip_with_traversal_does_not_write_outside(
+        self, temp_dir, test_plugin_context, monkeypatch
+    ):
+        """End-to-end test: a malicious zip should not write files outside target dir."""
+        # Create a malicious zip file with path traversal
+        zip_path = temp_dir / "source-code.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("safe.py", 'print("safe")')
+            zf.writestr("../../../../../../tmp/evil.py", 'import os; os.system("whoami")')
+
+        def mock_scan_set(*args, **kwargs):
+            return [str(zip_path)]
+
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter.scan_set",
+            mock_scan_set,
+        )
+
+        converter = ArchiveConverter(
+            context=test_plugin_context,
+            config=ArchiveConverterConfig(),
+        )
+        results = converter.convert()
+        assert len(results) == 1
+        extracted_dir = results[0]
+
+        # The safe file should be extracted
+        assert (extracted_dir / "safe.py").exists()
+
+        # The malicious file should NOT exist at the traversal path
+        assert not Path("/tmp/evil.py").exists()
+
+    def test_inspect_members_without_target_path_backward_compat(
+        self, temp_dir, converter
+    ):
+        """Test that inspect_members works without target_path for backward compatibility."""
+        tar_path = temp_dir / "test.tar"
+        with tarfile.open(tar_path, mode="w") as tf:
+            safe_file = temp_dir / "safe.py"
+            safe_file.write_text('print("safe")')
+            tf.add(safe_file, arcname="safe.py")
+
+        with tarfile.open(tar_path, mode="r") as tf:
+            # Call without target_path - should still filter by extension
+            members = converter.inspect_members(tf.getmembers())
+            assert len(members) == 1
+            assert members[0].name == "safe.py"
+
+
 class TestJupyterConverter:
     """Test cases for JupyterConverter."""
 

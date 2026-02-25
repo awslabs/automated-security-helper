@@ -3,9 +3,10 @@
 
 """Module containing the ArchiveConverter implementation."""
 
+import os
 from pathlib import Path
 import tarfile
-from typing import Annotated, List, Literal
+from typing import Annotated, List, Literal, Optional
 import zipfile
 
 from pydantic import Field
@@ -53,21 +54,72 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         # so there is nothing further to validate in terms of availability.
         return True
 
-    def inspect_members(self, members: List[str | zipfile.ZipInfo | tarfile.TarInfo]):
+    @staticmethod
+    def _is_path_traversal(member_path: str, target_path: Path) -> bool:
+        """Check if a member path would escape the target extraction directory.
+
+        Args:
+            member_path: The path of the archive member.
+            target_path: The intended extraction directory.
+
+        Returns:
+            True if the path is unsafe (traversal detected), False if safe.
+        """
+        # Reject absolute paths
+        if os.path.isabs(member_path):
+            return True
+
+        # Resolve the full extraction path and verify it stays within target
+        resolved = (target_path / member_path).resolve()
+        target_resolved = target_path.resolve()
+
+        # Check that the resolved path is within the target directory
+        try:
+            resolved.relative_to(target_resolved)
+        except ValueError:
+            return True
+
+        return False
+
+    def inspect_members(
+        self,
+        members: List[str | zipfile.ZipInfo | tarfile.TarInfo],
+        target_path: Optional[Path] = None,
+    ):
         ASH_LOGGER.verbose(f"Inspecting {len(members)} members from archive")
         filtered_members = []
         for member in members:
             if isinstance(member, tarfile.TarInfo):
-                member_ext = member.name.split(".")[-1]
+                member_name = member.name
+                member_ext = member_name.split(".")[-1]
+
+                # Reject symlinks and hard links in tar archives
+                if member.issym() or member.islnk():
+                    ASH_LOGGER.warning(
+                        f"Skipping symbolic/hard link in archive: {member_name}"
+                    )
+                    continue
             elif isinstance(member, zipfile.ZipInfo):
-                member_ext = member.filename.split(".")[-1]
+                member_name = member.filename
+                member_ext = member_name.split(".")[-1]
             elif isinstance(member, str):
+                member_name = member
                 member_ext = member.split(".")[-1]
             else:
                 ASH_LOGGER.debug(
                     f"Skipping uknown extension from archive: {type(member)}"
                 )
                 continue
+
+            # Validate path safety when target_path is provided
+            if target_path is not None and self._is_path_traversal(
+                member_name, target_path
+            ):
+                ASH_LOGGER.warning(
+                    f"Skipping archive member with path traversal: {member_name}"
+                )
+                continue
+
             if member_ext in KNOWN_SCANNABLE_EXTENSIONS:
                 ASH_LOGGER.verbose(f"Found .{member_ext} file: {member}")
                 filtered_members.append(member)
@@ -148,7 +200,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     with zipfile.ZipFile(archive_file, "r") as zip_ref:
                         zip_ref.extractall(
                             path=target_path,
-                            members=self.inspect_members(zip_ref.filelist),
+                            members=self.inspect_members(
+                                zip_ref.filelist, target_path=target_path
+                            ),
                         )
                 # Extract Tarball to target path after inspecting members
                 elif tarfile.is_tarfile(archive_file):
@@ -157,7 +211,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     ) as tar_ref:
                         tar_ref.extractall(
                             path=target_path,
-                            members=self.inspect_members(tar_ref.getmembers()),
+                            members=self.inspect_members(
+                                tar_ref.getmembers(), target_path=target_path
+                            ),
                         )
                 else:
                     ASH_LOGGER.debug(
