@@ -237,7 +237,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.1
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.2
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
@@ -253,7 +253,7 @@ jobs:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.1
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.2
     - ash --mode local
   artifacts:
     paths:
