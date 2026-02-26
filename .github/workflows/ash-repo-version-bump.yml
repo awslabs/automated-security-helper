@@ -1,0 +1,70 @@
+name: ASH - Auto Version Bump
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  version-bump:
+    name: Bump version on merge
+    if: github.event.pull_request.merged == true && (contains(github.event.pull_request.labels.*.name, 'version:patch') || contains(github.event.pull_request.labels.*.name, 'version:minor') || contains(github.event.pull_request.labels.*.name, 'version:major'))
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Determine bump type
+        id: bump-type
+        run: |
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'version:major') }}" == "true" ]]; then
+            echo "type=major" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ contains(github.event.pull_request.labels.*.name, 'version:minor') }}" == "true" ]]; then
+            echo "type=minor" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get current version
+        id: current-version
+        run: |
+          VERSION=$(uv run python scripts/version_bump.py current | grep -oP '\d+\.\d+\.\d+')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version
+        run: uv run python scripts/version_bump.py bump ${{ steps.bump-type.outputs.type }}
+
+      - name: Get new version
+        id: new-version
+        run: |
+          VERSION=$(uv run python scripts/version_bump.py current | grep -oP '\d+\.\d+\.\d+')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: bump version ${{ steps.current-version.outputs.version }} → ${{ steps.new-version.outputs.version }}"
+          git push

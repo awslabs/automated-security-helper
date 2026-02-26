@@ -220,6 +220,44 @@ The validator checks:
 - CLI tool availability via UV tool run
 - Build system configuration
 
+## Version Management
+
+ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `pyproject.toml` and propagated to documentation files via a template system.
+
+### How It Works
+
+- `pyproject.toml` is the single source of truth for the version.
+- Documentation files that reference the version (README, install guides, etc.) have corresponding `.template` files containing `{{VERSION}}` placeholders.
+- The `scripts/version_bump.py` script updates `pyproject.toml` and regenerates all documentation from templates.
+
+### Automated Version Bumping (CI)
+
+When a PR is merged to `main`, the version is automatically bumped if the PR has one of these labels:
+
+| Label | Effect | Example |
+|---|---|---|
+| `version:patch` | Bump patch version | `3.2.1` → `3.2.2` |
+| `version:minor` | Bump minor version | `3.2.1` → `3.3.0` |
+| `version:major` | Bump major version | `3.2.1` → `4.0.0` |
+
+If no version label is present, no bump occurs. If multiple labels are present, the highest takes precedence (major > minor > patch).
+
+### Manual Version Bumping
+
+```bash
+# Show current version
+uv run python scripts/version_bump.py current
+
+# Bump version (patch, minor, or major)
+uv run python scripts/version_bump.py bump patch
+
+# Set a specific version
+uv run python scripts/version_bump.py set 4.0.0
+
+# Validate version consistency across files
+uv run python scripts/version_bump.py validate
+```
+
 ## Scanner Plugin Development
 
 When developing custom scanner plugins for ASH, follow these guidelines:

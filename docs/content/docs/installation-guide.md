@@ -33,7 +33,7 @@ ASH v3 uses UV's tool isolation system to automatically manage most scanner depe
 curl -sSf https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.2.1"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.2.2"
 
 # Use as normal
 ash --help
@@ -45,7 +45,7 @@ ash --help
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.2.1 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.2.2 $args }
 
 # Use as normal
 ash --help
@@ -57,7 +57,7 @@ ash --help
 
 ```bash
 # Works on Windows, macOS, and Linux
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.2.1
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.2.2
 
 # Use as normal
 ash --help
@@ -69,7 +69,7 @@ Standard Python package installation:
 
 ```bash
 # Works on Windows, macOS, and Linux
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.1
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.2
 
 # Use as normal
 ash --help
@@ -81,7 +81,7 @@ For development or if you want to modify ASH:
 
 ```bash
 # Works on Windows, macOS, and Linux
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.2.1
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.2.2
 cd automated-security-helper
 pip install .
 
@@ -131,7 +131,7 @@ To upgrade ASH to the latest version:
 ### If installed with `uvx`
 ```bash
 # Your alias will use the latest version when specified
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.2.1"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.2.2"
 ```
 
 ### If installed with `pipx`
@@ -141,7 +141,7 @@ pipx upgrade automated-security-helper
 
 ### If installed with `pip`
 ```bash
-pip install --upgrade git+https://github.com/awslabs/automated-security-helper.git@v3.2.1
+pip install --upgrade git+https://github.com/awslabs/automated-security-helper.git@v3.2.2
 ```
 
 ### If installed from repository
