@@ -608,8 +608,11 @@ def run_ash_container(
         except Exception as e:
             ASH_LOGGER.debug(f"Unable to determine terminal size via shutil: {e}")
 
-        # Add color support - only add -t if we have a TTY
-        if color and sys.stdout.isatty():
+        # Add -t flag only if we have a real TTY
+        has_tty = sys.stdout.isatty()
+        if debug:
+            print(f"TTY check: color={color}, sys.stdout.isatty()={has_tty}")
+        if color and has_tty:
             run_cmd.append("-t")
 
         # Add image name
