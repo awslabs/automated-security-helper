@@ -28,7 +28,6 @@ RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
     . || echo "Skipping clone of repo for LOCAL revision"
 
 COPY pyproject.toml* hatch_build.py* uv.lock* README.md* LICENSE* Dockerfile* ./
-COPY ci*/ ci/
 COPY automated_security_helper*/ automated_security_helper/
 RUN tree .
 RUN git status --short || true
