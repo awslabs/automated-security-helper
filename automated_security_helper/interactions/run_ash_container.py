@@ -374,7 +374,16 @@ def run_ash_container(
                     break
                 current_path = current_path.parent
     else:
-        dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
+        # When not LOCAL, check if we're in a repo directory anyway (e.g., running from cloned repo)
+        # This handles the case where uvx installs ASH but user is in the actual repo directory
+        cwd_dockerfile = Path.cwd().joinpath("Dockerfile")
+        if cwd_dockerfile.exists() and Path.cwd().joinpath("pyproject.toml").exists():
+            dockerfile_path = cwd_dockerfile
+            ASH_LOGGER.info(
+                f"Found Dockerfile in current directory, using LOCAL build context despite revision={resolved_revision}"
+            )
+        else:
+            dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
 
     if not dockerfile_path.exists():
         typer.secho(f"Dockerfile not found at {dockerfile_path}", fg=typer.colors.RED)
