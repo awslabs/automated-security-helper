@@ -1,0 +1,40 @@
+refine: Prioritize jq as preferred tool in GenAI guide
+
+Apply Kiro's feedback to emphasize jq as the preferred tool for JSON
+parsing while maintaining fallbacks for compatibility.
+
+Key Changes:
+
+Tool Priority Clarification:
+- Added "Default Tool Priority" section at top of Quick Reference
+- Explicitly state: jq (ALWAYS TRY FIRST) > Python > grep/awk
+- Changed "Optional but recommended" to "Preferred" for jq
+- Added command to check jq availability upfront
+
+Section Reorganization:
+- Renamed "Strategy 1" to "Using jq (PREFERRED)"
+- Renamed "Strategy 2" to "Using Python (FALLBACK)"
+- Renamed "Strategy 3" to "Using grep (LAST RESORT)"
+- Renumbered remaining strategies (Streaming, Simpler Formats)
+
+Language Updates Throughout:
+- "With jq (if available)" → "Recommended: Using jq"
+- "Without jq" → "Fallback: Using Python"
+- "Without jq or Python" → "Last Resort: Using grep/awk"
+- Added "(preferred method)" annotations to jq examples
+- Emphasized "ALWAYS TRY FIRST" for jq
+
+Code Improvements:
+- Better exception handling (Exception instead of bare except)
+- Fixed grep parsing bug (added strip() before split)
+- Reordered imports (subprocess before shutil)
+- Added clearer comments about tool preference
+
+Rationale:
+- jq is significantly faster and more efficient than Python
+- Most Linux/macOS systems have jq installed
+- GenAI tools should attempt the most efficient method first
+- Fallbacks ensure compatibility across all environments
+
+This maintains the practical approach while optimizing for performance
+when jq is available.

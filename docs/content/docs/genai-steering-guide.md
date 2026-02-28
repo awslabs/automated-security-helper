@@ -146,6 +146,17 @@ head -n 20 ~/.kiro/steering/ash-integration.md
 
 ## Quick Reference
 
+**Before Analyzing Results - Check Tool Availability**:
+```bash
+# Verify jq is available (preferred method)
+command -v jq && echo "✓ jq available (recommended)" || echo "✗ jq not found, will use Python fallback"
+```
+
+**Default Tool Priority**:
+1. **jq** - Fastest and most efficient (ALWAYS TRY FIRST)
+2. **Python** - Reliable fallback (if jq unavailable)
+3. **grep/awk** - Last resort only (limited functionality)
+
 **Recommended Approach for GenAI Tools**:
 1. **For most use cases**: Use `reports/ash.flat.json` (simpler structure, smaller size)
 2. **For complete data**: Use `ash_aggregated_results.json` (but parse efficiently - see warnings below)
@@ -161,9 +172,9 @@ head -n 20 ~/.kiro/steering/ash-integration.md
 - **Suppressions**: Defined in configuration file under `global_settings.suppressions`
 
 **Tool Requirements**:
-- **Required**: Python 3.x (for reliable JSON parsing)
-- **Optional but recommended**: `jq` (for efficient command-line queries)
-- **Fallback**: `grep`, `awk` (basic text processing, always available)
+- **Preferred**: `jq` (fastest, most efficient for JSON queries - ALWAYS TRY FIRST)
+- **Fallback**: Python 3.x (reliable, widely available)
+- **Last Resort**: `grep`, `awk` (basic text processing, always available)
 
 ## Critical Rules for GenAI Tools
 
@@ -208,8 +219,9 @@ else:
 
 ### 3. Check Tool Availability
 
-**IMPORTANT**: Never assume tools like `jq` are installed. Always:
+**IMPORTANT**: Always attempt to use `jq` first for maximum efficiency, but never assume it's installed. Always:
 - Check if tools are available before using them
+- Try `jq` first (fastest and most efficient)
 - Provide fallback methods (Python, grep, awk)
 - Use the most reliable method available
 - Document which tools are required vs optional
@@ -218,21 +230,21 @@ else:
 ```python
 import shutil
 
-# Check for jq
+# Check for jq (PREFERRED)
 has_jq = shutil.which('jq') is not None
 
 # Check for Python (almost always available)
 has_python = shutil.which('python3') is not None or shutil.which('python') is not None
 
-# Use best available method
+# Use best available method (PREFER jq)
 if has_jq:
-    # Use jq for efficiency
+    # Use jq (PREFERRED - fastest and most efficient)
     pass
 elif has_python:
-    # Use Python for reliability
+    # Fallback to Python
     pass
 else:
-    # Fallback to grep/awk
+    # Last resort: grep/awk
     pass
 ```
 
@@ -331,9 +343,11 @@ else:
 
 ### Parsing Strategies
 
-#### Strategy 1: Command-Line Tools (Recommended)
+**DEFAULT APPROACH**: Always attempt `jq` first for maximum efficiency. Only use Python or grep if `jq` is unavailable.
 
-**If jq is available** (most Linux/macOS systems):
+#### Strategy 1: Using jq (PREFERRED - Check Availability First)
+
+**Recommended: Use jq for all queries** (most Linux/macOS systems have it installed):
 ```bash
 # Extract just summary stats
 jq '.metadata.summary_stats' ash_aggregated_results.json
@@ -342,7 +356,7 @@ jq '.metadata.summary_stats' ash_aggregated_results.json
 jq '.scanner_results.bandit' ash_aggregated_results.json
 ```
 
-**If jq is NOT available**, use Python (universally available):
+#### Strategy 2: Using Python (FALLBACK - If jq is NOT available)
 ```bash
 # Extract summary stats
 python3 -c "import json; data=json.load(open('ash_aggregated_results.json')); print(json.dumps(data['metadata']['summary_stats'], indent=2))"
@@ -360,7 +374,7 @@ grep -o '"actionable": [0-9]*' ash_aggregated_results.json | grep -o '[0-9]*'
 grep -o '"critical": [0-9]*' ash_aggregated_results.json | head -1
 ```
 
-#### Strategy 2: Streaming JSON Parsers (For Large Files)
+#### Strategy 3: Streaming JSON Parsers (For Large Files)
 
 **Python with ijson** (streaming parser):
 ```python
@@ -390,7 +404,7 @@ print(f"Actionable: {summary['actionable']}")
 print(f"Critical: {summary['critical']}")
 ```
 
-#### Strategy 3: Use Simpler Formats
+#### Strategy 4: Use Simpler Formats
 
 **For most use cases, use the flat JSON format instead**:
 ```python
@@ -478,11 +492,11 @@ Contains findings organized by scanner name:
 
 ### Efficient Querying
 
-**IMPORTANT**: Always check if tools are available before using them. Provide fallbacks for maximum compatibility.
+**IMPORTANT**: Always attempt `jq` first for maximum efficiency. Check availability and provide fallbacks for compatibility.
 
-#### With jq (if available)
+#### Recommended: Using jq (Check Availability First)
 
-**Get actionable findings count**:
+**Get actionable findings count** (preferred method):
 ```bash
 jq '.metadata.summary_stats.actionable' ash_aggregated_results.json
 ```
@@ -507,7 +521,7 @@ jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == 
 jq '[.scanner_results | to_entries[] | .value.findings[] | .severity] | group_by(.) | map({severity: .[0], count: length})' ash_aggregated_results.json
 ```
 
-#### Without jq (Python alternatives)
+#### Fallback: Using Python (If jq is unavailable)
 
 **Get actionable findings count**:
 ```bash
@@ -556,7 +570,7 @@ for severity, count in counts.items():
     print(f"{severity}: {count}")
 ```
 
-#### Without jq or Python (grep/awk alternatives)
+#### Last Resort: Using grep/awk (If neither jq nor Python available)
 
 **Get actionable findings count** (basic but works):
 ```bash
@@ -577,13 +591,13 @@ grep -o '"severity": "[A-Z]*"' ash_aggregated_results.json | sort -u
 
 **1. Check tool availability first**:
 ```python
-import shutil
 import subprocess
+import shutil
 
 def get_actionable_count(results_file):
     """Get actionable findings count using best available method."""
     
-    # Method 1: Try jq (fastest)
+    # Method 1: Try jq (fastest - PREFERRED)
     if shutil.which('jq'):
         try:
             result = subprocess.run(
@@ -591,16 +605,16 @@ def get_actionable_count(results_file):
                 capture_output=True, text=True, check=True
             )
             return int(result.stdout.strip())
-        except:
+        except Exception:
             pass
     
-    # Method 2: Use Python (most reliable)
+    # Method 2: Use Python (most reliable fallback)
     try:
         import json
         with open(results_file) as f:
             data = json.load(f)
         return data['metadata']['summary_stats']['actionable']
-    except:
+    except Exception:
         pass
     
     # Method 3: Fallback to grep (always available)
@@ -609,8 +623,8 @@ def get_actionable_count(results_file):
             ['grep', '-o', '"actionable": [0-9]*', results_file],
             capture_output=True, text=True, check=True
         )
-        return int(result.stdout.split(':')[1].strip())
-    except:
+        return int(result.stdout.strip().split(':')[1].strip())
+    except Exception:
         return None
 ```
 
@@ -700,11 +714,11 @@ The CycloneDX SBOM (`reports/ash.cdx.json`) provides a complete Software Bill of
 
 ### Querying Dependencies
 
-**IMPORTANT**: CycloneDX files can also be large. Use efficient parsing methods.
+**IMPORTANT**: CycloneDX files can also be large. Use efficient parsing methods. Always attempt `jq` first.
 
-#### With jq (if available)
+#### Recommended: Using jq (Check Availability First)
 
-**List all components**:
+**List all components** (preferred method):
 ```bash
 jq '.components[] | {name: .name, version: .version, type: .type}' ash.cdx.json
 ```
@@ -729,7 +743,7 @@ jq '[.components[].licenses[]?.license.id] | unique' ash.cdx.json
 jq --arg pkg "pkg:pypi/requests@2.31.0" '.dependencies[] | select(.ref == $pkg)' ash.cdx.json
 ```
 
-#### Without jq (Python alternatives)
+#### Fallback: Using Python (If jq is unavailable)
 
 **List all components**:
 ```python
@@ -791,7 +805,7 @@ for license_id in sorted(licenses):
     print(license_id)
 ```
 
-#### Without jq or Python (grep alternatives)
+#### Last Resort: Using grep (If neither jq nor Python available)
 
 **Count total components**:
 ```bash
