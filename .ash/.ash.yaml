@@ -129,6 +129,16 @@ global_settings:
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: tests/unit/utils/test_secret_masking.py
       reason: "False positive - Multiple ocurrences of the keyword due to the nature of the test suite"
+    - rule_id: B108
+      path: tests/unit/converters/test_converters.py
+      line_start: 319
+      line_end: 321
+      reason: "Test validates path traversal protection - checking /tmp/evil.py does NOT exist"
+    - rule_id: B108
+      path: tests/unit/converters/test_converters.py
+      line_start: 351
+      line_end: 353
+      reason: "Test validates path traversal protection - checking /tmp/evil.py does NOT exist"
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
