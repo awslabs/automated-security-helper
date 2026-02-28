@@ -113,6 +113,11 @@ global_settings:
     - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen2"
       path: automated_security_helper/utils/subprocess_utils.py
       reason: "False positive - ASH requires Python 3.10+, compatibility with Python3.6 and less is not required"
+    - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
+      path: automated_security_helper/cli/main.py
+      line_start: 75
+      line_end: 75
+      reason: "False positive - ASH requires Python 3.10+ (pyproject.toml), importlib.resources is available in Python 3.7+"
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/secret_masking.py
       reason: "False positive - Secret found message string"

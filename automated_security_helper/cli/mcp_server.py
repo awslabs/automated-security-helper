@@ -688,6 +688,8 @@ def _apply_content_filters(
     Returns:
         Filtered results with only matching scanners and severities
     """
+    import copy
+
     # Parse filter lists
     scanner_list = (
         [s.strip().lower() for s in scanners.split(",")] if scanners else None
@@ -696,8 +698,8 @@ def _apply_content_filters(
         [s.strip().lower() for s in severities.split(",")] if severities else None
     )
 
-    # Create a copy to avoid modifying the original
-    filtered_results = results.copy()
+    # Create a deep copy to avoid modifying the original
+    filtered_results = copy.deepcopy(results)
 
     # Filter scanner_reports
     if "scanner_reports" in filtered_results and scanner_list:
