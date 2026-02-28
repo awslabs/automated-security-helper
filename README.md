@@ -143,6 +143,9 @@ ash --mode container
 
 # Run a scan in precommit mode (fast subset of tools)
 ash --mode precommit
+
+# Download the GenAI Integration Guide for AI assistants
+ash get-genai-guide -o ash-genai-guide.md
 ```
 
 ### Sample Output
@@ -188,6 +191,23 @@ ERROR (2) Exiting due to 122 actionable findings found in ASH scan
 ## AI Integration with MCP
 
 ASH includes a Model Context Protocol (MCP) server that enables AI assistants to perform security scans and analyze results through a standardized interface. This allows you to integrate ASH with AI development tools like Amazon Q CLI, Claude Desktop, and Cline (VS Code).
+
+### GenAI Integration Guide
+
+ASH provides a comprehensive guide for AI assistants and LLMs on how to properly interact with scan results. This guide helps GenAI tools:
+
+- Use the correct output formats (JSON, not HTML)
+- Handle severity discrepancies between report formats
+- Create suppressions properly with correct syntax
+- Analyze dependencies using CycloneDX SBOM
+- Avoid common pitfalls and known issues
+
+**Download the guide**:
+```bash
+ash get-genai-guide -o ash-genai-guide.md
+```
+
+The guide can be provided to any AI assistant as context to ensure they process ASH results correctly and efficiently.
 
 ### MCP Server Features
 
