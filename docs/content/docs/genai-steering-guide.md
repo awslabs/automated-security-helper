@@ -1072,17 +1072,33 @@ with open('.ash/ash_output/ash_aggregated_results.json') as f:
 
 stats = results['metadata']['summary_stats']
 
-# Fail on critical/high findings
+# Fail on actionable critical/high findings
+# Note: Use actionable count to exclude suppressed findings (false positives)
 if stats['critical'] > 0:
-    print(f"FAILED: {stats['critical']} critical findings")
+    print(f"FAILED: {stats['critical']} critical actionable findings")
     sys.exit(1)
 
 if stats['high'] > 5:
-    print(f"FAILED: {stats['high']} high findings (threshold: 5)")
+    print(f"FAILED: {stats['high']} high actionable findings (threshold: 5)")
     sys.exit(1)
 
 print(f"PASSED: {stats['actionable']} actionable findings (within threshold)")
 sys.exit(0)
+```
+
+**Using MCP Server:**
+```python
+# Get only actionable findings for CI/CD gate
+result = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True,
+    severities="critical,high",
+    filter_level="minimal"
+)
+
+if result["summary_stats"]["critical"] > 0:
+    print("FAILED: Critical actionable findings detected")
+    sys.exit(1)
 ```
 
 ### Pattern 2: Finding Analysis and Remediation
@@ -1117,6 +1133,23 @@ for finding in actionable_findings:
     print(f"  Rule: {finding['rule_id']} ({finding['scanner']})")
     print(f"  Issue: {finding['message']}")
     print(f"  Action: [Suggest remediation based on rule_id]")
+```
+
+**Using MCP Server:**
+```python
+# Get actionable high/critical findings with full details
+results = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True,
+    severities="critical,high",
+    filter_level="full"
+)
+
+# Process findings from SARIF
+for run in results["raw_results"]["sarif"]["runs"]:
+    for result in run["results"]:
+        # All results here are actionable (suppressed findings already filtered)
+        print(f"[{result['level']}] {result['ruleId']}: {result['message']['text']}")
 ```
 
 ### Pattern 3: Dependency Vulnerability Report
@@ -1187,12 +1220,25 @@ results = await get_scan_results(
 
 ### Content Filtering
 
-Filter by scanner or severity:
+Filter by scanner, severity, or actionable status:
 
 ```python
+# Only actionable findings (exclude suppressed)
+actionable = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True
+)
+
 # Only critical findings
 critical = await get_scan_results(
     output_dir=".ash/ash_output",
+    severities="critical"
+)
+
+# Actionable critical findings only
+actionable_critical = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True,
     severities="critical"
 )
 
@@ -1202,12 +1248,13 @@ sast_results = await get_scan_results(
     scanners="bandit,semgrep"
 )
 
-# Combined filtering
+# Combined filtering - actionable high-priority SAST findings
 high_priority_sast = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
     scanners="bandit,semgrep",
-    severities="critical,high"
+    severities="critical,high",
+    actionable_only=True
 )
 ```
 
@@ -1274,10 +1321,11 @@ high_priority_sast = await get_scan_results(
 
 3. **Filter Results Early**:
    ```python
-   # Use MCP filtering to reduce data transfer
+   # Use MCP filtering to reduce data transfer and focus on actionable findings
    summary = await get_scan_results(
        output_dir=".ash/ash_output",
        filter_level="minimal",
+       actionable_only=True,
        severities="critical,high"
    )
    ```

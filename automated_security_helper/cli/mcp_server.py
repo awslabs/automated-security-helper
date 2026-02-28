@@ -506,6 +506,7 @@ async def get_scan_results(
     filter_level: str = "full",
     scanners: str = None,
     severities: str = None,
+    actionable_only: bool = False,
 ) -> Dict[str, Any]:
     """
     Get final results for a completed scan with optional filtering.
@@ -521,6 +522,8 @@ async def get_scan_results(
         severities: Comma-separated list of severity levels to include (e.g., "critical,high,medium").
                     Options: critical, high, medium, low, info, suppressed
                     If not specified, includes all severities.
+        actionable_only: If True, exclude suppressed findings from results. This filters out findings
+                        that have been marked as false positives or accepted risks. Default is False.
     """
     try:
         # Ensure output_dir is an absolute path
@@ -532,6 +535,8 @@ async def get_scan_results(
             filter_info += f", scanners={scanners}"
         if severities:
             filter_info += f", severities={severities}"
+        if actionable_only:
+            filter_info += ", actionable_only=True"
 
         await ctx.info(
             f"Getting results from ASH scan in directory: {output_dir} ({filter_info})"
@@ -543,6 +548,10 @@ async def get_scan_results(
         # Check if there was an actual error (not just missing success key)
         if "error" in results or not results.get("success"):
             return results
+
+        # Apply actionable_only filter first (exclude suppressed findings)
+        if actionable_only:
+            results = _filter_actionable_only(results)
 
         # Apply scanner and severity filters if specified
         if scanners or severities:
@@ -672,6 +681,72 @@ def _filter_minimal(results: Dict[str, Any]) -> Dict[str, Any]:
         "summary_stats": results.get("summary_stats", {}),
         "_filter": "minimal",
     }
+
+
+def _filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Filter results to exclude suppressed findings.
+
+    This removes findings that have been marked as false positives or accepted risks,
+    returning only actionable findings that require attention.
+
+    Args:
+        results: The full scan results
+
+    Returns:
+        Filtered results with suppressed findings excluded
+    """
+    import copy
+
+    # Create a deep copy to avoid modifying the original
+    filtered_results = copy.deepcopy(results)
+
+    # Filter SARIF results if present
+    if "raw_results" in filtered_results and "sarif" in filtered_results["raw_results"]:
+        sarif = filtered_results["raw_results"]["sarif"]
+        if "runs" in sarif:
+            for run in sarif["runs"]:
+                if "results" in run and run["results"]:
+                    # Filter out suppressed findings
+                    run["results"] = [
+                        result
+                        for result in run["results"]
+                        if not (
+                            result.get("suppressions")
+                            and len(result.get("suppressions", [])) > 0
+                        )
+                    ]
+
+    # Update summary stats to reflect only actionable findings
+    if "summary_stats" in filtered_results:
+        summary_stats = filtered_results["summary_stats"]
+        # Set suppressed count to 0 since we're excluding them
+        summary_stats["suppressed"] = 0
+        # Total should equal actionable when suppressed are excluded
+        summary_stats["total"] = summary_stats.get("actionable", 0)
+
+    # Update scanner-level suppressed counts
+    if (
+        "raw_results" in filtered_results
+        and "scanner_results" in filtered_results["raw_results"]
+    ):
+        for scanner_name, scanner_data in filtered_results["raw_results"][
+            "scanner_results"
+        ].items():
+            if "suppressed_finding_count" in scanner_data:
+                scanner_data["suppressed_finding_count"] = 0
+            if (
+                "severity_counts" in scanner_data
+                and "suppressed" in scanner_data["severity_counts"]
+            ):
+                scanner_data["severity_counts"]["suppressed"] = 0
+
+    # Add filter metadata
+    if "_content_filters" not in filtered_results:
+        filtered_results["_content_filters"] = {}
+    filtered_results["_content_filters"]["actionable_only"] = True
+
+    return filtered_results
 
 
 def _apply_content_filters(

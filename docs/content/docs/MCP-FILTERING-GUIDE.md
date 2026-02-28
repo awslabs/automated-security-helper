@@ -19,7 +19,48 @@ Controls how much data is returned in the response.
 - `summary`: Quick status checks, dashboards, CI/CD gates
 - `minimal`: Health checks, polling for completion, fast status queries
 
-### 2. `scanners` - Scanner/Tool Filtering
+### 2. `actionable_only` - Exclude Suppressed Findings
+
+Filter out suppressed findings (false positives or accepted risks) to focus only on findings that require action.
+
+**Type:** Boolean (default: `False`)
+
+**When True:**
+- Excludes all findings marked as suppressed
+- Returns only findings that require attention
+- Updates summary stats to reflect only actionable findings
+- Sets `suppressed` count to 0 in all statistics
+
+**Use when:**
+- CI/CD pipeline gates (fail only on actionable findings)
+- Focusing on work that needs to be done
+- Excluding known false positives from analysis
+- Generating reports for developers (hide accepted risks)
+
+**Examples:**
+```python
+# Get only actionable findings
+actionable = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True
+)
+
+# Combine with severity filter for high-priority actionable findings
+high_priority_actionable = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True,
+    severities="critical,high"
+)
+
+# Get actionable summary for dashboard
+actionable_summary = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True,
+    filter_level="summary"
+)
+```
+
+### 3. `scanners` - Scanner/Tool Filtering
 
 Filter results to include only specific security scanners.
 
@@ -52,7 +93,7 @@ scanners="bandit,semgrep"
 scanners="grype,npm-audit"
 ```
 
-### 3. `severities` - Severity Level Filtering
+### 4. `severities` - Severity Level Filtering
 
 Filter results to include only specific severity levels.
 
@@ -66,6 +107,8 @@ Filter results to include only specific severity levels.
 - `info` - Informational findings
 - `suppressed` - Suppressed/ignored findings
 
+**Note:** To exclude suppressed findings, use `actionable_only=True` instead of manually listing all non-suppressed severities.
+
 **Examples:**
 ```python
 # Critical only
@@ -74,16 +117,40 @@ severities="critical"
 # High-priority findings
 severities="critical,high"
 
-# Actionable findings (exclude suppressed)
-severities="critical,high,medium,low,info"
-
 # Medium and below
 severities="medium,low,info"
+
+# Include suppressed findings explicitly
+severities="critical,high,suppressed"
 ```
 
 ## Usage Examples
 
 ### Basic Filtering
+
+#### Actionable Findings Only
+```python
+# Get only actionable findings (exclude suppressed)
+actionable = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True
+)
+
+# Actionable summary for dashboard
+actionable_summary = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True,
+    filter_level="summary"
+)
+
+# Fast check for actionable critical findings
+actionable_critical = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True,
+    severities="critical",
+    filter_level="minimal"
+)
+```
 
 #### Response Size Only
 ```python
@@ -141,10 +208,11 @@ high_priority = await get_scan_results(
     severities="critical,high"
 )
 
-# Exclude suppressed findings
-actionable = await get_scan_results(
+# Actionable high-priority (exclude suppressed)
+actionable_high_priority = await get_scan_results(
     output_dir=".ash/ash_output",
-    severities="critical,high,medium,low,info"
+    actionable_only=True,
+    severities="critical,high"
 )
 ```
 
@@ -152,38 +220,42 @@ actionable = await get_scan_results(
 
 #### Lightweight + Content Filtering
 ```python
-# Fast check for critical findings
+# Fast check for actionable critical findings
 critical_status = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="minimal",
+    actionable_only=True,
     severities="critical"
 )
 
-# Summary of high/critical from SAST tools
+# Summary of actionable high/critical from SAST tools
 sast_summary = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
     scanners="bandit,semgrep",
-    severities="critical,high"
+    severities="critical,high",
+    actionable_only=True
 )
 ```
 
 #### Full Details with Content Filtering
 ```python
-# Complete bandit results for critical/high findings
+# Complete bandit actionable results for critical/high findings
 bandit_critical = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="full",
     scanners="bandit",
-    severities="critical,high"
+    severities="critical,high",
+    actionable_only=True
 )
 
-# All dependency scanner results (medium+)
+# All actionable dependency scanner results (medium+)
 dependency_findings = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="full",
     scanners="grype,npm-audit",
-    severities="critical,high,medium"
+    severities="critical,high,medium",
+    actionable_only=True
 )
 ```
 
@@ -192,38 +264,41 @@ dependency_findings = await get_scan_results(
 ### CI/CD Pipeline Gates
 
 ```python
-# Fast critical-only check
+# Fast actionable critical-only check
 result = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="minimal",
+    actionable_only=True,
     severities="critical"
 )
 
 if result["summary_stats"]["critical"] > 0:
-    print("CRITICAL findings detected!")
+    print("CRITICAL actionable findings detected!")
     sys.exit(1)
 
-# Check high-priority findings
+# Check actionable high-priority findings
 result = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
+    actionable_only=True,
     severities="critical,high"
 )
 
 if result["findings_summary"]["by_severity"]["critical"] > 0:
     sys.exit(1)
 elif result["findings_summary"]["by_severity"]["high"] > 5:
-    print(f"Too many HIGH findings: {result['findings_summary']['by_severity']['high']}")
+    print(f"Too many HIGH actionable findings: {result['findings_summary']['by_severity']['high']}")
     sys.exit(1)
 ```
 
 ### Progressive Analysis
 
 ```python
-# 1. Quick check for any critical findings
+# 1. Quick check for any actionable critical findings
 status = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="minimal",
+    actionable_only=True,
     severities="critical"
 )
 
@@ -232,6 +307,7 @@ if status["summary_stats"]["critical"] > 0:
     summary = await get_scan_results(
         output_dir=".ash/ash_output",
         filter_level="summary",
+        actionable_only=True,
         severities="critical"
     )
     
@@ -245,7 +321,8 @@ if status["summary_stats"]["critical"] > 0:
         output_dir=".ash/ash_output",
         filter_level="full",
         scanners=worst_scanner,
-        severities="critical"
+        severities="critical",
+        actionable_only=True
     )
 ```
 
@@ -272,10 +349,11 @@ print(f"Dependency findings: {dependencies['findings_summary']['by_severity']['t
 ### Dashboard/Monitoring
 
 ```python
-# Get summary of all high-priority findings
+# Get summary of all actionable high-priority findings
 dashboard_data = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
+    actionable_only=True,
     severities="critical,high"
 )
 
@@ -284,7 +362,7 @@ for scanner, data in dashboard_data["scanner_summary"]["by_scanner"].items():
     critical = data["by_severity"]["critical"]
     high = data["by_severity"]["high"]
     if critical > 0 or high > 0:
-        print(f"{scanner}: {critical} critical, {high} high")
+        print(f"{scanner}: {critical} critical, {high} high (actionable)")
 ```
 
 ### Debugging Specific Scanner
@@ -311,31 +389,36 @@ for report in scanner_details["scanner_reports"]["bandit"].values():
 | Filter Combination | Typical Size | Use Case |
 |-------------------|--------------|----------|
 | `filter_level="minimal"` | 1-2KB | Fast polling, health checks |
+| `filter_level="minimal", actionable_only=True` | <1KB | Actionable status only |
 | `filter_level="minimal", severities="critical"` | <1KB | Critical-only status |
 | `filter_level="summary"` | 5-15KB | Dashboard, quick analysis |
+| `filter_level="summary", actionable_only=True` | 3-10KB | Actionable summary |
 | `filter_level="summary", scanners="bandit"` | 2-5KB | Single scanner summary |
 | `filter_level="summary", severities="critical,high"` | 3-8KB | High-priority summary |
 | `filter_level="full"` | 50KB-2MB | Complete analysis |
+| `filter_level="full", actionable_only=True` | 30KB-1.5MB | Actionable findings only |
 | `filter_level="full", scanners="bandit"` | 10-200KB | Single scanner details |
 | `filter_level="full", severities="critical"` | 5-100KB | Critical findings details |
 
 ### Best Practices
 
 1. **Start Small**: Use `filter_level="minimal"` for initial checks, then fetch more data as needed
-2. **Filter Early**: Apply `severities` filter to reduce data transfer for high-priority checks
-3. **Target Scanners**: Use `scanners` filter when debugging or analyzing specific tools
-4. **Combine Filters**: Use multiple filters together for maximum efficiency
-5. **Cache Results**: Store filtered results locally to avoid repeated API calls
+2. **Use actionable_only**: For CI/CD and developer workflows, focus on actionable findings with `actionable_only=True`
+3. **Filter Early**: Apply `severities` filter to reduce data transfer for high-priority checks
+4. **Target Scanners**: Use `scanners` filter when debugging or analyzing specific tools
+5. **Combine Filters**: Use multiple filters together for maximum efficiency
+6. **Cache Results**: Store filtered results locally to avoid repeated API calls
 
 ## Filter Metadata
 
-When using content filters (`scanners` or `severities`), the response includes a `_content_filters` field showing which filters were applied:
+When using content filters (`scanners`, `severities`, or `actionable_only`), the response includes a `_content_filters` field showing which filters were applied:
 
 ```json
 {
   "_content_filters": {
     "scanners": ["bandit", "semgrep"],
-    "severities": ["critical", "high"]
+    "severities": ["critical", "high"],
+    "actionable_only": true
   }
 }
 ```

@@ -13,16 +13,22 @@ Get scan results with optional filtering to control response size. This is the p
 async def get_scan_results(
     ctx: Context, 
     output_dir: str = ".ash/ash_output",
-    filter: str = "full"
+    filter_level: str = "full",
+    scanners: str = None,
+    severities: str = None,
+    actionable_only: bool = False
 ) -> Dict[str, Any]
 ```
 
 ### Parameters
 - `output_dir` (str): Path to the scan output directory (absolute path recommended)
-- `filter` (str): Filter level for response data. Options:
+- `filter_level` (str): Filter level for response data. Options:
   - `"full"` (default): Return all results including raw_results, validation_checkpoints, etc.
   - `"summary"`: Return only summary data (metadata, findings counts, scanner summaries)
   - `"minimal"`: Return only basic scan status and completion info
+- `scanners` (str, optional): Comma-separated list of scanner names to include (e.g., "bandit,semgrep"). If not specified, includes all scanners.
+- `severities` (str, optional): Comma-separated list of severity levels to include (e.g., "critical,high,medium"). Options: critical, high, medium, low, info, suppressed. If not specified, includes all severities.
+- `actionable_only` (bool): If True, exclude suppressed findings from results. This filters out findings that have been marked as false positives or accepted risks. Default is False.
 
 ### Returns
 
@@ -146,10 +152,31 @@ results = await get_scan_results(
     output_dir="/path/to/.ash/ash_output"
 )
 
+# Get only actionable findings (exclude suppressed)
+actionable_results = await get_scan_results(
+    output_dir="/path/to/.ash/ash_output",
+    actionable_only=True
+)
+
+# Get summary with only actionable findings
+actionable_summary = await get_scan_results(
+    output_dir="/path/to/.ash/ash_output",
+    filter_level="summary",
+    actionable_only=True
+)
+
+# Filter by specific scanners and severities
+filtered_results = await get_scan_results(
+    output_dir="/path/to/.ash/ash_output",
+    scanners="bandit,semgrep",
+    severities="critical,high",
+    actionable_only=True
+)
+
 # Get summary only (lightweight)
 summary = await get_scan_results(
     output_dir="/path/to/.ash/ash_output",
-    filter="summary"
+    filter_level="summary"
 )
 
 # Check for critical findings
@@ -158,13 +185,13 @@ if summary["findings_summary"]["by_severity"]["critical"] > 0:
     # Now get full results for detailed analysis
     full_results = await get_scan_results(
         output_dir="/path/to/.ash/ash_output",
-        filter="full"
+        filter_level="full"
     )
 
 # Get minimal status (smallest response)
 status = await get_scan_results(
     output_dir="/path/to/.ash/ash_output",
-    filter="minimal"
+    filter_level="minimal"
 )
 print(f"Scan status: {status['status']}, Total findings: {status['summary_stats']['total']}")
 ```
@@ -432,12 +459,70 @@ for scanner, targets in paths["scanner_results"].items():
 
 | Tool | Response Size | Use Case | Data Included |
 |------|---------------|----------|---------------|
-| `get_scan_results` (filter="minimal") | ~1-2KB | Health checks, polling | Status + summary stats only |
+| `get_scan_results` (filter_level="minimal") | ~1-2KB | Health checks, polling | Status + summary stats only |
 | `get_scan_result_paths` | ~2-5KB | File discovery, integration | File paths, sizes, existence |
 | `get_scan_summary` | ~5-10KB | Quick status check, statistics | Metadata, counts by severity/scanner |
-| `get_scan_results` (filter="summary") | ~5-15KB | Detailed summary | Same as get_scan_summary |
-| `get_scan_results` (filter="full") | 50KB-2MB | Full analysis | All data including raw results |
+| `get_scan_results` (filter_level="summary") | ~5-15KB | Detailed summary | Same as get_scan_summary |
+| `get_scan_results` (filter_level="full") | 50KB-2MB | Full analysis | All data including raw results |
+| `get_scan_results` (actionable_only=True) | Varies | Actionable findings only | Excludes suppressed findings |
 | Direct file read | Varies | Full detail, specific format | Complete data in chosen format |
+
+## Content Filtering Options
+
+### Filter by Actionable Findings
+Use `actionable_only=True` to exclude suppressed findings (false positives or accepted risks):
+
+```python
+# Get only findings that require action
+actionable = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True
+)
+
+# Combine with other filters
+critical_actionable = await get_scan_results(
+    output_dir=".ash/ash_output",
+    severities="critical,high",
+    actionable_only=True,
+    filter_level="summary"
+)
+```
+
+### Filter by Scanner
+Use `scanners` parameter to include only specific scanners:
+
+```python
+# Get results from specific scanners only
+sast_results = await get_scan_results(
+    output_dir=".ash/ash_output",
+    scanners="bandit,semgrep"
+)
+```
+
+### Filter by Severity
+Use `severities` parameter to include only specific severity levels:
+
+```python
+# Get only high-priority findings
+high_priority = await get_scan_results(
+    output_dir=".ash/ash_output",
+    severities="critical,high"
+)
+```
+
+### Combine Multiple Filters
+All filters can be combined for precise control:
+
+```python
+# Get actionable critical/high findings from SAST scanners only
+results = await get_scan_results(
+    output_dir=".ash/ash_output",
+    scanners="bandit,semgrep",
+    severities="critical,high",
+    actionable_only=True,
+    filter_level="summary"
+)
+```
 
 ## Recommended Workflows
 
@@ -503,21 +588,48 @@ if summary["findings_summary"]["by_severity"]["high"] > 10:
 ### Workflow 3: CI/CD Pipeline
 ```python
 # Minimal data transfer for fast CI/CD checks
+# Get only actionable findings (exclude suppressed)
 summary = await get_scan_results(
     output_dir=".ash/ash_output",
-    filter="summary"
+    filter_level="summary",
+    actionable_only=True
 )
 
-# Fail pipeline on critical/high findings
+# Fail pipeline on critical/high actionable findings
 critical = summary["findings_summary"]["by_severity"]["critical"]
 high = summary["findings_summary"]["by_severity"]["high"]
 
 if critical > 0 or high > 5:
-    print(f"Pipeline failed: {critical} critical, {high} high findings")
+    print(f"Pipeline failed: {critical} critical, {high} high actionable findings")
     sys.exit(1)
 else:
     print("Security scan passed!")
     sys.exit(0)
+```
+
+### Workflow 4: Focus on Actionable Findings
+```python
+# Get only findings that require action (exclude suppressed)
+actionable = await get_scan_results(
+    output_dir=".ash/ash_output",
+    actionable_only=True,
+    filter_level="summary"
+)
+
+# Check actionable findings count
+if actionable["findings_summary"]["by_severity"]["actionable"] > 0:
+    # Get full details for actionable findings only
+    full_actionable = await get_scan_results(
+        output_dir=".ash/ash_output",
+        actionable_only=True,
+        filter_level="full"
+    )
+    
+    # Process actionable findings...
+    for run in full_actionable["raw_results"]["sarif"]["runs"]:
+        for result in run["results"]:
+            # All results here are actionable (not suppressed)
+            print(f"Finding: {result['ruleId']} - {result['message']}")
 ```
 
 ## Benefits
