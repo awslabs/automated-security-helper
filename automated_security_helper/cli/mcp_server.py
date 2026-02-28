@@ -52,13 +52,39 @@ async def run_ash_scan(
 
     This tool starts a scan and returns immediately with a scan ID.
     Progress updates will be reported through the MCP context.
-    Use get_scan_progress to track progress and get_scan_results for final results.
+
+    CRITICAL - Connection Management:
+    ASH scans take 30-120+ seconds. To prevent MCP connection timeout:
+    - Poll get_scan_progress(scan_id) every 5 seconds (keeps connection alive)
+    - Check progress['is_complete'] or progress['status'] for completion
+    - DO NOT sleep for long periods without polling
+
+    Example usage:
+        result = run_ash_scan(source_dir="/path/to/project")
+        scan_id = result['scan_id']
+
+        # Poll progress to keep connection alive
+        while True:
+            progress = get_scan_progress(scan_id=scan_id)
+            if progress.get('is_complete'):
+                break
+            time.sleep(5)  # Poll every 5 seconds
+
+        # Get filtered results after completion
+        results = get_scan_results(
+            output_dir=progress['output_directory'],
+            filter_level="summary",
+            actionable_only=True
+        )
 
     Args:
         source_dir: Path to the directory to scan. This should be the absolute path!
         severity_threshold: Minimum severity threshold (LOW, MEDIUM, HIGH, CRITICAL)
         config_path: Optional path to ASH configuration file
         clean_output: Whether to clean up existing output files before starting the scan
+
+    Returns:
+        Dict with scan_id, status, and connection management guidance
     """
     try:
         # Ensure source_dir is an absolute path
@@ -121,7 +147,7 @@ async def run_ash_scan(
         # Start background task to monitor progress
         asyncio.create_task(_monitor_scan_progress(ctx, scan_id))
 
-        # Return initial status
+        # Return initial status with connection management guidance
         return {
             "success": True,
             "status": "running",
@@ -129,6 +155,19 @@ async def run_ash_scan(
             "progress": 0.0,
             "message": "Scan started, initializing scanners. Use get_scan_progress to track progress.",
             "directory_path": str(directory_path_obj),
+            "important": {
+                "connection_management": (
+                    "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, "
+                    "poll get_scan_progress(scan_id) every 5 seconds instead of sleeping. "
+                    "Example: while True: progress = get_scan_progress(scan_id); "
+                    "if progress['is_complete']: break; time.sleep(5)"
+                ),
+                "next_steps": [
+                    "1. Poll get_scan_progress(scan_id) every 5 seconds to keep connection alive",
+                    "2. Check progress['is_complete'] or progress['status'] for completion",
+                    "3. After completion, use get_scan_results() with filtering for efficient data transfer",
+                ],
+            },
         }
 
     except Exception as e:
@@ -408,8 +447,27 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
     """
     Get current progress and partial results for a running scan.
 
+    IMPORTANT: Call this tool every 5 seconds in a loop to:
+    - Keep the MCP connection alive during long-running scans (30-120+ seconds)
+    - Get real-time status updates
+    - Detect completion or failures immediately
+
+    Usage pattern:
+        while True:
+            progress = get_scan_progress(scan_id=scan_id)
+            if progress.get('is_complete') or progress.get('status') in ['completed', 'failed', 'cancelled']:
+                break
+            time.sleep(5)  # Wait 5 seconds before next check
+
     Args:
-        scan_id: The scan ID returned from scan_directory
+        scan_id: The scan ID returned from run_ash_scan
+
+    Returns:
+        Dict with progress info including:
+        - is_complete: Boolean indicating if scan is done
+        - status: Current status (running, completed, failed, cancelled)
+        - progress_percentage: Estimated completion percentage
+        - message: Human-readable status message
     """
     try:
         await ctx.info(f"Getting progress for scan: {scan_id}")
