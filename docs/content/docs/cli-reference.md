@@ -386,6 +386,62 @@ ash get-genai-guide -o /path/to/guide.md
 ash get-genai-guide --output genai-integration.md
 ```
 
+### Installation for AI Coding Tools
+
+**For Kiro (Global - Recommended)**:
+```bash
+# Install globally for all Kiro workspaces
+mkdir -p ~/.kiro/steering
+ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
+
+# Kiro will automatically load this as steering context
+```
+
+**For Kiro (Project-Specific)**:
+```bash
+# Install for current project only
+mkdir -p .kiro/steering
+ash get-genai-guide -o .kiro/steering/ash-integration.md
+```
+
+**For Cline (VS Code)**:
+```bash
+# Add to project root for Cline to reference
+ash get-genai-guide -o .cline/ash-guide.md
+
+# Or add to VS Code workspace settings
+mkdir -p .vscode
+ash get-genai-guide -o .vscode/ash-integration-guide.md
+```
+
+**For Claude Desktop / MCP Clients**:
+```bash
+# Save to a dedicated documentation folder
+mkdir -p ~/Documents/ai-guides
+ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
+
+# Then reference in your prompts:
+# "Please read the ASH integration guide at ~/Documents/ai-guides/ash-integration.md"
+```
+
+**For Amazon Q CLI**:
+```bash
+# Add to project documentation
+mkdir -p docs/ai-guides
+ash get-genai-guide -o docs/ai-guides/ash-integration.md
+
+# Reference in .q/config if supported
+```
+
+**For Cursor**:
+```bash
+# Add to .cursorrules or project docs
+ash get-genai-guide -o .cursor/ash-guide.md
+
+# Or add to project root
+ash get-genai-guide -o ASH_INTEGRATION_GUIDE.md
+```
+
 ### Use Cases
 
 **For Users:**

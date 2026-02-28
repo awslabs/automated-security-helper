@@ -207,6 +207,25 @@ ASH provides a comprehensive guide for AI assistants and LLMs on how to properly
 ash get-genai-guide -o ash-genai-guide.md
 ```
 
+**Install for Kiro (recommended)**:
+```bash
+# Global installation - available in all Kiro workspaces
+mkdir -p ~/.kiro/steering
+ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
+```
+
+**Install for other AI tools**:
+```bash
+# Cline (VS Code)
+mkdir -p .cline && ash get-genai-guide -o .cline/ash-guide.md
+
+# Cursor
+mkdir -p .cursor && ash get-genai-guide -o .cursor/ash-guide.md
+
+# Claude Desktop / Generic
+mkdir -p ~/Documents/ai-guides && ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
+```
+
 The guide can be provided to any AI assistant as context to ensure they process ASH results correctly and efficiently.
 
 ### MCP Server Features

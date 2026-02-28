@@ -4,6 +4,146 @@
 
 This document provides comprehensive guidance for GenAI tools (AI assistants, LLMs, code analysis tools) on how to properly interact with ASH (Automated Security Helper) scan results. Following these guidelines ensures efficient processing, accurate analysis, and proper handling of security findings.
 
+## Installing This Guide
+
+### Quick Install
+
+```bash
+# Download the guide
+ash get-genai-guide -o ash-genai-guide.md
+```
+
+### Installation for AI Coding Tools
+
+Choose the installation method based on your AI coding tool:
+
+#### Kiro (Recommended: Global Installation)
+
+**Global installation** (available in all Kiro workspaces):
+```bash
+# Create steering directory if it doesn't exist
+mkdir -p ~/.kiro/steering
+
+# Download the guide
+ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
+```
+
+Kiro will automatically load this as steering context for all workspaces. This is the recommended approach as it makes ASH guidance available everywhere.
+
+**Project-specific installation** (only for current project):
+```bash
+# Create project steering directory
+mkdir -p .kiro/steering
+
+# Download the guide
+ash get-genai-guide -o .kiro/steering/ash-integration.md
+```
+
+**Verification**:
+After installation, you can verify Kiro sees the guide by checking the steering files list in Kiro's UI or by asking: "What steering files do you have loaded?"
+
+**How Kiro Steering Works**:
+- Files in `~/.kiro/steering/` are automatically loaded as context for all workspaces (global)
+- Files in `.kiro/steering/` are loaded only for the current workspace (project-specific)
+- Steering files are always included in Kiro's context, so you don't need to reference them in prompts
+- Kiro will automatically follow the guidance when working with ASH results
+
+#### Cline (VS Code Extension)
+
+**Option 1: Project-specific** (recommended):
+```bash
+# Create Cline directory
+mkdir -p .cline
+
+# Download the guide
+ash get-genai-guide -o .cline/ash-guide.md
+```
+
+**Option 2: VS Code workspace**:
+```bash
+# Add to VS Code settings
+mkdir -p .vscode
+ash get-genai-guide -o .vscode/ash-integration-guide.md
+```
+
+Then reference it in your Cline prompts: "Please read the ASH guide at .cline/ash-guide.md before analyzing scan results."
+
+#### Claude Desktop / MCP Clients
+
+**Dedicated documentation folder**:
+```bash
+# Create AI guides folder
+mkdir -p ~/Documents/ai-guides
+
+# Download the guide
+ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
+```
+
+**Usage**: In your prompts, reference the guide:
+```
+Please read the ASH integration guide at ~/Documents/ai-guides/ash-integration.md 
+before processing these scan results.
+```
+
+#### Amazon Q CLI
+
+**Project documentation**:
+```bash
+# Add to project docs
+mkdir -p docs/ai-guides
+ash get-genai-guide -o docs/ai-guides/ash-integration.md
+```
+
+**Usage**: Reference in your Q CLI prompts or add to project documentation index.
+
+#### Cursor
+
+**Option 1: Cursor rules directory**:
+```bash
+# Create Cursor directory
+mkdir -p .cursor
+
+# Download the guide
+ash get-genai-guide -o .cursor/ash-guide.md
+```
+
+**Option 2: Project root** (for easy discovery):
+```bash
+# Download to project root with clear name
+ash get-genai-guide -o ASH_INTEGRATION_GUIDE.md
+```
+
+**Usage**: Reference in `.cursorrules` or mention in prompts.
+
+#### Generic / Other Tools
+
+**Project root** (universal approach):
+```bash
+# Download with descriptive name
+ash get-genai-guide -o ASH_GENAI_GUIDE.md
+```
+
+Then reference it in your AI tool's context or prompts.
+
+### Updating the Guide
+
+When ASH is updated, refresh the guide:
+```bash
+# Re-download to the same location (overwrites existing)
+ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
+```
+
+### Verification
+
+After installation, verify the guide is accessible:
+```bash
+# Check file exists
+ls -lh ~/.kiro/steering/ash-integration.md
+
+# View first few lines
+head -n 20 ~/.kiro/steering/ash-integration.md
+```
+
 ## Quick Reference
 
 **Recommended Approach for GenAI Tools**:
