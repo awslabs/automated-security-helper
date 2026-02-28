@@ -134,12 +134,12 @@ ash config [subcommand] [options]
 
 ### Config Subcommands
 
-| Subcommand | Description                         |
-|------------|-------------------------------------|
-| `init`     | Initialize a new configuration file |
-| `get`      | Display current configuration       |
-| `update`   | Update configuration values         |
-| `validate` | Validate configuration file         |
+| Subcommand | Description                                                      |
+|------------|------------------------------------------------------------------|
+| `init`     | Initialize a new configuration file                              |
+| `get`      | Display current configuration                                    |
+| `update`   | Update configuration values                                      |
+| `validate` | Validate configuration file against JSON schema and check syntax |
 
 ### Config Options
 
@@ -160,15 +160,79 @@ ash config [subcommand] [options]
 # Initialize a new configuration file
 ash config init
 
+# Initialize with force (overwrite existing)
+ash config init --force
+
 # Display current configuration
 ash config get
+
+# Display configuration from a specific file
+ash config get --config /path/to/config.yaml
 
 # Update configuration
 ash config update --set 'scanners.bandit.enabled=true'
 
-# Validate configuration
+# Preview configuration update without writing
+ash config update --set 'scanners.bandit.enabled=true' --dry-run
+
+# Validate configuration file
 ash config validate
+
+# Validate a specific configuration file
+ash config validate --config /path/to/config.yaml
+
+# Validate with verbose output showing all checks
+ash config validate --verbose
 ```
+
+### Config Validate Details
+
+The `ash config validate` command performs comprehensive validation of your ASH configuration file:
+
+**Validation Checks:**
+- **Schema Validation**: Verifies the configuration matches the JSON schema
+- **YAML Syntax**: Checks for valid YAML syntax and structure
+- **Required Fields**: Ensures all required fields are present
+- **Type Checking**: Validates data types for all fields
+- **Enum Values**: Verifies enum fields contain valid values
+- **Path Validation**: Checks that file paths in suppressions and ignore rules are valid
+- **Suppression Rules**: Validates suppression syntax and required fields
+- **Scanner Configuration**: Checks scanner-specific options
+
+**Exit Codes:**
+- `0`: Configuration is valid
+- `1`: Configuration has validation errors
+
+**Example Output:**
+
+```bash
+$ ash config validate
+✓ Configuration file loaded successfully
+✓ YAML syntax is valid
+✓ Schema validation passed
+✓ All required fields present
+✓ Suppression rules validated (3 rules)
+✓ Scanner configurations validated (10 scanners)
+
+Configuration is valid!
+
+$ ash config validate --config .ash/.ash_bad_config.yaml
+✗ Configuration validation failed
+
+Errors found:
+  - Line 15: 'scanners.bandit.options' must be an object, got list
+  - Line 23: Unknown field 'global_settings.invalid_field'
+  - Line 30: 'suppressions[0].reason' is required but missing
+
+Please fix these errors and try again.
+```
+
+**Use Cases:**
+- Validate configuration before committing to version control
+- Debug configuration issues when scans fail
+- Verify configuration after manual edits
+- CI/CD pipeline checks to ensure valid configuration
+- Pre-deployment validation in automated workflows
 
 ## Plugin Command
 
