@@ -52,6 +52,85 @@ def register_mcp_command():
 register_mcp_command()
 
 
+@app.command(name="get-genai-guide")
+def get_genai_guide(
+    output_path: str = typer.Option(
+        "ash-genai-guide.md",
+        "--output",
+        "-o",
+        help="Output path for the GenAI integration guide",
+    ),
+):
+    """Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
+
+    This guide provides comprehensive instructions for GenAI tools on how to properly
+    interact with ASH scan results, including:
+    - Correct file formats to use (JSON vs HTML)
+    - How to handle severity discrepancies
+    - Creating suppressions properly
+    - Working with CycloneDX SBOM for dependencies
+    - Configuration file schema
+    - Common pitfalls and solutions
+    """
+    import importlib.resources
+    from pathlib import Path
+
+    try:
+        # Try to read from the installed package
+        try:
+            # Python 3.9+
+            guide_content = (
+                importlib.resources.files("automated_security_helper")
+                .joinpath("../docs/content/docs/genai-steering-guide.md")
+                .read_text()
+            )
+        except AttributeError:
+            # Python 3.8 fallback
+            with importlib.resources.path(
+                "automated_security_helper", "__init__.py"
+            ) as pkg_path:
+                guide_path = (
+                    pkg_path.parent.parent
+                    / "docs"
+                    / "content"
+                    / "docs"
+                    / "genai-steering-guide.md"
+                )
+                guide_content = guide_path.read_text()
+    except Exception:
+        # Fallback: try to read from current directory (development mode)
+        try:
+            guide_path = (
+                Path(__file__).parent.parent.parent
+                / "docs"
+                / "content"
+                / "docs"
+                / "genai-steering-guide.md"
+            )
+            guide_content = guide_path.read_text()
+        except Exception as e:
+            typer.echo(f"Error: Could not locate GenAI guide: {e}", err=True)
+            typer.echo("\nYou can download it directly from:", err=True)
+            typer.echo(
+                "https://raw.githubusercontent.com/awslabs/automated-security-helper/main/docs/content/docs/genai-steering-guide.md",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+    # Write to output file
+    output_file = Path(output_path)
+    output_file.write_text(guide_content)
+
+    typer.echo(f"✓ GenAI Integration Guide saved to: {output_file.absolute()}")
+    typer.echo(f"\nFile size: {len(guide_content):,} bytes")
+    typer.echo("\nThis guide can be provided to AI assistants to help them:")
+    typer.echo("  • Use the correct ASH output formats (JSON, not HTML)")
+    typer.echo("  • Handle severity discrepancies properly")
+    typer.echo("  • Create suppressions correctly")
+    typer.echo("  • Analyze dependencies using CycloneDX SBOM")
+    typer.echo("  • Avoid common pitfalls and known issues")
+
+
 app.add_typer(config_app, name="config")
 app.add_typer(dependencies_app, name="dependencies")
 app.add_typer(inspect_app, name="inspect")
