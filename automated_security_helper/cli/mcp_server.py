@@ -335,9 +335,9 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                             await ctx.debug(
                                 f"Scanner progress: {scanner_name}/{target_type} - {int(progress * 100)}%"
                             )
-                        except Exception:
-                            # Ignore debug message failures
-                            pass
+                        except Exception as e:
+                            # Ignore debug message failures (connection may be closed)
+                            logger.debug(f"Failed to send debug message: {str(e)}")
                     except asyncio.CancelledError:
                         raise  # Re-raise cancellation
                     except Exception as e:
@@ -348,9 +348,9 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                             await ctx.warning(
                                 f"Error processing scanner results for {scanner_name}/{target_type}: {str(e)}"
                             )
-                        except Exception:
+                        except Exception as e:
                             # Ignore errors sending warning (connection may be closed)
-                            pass
+                            logger.debug(f"Failed to send warning message: {str(e)}")
 
             # Send heartbeat if no progress updates for a while
             if (
@@ -391,9 +391,9 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
         logger.info(f"Scan monitoring cancelled for scan_id: {scan_id}")
         try:
             await ctx.info("Scan monitoring stopped.")
-        except Exception:
-            # Ignore errors when trying to send final message
-            pass
+        except Exception as e:
+            # Ignore errors when trying to send final message (connection may be closed)
+            logger.debug(f"Failed to send cancellation message: {str(e)}")
     except Exception as e:
         logger.exception(f"Error monitoring scan progress: {str(e)}")
         try:
