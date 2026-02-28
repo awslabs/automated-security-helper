@@ -130,3 +130,116 @@ This helps ensure that temporary exceptions don't become permanent security gaps
 3. **Be specific**: Use line numbers when possible to limit the scope of suppressions
 4. **Regular review**: Periodically review suppressions to ensure they're still valid
 5. **Document approvals**: Include reference to security review or approval in the reason
+
+## Identifying Unused Suppressions
+
+ASH automatically tracks which suppressions are actually being applied to findings and generates a report of unused suppressions. This helps you maintain a clean configuration by identifying:
+
+- Suppressions for files that no longer exist
+- Suppressions for findings that have been fixed
+- Suppressions that are no longer applicable due to code changes
+
+### Unused Suppressions Report
+
+After each scan, ASH generates two reports for unused suppressions:
+
+1. **JSON Report**: `.ash/ash_output/reports/ash.unused-suppressions.json`
+2. **Markdown Report**: `.ash/ash_output/reports/ash.unused-suppressions.md` (human-readable)
+
+#### JSON Report Format
+
+```json
+{
+  "summary": {
+    "total_suppressions": 10,
+    "used_suppressions": 7,
+    "unused_suppressions": 3
+  },
+  "unused_suppressions": [
+    {
+      "path": "src/old_file.py",
+      "rule_id": "B201",
+      "line_start": 42,
+      "line_end": 42,
+      "reason": "False positive - debug mode only in development",
+      "expiration": "2026-12-31"
+    }
+  ]
+}
+```
+
+#### Markdown Report Format
+
+The markdown report provides a human-readable summary with:
+- Overall statistics (total, used, unused counts)
+- Percentage of unused suppressions
+- Detailed list of each unused suppression
+- Recommendations for cleanup
+
+### Reviewing Unused Suppressions
+
+Check the summary after a scan:
+
+```bash
+# View summary statistics
+jq '.summary' .ash/ash_output/reports/ash.unused-suppressions.json
+
+# View all unused suppressions
+jq '.unused_suppressions' .ash/ash_output/reports/ash.unused-suppressions.json
+
+# Or view the markdown report
+cat .ash/ash_output/reports/ash.unused-suppressions.md
+```
+
+### Cleaning Up Unused Suppressions
+
+For each unused suppression, determine the appropriate action:
+
+1. **File no longer exists**: Remove the suppression from your configuration
+2. **Finding was fixed**: Remove the suppression as it's no longer needed
+3. **Path/rule/line mismatch**: Update the suppression to match the current code structure
+4. **Still needed**: Verify the suppression is correctly configured (check path, rule_id, line numbers)
+
+Example cleanup workflow:
+
+```bash
+# 1. Run scan
+ash --mode local
+
+# 2. Check for unused suppressions
+cat .ash/ash_output/reports/ash.unused-suppressions.md
+
+# 3. Edit configuration to remove unused suppressions
+vim .ash/.ash.yaml
+
+# 4. Re-run scan to verify
+ash --mode local
+```
+
+### Configuration Options
+
+The unused suppressions reporter is enabled by default. To customize its behavior, add to your `.ash/.ash.yaml`:
+
+```yaml
+reporters:
+  unused-suppressions:
+    enabled: true  # Set to false to disable
+    options:
+      output_format: "json"  # "json" or "markdown"
+```
+
+### Integration with CI/CD
+
+You can use the unused suppressions report in your CI/CD pipeline:
+
+```bash
+# Check if there are unused suppressions
+UNUSED_COUNT=$(jq '.summary.unused_suppressions' .ash/ash_output/reports/ash.unused-suppressions.json)
+
+if [ "$UNUSED_COUNT" -gt 0 ]; then
+  echo "Warning: $UNUSED_COUNT unused suppressions found"
+  echo "Review: .ash/ash_output/reports/ash.unused-suppressions.md"
+  # Optionally fail the build
+  # exit 1
+fi
+```

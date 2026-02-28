@@ -21221,6 +21221,15 @@
       "title": "Scanner Results",
       "type": "object"
     },
+    "used_suppressions": {
+      "description": "Set of suppression IDs that were actually applied to findings during the scan.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Used Suppressions",
+      "type": "array",
+      "uniqueItems": true
+    },
     "validation_checkpoints": {
       "description": "List of validation checkpoints captured during the scan process for debugging and monitoring.",
       "items": {
