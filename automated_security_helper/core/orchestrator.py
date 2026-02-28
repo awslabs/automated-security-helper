@@ -145,6 +145,14 @@ class ASHScanOrchestrator(BaseModel):
         ),
     ]
 
+    show_summary: Annotated[
+        bool,
+        Field(
+            True,
+            description="Show metrics table and results summary after scan completion",
+        ),
+    ] = True
+
     def model_post_init(self, context):
         """Post initialization configuration."""
         super().model_post_init(context)
@@ -219,6 +227,7 @@ class ASHScanOrchestrator(BaseModel):
             enabled_scanners=self.enabled_scanners,
             excluded_scanners=self.excluded_scanners,
             show_progress=self.show_progress,
+            show_summary=self.show_summary,
             global_ignore_paths=self.config.global_settings.ignore_paths,
             color_system=self.color_system,
             verbose=self.verbose,

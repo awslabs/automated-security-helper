@@ -53,6 +53,7 @@ class ScanExecutionEngine:
         strategy: Optional[ExecutionStrategy] = ExecutionStrategy.PARALLEL,
         asharp_model: Optional[AshAggregatedResults] = None,
         show_progress: bool = True,
+        show_summary: bool = True,
         global_ignore_paths: List[IgnorePathWithReason] = [],
         color_system: Literal[
             "auto", "standard", "256", "truecolor", "windows"
@@ -71,6 +72,7 @@ class ScanExecutionEngine:
             strategy: Execution strategy to use for scanner execution (default: PARALLEL)
             asharp_model: Optional AshAggregatedResults to use for results
             show_progress: Whether to show progress bars
+            show_summary: Whether to show metrics table and results summary after scan completion
             global_ignore_paths: List of paths to ignore globally
             color_system: Color system to use for progress display
             verbose: Whether to show verbose output
@@ -99,6 +101,7 @@ class ScanExecutionEngine:
         self._scan_results = {}
         self._strategy = strategy
         self.show_progress = show_progress
+        self.show_summary = show_summary
         self._initialized = False  # Track initialization state
         self._init_enabled_scanners = [
             subitem.strip()
@@ -627,17 +630,20 @@ class ScanExecutionEngine:
                             self.progress_display.console.color_system is not None
                         )
 
-                    # Always display the metrics table, even in simple mode
-                    display_metrics_table(
-                        asharp_model=self._asharp_model,
-                        source_dir=os.environ.get(
-                            "ASH_ACTUAL_SOURCE_DIR", self._context.source_dir.as_posix()
-                        ),
-                        output_dir=os.environ.get(
-                            "ASH_ACTUAL_OUTPUT_DIR", self._context.output_dir.as_posix()
-                        ),
-                        use_color=use_color,
-                    )
+                    # Always display the metrics table if show_summary is True
+                    if self.show_summary:
+                        display_metrics_table(
+                            asharp_model=self._asharp_model,
+                            source_dir=os.environ.get(
+                                "ASH_ACTUAL_SOURCE_DIR",
+                                self._context.source_dir.as_posix(),
+                            ),
+                            output_dir=os.environ.get(
+                                "ASH_ACTUAL_OUTPUT_DIR",
+                                self._context.output_dir.as_posix(),
+                            ),
+                            use_color=use_color,
+                        )
 
                 # Return the results
                 return self._results

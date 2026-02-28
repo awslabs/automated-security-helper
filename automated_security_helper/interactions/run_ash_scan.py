@@ -396,6 +396,7 @@ def run_ash_scan(
                 output_formats=output_formats,
                 show_progress=final_show_progress,
                 simple_mode=simple,
+                show_summary=show_summary,
                 color_system=(
                     "windows"
                     if platform.system() == "Windows"
