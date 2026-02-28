@@ -108,11 +108,15 @@ async def run_ash_scan(
         await ctx.info(f"Scan started with ID: {scan_id}")
 
         # Initial progress update
-        await ctx.report_progress(
-            progress=0.0,
-            total=1.0,
-            message="Scan started, initializing scanners...",
-        )
+        try:
+            await ctx.report_progress(
+                progress=0.0,
+                total=1.0,
+                message="Scan started, initializing scanners...",
+            )
+        except Exception as e:
+            # Log but don't fail if progress reporting fails
+            logger.warning(f"Failed to send initial progress update: {str(e)}")
 
         # Start background task to monitor progress
         asyncio.create_task(_monitor_scan_progress(ctx, scan_id))
@@ -171,17 +175,23 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
         completed_scanners = set()
         total_scanners_estimate = 5  # Initial estimate, will be updated
         last_progress_time = asyncio.get_event_loop().time()
-        heartbeat_interval = 10  # Send a heartbeat every 10 seconds
+        heartbeat_interval = 15  # Send a heartbeat every 15 seconds
         max_wait_time = 1800  # 30 minutes maximum wait time
         start_time = asyncio.get_event_loop().time()
         completed = False
 
         # Initial progress update
-        await ctx.report_progress(
-            progress=0.0,
-            total=1.0,
-            message="Scan started, initializing scanners...",
-        )
+        try:
+            await ctx.report_progress(
+                progress=0.0,
+                total=1.0,
+                message="Scan started, initializing scanners...",
+            )
+        except Exception as e:
+            # Log but continue monitoring even if initial update fails
+            logger.warning(
+                f"Failed to send initial progress update in monitor: {str(e)}"
+            )
 
         # Monitor scan progress until completion
         while not completed:
@@ -199,11 +209,14 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                 completed = True
 
                 # Report final progress
-                await ctx.report_progress(
-                    progress=1.0,
-                    total=1.0,
-                    message="Scan completed, parsing results...",
-                )
+                try:
+                    await ctx.report_progress(
+                        progress=1.0,
+                        total=1.0,
+                        message="Scan completed, parsing results...",
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to send completion progress: {str(e)}")
 
                 # Get final results with the correct output directory path
                 final_results = await mcp_get_scan_results(output_dir=str(output_dir))
@@ -223,7 +236,11 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                     else:
                         summary = "Scan completed with no findings."
 
-                    await ctx.info(summary)
+                    try:
+                        await ctx.info(summary)
+                    except Exception as e:
+                        # Connection may be closed, log but don't fail
+                        logger.warning(f"Failed to send completion summary: {str(e)}")
 
                 return
 
@@ -233,19 +250,25 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                 completed = True
 
                 # Report final status
-                await ctx.report_progress(
-                    progress=1.0,
-                    total=1.0,
-                    message=f"Scan {progress_info.get('status')}",
-                )
+                try:
+                    await ctx.report_progress(
+                        progress=1.0,
+                        total=1.0,
+                        message=f"Scan {progress_info.get('status')}",
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to send final status progress: {str(e)}")
 
                 # Log completion
-                if progress_info.get("status") == "failed":
-                    await ctx.error(
-                        f"Scan failed: {progress_info.get('error_message', 'Unknown error')}"
-                    )
-                elif progress_info.get("status") == "cancelled":
-                    await ctx.info("Scan was cancelled.")
+                try:
+                    if progress_info.get("status") == "failed":
+                        await ctx.error(
+                            f"Scan failed: {progress_info.get('error_message', 'Unknown error')}"
+                        )
+                    elif progress_info.get("status") == "cancelled":
+                        await ctx.info("Scan was cancelled.")
+                except Exception as e:
+                    logger.warning(f"Failed to send completion message: {str(e)}")
 
                 return
 
@@ -296,22 +319,38 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                         )  # Cap at 95% until fully complete
 
                         # Update progress
-                        await ctx.report_progress(
-                            progress=progress,
-                            total=1.0,
-                            message=message,
-                        )
+                        try:
+                            await ctx.report_progress(
+                                progress=progress,
+                                total=1.0,
+                                message=message,
+                            )
+                            # Update last progress time only if send succeeded
+                            last_progress_time = current_time
+                        except Exception as e:
+                            # Connection may be closed, log but continue monitoring
+                            logger.debug(f"Failed to send progress update: {str(e)}")
 
-                        # Update last progress time
-                        last_progress_time = current_time
-
-                        await ctx.debug(
-                            f"Scanner progress: {scanner_name}/{target_type} - {int(progress * 100)}%"
-                        )
+                        try:
+                            await ctx.debug(
+                                f"Scanner progress: {scanner_name}/{target_type} - {int(progress * 100)}%"
+                            )
+                        except Exception as e:
+                            # Ignore debug message failures (connection may be closed)
+                            logger.debug(f"Failed to send debug message: {str(e)}")
+                    except asyncio.CancelledError:
+                        raise  # Re-raise cancellation
                     except Exception as e:
-                        await ctx.warning(
+                        logger.warning(
                             f"Error processing scanner results for {scanner_name}/{target_type}: {str(e)}"
                         )
+                        try:
+                            await ctx.warning(
+                                f"Error processing scanner results for {scanner_name}/{target_type}: {str(e)}"
+                            )
+                        except Exception as e:
+                            # Ignore errors sending warning (connection may be closed)
+                            logger.debug(f"Failed to send warning message: {str(e)}")
 
             # Send heartbeat if no progress updates for a while
             if (
@@ -321,22 +360,47 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                 progress = len(completed_scanners) / max(total_scanners_estimate, 1)
                 progress = min(progress, 0.95)  # Cap at 95% until fully complete
 
-                # Report heartbeat progress
-                await ctx.report_progress(
-                    progress=progress,
-                    total=1.0,
-                    message=f"Scan in progress ({len(completed_scanners)}/{total_scanners_estimate} scanners completed)",
-                )
+                try:
+                    # Report heartbeat progress
+                    await ctx.report_progress(
+                        progress=progress,
+                        total=1.0,
+                        message=f"Scan in progress ({len(completed_scanners)}/{total_scanners_estimate} scanners completed)",
+                    )
 
-                # Update last progress time
-                last_progress_time = current_time
+                    # Update last progress time
+                    last_progress_time = current_time
+                except Exception as e:
+                    # Connection may be closed, log but continue monitoring
+                    logger.debug(f"Failed to send heartbeat: {str(e)}")
 
-            # Wait before checking again
-            await asyncio.sleep(1)
+            # Wait before checking again - use adaptive polling interval
+            # For 2-5 minute scans, use longer intervals to reduce network traffic
+            if len(completed_scanners) == 0:
+                # No scanners completed yet (initialization phase), poll every 5 seconds
+                await asyncio.sleep(5)
+            elif len(completed_scanners) < 2:
+                # Few scanners completed (early phase), poll every 8 seconds
+                await asyncio.sleep(8)
+            else:
+                # Multiple scanners running (main phase), poll every 10 seconds
+                await asyncio.sleep(10)
 
+    except asyncio.CancelledError:
+        # Task was cancelled, log and exit gracefully
+        logger.info(f"Scan monitoring cancelled for scan_id: {scan_id}")
+        try:
+            await ctx.info("Scan monitoring stopped.")
+        except Exception as e:
+            # Ignore errors when trying to send final message (connection may be closed)
+            logger.debug(f"Failed to send cancellation message: {str(e)}")
     except Exception as e:
         logger.exception(f"Error monitoring scan progress: {str(e)}")
-        await ctx.error(f"Error monitoring scan progress: {str(e)}")
+        try:
+            await ctx.error(f"Error monitoring scan progress: {str(e)}")
+        except Exception:
+            # Ignore errors when trying to send error message (connection may be closed)
+            logger.error(f"Failed to send error message to client: {str(e)}")
 
 
 @mcp.tool()
@@ -437,10 +501,468 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
 @mcp.tool()
 async def get_scan_results(
+    ctx: Context,
+    output_dir: str = ".ash/ash_output",
+    filter_level: str = "full",
+    scanners: str = None,
+    severities: str = None,
+) -> Dict[str, Any]:
+    """
+    Get final results for a completed scan with optional filtering.
+
+    Args:
+        output_dir: Path to the scan output directory (absolute path recommended)
+        filter_level: Filter level for response data. Options:
+                - "full" (default): Return all results including raw_results, validation_checkpoints, etc.
+                - "summary": Return only summary data (metadata, findings counts, scanner summaries)
+                - "minimal": Return only basic scan status and completion info
+        scanners: Comma-separated list of scanner names to include (e.g., "bandit,semgrep").
+                  If not specified, includes all scanners.
+        severities: Comma-separated list of severity levels to include (e.g., "critical,high,medium").
+                    Options: critical, high, medium, low, info, suppressed
+                    If not specified, includes all severities.
+    """
+    try:
+        # Ensure output_dir is an absolute path
+        if not Path(output_dir).is_absolute():
+            output_dir = str(Path.cwd() / output_dir)
+
+        filter_info = f"filter_level={filter_level}"
+        if scanners:
+            filter_info += f", scanners={scanners}"
+        if severities:
+            filter_info += f", severities={severities}"
+
+        await ctx.info(
+            f"Getting results from ASH scan in directory: {output_dir} ({filter_info})"
+        )
+
+        # Get the raw results
+        results = await mcp_get_scan_results(output_dir=output_dir)
+
+        # Check if there was an actual error (not just missing success key)
+        if "error" in results or not results.get("success"):
+            return results
+
+        # Apply scanner and severity filters if specified
+        if scanners or severities:
+            results = _apply_content_filters(results, scanners, severities)
+
+        # Apply response size filter based on parameter
+        if filter_level == "full":
+            # Return full results for backward compatibility
+            return results
+        elif filter_level == "summary":
+            # Return summary data only (similar to get_scan_summary but from this tool)
+            return _filter_summary(results)
+        elif filter_level == "minimal":
+            # Return only basic status info
+            return _filter_minimal(results)
+        else:
+            # Unknown filter - return full results with warning
+            await ctx.warning(
+                f"Unknown filter_level '{filter_level}', returning full results"
+            )
+            return results
+
+    except Exception as e:
+        logger.exception(f"Error in get_scan_results: {str(e)}")
+        try:
+            await ctx.error(f"Error getting scan results: {str(e)}")
+        except Exception:
+            # Ignore errors sending error message (connection may be closed)
+            logger.error(f"Failed to send error message to client: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error getting scan results: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+
+def _filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
+    """Filter results to return only summary information."""
+    summary = {
+        "success": True,
+        "scan_id": results.get("scan_id"),
+        "status": results.get("status"),
+        "is_complete": results.get("is_complete"),
+        "completion_time": results.get("completion_time"),
+        "metadata": {},
+        "findings_summary": {},
+        "scanner_summary": {},
+        "_filter": "summary",
+    }
+
+    # Extract metadata from raw_results
+    raw_results = results.get("raw_results", {})
+    metadata = raw_results.get("metadata", {})
+
+    summary["metadata"] = {
+        "generated_at": metadata.get("generated_at"),
+        "ash_version": metadata.get("tool_version"),
+        "scan_duration_seconds": metadata.get("summary_stats", {}).get("duration"),
+    }
+
+    # Extract findings summary by severity from summary_stats
+    summary_stats = results.get("summary_stats", {})
+    summary["findings_summary"] = {
+        "by_severity": {
+            "critical": summary_stats.get("critical", 0),
+            "high": summary_stats.get("high", 0),
+            "medium": summary_stats.get("medium", 0),
+            "low": summary_stats.get("low", 0),
+            "info": summary_stats.get("info", 0),
+            "suppressed": summary_stats.get("suppressed", 0),
+            "total": summary_stats.get("total", 0),
+            "actionable": summary_stats.get("actionable", 0),
+        },
+        "scan_stats": {
+            "passed": summary_stats.get("passed", 0),
+            "failed": summary_stats.get("failed", 0),
+            "missing": summary_stats.get("missing", 0),
+            "skipped": summary_stats.get("skipped", 0),
+        },
+    }
+
+    # Extract scanner summary from scanner_results
+    scanner_results = raw_results.get("scanner_results", {})
+    summary["scanner_summary"] = {
+        "by_scanner": {},
+        "total_scanners": len(scanner_results),
+        "completed_scanners": 0,
+    }
+
+    for scanner_name, scanner_data in scanner_results.items():
+        status = scanner_data.get("status", "UNKNOWN")
+        severity_counts = scanner_data.get("severity_counts", {})
+
+        scanner_info = {
+            "status": status,
+            "findings_count": scanner_data.get("finding_count", 0),
+            "actionable_findings": scanner_data.get("actionable_finding_count", 0),
+            "suppressed_findings": scanner_data.get("suppressed_finding_count", 0),
+            "duration": scanner_data.get("duration", 0),
+            "by_severity": {
+                "critical": severity_counts.get("critical", 0),
+                "high": severity_counts.get("high", 0),
+                "medium": severity_counts.get("medium", 0),
+                "low": severity_counts.get("low", 0),
+                "info": severity_counts.get("info", 0),
+                "suppressed": severity_counts.get("suppressed", 0),
+            },
+        }
+
+        summary["scanner_summary"]["by_scanner"][scanner_name] = scanner_info
+
+        # Count completed scanners
+        if status in ["PASSED", "FAILED"]:
+            summary["scanner_summary"]["completed_scanners"] += 1
+
+    return summary
+
+
+def _filter_minimal(results: Dict[str, Any]) -> Dict[str, Any]:
+    """Filter results to return only minimal status information."""
+    return {
+        "success": True,
+        "scan_id": results.get("scan_id"),
+        "status": results.get("status"),
+        "is_complete": results.get("is_complete"),
+        "completion_time": results.get("completion_time"),
+        "summary_stats": results.get("summary_stats", {}),
+        "_filter": "minimal",
+    }
+
+
+def _apply_content_filters(
+    results: Dict[str, Any], scanners: str = None, severities: str = None
+) -> Dict[str, Any]:
+    """
+    Filter results by scanner names and/or severity levels.
+
+    Args:
+        results: The full scan results
+        scanners: Comma-separated list of scanner names (e.g., "bandit,semgrep")
+        severities: Comma-separated list of severity levels (e.g., "critical,high")
+
+    Returns:
+        Filtered results with only matching scanners and severities
+    """
+    # Parse filter lists
+    scanner_list = (
+        [s.strip().lower() for s in scanners.split(",")] if scanners else None
+    )
+    severity_list = (
+        [s.strip().lower() for s in severities.split(",")] if severities else None
+    )
+
+    # Create a copy to avoid modifying the original
+    filtered_results = results.copy()
+
+    # Filter scanner_reports
+    if "scanner_reports" in filtered_results and scanner_list:
+        filtered_scanner_reports = {}
+        for scanner_name, scanner_data in filtered_results["scanner_reports"].items():
+            if scanner_name.lower() in scanner_list:
+                filtered_scanner_reports[scanner_name] = scanner_data
+        filtered_results["scanner_reports"] = filtered_scanner_reports
+
+    # Filter raw_results.scanner_results
+    if (
+        "raw_results" in filtered_results
+        and "scanner_results" in filtered_results["raw_results"]
+    ):
+        if scanner_list:
+            filtered_scanner_results = {}
+            for scanner_name, scanner_data in filtered_results["raw_results"][
+                "scanner_results"
+            ].items():
+                if scanner_name.lower() in scanner_list:
+                    # If severity filter is specified, filter severity counts
+                    if severity_list and "severity_counts" in scanner_data:
+                        filtered_severity_counts = {
+                            k: v
+                            for k, v in scanner_data["severity_counts"].items()
+                            if k.lower() in severity_list
+                        }
+                        scanner_data = scanner_data.copy()
+                        scanner_data["severity_counts"] = filtered_severity_counts
+                    filtered_scanner_results[scanner_name] = scanner_data
+            filtered_results["raw_results"]["scanner_results"] = (
+                filtered_scanner_results
+            )
+        elif severity_list:
+            # Only severity filter, apply to all scanners
+            filtered_scanner_results = {}
+            for scanner_name, scanner_data in filtered_results["raw_results"][
+                "scanner_results"
+            ].items():
+                if "severity_counts" in scanner_data:
+                    filtered_severity_counts = {
+                        k: v
+                        for k, v in scanner_data["severity_counts"].items()
+                        if k.lower() in severity_list
+                    }
+                    scanner_data = scanner_data.copy()
+                    scanner_data["severity_counts"] = filtered_severity_counts
+                filtered_scanner_results[scanner_name] = scanner_data
+            filtered_results["raw_results"]["scanner_results"] = (
+                filtered_scanner_results
+            )
+
+    # Filter additional_reports
+    if (
+        "raw_results" in filtered_results
+        and "additional_reports" in filtered_results["raw_results"]
+    ):
+        if scanner_list:
+            filtered_additional_reports = {}
+            for scanner_name, scanner_data in filtered_results["raw_results"][
+                "additional_reports"
+            ].items():
+                if scanner_name.lower() in scanner_list:
+                    filtered_additional_reports[scanner_name] = scanner_data
+            filtered_results["raw_results"]["additional_reports"] = (
+                filtered_additional_reports
+            )
+
+    # Update summary_stats to reflect filtered data
+    if severity_list and "summary_stats" in filtered_results:
+        filtered_summary_stats = {}
+        for key, value in filtered_results["summary_stats"].items():
+            if key.lower() in severity_list or key not in [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "suppressed",
+            ]:
+                filtered_summary_stats[key] = value
+            elif key.lower() not in severity_list and key in [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info",
+                "suppressed",
+            ]:
+                filtered_summary_stats[key] = 0
+        filtered_results["summary_stats"] = filtered_summary_stats
+
+    # Add filter metadata
+    filter_metadata = {}
+    if scanner_list:
+        filter_metadata["scanners"] = scanner_list
+    if severity_list:
+        filter_metadata["severities"] = severity_list
+    filtered_results["_content_filters"] = filter_metadata
+
+    return filtered_results
+
+
+@mcp.tool()
+async def get_scan_summary(
     ctx: Context, output_dir: str = ".ash/ash_output"
 ) -> Dict[str, Any]:
     """
-    Get final results for a completed scan.
+    Get a lightweight summary of scan results without detailed findings.
+
+    This tool returns only high-level metadata and statistics, making it ideal for
+    quick status checks without transferring large amounts of data.
+
+    Returns:
+    - Scan metadata (timestamps, duration, etc.)
+    - Findings count by severity
+    - Findings count by scanner/tool
+    - Scanner execution status
+    - No detailed finding information
+
+    Args:
+        output_dir: Path to the scan output directory (absolute path recommended)
+    """
+    import sys
+
+    print("=" * 80, file=sys.stderr)
+    print("DEBUG: get_scan_summary FUNCTION CALLED!", file=sys.stderr)
+    print("=" * 80, file=sys.stderr)
+
+    try:
+        # Ensure output_dir is an absolute path
+        if not Path(output_dir).is_absolute():
+            output_dir = str(Path.cwd() / output_dir)
+
+        await ctx.info(f"[SUMMARY TOOL] Getting scan summary from: {output_dir}")
+        await ctx.info("[SUMMARY TOOL] *** EXECUTING get_scan_summary FUNCTION ***")
+
+        # Get the raw results
+        results = await mcp_get_scan_results(output_dir=output_dir)
+
+        # Check if there was an actual error (not just missing success key)
+        if "error" in results or not results.get("success"):
+            return results
+
+        # Extract only summary information - no detailed findings
+        summary = {
+            "success": True,
+            "scan_id": results.get("scan_id"),
+            "status": results.get("status"),
+            "is_complete": results.get("is_complete"),
+            "completion_time": results.get("completion_time"),
+            "metadata": {},
+            "findings_summary": {},
+            "scanner_summary": {},
+        }
+
+        # Extract metadata from raw_results
+        raw_results = results.get("raw_results", {})
+        metadata = raw_results.get("metadata", {})
+
+        summary["metadata"] = {
+            "generated_at": metadata.get("generated_at"),
+            "ash_version": metadata.get("tool_version"),
+            "scan_duration_seconds": metadata.get("summary_stats", {}).get("duration"),
+        }
+
+        # Extract findings summary by severity from summary_stats
+        summary_stats = results.get("summary_stats", {})
+        summary["findings_summary"] = {
+            "by_severity": {
+                "critical": summary_stats.get("critical", 0),
+                "high": summary_stats.get("high", 0),
+                "medium": summary_stats.get("medium", 0),
+                "low": summary_stats.get("low", 0),
+                "info": summary_stats.get("info", 0),
+                "suppressed": summary_stats.get("suppressed", 0),
+                "total": summary_stats.get("total", 0),
+                "actionable": summary_stats.get("actionable", 0),
+            },
+            "scan_stats": {
+                "passed": summary_stats.get("passed", 0),
+                "failed": summary_stats.get("failed", 0),
+                "missing": summary_stats.get("missing", 0),
+                "skipped": summary_stats.get("skipped", 0),
+            },
+        }
+
+        # Extract scanner summary from scanner_results
+        scanner_results = raw_results.get("scanner_results", {})
+        summary["scanner_summary"] = {
+            "by_scanner": {},
+            "total_scanners": len(scanner_results),
+            "completed_scanners": 0,
+        }
+
+        for scanner_name, scanner_data in scanner_results.items():
+            status = scanner_data.get("status", "UNKNOWN")
+            severity_counts = scanner_data.get("severity_counts", {})
+
+            scanner_info = {
+                "status": status,
+                "findings_count": scanner_data.get("finding_count", 0),
+                "actionable_findings": scanner_data.get("actionable_finding_count", 0),
+                "suppressed_findings": scanner_data.get("suppressed_finding_count", 0),
+                "duration": scanner_data.get("duration", 0),
+                "by_severity": {
+                    "critical": severity_counts.get("critical", 0),
+                    "high": severity_counts.get("high", 0),
+                    "medium": severity_counts.get("medium", 0),
+                    "low": severity_counts.get("low", 0),
+                    "info": severity_counts.get("info", 0),
+                    "suppressed": severity_counts.get("suppressed", 0),
+                },
+            }
+
+            summary["scanner_summary"]["by_scanner"][scanner_name] = scanner_info
+
+            # Count completed scanners
+            if status in ["PASSED", "FAILED"]:
+                summary["scanner_summary"]["completed_scanners"] += 1
+
+        # Add a marker to confirm this is from get_scan_summary
+        summary["_source_function"] = "get_scan_summary"
+        summary["_note"] = "Lightweight summary - filtered response"
+        summary["_debug"] = "If you see this, the function executed correctly!"
+
+        await ctx.info(
+            f"[SUMMARY TOOL] Returning summary with {len(summary)} top-level keys"
+        )
+
+        return summary
+
+    except Exception as e:
+        logger.exception(f"Error in get_scan_summary: {str(e)}")
+        try:
+            await ctx.error(f"Error getting scan summary: {str(e)}")
+        except Exception:
+            logger.error(f"Failed to send error message to client: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error getting scan summary: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+
+@mcp.tool()
+async def get_scan_result_paths(
+    ctx: Context, output_dir: str = ".ash/ash_output"
+) -> Dict[str, Any]:
+    """
+    Get file paths for all scan result files by type.
+
+    This tool returns the absolute paths to various result files (SARIF, JSON, HTML, etc.)
+    allowing the client to decide which files to read and how to process them.
+
+    Returns paths for:
+    - SARIF report
+    - Flat JSON report
+    - HTML report
+    - CSV report
+    - Markdown summary
+    - OCSF report
+    - CycloneDX SBOM
+    - JUnit XML report
+    - GitLab SAST report
 
     Args:
         output_dir: Path to the scan output directory (absolute path recommended)
@@ -450,39 +972,101 @@ async def get_scan_results(
         if not Path(output_dir).is_absolute():
             output_dir = str(Path.cwd() / output_dir)
 
-        await ctx.info(f"Getting results from ASH scan in directory: {output_dir}")
+        output_path = Path(output_dir)
+        reports_dir = output_path / "reports"
 
-        # Get the raw results
-        results = await mcp_get_scan_results(output_dir=output_dir)
+        await ctx.info(f"Getting scan result paths from: {output_dir}")
 
-        if not results.get("success", False):
-            return results
+        # Check if output directory exists
+        if not output_path.exists():
+            return {
+                "success": False,
+                "error": f"Output directory does not exist: {output_dir}",
+                "error_type": "DirectoryNotFound",
+            }
 
-        # Process the raw results to remove specified keys
-        if "raw_results" in results:
-            raw_results = results["raw_results"]
+        # Check if reports directory exists
+        if not reports_dir.exists():
+            return {
+                "success": False,
+                "error": f"Reports directory does not exist: {reports_dir}",
+                "error_type": "DirectoryNotFound",
+            }
 
-            # Remove specified keys
-            keys_to_remove = [
-                "ash_config",
-                "validation_checkpoints",
-                "sarif",
-                "cyclonedx",
-            ]
-            for key in keys_to_remove:
-                if key in raw_results:
-                    del raw_results[key]
+        # Define expected report files
+        report_files = {
+            "sarif": reports_dir / "ash.sarif",
+            "flat_json": reports_dir / "ash.flat.json",
+            "html": reports_dir / "ash.html",
+            "csv": reports_dir / "ash.csv",
+            "markdown": reports_dir / "ash.summary.md",
+            "text": reports_dir / "ash.summary.txt",
+            "ocsf": reports_dir / "ash.ocsf.json",
+            "cyclonedx": reports_dir / "ash.cdx.json",
+            "junit_xml": reports_dir / "ash.junit.xml",
+            "gitlab_sast": reports_dir / "ash.gl-sast-report.json",
+        }
 
-            # Update the raw_results in the response
-            results["raw_results"] = raw_results
+        # Build response with file paths and existence status
+        result = {
+            "success": True,
+            "output_dir": str(output_path),
+            "reports_dir": str(reports_dir),
+            "files": {},
+        }
 
-        return results
+        for report_type, file_path in report_files.items():
+            result["files"][report_type] = {
+                "path": str(file_path),
+                "exists": file_path.exists(),
+                "size_bytes": file_path.stat().st_size if file_path.exists() else 0,
+            }
+
+        # Add aggregated results file
+        aggregated_file = output_path / "ash_aggregated_results.json"
+        result["files"]["aggregated_results"] = {
+            "path": str(aggregated_file),
+            "exists": aggregated_file.exists(),
+            "size_bytes": aggregated_file.stat().st_size
+            if aggregated_file.exists()
+            else 0,
+        }
+
+        # Add scanner-specific results
+        scanners_dir = output_path / "scanners"
+        if scanners_dir.exists():
+            result["scanners_dir"] = str(scanners_dir)
+            result["scanner_results"] = {}
+
+            for scanner_dir in scanners_dir.iterdir():
+                if scanner_dir.is_dir():
+                    scanner_name = scanner_dir.name
+                    result["scanner_results"][scanner_name] = {}
+
+                    for target_dir in scanner_dir.iterdir():
+                        if target_dir.is_dir():
+                            target_name = target_dir.name
+                            result_file = target_dir / "ASH.ScanResults.json"
+
+                            result["scanner_results"][scanner_name][target_name] = {
+                                "path": str(result_file),
+                                "exists": result_file.exists(),
+                                "size_bytes": result_file.stat().st_size
+                                if result_file.exists()
+                                else 0,
+                            }
+
+        return result
+
     except Exception as e:
-        logger.exception(f"Error in get_scan_results: {str(e)}")
-        await ctx.error(f"Error getting scan results: {str(e)}")
+        logger.exception(f"Error in get_scan_result_paths: {str(e)}")
+        try:
+            await ctx.error(f"Error getting scan result paths: {str(e)}")
+        except Exception:
+            logger.error(f"Failed to send error message to client: {str(e)}")
         return {
             "success": False,
-            "error": f"Error getting scan results: {str(e)}",
+            "error": f"Error getting scan result paths: {str(e)}",
             "error_type": type(e).__name__,
         }
 
@@ -651,13 +1235,23 @@ Focus on actionable insights and practical remediation steps."""
 
 
 def run_mcp_server():
-    """Run the MCP server."""
+    """Run the MCP server with improved error handling."""
     try:
         # Run the MCP server
         mcp.run()
+    except KeyboardInterrupt:
+        logger.info("MCP server stopped by user")
     except Exception as e:
-        logger.exception(f"Error running MCP server: {str(e)}")
-        raise
+        # Check if it's a connection-related error
+        error_str = str(e)
+        if "ClosedResourceError" in error_str or "TaskGroup" in error_str:
+            logger.warning(
+                "MCP server connection closed unexpectedly. "
+                "This may happen if the client disconnects during a long-running operation."
+            )
+        else:
+            logger.exception(f"Error running MCP server: {error_str}")
+        # Don't re-raise - allow graceful shutdown
 
 
 if __name__ == "__main__":

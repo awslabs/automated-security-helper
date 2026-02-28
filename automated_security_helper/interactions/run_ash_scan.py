@@ -217,6 +217,18 @@ def run_ash_scan(
             logger.error(
                 f"Container execution failed with code {container_result.returncode}"
             )
+            # Print stderr to help debug the issue
+            if hasattr(container_result, "stderr") and container_result.stderr:
+                logger.error(f"Container stderr:\n{container_result.stderr}")
+                print(
+                    f"\n[bold red]Container Error Output:[/bold red]\n{container_result.stderr}"
+                )
+            if hasattr(container_result, "stdout") and container_result.stdout:
+                logger.debug(f"Container stdout:\n{container_result.stdout}")
+                if debug:
+                    print(
+                        f"\n[bold blue]Container Standard Output:[/bold blue]\n{container_result.stdout}"
+                    )
 
         # Load the results from the output file
         output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
