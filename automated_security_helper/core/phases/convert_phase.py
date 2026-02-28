@@ -117,7 +117,7 @@ class ConvertPhase(EnginePhase):
                 "No enabled converter plugins found, skipping conversion phase"
             )
             self.update_progress(100, "No converters to run")
-            return converted_paths
+            return aggregated_results  # Return aggregated_results, not converted_paths!
 
         # Create task for conversion - this is the main phase task
         convert_task = self.progress_display.add_task(
