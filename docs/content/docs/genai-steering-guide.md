@@ -6,19 +6,32 @@ This document provides comprehensive guidance for GenAI tools (AI assistants, LL
 
 ## Quick Reference
 
-- **Primary Results File**: `ash_aggregated_results.json` (machine-readable, source of truth)
+**Recommended Approach for GenAI Tools**:
+1. **For most use cases**: Use `reports/ash.flat.json` (simpler structure, smaller size)
+2. **For complete data**: Use `ash_aggregated_results.json` (but parse efficiently - see warnings below)
+3. **For dependencies**: Use `reports/ash.cdx.json` (CycloneDX SBOM)
+4. **For CI/CD integration**: Use `reports/ash.junit.xml` or `reports/ash.csv`
+
+**File Locations**:
+- **Primary Results File**: `ash_aggregated_results.json` (complete but large - 1-10MB+)
+- **Simplified Results**: `reports/ash.flat.json` (recommended for most use cases)
 - **Human Reports**: HTML, Markdown, Text (NOT for machine parsing)
-- **Dependencies**: CycloneDX SBOM at `reports/ash.cdx.json`
+- **Dependencies**: `reports/ash.cdx.json` (CycloneDX SBOM)
 - **Configuration**: `.ash/.ash.yaml` (YAML format with JSON schema)
 - **Suppressions**: Defined in configuration file under `global_settings.suppressions`
+
+**Tool Requirements**:
+- **Required**: Python 3.x (for reliable JSON parsing)
+- **Optional but recommended**: `jq` (for efficient command-line queries)
+- **Fallback**: `grep`, `awk` (basic text processing, always available)
 
 ## Critical Rules for GenAI Tools
 
 ### 1. Always Use JSON Formats for Machine Processing
 
 **DO:**
-- Read `ash_aggregated_results.json` for complete scan results
-- Use `reports/ash.flat.json` for simplified finding structure
+- Read `ash_aggregated_results.json` for complete scan results (but see file size warnings below)
+- Use `reports/ash.flat.json` for simplified finding structure (recommended for most use cases)
 - Use `reports/ash.sarif` for SARIF-compliant tooling
 - Use `reports/ash.cdx.json` for dependency analysis
 
@@ -27,7 +40,63 @@ This document provides comprehensive guidance for GenAI tools (AI assistants, LL
 - Parse Markdown summaries (`reports/ash.summary.md`) - may have formatting inconsistencies
 - Parse Text summaries (`reports/ash.summary.txt`) - lossy representation
 
-### 2. Severity Discrepancies - Source of Truth
+### 2. Handle Large Files Efficiently
+
+**CRITICAL**: ASH result files can be very large (1-10MB+). Always:
+- Check file size before loading into memory
+- Use streaming parsers for files >5MB
+- Extract only the data you need
+- Consider using simpler formats (`ash.flat.json`, `ash.csv`)
+- Provide progress indicators for large file operations
+
+**Example - Check before loading**:
+```python
+import os
+import json
+
+results_file = 'ash_aggregated_results.json'
+file_size_mb = os.path.getsize(results_file) / (1024 * 1024)
+
+if file_size_mb > 5:
+    print(f"Large file detected ({file_size_mb:.1f}MB). Using streaming parser...")
+    # Use streaming approach
+else:
+    # Safe to load into memory
+    with open(results_file) as f:
+        data = json.load(f)
+```
+
+### 3. Check Tool Availability
+
+**IMPORTANT**: Never assume tools like `jq` are installed. Always:
+- Check if tools are available before using them
+- Provide fallback methods (Python, grep, awk)
+- Use the most reliable method available
+- Document which tools are required vs optional
+
+**Tool Availability Check**:
+```python
+import shutil
+
+# Check for jq
+has_jq = shutil.which('jq') is not None
+
+# Check for Python (almost always available)
+has_python = shutil.which('python3') is not None or shutil.which('python') is not None
+
+# Use best available method
+if has_jq:
+    # Use jq for efficiency
+    pass
+elif has_python:
+    # Use Python for reliability
+    pass
+else:
+    # Fallback to grep/awk
+    pass
+```
+
+### 4. Severity Discrepancies - Source of Truth
 
 **IMPORTANT**: Severity levels may differ between report formats due to underlying scanner behavior.
 
@@ -55,7 +124,7 @@ This document provides comprehensive guidance for GenAI tools (AI assistants, LL
 }
 ```
 
-### 3. Understanding Suppressed vs Actionable Findings
+### 5. Understanding Suppressed vs Actionable Findings
 
 **Key Concepts**:
 - **Total Findings**: All findings detected by scanners
@@ -106,6 +175,96 @@ This document provides comprehensive guidance for GenAI tools (AI assistants, LL
 ```
 
 ## Working with ash_aggregated_results.json
+
+### Important: File Size Considerations
+
+**WARNING**: The `ash_aggregated_results.json` file can be very large (often 1-10MB, sometimes larger for big codebases).
+
+**Best Practices**:
+1. **DO NOT load the entire file into memory** if you only need specific data
+2. **Use streaming JSON parsers** when possible
+3. **Extract only what you need** using command-line tools or streaming libraries
+4. **Consider using alternative formats** for specific use cases:
+   - `reports/ash.flat.json` - Simplified structure, smaller size
+   - `reports/ash.csv` - Easy to filter and query
+   - `reports/ash.sarif` - Industry standard, well-supported
+
+### Parsing Strategies
+
+#### Strategy 1: Command-Line Tools (Recommended)
+
+**If jq is available** (most Linux/macOS systems):
+```bash
+# Extract just summary stats
+jq '.metadata.summary_stats' ash_aggregated_results.json
+
+# Get specific scanner results
+jq '.scanner_results.bandit' ash_aggregated_results.json
+```
+
+**If jq is NOT available**, use Python (universally available):
+```bash
+# Extract summary stats
+python3 -c "import json; data=json.load(open('ash_aggregated_results.json')); print(json.dumps(data['metadata']['summary_stats'], indent=2))"
+
+# Get actionable count
+python3 -c "import json; print(json.load(open('ash_aggregated_results.json'))['metadata']['summary_stats']['actionable'])"
+```
+
+**Alternative: Use grep for simple extractions** (always available):
+```bash
+# Get actionable count (quick and dirty)
+grep -o '"actionable": [0-9]*' ash_aggregated_results.json | grep -o '[0-9]*'
+
+# Check for critical findings
+grep -o '"critical": [0-9]*' ash_aggregated_results.json | head -1
+```
+
+#### Strategy 2: Streaming JSON Parsers (For Large Files)
+
+**Python with ijson** (streaming parser):
+```python
+import ijson
+
+# Stream parse - memory efficient
+with open('ash_aggregated_results.json', 'rb') as f:
+    # Extract just summary stats without loading entire file
+    parser = ijson.items(f, 'metadata.summary_stats')
+    summary_stats = next(parser)
+    print(f"Actionable findings: {summary_stats['actionable']}")
+```
+
+**Python standard library** (load specific sections):
+```python
+import json
+
+# Load and extract only what you need
+with open('ash_aggregated_results.json') as f:
+    data = json.load(f)
+    
+# Immediately extract and discard the rest
+summary = data['metadata']['summary_stats']
+del data  # Free memory
+
+print(f"Actionable: {summary['actionable']}")
+print(f"Critical: {summary['critical']}")
+```
+
+#### Strategy 3: Use Simpler Formats
+
+**For most use cases, use the flat JSON format instead**:
+```python
+# reports/ash.flat.json is much smaller and easier to parse
+import json
+
+with open('reports/ash.flat.json') as f:
+    findings = json.load(f)
+
+# Simpler structure, direct access to findings
+for finding in findings:
+    if finding['severity'] in ['CRITICAL', 'HIGH']:
+        print(f"{finding['file_path']}: {finding['message']}")
+```
 
 ### Schema Overview
 
@@ -177,7 +336,11 @@ Contains findings organized by scanner name:
 }
 ```
 
-### Efficient Querying with jq
+### Efficient Querying
+
+**IMPORTANT**: Always check if tools are available before using them. Provide fallbacks for maximum compatibility.
+
+#### With jq (if available)
 
 **Get actionable findings count**:
 ```bash
@@ -202,6 +365,123 @@ jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == 
 **Count findings by severity**:
 ```bash
 jq '[.scanner_results | to_entries[] | .value.findings[] | .severity] | group_by(.) | map({severity: .[0], count: length})' ash_aggregated_results.json
+```
+
+#### Without jq (Python alternatives)
+
+**Get actionable findings count**:
+```bash
+python3 -c "import json; print(json.load(open('ash_aggregated_results.json'))['metadata']['summary_stats']['actionable'])"
+```
+
+**Get all critical/high findings**:
+```python
+import json
+
+with open('ash_aggregated_results.json') as f:
+    data = json.load(f)
+
+for scanner, results in data['scanner_results'].items():
+    for finding in results.get('findings', []):
+        if finding['severity'] in ['CRITICAL', 'HIGH']:
+            print(f"{scanner}: {finding['file_path']}:{finding['line_start']} - {finding['message']}")
+```
+
+**Get findings by scanner**:
+```python
+import json
+
+with open('ash_aggregated_results.json') as f:
+    data = json.load(f)
+
+bandit_findings = data['scanner_results']['bandit']['findings']
+print(json.dumps(bandit_findings, indent=2))
+```
+
+**Count findings by severity**:
+```python
+import json
+from collections import Counter
+
+with open('ash_aggregated_results.json') as f:
+    data = json.load(f)
+
+severities = []
+for scanner, results in data['scanner_results'].items():
+    for finding in results.get('findings', []):
+        severities.append(finding['severity'])
+
+counts = Counter(severities)
+for severity, count in counts.items():
+    print(f"{severity}: {count}")
+```
+
+#### Without jq or Python (grep/awk alternatives)
+
+**Get actionable findings count** (basic but works):
+```bash
+grep -o '"actionable": [0-9]*' ash_aggregated_results.json | head -1 | grep -o '[0-9]*'
+```
+
+**Check for critical findings**:
+```bash
+grep -c '"severity": "CRITICAL"' ash_aggregated_results.json
+```
+
+**List all severity levels found**:
+```bash
+grep -o '"severity": "[A-Z]*"' ash_aggregated_results.json | sort -u
+```
+
+#### Recommended Approach for GenAI Tools
+
+**1. Check tool availability first**:
+```python
+import shutil
+import subprocess
+
+def get_actionable_count(results_file):
+    """Get actionable findings count using best available method."""
+    
+    # Method 1: Try jq (fastest)
+    if shutil.which('jq'):
+        try:
+            result = subprocess.run(
+                ['jq', '.metadata.summary_stats.actionable', results_file],
+                capture_output=True, text=True, check=True
+            )
+            return int(result.stdout.strip())
+        except:
+            pass
+    
+    # Method 2: Use Python (most reliable)
+    try:
+        import json
+        with open(results_file) as f:
+            data = json.load(f)
+        return data['metadata']['summary_stats']['actionable']
+    except:
+        pass
+    
+    # Method 3: Fallback to grep (always available)
+    try:
+        result = subprocess.run(
+            ['grep', '-o', '"actionable": [0-9]*', results_file],
+            capture_output=True, text=True, check=True
+        )
+        return int(result.stdout.split(':')[1].strip())
+    except:
+        return None
+```
+
+**2. Use the flat JSON format when possible**:
+```python
+# Simpler, smaller, easier to parse
+with open('reports/ash.flat.json') as f:
+    findings = json.load(f)
+
+actionable = [f for f in findings if not f.get('suppressed', False)]
+critical_high = [f for f in actionable if f['severity'] in ['CRITICAL', 'HIGH']]
 ```
 
 ## Working with CycloneDX SBOM
@@ -278,7 +558,11 @@ The CycloneDX SBOM (`reports/ash.cdx.json`) provides a complete Software Bill of
 }
 ```
 
-### Querying Dependencies with jq
+### Querying Dependencies
+
+**IMPORTANT**: CycloneDX files can also be large. Use efficient parsing methods.
+
+#### With jq (if available)
 
 **List all components**:
 ```bash
@@ -303,6 +587,85 @@ jq '[.components[].licenses[]?.license.id] | unique' ash.cdx.json
 **Find dependency tree for a component**:
 ```bash
 jq --arg pkg "pkg:pypi/requests@2.31.0" '.dependencies[] | select(.ref == $pkg)' ash.cdx.json
+```
+
+#### Without jq (Python alternatives)
+
+**List all components**:
+```python
+import json
+
+with open('reports/ash.cdx.json') as f:
+    sbom = json.load(f)
+
+for component in sbom.get('components', []):
+    print(f"{component['name']} {component['version']} ({component['type']})")
+```
+
+**Find components with vulnerabilities**:
+```python
+import json
+
+with open('reports/ash.cdx.json') as f:
+    sbom = json.load(f)
+
+vulnerable_refs = set()
+for vuln in sbom.get('vulnerabilities', []):
+    for affect in vuln.get('affects', []):
+        vulnerable_refs.add(affect['ref'])
+
+for ref in sorted(vulnerable_refs):
+    print(ref)
+```
+
+**Get high/critical vulnerabilities**:
+```python
+import json
+
+with open('reports/ash.cdx.json') as f:
+    sbom = json.load(f)
+
+for vuln in sbom.get('vulnerabilities', []):
+    for rating in vuln.get('ratings', []):
+        if rating.get('severity') in ['high', 'critical']:
+            print(f"{vuln['id']}: {rating['severity']} (score: {rating.get('score', 'N/A')})")
+            for affect in vuln.get('affects', []):
+                print(f"  Affects: {affect['ref']}")
+            break
+```
+
+**List all licenses**:
+```python
+import json
+
+with open('reports/ash.cdx.json') as f:
+    sbom = json.load(f)
+
+licenses = set()
+for component in sbom.get('components', []):
+    for license_info in component.get('licenses', []):
+        if 'license' in license_info and 'id' in license_info['license']:
+            licenses.add(license_info['license']['id'])
+
+for license_id in sorted(licenses):
+    print(license_id)
+```
+
+#### Without jq or Python (grep alternatives)
+
+**Count total components**:
+```bash
+grep -c '"type": "library"' reports/ash.cdx.json
+```
+
+**Find if specific package exists**:
+```bash
+grep -i "requests" reports/ash.cdx.json
+```
+
+**Count vulnerabilities**:
+```bash
+grep -c '"id": "CVE-' reports/ash.cdx.json
 ```
 
 ## Configuration File Schema
