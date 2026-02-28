@@ -1188,11 +1188,121 @@ If using ASH via the Model Context Protocol (MCP) server, follow these guideline
 
 ### Available Tools
 - `run_ash_scan` - Start a security scan
+- `get_scan_progress` - Get current progress and partial results
 - `get_scan_results` - Get scan results with filtering
 - `get_scan_summary` - Get lightweight summary
 - `get_scan_result_paths` - Get file paths for all reports
 - `list_active_scans` - List running scans
 - `cancel_scan` - Cancel a running scan
+
+### Managing Long-Running Scans
+
+**CRITICAL**: ASH scans can take 30-120+ seconds. MCP connections may timeout if you don't keep them alive.
+
+#### ❌ WRONG: Sleep and Wait (Connection Timeout)
+
+```python
+# This will cause connection timeout!
+result = run_ash_scan(source_dir="/path/to/project")
+scan_id = result['scan_id']
+
+# Sleeping for 60+ seconds causes MCP connection to close
+time.sleep(60)
+
+# This will fail - connection already timed out
+summary = get_scan_summary()  # ERROR: Connection closed
+```
+
+#### ✅ CORRECT: Poll Progress (Keep Connection Alive)
+
+```python
+# 1. Start scan (returns immediately with scan_id)
+result = run_ash_scan(source_dir="/path/to/project")
+scan_id = result['scan_id']
+
+# 2. Poll progress periodically to keep connection alive
+while True:
+    progress = get_scan_progress(scan_id=scan_id)
+    
+    # Check if scan is complete
+    if progress.get('is_complete') or progress.get('status') in ['completed', 'failed', 'cancelled']:
+        break
+    
+    # Wait 5 seconds before next check (keeps connection alive)
+    time.sleep(5)
+
+# 3. Get results after completion
+if progress.get('status') == 'completed':
+    # Use filtered queries to reduce data transfer
+    results = get_scan_results(
+        output_dir=progress['output_directory'],
+        filter_level="summary",
+        actionable_only=True,
+        severities="critical,high"
+    )
+```
+
+#### Best Practice: Progress Monitoring with Status Updates
+
+```python
+import time
+
+def run_ash_scan_with_monitoring(source_dir: str) -> dict:
+    """Run ASH scan with proper progress monitoring."""
+    
+    # Start scan
+    result = run_ash_scan(source_dir=source_dir)
+    if not result.get('success'):
+        return {'error': result.get('error', 'Failed to start scan')}
+    
+    scan_id = result['scan_id']
+    print(f"Scan started: {scan_id}")
+    
+    # Monitor progress
+    last_status = None
+    while True:
+        progress = get_scan_progress(scan_id=scan_id)
+        
+        # Show status updates
+        current_status = progress.get('message', 'Running...')
+        if current_status != last_status:
+            print(f"Status: {current_status}")
+            last_status = current_status
+        
+        # Check completion
+        if progress.get('is_complete'):
+            break
+        
+        if progress.get('status') in ['failed', 'cancelled']:
+            return {'error': f"Scan {progress['status']}: {progress.get('error', 'Unknown error')}"}
+        
+        # Wait before next poll (keeps connection alive)
+        time.sleep(5)
+    
+    # Get filtered results
+    output_dir = progress.get('output_directory', f"{source_dir}/.ash/ash_output")
+    results = get_scan_results(
+        output_dir=output_dir,
+        filter_level="summary",
+        actionable_only=True,
+        severities="critical,high,medium"
+    )
+    
+    return results
+```
+
+#### Why This Matters
+
+1. **Connection Keepalive**: Polling `get_scan_progress()` every 5 seconds keeps the MCP connection active
+2. **Status Updates**: You can show progress to users instead of appearing frozen
+3. **Early Failure Detection**: Detect scan failures immediately instead of waiting for timeout
+4. **Efficient Data Transfer**: Use filtered queries after completion to get only what you need
+
+#### Recommended Polling Intervals
+
+- **Development/Interactive**: 3-5 seconds (responsive feedback)
+- **CI/CD/Automated**: 10-15 seconds (reduce overhead)
+- **Never**: >30 seconds (risks connection timeout)
 
 ### Filtering Results
 
