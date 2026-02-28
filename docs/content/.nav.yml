@@ -47,7 +47,6 @@ nav:
       - MCP Streaming Guide: tutorials/mcp-streaming-guide.md
   - Advanced Usage:
       - Advanced Features: docs/advanced-usage.md
-      - GenAI Integration Guide: docs/genai-steering-guide.md
       - MCP Server Guide: docs/mcp-server-guide.md
       - MCP Performance and Scalability: docs/mcp-performance-scalability.md
       - Plugin Development:

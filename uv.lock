@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10, <4"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -40,7 +40,7 @@ wheels = [
 
 [[package]]
 name = "automated-security-helper"
-version = "3.2.2"
+version = "3.1.13"
 source = { editable = "." }
 dependencies = [
     { name = "attrs" },
