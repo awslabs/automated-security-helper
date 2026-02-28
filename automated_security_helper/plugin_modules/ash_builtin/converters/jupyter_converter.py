@@ -101,15 +101,30 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
 
         This method implements the enhanced validation workflow that:
         1. Checks if UV tool is available when required
-        2. Attempts explicit tool installation if needed
-        3. Falls back to existing validation methods
-        4. Provides comprehensive logging for troubleshooting
+        2. Checks if tool is already available (UV or pre-installed)
+        3. Attempts explicit tool installation if needed
+        4. Falls back to existing validation methods
+        5. Provides comprehensive logging for troubleshooting
 
         Returns:
             True if converter is ready to use, False otherwise
         """
         if self.use_uv_tool:
-            # Attempt explicit tool installation
+            # Check if tool is already available (UV-installed or pre-installed)
+            installation_info = self._get_tool_installation_info()
+
+            if installation_info.get("available"):
+                # Tool is available either via UV or pre-installed
+                source = installation_info.get("preferred_source", "unknown")
+                if source == "uv":
+                    ASH_LOGGER.debug(f"{self.command} already installed via UV tool")
+                elif source == "pre_installed":
+                    ASH_LOGGER.debug(
+                        f"Using pre-installed {self.command} at {installation_info.get('pre_installed_path')}"
+                    )
+                return True
+
+            # Tool not available, attempt installation
             installation_success = self._install_uv_tool(
                 timeout=self.config.options.install_timeout
             )
