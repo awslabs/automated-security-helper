@@ -60,6 +60,17 @@ def get_genai_guide(
         "-o",
         help="Output path for the GenAI integration guide",
     ),
+    from_github: bool = typer.Option(
+        False,
+        "--from-github",
+        help="Fetch from GitHub instead of local installation",
+    ),
+    branch: str = typer.Option(
+        "main",
+        "--branch",
+        "-b",
+        help="GitHub branch to fetch from when using --from-github (default: main)",
+    ),
 ):
     """Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 
@@ -72,33 +83,14 @@ def get_genai_guide(
     - Configuration file schema
     - Common pitfalls and solutions
     """
-    import importlib.resources
+    import requests
     from pathlib import Path
 
-    try:
-        # Try to read from the installed package
-        try:
-            # Python 3.9+
-            guide_content = (
-                importlib.resources.files("automated_security_helper")
-                .joinpath("../docs/content/docs/genai-steering-guide.md")
-                .read_text()
-            )
-        except AttributeError:
-            # Python 3.8 fallback
-            with importlib.resources.path(
-                "automated_security_helper", "__init__.py"
-            ) as pkg_path:
-                guide_path = (
-                    pkg_path.parent.parent
-                    / "docs"
-                    / "content"
-                    / "docs"
-                    / "genai-steering-guide.md"
-                )
-                guide_content = guide_path.read_text()
-    except Exception:
-        # Fallback: try to read from current directory (development mode)
+    guide_content = None
+    source = None
+
+    # Try local file first (unless --from-github is specified)
+    if not from_github:
         try:
             guide_path = (
                 Path(__file__).parent.parent.parent
@@ -107,14 +99,28 @@ def get_genai_guide(
                 / "docs"
                 / "genai-steering-guide.md"
             )
-            guide_content = guide_path.read_text()
-        except Exception as e:
-            typer.echo(f"Error: Could not locate GenAI guide: {e}", err=True)
-            typer.echo("\nYou can download it directly from:", err=True)
+            if guide_path.exists():
+                guide_content = guide_path.read_text()
+                source = "local"
+        except Exception:
+            pass
+
+    # If local file not found or --from-github specified, try GitHub
+    if guide_content is None:
+        github_url = f"https://raw.githubusercontent.com/awslabs/automated-security-helper/{branch}/docs/content/docs/genai-steering-guide.md"
+
+        try:
             typer.echo(
-                "https://raw.githubusercontent.com/awslabs/automated-security-helper/main/docs/content/docs/genai-steering-guide.md",
-                err=True,
+                f"Fetching GenAI Integration Guide from GitHub ({branch} branch)..."
             )
+            response = requests.get(github_url, timeout=10)
+            response.raise_for_status()
+            guide_content = response.text
+            source = "github"
+        except requests.RequestException as e:
+            typer.echo(f"Error: Could not fetch from GitHub: {e}", err=True)
+            typer.echo("\nYou can download it directly from:", err=True)
+            typer.echo(github_url, err=True)
             raise typer.Exit(1)
 
     # Write to output file
@@ -122,7 +128,9 @@ def get_genai_guide(
     output_file.write_text(guide_content)
 
     typer.echo(f"✓ GenAI Integration Guide saved to: {output_file.absolute()}")
-    typer.echo(f"\nFile size: {len(guide_content):,} bytes")
+    if source:
+        typer.echo(f"  Source: {source}")
+    typer.echo(f"  File size: {len(guide_content):,} bytes")
     typer.echo("\nThis guide can be provided to AI assistants to help them:")
     typer.echo("  • Use the correct ASH output formats (JSON, not HTML)")
     typer.echo("  • Handle severity discrepancies properly")
