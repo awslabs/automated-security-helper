@@ -52,6 +52,93 @@ def register_mcp_command():
 register_mcp_command()
 
 
+@app.command(name="get-genai-guide")
+def get_genai_guide(
+    output_path: str = typer.Option(
+        "ash-genai-guide.md",
+        "--output",
+        "-o",
+        help="Output path for the GenAI integration guide",
+    ),
+    from_github: bool = typer.Option(
+        False,
+        "--from-github",
+        help="Fetch from GitHub instead of local installation",
+    ),
+    branch: str = typer.Option(
+        "main",
+        "--branch",
+        "-b",
+        help="GitHub branch to fetch from when using --from-github (default: main)",
+    ),
+):
+    """Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
+
+    This guide provides comprehensive instructions for GenAI tools on how to properly
+    interact with ASH scan results, including:
+    - Correct file formats to use (JSON vs HTML)
+    - How to handle severity discrepancies
+    - Creating suppressions properly
+    - Working with CycloneDX SBOM for dependencies
+    - Configuration file schema
+    - Common pitfalls and solutions
+    """
+    import requests
+    from pathlib import Path
+
+    guide_content = None
+    source = None
+
+    # Try local file first (unless --from-github is specified)
+    if not from_github:
+        try:
+            guide_path = (
+                Path(__file__).parent.parent.parent
+                / "docs"
+                / "content"
+                / "docs"
+                / "genai-steering-guide.md"
+            )
+            if guide_path.exists():
+                guide_content = guide_path.read_text()
+                source = "local"
+        except Exception:
+            pass
+
+    # If local file not found or --from-github specified, try GitHub
+    if guide_content is None:
+        github_url = f"https://raw.githubusercontent.com/awslabs/automated-security-helper/{branch}/docs/content/docs/genai-steering-guide.md"
+
+        try:
+            typer.echo(
+                f"Fetching GenAI Integration Guide from GitHub ({branch} branch)..."
+            )
+            response = requests.get(github_url, timeout=10)
+            response.raise_for_status()
+            guide_content = response.text
+            source = "github"
+        except requests.RequestException as e:
+            typer.echo(f"Error: Could not fetch from GitHub: {e}", err=True)
+            typer.echo("\nYou can download it directly from:", err=True)
+            typer.echo(github_url, err=True)
+            raise typer.Exit(1)
+
+    # Write to output file
+    output_file = Path(output_path)
+    output_file.write_text(guide_content)
+
+    typer.echo(f"✓ GenAI Integration Guide saved to: {output_file.absolute()}")
+    if source:
+        typer.echo(f"  Source: {source}")
+    typer.echo(f"  File size: {len(guide_content):,} bytes")
+    typer.echo("\nThis guide can be provided to AI assistants to help them:")
+    typer.echo("  • Use the correct ASH output formats (JSON, not HTML)")
+    typer.echo("  • Handle severity discrepancies properly")
+    typer.echo("  • Create suppressions correctly")
+    typer.echo("  • Analyze dependencies using CycloneDX SBOM")
+    typer.echo("  • Avoid common pitfalls and known issues")
+
+
 app.add_typer(config_app, name="config")
 app.add_typer(dependencies_app, name="dependencies")
 app.add_typer(inspect_app, name="inspect")

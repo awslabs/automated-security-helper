@@ -182,6 +182,25 @@ class UVToolRunner:
         if not self.is_uv_available():
             return False
 
+        # Check if tool is already installed - skip installation if it exists
+        if self.is_tool_installed(tool_name):
+            # Tool already exists, no need to reinstall
+            return True
+
+        # Check if tool executable exists but is broken (e.g., broken symlink)
+        # This can happen if UV tool was uninstalled but symlinks remain
+        import shutil
+        import logging
+
+        tool_path = shutil.which(tool_name)
+        if tool_path and not os.path.exists(tool_path):
+            # Broken symlink detected - remove it so UV can recreate
+            try:
+                os.remove(tool_path)
+                logging.debug(f"Removed broken symlink for {tool_name} at {tool_path}")
+            except Exception as e:
+                logging.warning(f"Failed to remove broken symlink for {tool_name}: {e}")
+
         # Check for offline mode
         is_offline = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in [
             "YES",

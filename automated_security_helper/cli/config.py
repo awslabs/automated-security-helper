@@ -374,3 +374,110 @@ def validate_plugin_dependencies(
 
 if __name__ == "__main__":
     config_app()
+
+
+@config_app.command()
+def validate(
+    config: Annotated[
+        str,
+        typer.Option(
+            "--config",
+            "-c",
+            help="The path to the configuration file to validate. By default, ASH looks for config files in .ash/.ash.yaml",
+            envvar="ASH_CONFIG",
+        ),
+    ] = ".ash/.ash.yaml",
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+    ] = False,
+):
+    """Validate an ASH configuration file for common issues.
+
+    This command checks for:
+    - Invalid or internal-only fields in scanners/reporters/converters
+    - Duplicate top-level field definitions
+    - Missing required fields
+    - Invalid top-level sections
+    - YAML/JSON syntax errors
+
+    Examples:
+        # Validate default config
+        ash config validate
+
+        # Validate specific config file
+        ash config validate --config path/to/config.yaml
+
+        # Validate with verbose output
+        ash config validate --verbose
+    """
+    # Setup logging
+    logger = get_logger(
+        name="ash.cli.config.validate",
+        level=logging.DEBUG
+        if debug
+        else (logging.INFO if verbose else logging.WARNING),
+    )
+
+    try:
+        from automated_security_helper.config.config_validator import ConfigValidator
+
+        config_path = Path(config)
+
+        if not config_path.exists():
+            typer.secho(f"❌ Config file not found: {config_path}", fg=typer.colors.RED)
+            raise typer.Exit(1)
+
+        typer.secho(
+            f"Validating configuration file: {config_path}", fg=typer.colors.BLUE
+        )
+
+        is_valid, errors = ConfigValidator.validate_config_file(config_path)
+
+        if is_valid:
+            typer.secho("✅ Configuration is valid!", fg=typer.colors.GREEN)
+            typer.secho(
+                "\nThe configuration file passed all validation checks.",
+                fg=typer.colors.GREEN,
+            )
+            return
+
+        # Configuration has errors
+        typer.secho(
+            f"\n❌ Configuration validation failed with {len(errors)} error(s):",
+            fg=typer.colors.RED,
+        )
+        for i, error in enumerate(errors, 1):
+            typer.secho(f"  {i}. {error}", fg=typer.colors.RED)
+
+        typer.secho(
+            "\n💡 Common fixes:",
+            fg=typer.colors.YELLOW,
+        )
+        typer.secho(
+            "  - Remove internal-only fields like 'name', 'extension', 'tool_version' from scanner/reporter configs",
+            fg=typer.colors.YELLOW,
+        )
+        typer.secho(
+            "  - Remove invalid top-level sections like 'build' or 'mcp-resource-management'",
+            fg=typer.colors.YELLOW,
+        )
+        typer.secho(
+            "  - Check for duplicate field definitions in your YAML file",
+            fg=typer.colors.YELLOW,
+        )
+        typer.secho(
+            "\n📖 See the ASH configuration documentation for the correct format.",
+            fg=typer.colors.BLUE,
+        )
+
+        raise typer.Exit(1)
+
+    except typer.Exit:
+        raise
+    except Exception as e:
+        logger.error(f"Error validating config: {e}")
+        typer.secho(f"❌ Error validating config: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)

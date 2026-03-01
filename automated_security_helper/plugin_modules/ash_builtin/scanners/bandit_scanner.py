@@ -190,40 +190,51 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         # For UV tool-based scanners, attempt explicit installation if needed
         if self.use_uv_tool:
-            # Check if tool is already installed
-            if not self._is_uv_tool_installed():
-                self._plugin_log(
-                    "Bandit not found via UV tool, attempting explicit installation...",
-                    level=logging.INFO,
-                )
+            # Check if tool is already available (UV-installed or pre-installed)
+            installation_info = self._get_tool_installation_info()
 
-                # Attempt explicit tool installation with configured timeout
-                timeout = self.config.options.install_timeout if self.config else 300
-                retry_config = {
-                    "max_retries": 3,
-                    "base_delay": 1.0,
-                    "max_delay": 60.0,
-                }
+            if installation_info.get("available"):
+                # Tool is available either via UV or pre-installed
+                source = installation_info.get("preferred_source", "unknown")
+                if source == "uv":
+                    self._plugin_log(
+                        "Bandit already installed via UV tool", level=logging.INFO
+                    )
+                elif source == "pre_installed":
+                    self._plugin_log(
+                        f"Using pre-installed bandit at {installation_info.get('pre_installed_path')}",
+                        level=logging.INFO,
+                    )
+                self.dependencies_satisfied = True
+                return True
 
-                if self._install_uv_tool(timeout=timeout, retry_config=retry_config):
-                    self._plugin_log(
-                        "Successfully installed bandit via UV tool", level=logging.INFO
-                    )
-                    self.dependencies_satisfied = True
-                    return True
-                else:
-                    self._plugin_log(
-                        "UV tool installation failed for bandit, falling back to base validation",
-                        level=logging.WARNING,
-                    )
-                    # Fall back to base class validation which includes pre-installed tool detection
-                    return super().validate_plugin_dependencies()
-            else:
+            # Tool not available, attempt installation
+            self._plugin_log(
+                "Bandit not found via UV tool, attempting explicit installation...",
+                level=logging.INFO,
+            )
+
+            # Attempt explicit tool installation with configured timeout
+            timeout = self.config.options.install_timeout if self.config else 300
+            retry_config = {
+                "max_retries": 3,
+                "base_delay": 1.0,
+                "max_delay": 60.0,
+            }
+
+            if self._install_uv_tool(timeout=timeout, retry_config=retry_config):
                 self._plugin_log(
-                    "Bandit already installed via UV tool", level=logging.INFO
+                    "Successfully installed bandit via UV tool", level=logging.INFO
                 )
                 self.dependencies_satisfied = True
                 return True
+            else:
+                self._plugin_log(
+                    "UV tool installation failed for bandit, falling back to base validation",
+                    level=logging.WARNING,
+                )
+                # Fall back to base class validation which includes pre-installed tool detection
+                return super().validate_plugin_dependencies()
 
         # Fall back to base class validation for non-UV tool scenarios
         return super().validate_plugin_dependencies()
@@ -265,7 +276,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         if self.config.options.config_file is not None:
             config_file_path = Path(self.config.options.config_file)
-            if config_file_path.name == ".bandit":
+            if not config_file_path.exists():
+                ASH_LOGGER.warning(
+                    f"Configured bandit config file does not exist: {config_file_path}. "
+                    "Bandit will run without a config file."
+                )
+            elif config_file_path.name == ".bandit":
                 self.args.extra_args.append(
                     ToolExtraArg(key="--ini", value=config_file_path.as_posix())
                 )
@@ -275,9 +291,16 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 )
         else:
             for conf_path, extra_arg_list in possible_config_paths.items():
-                if Path(conf_path).exists():
+                conf_path_obj = Path(conf_path)
+                if conf_path_obj.exists() and conf_path_obj.is_file():
+                    ASH_LOGGER.info(f"Using bandit config file: {conf_path}")
                     self.args.extra_args.extend(extra_arg_list)
                     break
+            else:
+                # No config file found - this is normal, bandit will use defaults
+                ASH_LOGGER.debug(
+                    "No bandit config file found, using default configuration"
+                )
 
         self.args.extra_args.append(
             ToolExtraArg(
@@ -370,6 +393,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         self.config.options.excluded_paths.extend(global_ignore_paths)
 
         final_args = self._resolve_arguments(target=target, results_file=results_file)
+        command_str = " ".join(str(arg) for arg in final_args)
+        ASH_LOGGER.info(f"Executing bandit command: {command_str}")
         self._run_subprocess(
             command=final_args,
             results_dir=target_results_dir,
@@ -382,7 +407,23 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         bandit_results = {}
         with open(results_file, mode="r", encoding="utf-8") as f:
-            bandit_results = json.load(f)
+            content = f.read()
+            if not content or content.strip() == "":
+                error_msg = (
+                    f"Bandit SARIF file is empty (exit code: {self.exit_code}). "
+                )
+                if self.errors:
+                    error_msg += f"Stderr: {' '.join(self.errors)}"
+                else:
+                    error_msg += "No stderr output captured."
+                ASH_LOGGER.warning(error_msg)
+                # Return empty SARIF report instead of failing
+                return SarifReport(
+                    version="2.1.0",
+                    schema_uri="https://json.schemastore.org/sarif-2.1.0.json",
+                    runs=[],
+                )
+            bandit_results = json.loads(content)
         try:
             sarif_report: SarifReport = SarifReport.model_validate(bandit_results)
             sarif_report.runs[0].invocations = [
@@ -399,10 +440,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                     ),
                 )
             ]
-            
+
             # Mask secrets in the SARIF report before returning
             sarif_report = mask_secrets_in_sarif(sarif_report)
-            
+
         except Exception as e:
             ASH_LOGGER.warning(f"Failed to parse Bandit results as SARIF: {str(e)}")
             sarif_report = bandit_results

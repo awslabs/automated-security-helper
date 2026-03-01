@@ -793,6 +793,8 @@ class ScanPhase(EnginePhase):
                             ASH_LOGGER.trace(
                                 f"Ignoring paths: {self.plugin_context.config.global_settings.ignore_paths}"
                             )
+                            # Note: Suppression tracking will be done in _process_results
+                            # where we have access to aggregated_results
                             raw_results = apply_suppressions_to_sarif(
                                 sarif_report=raw_results,
                                 plugin_context=self.plugin_context,
@@ -1426,6 +1428,7 @@ class ScanPhase(EnginePhase):
                 sanitized_sarif = apply_suppressions_to_sarif(
                     sarif_report=sanitized_sarif,
                     plugin_context=self.plugin_context,
+                    used_suppressions=aggregated_results.used_suppressions,
                 )
             else:
                 ASH_LOGGER.debug(
