@@ -637,8 +637,16 @@ class ScannerStatisticsCalculator:
                 dependencies_missing = True
             elif status == "ERROR":
                 error = True
+            elif status == "FAILED":
+                # FAILED means scanner ran successfully and found actionable findings
+                # This is a valid completion status, not an error or exclusion
+                pass
+            elif status == "PASSED":
+                # PASSED means scanner ran successfully with no actionable findings
+                # This is a valid completion status
+                pass
             else:
-                # For any other status, treat as excluded for backward compatibility
+                # For any other unknown status, treat as excluded for backward compatibility
                 excluded = True
         elif scanner_name in asharp_model.scanner_results:
             scanner_status_info = asharp_model.scanner_results[scanner_name]
@@ -666,8 +674,12 @@ class ScannerStatisticsCalculator:
                 dependencies_missing = True
             elif status == "ERROR":
                 error = True
+            elif status == "FAILED":
+                # FAILED means scanner ran successfully and found actionable findings
+                # This is a valid completion status, not an error or exclusion
+                pass
             elif status != "PASSED":
-                # For any other status, treat as excluded for backward compatibility
+                # For any other unknown status, treat as excluded for backward compatibility
                 excluded = True
         else:
             # If the scanner is not found in the dictionary, check for errors

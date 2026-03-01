@@ -276,7 +276,12 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         if self.config.options.config_file is not None:
             config_file_path = Path(self.config.options.config_file)
-            if config_file_path.name == ".bandit":
+            if not config_file_path.exists():
+                ASH_LOGGER.warning(
+                    f"Configured bandit config file does not exist: {config_file_path}. "
+                    "Bandit will run without a config file."
+                )
+            elif config_file_path.name == ".bandit":
                 self.args.extra_args.append(
                     ToolExtraArg(key="--ini", value=config_file_path.as_posix())
                 )
@@ -286,9 +291,16 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 )
         else:
             for conf_path, extra_arg_list in possible_config_paths.items():
-                if Path(conf_path).exists():
+                conf_path_obj = Path(conf_path)
+                if conf_path_obj.exists() and conf_path_obj.is_file():
+                    ASH_LOGGER.info(f"Using bandit config file: {conf_path}")
                     self.args.extra_args.extend(extra_arg_list)
                     break
+            else:
+                # No config file found - this is normal, bandit will use defaults
+                ASH_LOGGER.debug(
+                    "No bandit config file found, using default configuration"
+                )
 
         self.args.extra_args.append(
             ToolExtraArg(
@@ -381,6 +393,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         self.config.options.excluded_paths.extend(global_ignore_paths)
 
         final_args = self._resolve_arguments(target=target, results_file=results_file)
+        command_str = " ".join(str(arg) for arg in final_args)
+        ASH_LOGGER.info(f"Executing bandit command: {command_str}")
         self._run_subprocess(
             command=final_args,
             results_dir=target_results_dir,
@@ -393,7 +407,23 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         bandit_results = {}
         with open(results_file, mode="r", encoding="utf-8") as f:
-            bandit_results = json.load(f)
+            content = f.read()
+            if not content or content.strip() == "":
+                error_msg = (
+                    f"Bandit SARIF file is empty (exit code: {self.exit_code}). "
+                )
+                if self.errors:
+                    error_msg += f"Stderr: {' '.join(self.errors)}"
+                else:
+                    error_msg += "No stderr output captured."
+                ASH_LOGGER.warning(error_msg)
+                # Return empty SARIF report instead of failing
+                return SarifReport(
+                    version="2.1.0",
+                    schema_uri="https://json.schemastore.org/sarif-2.1.0.json",
+                    runs=[],
+                )
+            bandit_results = json.loads(content)
         try:
             sarif_report: SarifReport = SarifReport.model_validate(bandit_results)
             sarif_report.runs[0].invocations = [
