@@ -145,7 +145,14 @@ async def run_ash_scan(
             logger.warning(f"Failed to send initial progress update: {str(e)}")
 
         # Start background task to monitor progress
-        asyncio.create_task(_monitor_scan_progress(ctx, scan_id))
+        # Store task reference to prevent it from being garbage collected
+        monitor_task = asyncio.create_task(_monitor_scan_progress(ctx, scan_id))
+        # Add task to a set to keep it alive (but don't await it)
+        if not hasattr(run_ash_scan, "_monitor_tasks"):
+            run_ash_scan._monitor_tasks = set()
+        run_ash_scan._monitor_tasks.add(monitor_task)
+        # Remove task from set when it completes
+        monitor_task.add_done_callback(lambda t: run_ash_scan._monitor_tasks.discard(t))
 
         # Return initial status with connection management guidance
         return {
@@ -187,10 +194,15 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
     This function monitors the scan progress by checking for result files in the output directory
     and reports progress updates through the MCP context.
 
+    NOTE: This function is resilient to connection closures. If the client disconnects,
+    it will continue monitoring silently until the scan completes.
+
     Args:
         ctx: MCP context
         scan_id: The scan ID to monitor
     """
+    connection_alive = True  # Track if we can still send updates
+
     try:
         # Get scan information
         registry_info = await mcp_get_scan_progress(scan_id=scan_id)
@@ -227,10 +239,9 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                 message="Scan started, initializing scanners...",
             )
         except Exception as e:
-            # Log but continue monitoring even if initial update fails
-            logger.warning(
-                f"Failed to send initial progress update in monitor: {str(e)}"
-            )
+            # Connection may be closed, mark as disconnected and continue monitoring silently
+            logger.debug(f"Failed to send initial progress update in monitor: {str(e)}")
+            connection_alive = False
 
         # Monitor scan progress until completion
         while not completed:
@@ -249,13 +260,15 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
 
                 # Report final progress
                 try:
-                    await ctx.report_progress(
-                        progress=1.0,
-                        total=1.0,
-                        message="Scan completed, parsing results...",
-                    )
+                    if connection_alive:
+                        await ctx.report_progress(
+                            progress=1.0,
+                            total=1.0,
+                            message="Scan completed, parsing results...",
+                        )
                 except Exception as e:
                     logger.debug(f"Failed to send completion progress: {str(e)}")
+                    connection_alive = False
 
                 # Get final results with the correct output directory path
                 final_results = await mcp_get_scan_results(output_dir=str(output_dir))
@@ -276,10 +289,12 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                         summary = "Scan completed with no findings."
 
                     try:
-                        await ctx.info(summary)
+                        if connection_alive:
+                            await ctx.info(summary)
                     except Exception as e:
                         # Connection may be closed, log but don't fail
-                        logger.warning(f"Failed to send completion summary: {str(e)}")
+                        logger.debug(f"Failed to send completion summary: {str(e)}")
+                        connection_alive = False
 
                 return
 
@@ -290,24 +305,28 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
 
                 # Report final status
                 try:
-                    await ctx.report_progress(
-                        progress=1.0,
-                        total=1.0,
-                        message=f"Scan {progress_info.get('status')}",
-                    )
+                    if connection_alive:
+                        await ctx.report_progress(
+                            progress=1.0,
+                            total=1.0,
+                            message=f"Scan {progress_info.get('status')}",
+                        )
                 except Exception as e:
                     logger.debug(f"Failed to send final status progress: {str(e)}")
+                    connection_alive = False
 
                 # Log completion
                 try:
-                    if progress_info.get("status") == "failed":
-                        await ctx.error(
-                            f"Scan failed: {progress_info.get('error_message', 'Unknown error')}"
-                        )
-                    elif progress_info.get("status") == "cancelled":
-                        await ctx.info("Scan was cancelled.")
+                    if connection_alive:
+                        if progress_info.get("status") == "failed":
+                            await ctx.error(
+                                f"Scan failed: {progress_info.get('error_message', 'Unknown error')}"
+                            )
+                        elif progress_info.get("status") == "cancelled":
+                            await ctx.info("Scan was cancelled.")
                 except Exception as e:
-                    logger.warning(f"Failed to send completion message: {str(e)}")
+                    logger.debug(f"Failed to send completion message: {str(e)}")
+                    connection_alive = False
 
                 return
 
@@ -359,24 +378,28 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
 
                         # Update progress
                         try:
-                            await ctx.report_progress(
-                                progress=progress,
-                                total=1.0,
-                                message=message,
-                            )
-                            # Update last progress time only if send succeeded
-                            last_progress_time = current_time
+                            if connection_alive:
+                                await ctx.report_progress(
+                                    progress=progress,
+                                    total=1.0,
+                                    message=message,
+                                )
+                                # Update last progress time only if send succeeded
+                                last_progress_time = current_time
                         except Exception as e:
                             # Connection may be closed, log but continue monitoring
                             logger.debug(f"Failed to send progress update: {str(e)}")
+                            connection_alive = False
 
                         try:
-                            await ctx.debug(
-                                f"Scanner progress: {scanner_name}/{target_type} - {int(progress * 100)}%"
-                            )
+                            if connection_alive:
+                                await ctx.debug(
+                                    f"Scanner progress: {scanner_name}/{target_type} - {int(progress * 100)}%"
+                                )
                         except Exception as e:
                             # Ignore debug message failures (connection may be closed)
                             logger.debug(f"Failed to send debug message: {str(e)}")
+                            connection_alive = False
                     except asyncio.CancelledError:
                         raise  # Re-raise cancellation
                     except Exception as e:
@@ -384,16 +407,19 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                             f"Error processing scanner results for {scanner_name}/{target_type}: {str(e)}"
                         )
                         try:
-                            await ctx.warning(
-                                f"Error processing scanner results for {scanner_name}/{target_type}: {str(e)}"
-                            )
+                            if connection_alive:
+                                await ctx.warning(
+                                    f"Error processing scanner results for {scanner_name}/{target_type}: {str(e)}"
+                                )
                         except Exception as e:
                             # Ignore errors sending warning (connection may be closed)
                             logger.debug(f"Failed to send warning message: {str(e)}")
+                            connection_alive = False
 
             # Send heartbeat if no progress updates for a while
             if (
                 not progress_updated
+                and connection_alive
                 and (current_time - last_progress_time) >= heartbeat_interval
             ):
                 progress = len(completed_scanners) / max(total_scanners_estimate, 1)
@@ -412,6 +438,7 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
                 except Exception as e:
                     # Connection may be closed, log but continue monitoring
                     logger.debug(f"Failed to send heartbeat: {str(e)}")
+                    connection_alive = False
 
             # Wait before checking again - use adaptive polling interval
             # For 2-5 minute scans, use longer intervals to reduce network traffic
@@ -429,17 +456,19 @@ async def _monitor_scan_progress(ctx: Context, scan_id: str) -> None:
         # Task was cancelled, log and exit gracefully
         logger.info(f"Scan monitoring cancelled for scan_id: {scan_id}")
         try:
-            await ctx.info("Scan monitoring stopped.")
+            if connection_alive:
+                await ctx.info("Scan monitoring stopped.")
         except Exception as e:
             # Ignore errors when trying to send final message (connection may be closed)
             logger.debug(f"Failed to send cancellation message: {str(e)}")
     except Exception as e:
         logger.exception(f"Error monitoring scan progress: {str(e)}")
         try:
-            await ctx.error(f"Error monitoring scan progress: {str(e)}")
+            if connection_alive:
+                await ctx.error(f"Error monitoring scan progress: {str(e)}")
         except Exception:
             # Ignore errors when trying to send error message (connection may be closed)
-            logger.error(f"Failed to send error message to client: {str(e)}")
+            logger.debug(f"Failed to send error message to client: {str(e)}")
 
 
 @mcp.tool()
