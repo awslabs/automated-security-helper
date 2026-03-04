@@ -20,7 +20,7 @@ from automated_security_helper.models.core import AshSuppression
 class UnusedSuppressionsReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Unused Suppressions reporter."""
 
-    output_format: str = "json"  # "json" or "markdown"
+    output_format: str = "both"  # "json", "markdown", or "both"
 
 
 class UnusedSuppressionsReporterConfig(ReporterPluginConfigBase):
@@ -79,9 +79,29 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             ],
         }
 
-        # Return in requested format
-        output_format = getattr(self.config.options, "output_format", "json")
-        if output_format == "markdown":
+        # Check if we should generate both formats
+        output_format = getattr(self.config.options, "output_format", "both")
+
+        if output_format == "both":
+            # Generate both formats and write markdown separately
+            json_output = json.dumps(report_data, indent=2, default=str)
+            markdown_output = self._generate_markdown_report(
+                report_data, unused_suppressions
+            )
+
+            # Write the markdown file separately
+            if hasattr(self.context, "output_dir"):
+                from pathlib import Path
+
+                report_dir = Path(self.context.output_dir) / "reports"
+                report_dir.mkdir(parents=True, exist_ok=True)
+                markdown_file = report_dir / "ash.unused-suppressions.md"
+                with open(markdown_file, "w", encoding="utf-8") as f:
+                    f.write(markdown_output)
+
+            # Return JSON as the primary output
+            return json_output
+        elif output_format == "markdown":
             return self._generate_markdown_report(report_data, unused_suppressions)
         else:
             return json.dumps(report_data, indent=2, default=str)
