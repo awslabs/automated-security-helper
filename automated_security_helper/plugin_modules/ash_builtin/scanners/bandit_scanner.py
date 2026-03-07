@@ -420,7 +420,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 # Return empty SARIF report instead of failing
                 return SarifReport(
                     version="2.1.0",
-                    schema_uri="https://json.schemastore.org/sarif-2.1.0.json",
                     runs=[],
                 )
             bandit_results = json.loads(content)

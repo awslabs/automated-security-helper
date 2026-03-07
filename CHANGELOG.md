@@ -1,4 +1,6 @@
 # Automated Security Helper - CHANGELOG
+- [v3.2.3](#v323)
+    - [Fixes](#fixes)
 - [v2.0.1](#v201)
     - [What's Changed](#whats-changed)
 - [v2.0.0](#v200)
@@ -29,6 +31,14 @@
 - [1.0.8-e-03May2023](#108-e-03may2023)
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
+
+## v3.2.3
+
+### Fixes
+
+- Fix Dockerfile `COPY` glob patterns that fail on Podman/buildah when source directories don't exist in the build context. Replaced targeted `COPY` globs with `COPY . .` which works across all OCI runtimes (Docker, Finch, Podman, nerdctl)
+- Fix `BUILD_DATE` build arg mismatch in container mode — the Python code passed `BUILD_DATE` but the Dockerfile expected `BUILD_DATE_EPOCH`
+- Fix Bandit scanner crash when SARIF output is empty — the fallback `SarifReport` was constructed with an invalid `schema_uri` parameter, causing a Pydantic validation error that lost all Bandit findings
 
 ## v2.0.1
 

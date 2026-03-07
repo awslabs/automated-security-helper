@@ -453,7 +453,7 @@ def run_ash_container(
                 "--build-arg",
                 f"OFFLINE_SEMGREP_RULESETS={offline_semgrep_rulesets}",
                 "--build-arg",
-                f"BUILD_DATE={int(datetime.now().timestamp())}",
+                f"BUILD_DATE_EPOCH={int(datetime.now().timestamp())}",
             ]
         )
 
