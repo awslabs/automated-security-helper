@@ -608,12 +608,15 @@ def run_ash_container(
         except Exception as e:
             ASH_LOGGER.debug(f"Unable to determine terminal size via shutil: {e}")
 
-        # Add -t flag only if we have a real TTY
-        has_tty = sys.stdout.isatty()
+        # Skip -t flag entirely — the container sets ASH_IN_CONTAINER=YES which
+        # disables the progress bar, so a pseudo-TTY is unnecessary. Finch/nerdctl
+        # (via Lima VM) often rejects -t with "provided file is not a console" even
+        # when isatty() returns True on the host, because the fd doesn't survive the
+        # Lima VM boundary. Docker is more lenient but also doesn't need it.
         if debug:
-            print(f"TTY check: color={color}, sys.stdout.isatty()={has_tty}")
-        if color and has_tty:
-            run_cmd.append("-t")
+            print(
+                f"TTY check (skipped): color={color}, stdout.isatty()={sys.stdout.isatty()}, stdin.isatty()={sys.stdin.isatty()}"
+            )
 
         # Add image name
         run_cmd.append(ash_base_image_name)
