@@ -374,7 +374,16 @@ def run_ash_container(
                     break
                 current_path = current_path.parent
     else:
-        dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
+        # When not LOCAL, check if we're in a repo directory anyway (e.g., running from cloned repo)
+        # This handles the case where uvx installs ASH but user is in the actual repo directory
+        cwd_dockerfile = Path.cwd().joinpath("Dockerfile")
+        if cwd_dockerfile.exists() and Path.cwd().joinpath("pyproject.toml").exists():
+            dockerfile_path = cwd_dockerfile
+            ASH_LOGGER.info(
+                f"Found Dockerfile in current directory, using LOCAL build context despite revision={resolved_revision}"
+            )
+        else:
+            dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
 
     if not dockerfile_path.exists():
         typer.secho(f"Dockerfile not found at {dockerfile_path}", fg=typer.colors.RED)
@@ -444,7 +453,7 @@ def run_ash_container(
                 "--build-arg",
                 f"OFFLINE_SEMGREP_RULESETS={offline_semgrep_rulesets}",
                 "--build-arg",
-                f"BUILD_DATE={int(datetime.now().timestamp())}",
+                f"BUILD_DATE_EPOCH={int(datetime.now().timestamp())}",
             ]
         )
 
@@ -599,9 +608,15 @@ def run_ash_container(
         except Exception as e:
             ASH_LOGGER.debug(f"Unable to determine terminal size via shutil: {e}")
 
-        # Add color support
-        if color:
-            run_cmd.append("-t")
+        # Skip -t flag entirely — the container sets ASH_IN_CONTAINER=YES which
+        # disables the progress bar, so a pseudo-TTY is unnecessary. Finch/nerdctl
+        # (via Lima VM) often rejects -t with "provided file is not a console" even
+        # when isatty() returns True on the host, because the fd doesn't survive the
+        # Lima VM boundary. Docker is more lenient but also doesn't need it.
+        if debug:
+            print(
+                f"TTY check (skipped): color={color}, stdout.isatty()={sys.stdout.isatty()}, stdin.isatty()={sys.stdin.isatty()}"
+            )
 
         # Add image name
         run_cmd.append(ash_base_image_name)

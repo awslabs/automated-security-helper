@@ -241,16 +241,33 @@ def display_metrics_table(
         )
 
         # Display the help panel first, then the table
-        console.print()
-        console.print(help_panel)
-        console.print()
-        console.print(table)
-        console.print()
+        # Wrap in try-except to handle closed stdout/stderr (e.g., in MCP server)
+        try:
+            console.print()
+            console.print(help_panel)
+            console.print()
+            console.print(table)
+            console.print()
+        except (ValueError, OSError, BrokenPipeError) as io_error:
+            # stdout/stderr may be closed (e.g., in MCP server context)
+            # Log the error but don't fail the scan
+            ASH_LOGGER.warning(f"Could not write metrics table to console: {io_error}")
+            ASH_LOGGER.info(
+                "Scan completed successfully. Results written to output files."
+            )
 
     except Exception as e:
         ASH_LOGGER.error(f"Error displaying metrics table: {e}")
-        # Fallback to simple text output
-        print("ASH Scan Results Summary")
-        print("=" * 50)
-        print(f"Error displaying detailed table: {e}")
-        print("Please check the output files for detailed results.")
+        # Fallback to simple text output with I/O error protection
+        try:
+            print("ASH Scan Results Summary")
+            print("=" * 50)
+            print(f"Error displaying detailed table: {e}")
+            print("Please check the output files for detailed results.")
+        except (ValueError, OSError) as io_error:
+            # stdout/stderr may be closed (e.g., in MCP server context)
+            # Log the error but don't fail the scan
+            ASH_LOGGER.warning(f"Could not write to stdout/stderr: {io_error}")
+            ASH_LOGGER.info(
+                "Scan completed successfully. Results written to output files."
+            )

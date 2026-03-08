@@ -37,6 +37,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.spdx_reporte
 from automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter import (
     TextReporter,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+    UnusedSuppressionsReporter,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporter import (
     YamlReporter,
 )
@@ -55,5 +58,6 @@ __all__ = [
     "SarifReporter",
     "SpdxReporter",
     "TextReporter",
+    "UnusedSuppressionsReporter",
     "YamlReporter",
 ]

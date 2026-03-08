@@ -28,6 +28,32 @@ from automated_security_helper.utils.suppression_matcher import (
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
+from automated_security_helper.models.core import AshSuppression
+
+
+def _get_suppression_id(suppression: AshSuppression) -> str:
+    """Generate a unique identifier for a suppression rule.
+
+    Args:
+        suppression: The suppression rule
+
+    Returns:
+        A unique string identifier for the suppression
+    """
+    # If line_start is specified but line_end is not, use line_start for both
+    line_end_val = (
+        suppression.line_end
+        if suppression.line_end is not None
+        else suppression.line_start
+    )
+
+    parts = [
+        suppression.path,
+        suppression.rule_id or "*",
+        str(suppression.line_start) if suppression.line_start is not None else "*",
+        str(line_end_val) if line_end_val is not None else "*",
+    ]
+    return "|".join(parts)
 
 
 def get_finding_id(
@@ -344,20 +370,20 @@ def get_severity_metrics_from_sarif(
 def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:
     """
     Mask secrets in SARIF report messages based on rule IDs.
-    
+
     Args:
         sarif_report: The SARIF report to modify
-        
+
     Returns:
         The modified SARIF report with secrets masked
     """
     if not sarif_report or not sarif_report.runs:
         return sarif_report
-        
+
     for run in sarif_report.runs:
         if not run.results:
             continue
-            
+
         for result in run.results:
             if result.message and result.ruleId:
                 # Mask secrets in message text
@@ -373,13 +399,14 @@ def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:
                     result.message.root.text = mask_secret_in_text(
                         result.message.root.text, result.ruleId
                     )
-    
+
     return sarif_report
 
 
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
+    used_suppressions: set | None = None,
 ) -> SarifReport:
     """
     Apply suppressions to a SARIF report based on global ignore paths and suppression rules.
@@ -387,6 +414,7 @@ def apply_suppressions_to_sarif(
     Args:
         sarif_report: The SARIF report to modify
         plugin_context: Plugin context containing configuration
+        used_suppressions: Optional set to track which suppressions were actually used
 
     Returns:
         The modified SARIF report with suppressions applied
@@ -524,6 +552,11 @@ def apply_suppressions_to_sarif(
                         flat_finding, suppressions
                     )
                     if should_suppress:
+                        # Track the used suppression
+                        if used_suppressions is not None and matching_suppression:
+                            suppression_id = _get_suppression_id(matching_suppression)
+                            used_suppressions.add(suppression_id)
+
                         # Initialize suppressions list if it doesn't exist
                         if not result.suppressions:
                             result.suppressions = []
