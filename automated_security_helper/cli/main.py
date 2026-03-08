@@ -103,7 +103,8 @@ def get_genai_guide(
                 guide_content = guide_path.read_text()
                 source = "local"
         except Exception:
-            pass
+            # Local file read failed; fall through to GitHub fetch
+            guide_content = None
 
     # If local file not found or --from-github specified, try GitHub
     if guide_content is None:
