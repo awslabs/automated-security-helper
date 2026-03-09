@@ -33,6 +33,17 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERS
 ```
 
 ### What are the prerequisites for ASH v3?
+
+### What is the `v3` floating tag?
+We maintain a `v3` Git tag that always points to the latest stable v3.x release. This means you can use `@v3` in your installation commands instead of a specific version like `@v{{VERSION}}`:
+
+```bash
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3"
+```
+
+This is convenient for local development where you always want the latest version. For CI/CD pipelines or environments where reproducibility matters, we recommend pinning to a specific release tag (e.g., `@v{{VERSION}}`).
+
+### What are the prerequisites for ASH v3?
 - For local mode: Python 3.10 or later, UV package manager
 - For container mode: Any OCI-compatible container runtime (Docker, Podman, Finch, etc.)
 - On Windows with container mode: WSL2 is typically required
