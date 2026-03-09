@@ -100,6 +100,17 @@ class EnginePhase(ABC):
             python_based_plugins_only=python_based_plugins_only,
             **kwargs,
         )
+
+        # Defensive type checking to catch unexpected return types
+        if not isinstance(results, AshAggregatedResults):
+            error_msg = (
+                f"Phase {self.phase_name} returned unexpected type {type(results).__name__} "
+                f"instead of AshAggregatedResults. This indicates a critical error in phase execution."
+            )
+            ASH_LOGGER.error(error_msg)
+            ASH_LOGGER.debug(f"Unexpected results value: {results}")
+            raise TypeError(error_msg)
+
         if isinstance(results, AshAggregatedResults):
             # Should update the instance then return it once done, so allow
             # overriding if it was returned.

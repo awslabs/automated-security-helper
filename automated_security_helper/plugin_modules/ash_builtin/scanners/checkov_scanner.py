@@ -197,29 +197,39 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         # For UV tool-based scanners, attempt explicit installation if needed
         if self.use_uv_tool:
-            # Check if tool is already installed
-            if not self._is_uv_tool_installed():
-                self._plugin_log(
-                    "Checkov not found via UV tool, attempting explicit installation..."
-                )
+            # Check if tool is already available (UV-installed or pre-installed)
+            installation_info = self._get_tool_installation_info()
 
-                # Attempt explicit tool installation with configured timeout
-                timeout = self.config.options.install_timeout if self.config else 300
-                if self._install_uv_tool(timeout=timeout):
-                    self._plugin_log("Successfully installed checkov via UV tool")
-                    self.dependencies_satisfied = True
-                    return True
-                else:
+            if installation_info.get("available"):
+                # Tool is available either via UV or pre-installed
+                source = installation_info.get("preferred_source", "unknown")
+                if source == "uv":
+                    self._plugin_log("Checkov already installed via UV tool")
+                elif source == "pre_installed":
                     self._plugin_log(
-                        "UV tool installation failed for checkov, falling back to existing validation",
-                        level=logging.WARNING,
+                        f"Using pre-installed checkov at {installation_info.get('pre_installed_path')}"
                     )
-                    # Fall back to existing validation logic
-                    return super().validate_plugin_dependencies()
-            else:
-                self._plugin_log("Checkov already installed via UV tool")
                 self.dependencies_satisfied = True
                 return True
+
+            # Tool not available, attempt installation
+            self._plugin_log(
+                "Checkov not found via UV tool, attempting explicit installation..."
+            )
+
+            # Attempt explicit tool installation with configured timeout
+            timeout = self.config.options.install_timeout if self.config else 300
+            if self._install_uv_tool(timeout=timeout):
+                self._plugin_log("Successfully installed checkov via UV tool")
+                self.dependencies_satisfied = True
+                return True
+            else:
+                self._plugin_log(
+                    "UV tool installation failed for checkov, falling back to existing validation",
+                    level=logging.WARNING,
+                )
+                # Fall back to existing validation logic
+                return super().validate_plugin_dependencies()
 
         # Fall back to base class validation for non-UV tool scenarios
         return super().validate_plugin_dependencies()

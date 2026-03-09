@@ -436,7 +436,8 @@ def parse_scanner_result_file(
         return []
 
     # Extract findings from the result file
-    # The structure is expected to be:
+    # The structure can be either:
+    # Format 1 (expected by original code):
     # {
     #   "findings": [
     #     {
@@ -447,11 +448,35 @@ def parse_scanner_result_file(
     #     ...
     #   ]
     # }
+    # Format 2 (actual ASH output):
+    # {
+    #   "scanner_name": "detect-secrets",
+    #   "target": "/path/to/project",
+    #   "target_type": "source",
+    #   "exit_code": 0,
+    #   "finding_count": 1,
+    #   "severity_counts": {...},
+    #   "status": "PASSED" or "FAILED"
+    # }
 
     if data and "findings" in data and isinstance(data["findings"], list):
+        # Format 1: Direct findings array
         return data["findings"]
+    elif data and "scanner_name" in data:
+        # Format 2: ASH scanner result metadata (no findings in this file)
+        # The actual findings are in the aggregated results file
+        _logger.debug(
+            f"Scanner result file {result_file} contains metadata only (no findings array). "
+            f"Scanner: {data.get('scanner_name')}, Status: {data.get('status')}, "
+            f"Finding count: {data.get('finding_count', 0)}"
+        )
+        return []
     else:
-        _logger.warning(f"Unexpected result file structure: {result_file}")
+        _logger.warning(
+            f"Unexpected result file structure in {result_file}. "
+            f"Expected either 'findings' array or 'scanner_name' metadata. "
+            f"Available keys: {list(data.keys()) if data else 'None'}"
+        )
         return []
 
 

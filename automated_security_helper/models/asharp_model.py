@@ -270,6 +270,13 @@ class AshAggregatedResults(BaseModel):
             default_factory=list,
         ),
     ]
+    used_suppressions: Annotated[
+        set[str],
+        Field(
+            description="Set of suppression IDs that were actually applied to findings during the scan.",
+            default_factory=set,
+        ),
+    ]
 
     @field_validator("ash_config")
     def validate_ash_config(cls, v: Any):

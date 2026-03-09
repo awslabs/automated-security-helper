@@ -50,15 +50,17 @@ ash [command] [options]
 
 ### Available Commands
 
-| Command        | Description                                         |
-|----------------|-----------------------------------------------------|
-| `scan`         | Run security scans on source code (default command) |
-| `config`       | Manage ASH configuration                            |
-| `plugin`       | Manage ASH plugins                                  |
-| `report`       | Generate reports from scan results                  |
-| `dependencies` | Install dependencies for ASH plugins                |
-| `inspect`      | Inspect and analyze ASH outputs and reports         |
-| `build-image`  | Build the ASH container image                       |
+| Command           | Description                                                |
+|-------------------|------------------------------------------------------------|
+| `scan`            | Run security scans on source code (default command)        |
+| `config`          | Manage ASH configuration                                   |
+| `plugin`          | Manage ASH plugins                                         |
+| `report`          | Generate reports from scan results                         |
+| `dependencies`    | Install dependencies for ASH plugins                       |
+| `inspect`         | Inspect and analyze ASH outputs and reports                |
+| `build-image`     | Build the ASH container image                              |
+| `get-genai-guide` | Download the GenAI Integration Guide for AI assistants     |
+| `mcp`             | Start the Model Context Protocol (MCP) server for AI tools |
 
 ## Scan Command
 
@@ -132,12 +134,12 @@ ash config [subcommand] [options]
 
 ### Config Subcommands
 
-| Subcommand | Description                         |
-|------------|-------------------------------------|
-| `init`     | Initialize a new configuration file |
-| `get`      | Display current configuration       |
-| `update`   | Update configuration values         |
-| `validate` | Validate configuration file         |
+| Subcommand | Description                                                      |
+|------------|------------------------------------------------------------------|
+| `init`     | Initialize a new configuration file                              |
+| `get`      | Display current configuration                                    |
+| `update`   | Update configuration values                                      |
+| `validate` | Validate configuration file against JSON schema and check syntax |
 
 ### Config Options
 
@@ -158,15 +160,79 @@ ash config [subcommand] [options]
 # Initialize a new configuration file
 ash config init
 
+# Initialize with force (overwrite existing)
+ash config init --force
+
 # Display current configuration
 ash config get
+
+# Display configuration from a specific file
+ash config get --config /path/to/config.yaml
 
 # Update configuration
 ash config update --set 'scanners.bandit.enabled=true'
 
-# Validate configuration
+# Preview configuration update without writing
+ash config update --set 'scanners.bandit.enabled=true' --dry-run
+
+# Validate configuration file
 ash config validate
+
+# Validate a specific configuration file
+ash config validate --config /path/to/config.yaml
+
+# Validate with verbose output showing all checks
+ash config validate --verbose
 ```
+
+### Config Validate Details
+
+The `ash config validate` command performs comprehensive validation of your ASH configuration file:
+
+**Validation Checks:**
+- **Schema Validation**: Verifies the configuration matches the JSON schema
+- **YAML Syntax**: Checks for valid YAML syntax and structure
+- **Required Fields**: Ensures all required fields are present
+- **Type Checking**: Validates data types for all fields
+- **Enum Values**: Verifies enum fields contain valid values
+- **Path Validation**: Checks that file paths in suppressions and ignore rules are valid
+- **Suppression Rules**: Validates suppression syntax and required fields
+- **Scanner Configuration**: Checks scanner-specific options
+
+**Exit Codes:**
+- `0`: Configuration is valid
+- `1`: Configuration has validation errors
+
+**Example Output:**
+
+```bash
+$ ash config validate
+✓ Configuration file loaded successfully
+✓ YAML syntax is valid
+✓ Schema validation passed
+✓ All required fields present
+✓ Suppression rules validated (3 rules)
+✓ Scanner configurations validated (10 scanners)
+
+Configuration is valid!
+
+$ ash config validate --config .ash/.ash_bad_config.yaml
+✗ Configuration validation failed
+
+Errors found:
+  - Line 15: 'scanners.bandit.options' must be an object, got list
+  - Line 23: Unknown field 'global_settings.invalid_field'
+  - Line 30: 'suppressions[0].reason' is required but missing
+
+Please fix these errors and try again.
+```
+
+**Use Cases:**
+- Validate configuration before committing to version control
+- Debug configuration issues when scans fail
+- Verify configuration after manual edits
+- CI/CD pipeline checks to ensure valid configuration
+- Pre-deployment validation in automated workflows
 
 ## Plugin Command
 
@@ -344,6 +410,189 @@ ash build-image --offline --offline-semgrep-rulesets p/ci
 # Build using a specific OCI runner
 ash build-image --oci-runner podman
 ```
+
+## Get-GenAI-Guide Command
+
+The `get-genai-guide` command downloads the ASH GenAI Integration Guide, a comprehensive document designed to help AI assistants and LLMs properly interact with ASH scan results.
+
+```bash
+ash get-genai-guide [options]
+```
+
+### Purpose
+
+This guide provides AI assistants with:
+- Instructions on using correct output formats (JSON vs HTML)
+- How to handle severity discrepancies between report formats
+- Proper suppression creation with correct YAML syntax
+- Working with CycloneDX SBOM for dependency analysis
+- Configuration file schema and structure
+- Common pitfalls and known issues
+- Integration patterns and examples
+- Pre-tested jq queries for efficient result querying
+
+### Get-GenAI-Guide Options
+
+| Option            | Description                                | Default              |
+|-------------------|--------------------------------------------|----------------------|
+| `--output`, `-o`  | Output path for the GenAI integration guide | `ash-genai-guide.md` |
+
+### Examples
+
+```bash
+# Download to default location (ash-genai-guide.md)
+ash get-genai-guide
+
+# Download to custom location
+ash get-genai-guide -o /path/to/guide.md
+
+# Download to current directory with custom name
+ash get-genai-guide --output genai-integration.md
+```
+
+### Installation for AI Coding Tools
+
+**For Kiro (Global - Recommended)**:
+```bash
+# Install globally for all Kiro workspaces
+mkdir -p ~/.kiro/steering
+ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
+
+# Kiro will automatically load this as steering context
+```
+
+**For Kiro (Project-Specific)**:
+```bash
+# Install for current project only
+mkdir -p .kiro/steering
+ash get-genai-guide -o .kiro/steering/ash-integration.md
+```
+
+**For Cline (VS Code)**:
+```bash
+# Add to project root for Cline to reference
+ash get-genai-guide -o .cline/ash-guide.md
+
+# Or add to VS Code workspace settings
+mkdir -p .vscode
+ash get-genai-guide -o .vscode/ash-integration-guide.md
+```
+
+**For Claude Desktop / MCP Clients**:
+```bash
+# Save to a dedicated documentation folder
+mkdir -p ~/Documents/ai-guides
+ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
+
+# Then reference in your prompts:
+# "Please read the ASH integration guide at ~/Documents/ai-guides/ash-integration.md"
+```
+
+**For Amazon Q CLI**:
+```bash
+# Add to project documentation
+mkdir -p docs/ai-guides
+ash get-genai-guide -o docs/ai-guides/ash-integration.md
+
+# Reference in .q/config if supported
+```
+
+**For Cursor**:
+```bash
+# Add to .cursorrules or project docs
+ash get-genai-guide -o .cursor/ash-guide.md
+
+# Or add to project root
+ash get-genai-guide -o ASH_INTEGRATION_GUIDE.md
+```
+
+### Use Cases
+
+**For Users:**
+- Download and provide to AI assistants as context
+- Share with team members using AI coding tools
+- Include in documentation for AI-assisted workflows
+
+**For AI Assistants:**
+- Learn correct ASH result processing patterns
+- Avoid common mistakes (parsing HTML, incorrect suppressions)
+- Use efficient queries and proper data formats
+- Understand ASH configuration and suppression syntax
+
+### Guide Contents
+
+The guide includes:
+- Quick reference for key files and locations
+- Critical rules for GenAI tools
+- File structure and output directory layout
+- Working with `ash_aggregated_results.json`
+- Working with CycloneDX SBOM
+- Configuration file schema
+- Creating suppressions properly
+- Common pitfalls and solutions
+- Integration patterns (CI/CD, analysis, reporting)
+- MCP server integration guidelines
+- Scanner-specific notes
+- Performance optimization tips
+- Troubleshooting guide
+
+For more information, see the [GenAI Integration Guide](genai-steering-guide.md) documentation.
+
+## MCP Command
+
+The `mcp` command starts the Model Context Protocol (MCP) server, which enables AI assistants to interact with ASH programmatically.
+
+```bash
+ash mcp
+```
+
+### Purpose
+
+The MCP server provides a standardized interface for AI assistants to:
+- Run security scans programmatically
+- Retrieve scan results with filtering options
+- Monitor scan progress in real-time
+- Manage multiple concurrent scans
+- Access scan result files and paths
+
+### MCP Server Features
+
+- **Real-time Progress Tracking**: Monitor scan progress with streaming updates
+- **Background Scanning**: Start scans and continue other work while they run
+- **Multiple Scan Management**: Handle concurrent scans with unique identifiers
+- **Comprehensive Error Handling**: Detailed error messages and recovery suggestions
+- **Configuration Support**: Full support for ASH configuration files and environment variables
+- **Result Filtering**: Filter results by severity, scanner, or response size
+
+### Usage
+
+The MCP server is typically configured in AI assistant clients (Amazon Q CLI, Claude Desktop, Cline) rather than run directly. See the [MCP Server Guide](mcp-server-guide.md) for detailed setup instructions.
+
+### Configuration Example
+
+For Amazon Q CLI (`~/.aws/amazonq/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "ash": {
+      "command": "uvx",
+      "args": [
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.2.2",
+        "ash",
+        "mcp"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+For more information, see:
+- [MCP Server Guide](mcp-server-guide.md)
+- [MCP Tools Reference](MCP-TOOLS-REFERENCE.md)
+- [MCP Filtering Guide](MCP-FILTERING-GUIDE.md)
+- [Using ASH with MCP Tutorial](../tutorials/using-ash-with-mcp.md)
 
 ## Additional Environment Variables
 

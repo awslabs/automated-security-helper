@@ -27,9 +27,13 @@ RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
     ${ASH_REPO_CLONE_URL} \
     . || echo "Skipping clone of repo for LOCAL revision"
 
-COPY pyproject.toml* hatch_build.py* uv.lock* README.md* LICENSE* Dockerfile* ./
-COPY ci*/ ci/
-COPY automated_security_helper*/ automated_security_helper/
+# For LOCAL builds the build context is the repo root and supplies all sources.
+# For non-LOCAL builds git clone above already populated /src; the COPY brings
+# in any build-context overrides and is otherwise a no-op for files that only
+# exist in the full repo.
+# Using "COPY . ." instead of targeted globs avoids Podman/buildah errors on
+# glob patterns that match nothing (Docker/Finch silently skip them, Podman doesn't).
+COPY . .
 RUN tree .
 RUN git status --short || true
 RUN uv build
