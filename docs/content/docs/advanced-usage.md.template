@@ -216,6 +216,8 @@ print(f"Found {results.summary_stats.total_findings} findings")
 
 ## CI/CD Integration
 
+> **Tip**: The examples below use pinned versions (`@v{{VERSION}}`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD.
+
 ### GitHub Actions
 
 ```yaml

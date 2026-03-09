@@ -1,8 +1,6 @@
 # Automated Security Helper - CHANGELOG
-- [v3.2.4](#v324)
-    - [Fixes](#fixes)
 - [v3.2.3](#v323)
-    - [Fixes](#fixes-1)
+    - [Fixes](#fixes)
 - [v2.0.1](#v201)
     - [What's Changed](#whats-changed)
 - [v2.0.0](#v200)
@@ -34,12 +32,6 @@
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
-## v3.2.4
-
-### Fixes
-
-- Fix reusable workflow `run-ash-security-scan.yml` failing for external consumers — `ASH_UVX_SOURCE` was resolving to the caller's repository instead of the ASH repo, causing `uvx` to fail with "does not appear to be a Python project". Now correctly uses `inputs.ash-version` to reference the ASH repo.
-- Update example workflow to use floating `v3` tag for both the workflow ref and `ash-version` input.
 
 ## v3.2.3
 
@@ -49,6 +41,8 @@
 - Fix `BUILD_DATE` build arg mismatch in container mode — the Python code passed `BUILD_DATE` but the Dockerfile expected `BUILD_DATE_EPOCH`
 - Fix Bandit scanner crash when SARIF output is empty — the fallback `SarifReport` was constructed with an invalid `schema_uri` parameter, causing a Pydantic validation error that lost all Bandit findings
 - Fix Bandit B110 (Try, Except, Pass) finding in `get-genai-guide` command by replacing bare `pass` with an explicit assignment in the local file read fallback
+- Fix reusable workflow `run-ash-security-scan.yml` failing for external consumers — `ASH_UVX_SOURCE` was resolving to the caller's repository instead of the ASH repo, causing `uvx` to fail with "does not appear to be a Python project". Now correctly uses `inputs.ash-version` to reference the ASH repo.
+- Update example workflow to use floating `v3` tag for both the workflow ref and `ash-version` input.
 
 ## v2.0.1
 

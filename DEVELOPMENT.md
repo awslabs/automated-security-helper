@@ -81,57 +81,29 @@ This provides a consistent development environment across different platforms an
 Run the test suite:
 
 ```bash
-pytest
+uv run pytest
 ```
 
-### Scanner Validation Integration Testing
-
-The project includes a verification script to test the scanner validation system integration:
+Run specific test categories:
 
 ```bash
-# Run the scanner validation integration verification
-python verify_integration.py
+# Unit tests
+uv run pytest tests/unit/ -v
+
+# Integration tests
+uv run pytest tests/integration/ -v
+
+# Scanner-specific integration tests
+uv run pytest tests/integration/scanners/ -v
 ```
-
-This script validates that:
-- The `ScannerValidationManager` is properly initialized in `ScanPhase`
-- Validation methods are available and callable
-- The integration points are working correctly
-
-### UV Migration Integration Tests
-
-The project includes comprehensive integration tests for the Poetry to UV migration:
-
-```bash
-# Run all UV migration integration tests
-pytest tests/integration/migration/test_uv_migration_integration.py -v
-
-# Run specific test categories
-pytest tests/integration/migration/test_uv_migration_integration.py::TestUVToolScannerExecution -v
-pytest tests/integration/migration/test_uv_migration_integration.py::TestUVDependencyResolution -v
-pytest tests/integration/migration/test_uv_migration_integration.py::TestUVBuildSystem -v
-
-# Run performance comparison tests (slower)
-pytest tests/integration/migration/test_uv_migration_integration.py::TestUVPerformanceComparison -v -m slow
-
-# Run cross-platform compatibility tests
-pytest tests/integration/migration/test_uv_migration_integration.py::TestUVCrossPlatformCompatibility -v
-```
-
-These tests validate:
-- UV tool scanner execution (Checkov, Semgrep)
-- UV dependency resolution and installation
-- UV build system functionality
-- Performance comparisons between Poetry and UV
-- Cross-platform compatibility (Windows, macOS, Linux)
-- ASH project UV migration validation
 
 ## Development Commands
 
 - Format and lint code:
 
 ```bash
-uv run ruff .
+uv run ruff check .
+uv run ruff format .
 ```
 
 - Run a specific script:
@@ -142,53 +114,38 @@ uv run ash
 
 ## Project Dependencies
 
-The project uses the following key dependencies:
+Dependencies are managed in `pyproject.toml`. Key groups:
 
-- Python
-- UV (package manager)
+- Runtime dependencies: defined under `[project] dependencies`
+- Dev dependencies: defined under `[dependency-groups] dev` (includes ruff, pytest, mypy, mkdocs, etc.)
 
-CLI tools managed via UV tool:
-
-- checkov (Infrastructure as Code scanning)
-- semgrep (Static Application Security Testing)
-
-Development dependencies include:
-
-- ruff
-- pytest
-- pytest-cov
+Scanner tools (Bandit, Checkov, Semgrep) are managed via UV tool isolation at runtime — they're not project dependencies.
 
 ## Troubleshooting
 
 If you encounter any issues:
 
-1. **Validate the migration status first:**
-
-```bash
-python -m automated_security_helper.utils.migration_validator
-```
-
-2. Verify your Python version matches the required version (3.10+):
+1. Verify your Python version matches the required version (3.10+):
 
 ```bash
 python --version
 ```
 
-3. Try cleaning and rebuilding the environment:
+2. Try cleaning and rebuilding the environment:
 
 ```bash
 rm -rf .venv
 uv sync
 ```
 
-4. Update UV and dependencies:
+3. Update UV and dependencies:
 
 ```bash
 uv self update
 uv sync --upgrade
 ```
 
-5. If using a devfile-compatible IDE and encountering issues, try running the devfile commands manually:
+4. If using a devfile-compatible IDE and encountering issues, try running the devfile commands manually:
 
 ```bash
 # Install dependencies
@@ -207,13 +164,14 @@ The project includes a migration validator to help diagnose UV-related issues:
 
 ```bash
 # Check migration status
-python -m automated_security_helper.utils.migration_validator
+uv run python -m automated_security_helper.utils.migration_validator
 
 # Get detailed JSON output for debugging
-python -m automated_security_helper.utils.migration_validator --json
+uv run python -m automated_security_helper.utils.migration_validator --json
 ```
 
 The validator checks:
+
 - UV installation and version compatibility
 - Project configuration (pyproject.toml) structure
 - Dependency resolution capability
@@ -331,15 +289,13 @@ ASH provides automatic tool management via UV's tool isolation system:
 
 When testing custom scanner plugins:
 
-1. **Unit Tests**: Test scanner logic in isolation
-2. **Integration Tests**: Test with actual tool execution
-3. **UV Tool Tests**: Verify UV tool installation and execution
-4. **Validation Tests**: Ensure proper validation behavior
+1. Unit tests: test scanner logic in isolation
+2. Integration tests: test with actual tool execution
 
 ```bash
-# Run scanner-specific tests
-pytest tests/unit/plugin_modules/my_custom_scanner/ -v
+# Run scanner-specific unit tests
+uv run pytest tests/unit/plugin_modules/ -v
 
-# Test UV tool integration
-pytest tests/integration/migration/test_uv_migration_integration.py -v
+# Run scanner integration tests
+uv run pytest tests/integration/scanners/ -v
 ```
