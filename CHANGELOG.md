@@ -1,4 +1,6 @@
 # Automated Security Helper - CHANGELOG
+- [v3.2.4](#v324)
+    - [Maintenance](#maintenance)
 - [v3.2.3](#v323)
     - [Fixes](#fixes)
 - [v2.0.1](#v201)
@@ -32,6 +34,24 @@
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
+
+## v3.2.4
+
+### Maintenance
+
+- Upgrade all dependencies to latest compatible versions via `uv lock --upgrade`, including:
+  - `aws-cdk-lib` 2.238.0 → 2.243.0
+  - `boto3`/`botocore` 1.42.47 → 1.42.68
+  - `constructs` 10.4.5 → 10.5.1
+  - `pydantic-settings` 2.12.0 → 2.13.1
+  - `pyjwt` 2.11.0 → 2.12.1
+  - `ruff` 0.15.0 → 0.15.6
+  - `uvicorn` 0.40.0 → 0.41.0
+  - `certifi` 2026.1.4 → 2026.2.25
+  - `mkdocs-material` 9.7.1 → 9.7.5
+  - `platformdirs` 4.5.1 → 4.9.4
+  - `sse-starlette` 3.2.0 → 3.3.2
+  - And various other transitive/type-stub dependency bumps
 
 ## v3.2.3
 
