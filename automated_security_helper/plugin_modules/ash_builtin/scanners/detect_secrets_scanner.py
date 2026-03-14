@@ -1,5 +1,6 @@
 """Module containing the detect-secrets security scanner implementation."""
 
+import fnmatch
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -283,6 +284,25 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 if Path(item).name not in [*KNOWN_LOCKFILE_NAMES]
                 and "/.ash/" not in str(item)
             ]
+
+            # Filter out files matching global_ignore_paths patterns
+            if global_ignore_paths:
+                original_count = len(scannable)
+                scannable = [
+                    file_path
+                    for file_path in scannable
+                    if not any(
+                        fnmatch.fnmatch(file_path, ignore_path.path)
+                        or fnmatch.fnmatch(Path(file_path).name, ignore_path.path)
+                        or file_path.endswith(ignore_path.path)
+                        for ignore_path in global_ignore_paths
+                    )
+                ]
+                if original_count != len(scannable):
+                    ASH_LOGGER.debug(
+                        f"Filtered {original_count - len(scannable)} files using global_ignore_paths"
+                    )
+
             if len(scannable) == 0:
                 message = f"There were no scannable files found in target '{target}'"
                 self._plugin_log(
