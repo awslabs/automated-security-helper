@@ -113,7 +113,7 @@ function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@
 
 ```bash
 # Install with pipx (isolated environment)
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0,1
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.2.2
 
 # Use as normal
 ash --help
@@ -217,7 +217,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.2.2",
         "ash",
         "mcp"
       ],
@@ -235,7 +235,7 @@ The ASH MCP server provides:
     "ash-security": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.2.2",
         "ash",
         "mcp"
       ]
@@ -251,7 +251,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.2.2",
         "ash",
         "mcp"
       ],
@@ -351,7 +351,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v3.2.2
     hooks:
       - id: ash-simple-scan
 ```
