@@ -1,6 +1,7 @@
 # TEMP
 /automated_security_helper/identifiers/
 /fix_*.py
+/analysis/
 
 # ASH Ignores
 utils/cfn-to-cdk/cfn_to_cdk/
