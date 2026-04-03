@@ -2,8 +2,10 @@
 
 from importlib.metadata import version
 import json
+import multiprocessing
 from pathlib import Path
 import re
+import sys
 from typing import Annotated, Any, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -148,6 +150,44 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 self.config.options.baseline_file = Path(baseline_path)
                 break
 
+        # If a baseline file was found, load its plugins_used and filters_used
+        # into scan_settings so they are applied during scanning.
+        # SecretsCollection.load_from_baseline() only loads results, not settings,
+        # so we must propagate the baseline's configuration explicitly.
+        if self.config.options.baseline_file is not None:
+            try:
+                with open(Path(self.config.options.baseline_file).absolute(), "r") as f:
+                    baseline_data = json.load(f)
+
+                # Only apply baseline settings if scan_settings was not explicitly
+                # configured by the user (i.e. still at defaults)
+                if (
+                    self.config.options.scan_settings.version is None
+                    and len(self.config.options.scan_settings.plugins_used) == 0
+                ):
+                    # Load plugins from baseline
+                    if "plugins_used" in baseline_data:
+                        self.config.options.scan_settings.plugins_used = [
+                            DetectSecretsScanSettingsPluginsUsed(**plugin)
+                            for plugin in baseline_data["plugins_used"]
+                        ]
+                    # Load filters from baseline (includes should_exclude_file, etc.)
+                    if "filters_used" in baseline_data:
+                        self.config.options.scan_settings.filters_used = [
+                            DetectSecretsScanSettingsFiltersUsed(**f)
+                            for f in baseline_data["filters_used"]
+                        ]
+                    ASH_LOGGER.debug(
+                        f"Loaded settings from baseline: "
+                        f"{len(self.config.options.scan_settings.plugins_used)} plugins, "
+                        f"{len(self.config.options.scan_settings.filters_used)} filters"
+                    )
+            except (json.JSONDecodeError, OSError) as e:
+                ASH_LOGGER.warning(
+                    f"Failed to read baseline file settings: {e}. "
+                    f"Falling back to default settings."
+                )
+
         # If no existing baseline is identified then use all detect-secrets plugins
         # This is the same as using the default_settings function provided by detect-secrets
         if (
@@ -166,6 +206,77 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             ASH_LOGGER.debug(f"Default settings identified: {settings}")
 
         return super()._process_config_options()
+
+    @staticmethod
+    def _get_baseline_exclude_patterns(
+        scan_settings_dict: Dict[str, Any],
+    ) -> List[re.Pattern]:
+        """Extract file exclusion regex patterns from scan settings filters.
+
+        Looks for detect_secrets.filters.regex.should_exclude_file entries
+        in the filters_used configuration and compiles their patterns.
+
+        Returns:
+            List of compiled regex patterns for file exclusion.
+        """
+        patterns = []
+        for filter_config in scan_settings_dict.get("filters_used", []):
+            if filter_config.get("path") == (
+                "detect_secrets.filters.regex.should_exclude_file"
+            ):
+                raw_patterns = filter_config.get("pattern", [])
+                if isinstance(raw_patterns, str):
+                    raw_patterns = [raw_patterns]
+                for p in raw_patterns:
+                    try:
+                        patterns.append(re.compile(p))
+                    except re.error as e:
+                        ASH_LOGGER.warning(
+                            f"Invalid exclude pattern '{p}' in baseline: {e}"
+                        )
+        return patterns
+
+    @staticmethod
+    def _apply_file_exclusions(
+        files: List[str],
+        exclude_patterns: List[re.Pattern],
+    ) -> List[str]:
+        """Filter out files matching any of the exclude patterns.
+
+        Args:
+            files: List of file paths to filter.
+            exclude_patterns: Compiled regex patterns to match against.
+
+        Returns:
+            Filtered list of file paths.
+        """
+        if not exclude_patterns:
+            return files
+        return [
+            f
+            for f in files
+            if not any(pattern.search(f) for pattern in exclude_patterns)
+        ]
+
+    @staticmethod
+    def _ensure_fork_multiprocessing() -> None:
+        """Ensure multiprocessing uses 'fork' start method on Linux.
+
+        detect-secrets' scan_files() uses multiprocessing.Pool internally.
+        On macOS with Python 3.13+, the default start method is 'spawn',
+        which causes recursive process creation (fork bomb) when called
+        outside of 'if __name__ == "__main__"' guard.
+
+        On Linux containers (CodeBuild, Docker), 'fork' is the default and
+        works correctly, but we set it explicitly to be safe in case the
+        default changes in future Python versions.
+        """
+        if sys.platform == "linux":
+            try:
+                multiprocessing.set_start_method("fork", force=True)
+            except RuntimeError:
+                # Already set — this is fine
+                pass
 
     def scan(
         self,
@@ -266,7 +377,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     self._secrets_collection = SecretsCollection.load_from_baseline(
                         baseline=json.load(f),
                     )
-                    f.close()
 
                 self._secrets_collection.root = Path(target).absolute()
             # Find all files to scan from the scan set
@@ -283,6 +393,43 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 if Path(item).name not in [*KNOWN_LOCKFILE_NAMES]
                 and "/.ash/" not in str(item)
             ]
+
+            # Build the scan_settings dict for transient_settings, ensuring
+            # filters_used from the baseline are included so detect-secrets
+            # can apply should_exclude_file and other filters during scanning.
+            scan_settings_dict = self.config.options.scan_settings.model_dump(
+                exclude_defaults=True, exclude_none=True, exclude_unset=True
+            )
+            # model_dump with exclude_defaults drops empty lists, but we need
+            # filters_used to be present if the baseline defined any filters,
+            # so that transient_settings -> configure_settings_from_baseline
+            # actually configures them.
+            if (
+                len(self.config.options.scan_settings.filters_used) > 0
+                and "filters_used" not in scan_settings_dict
+            ):
+                scan_settings_dict["filters_used"] = [
+                    f.model_dump(exclude_none=True)
+                    for f in self.config.options.scan_settings.filters_used
+                ]
+
+            # Apply exclude file patterns from baseline filters to the scan set
+            # BEFORE passing files to detect-secrets. This prevents unnecessary
+            # file I/O and entropy calculations on excluded files, which is
+            # critical for performance on large repos (e.g. 400+ JSON test files).
+            exclude_patterns = self._get_baseline_exclude_patterns(scan_settings_dict)
+            if exclude_patterns:
+                pre_filter_count = len(scannable)
+                scannable = self._apply_file_exclusions(scannable, exclude_patterns)
+                excluded_count = pre_filter_count - len(scannable)
+                if excluded_count > 0:
+                    self._plugin_log(
+                        f"Excluded {excluded_count} files from detect-secrets scan "
+                        f"based on baseline exclude patterns",
+                        level=15,
+                        target_type=target_type,
+                    )
+
             if len(scannable) == 0:
                 message = f"There were no scannable files found in target '{target}'"
                 self._plugin_log(
@@ -302,11 +449,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 level=15,
                 target_type=target_type,
             )
-            with transient_settings(
-                self.config.options.scan_settings.model_dump(
-                    exclude_defaults=True, exclude_none=True, exclude_unset=True
-                )
-            ) as settings:
+
+            # Ensure multiprocessing uses 'fork' start method to avoid spawn-related
+            # issues in containerized environments (CodeBuild, Docker) where 'spawn'
+            # can cause recursive process creation and significant overhead.
+            self._ensure_fork_multiprocessing()
+
+            with transient_settings(scan_settings_dict) as settings:
                 ASH_LOGGER.debug(f"Settings: {settings}")
                 self._secrets_collection.scan_files(*scannable)
 

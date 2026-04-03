@@ -41,7 +41,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
@@ -70,7 +70,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
       - name: Run ASH scan
         run: ash --mode container
       - name: Upload scan results
@@ -99,7 +99,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
       - name: Run ASH scan
         run: ash --mode local
       - name: Add PR comment
@@ -132,7 +132,7 @@ jobs:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
     - ash --mode local
   artifacts:
     paths:
@@ -150,7 +150,7 @@ ash-scan-container:
     DOCKER_TLS_CERTDIR: "/certs"
   script:
     - apk add --no-cache python3 py3-pip git
-    - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+    - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
     - ash --mode container
   artifacts:
     paths:
@@ -174,7 +174,7 @@ Example using local mode:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
     - ash --mode local --no-fail-on-findings
   artifacts:
     paths:
@@ -193,7 +193,7 @@ phases:
     runtime-versions:
       python: 3.10
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
 
   build:
     commands:
@@ -214,7 +214,7 @@ phases:
     runtime-versions:
       python: 3.10
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
 
   pre_build:
     commands:
@@ -244,7 +244,7 @@ pipeline {
     stages {
         stage('Install ASH') {
             steps {
-                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4'
+                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5'
             }
         }
         stage('Run ASH Scan') {
@@ -275,7 +275,7 @@ pipeline {
         stage('Install ASH') {
             steps {
                 sh 'apk add --no-cache python3 py3-pip git'
-                sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4'
+                sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5'
             }
         }
         stage('Run ASH Scan') {
@@ -306,7 +306,7 @@ jobs:
       - checkout
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
       - run:
           name: Run ASH scan
           command: ash --mode local
@@ -333,7 +333,7 @@ jobs:
       - checkout
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.4
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.5
       - run:
           name: Run ASH scan
           command: ash --mode container
@@ -350,7 +350,7 @@ workflows:
 
 ## Best Practices for CI Integration
 
-> **Tip**: The CI examples in this guide use pinned versions (`@v3.2.4`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD pipelines.
+> **Tip**: The CI examples in this guide use pinned versions (`@v3.2.5`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD pipelines.
 
 1. **Fail builds on critical findings**:
    ```bash
