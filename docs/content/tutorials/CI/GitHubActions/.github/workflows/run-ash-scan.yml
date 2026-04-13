@@ -23,13 +23,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout ASH
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./automated-security-helper
           repository: awslabs/automated-security-helper
           ref: v1.3.3
       - name: Checkout app repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ./repo
       - name: Run ASH scan against repo
@@ -41,7 +41,7 @@ jobs:
             --output-dir "${{ env.ASH_OUTPUT_PATH }}"
 
       - name: Publish ${{ env.ASH_OUTPUT_PATH }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         if: success() || failure()
         with:
           name: ${{ env.ASH_OUTPUT_PATH }}
