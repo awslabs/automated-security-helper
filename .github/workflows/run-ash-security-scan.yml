@@ -167,6 +167,7 @@ jobs:
         with:
           name: ash_output
           path: ${{ inputs.output-dir }}
+          retention-days: 7
           if-no-files-found: error
 
       - name: Publish JUnit Test Report

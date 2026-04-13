@@ -463,6 +463,16 @@ jobs:
             echo "SUCCESS: No plugin execution errors found"
           fi
 
+      - name: Collect ASH output artifact
+        uses: actions/upload-artifact@v7
+        if: success() || failure()
+        continue-on-error: true
+        with:
+          name: ash_output-${{ matrix.os }}-${{ matrix.method }}-${{ matrix.config_file }}
+          path: .ash/ash_output
+          retention-days: 7
+          if-no-files-found: warn
+
       - name: Verify scan completed
         shell: pwsh
         run: |
