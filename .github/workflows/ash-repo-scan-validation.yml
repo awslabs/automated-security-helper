@@ -238,6 +238,17 @@ jobs:
           pip install .
           echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
 
+      - name: Validate ASH config files
+        if: contains(matrix.method, 'python')
+        shell: bash
+        run: |
+          echo "Validating ASH configuration files..."
+          if [ "${{ matrix.config_file }}" = "community" ]; then
+            ash config validate --config .ash/.ash_community_plugins.yaml
+          else
+            ash config validate --config .ash/.ash.yaml
+          fi
+
       - name: Validate ASH using Python + Container
         if: matrix.method == 'python-container'
         # We're not worried if the scan failed, we are validating that it produces the outputs expected.
