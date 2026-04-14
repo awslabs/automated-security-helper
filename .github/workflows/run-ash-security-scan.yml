@@ -49,7 +49,7 @@ on:
         default: true
         type: boolean
       collect-junit-xml-report:
-        description: "Whether to collect the ash.junit.xml report using the mikepenz/action-junit-report@v5 GitHub Action"
+        description: "Whether to collect the ash.junit.xml report using the mikepenz/action-junit-report@v6 GitHub Action"
         required: false
         default: true
         type: boolean
@@ -97,15 +97,15 @@ jobs:
       COLUMNS: 140
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python-version }}
 
@@ -154,23 +154,24 @@ jobs:
           tree "${ASH_OUTPUT_DIR}"
 
       - name: Post ASH MarkdownReporter output as PR comment
-        uses: mshick/add-pr-comment@v2
+        uses: mshick/add-pr-comment@v3
         if: inputs.post-pr-comment && github.repository_owner == inputs.repository-owner && (success() || failure())
         continue-on-error: true
         with:
           message-path: ${{ inputs.output-dir }}/reports/ash.summary.md
 
       - name: Collect ASH output artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: success() || failure()
         continue-on-error: true
         with:
           name: ash_output
           path: ${{ inputs.output-dir }}
+          retention-days: 7
           if-no-files-found: error
 
       - name: Publish JUnit Test Report
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@v6
         if: inputs.collect-junit-xml-report && (success() || failure())
         continue-on-error: true
         with:
@@ -181,7 +182,7 @@ jobs:
           summary: Skipped means passing, suppressed, or ignored findings that are considered non-actionable.
 
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: inputs.collect-sarif-report && (success() || failure())
         continue-on-error: false
         with:

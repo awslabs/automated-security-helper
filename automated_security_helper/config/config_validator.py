@@ -108,7 +108,13 @@ class ConfigValidator:
             top_level_fields = {}
             for line in raw_content.split("\n"):
                 stripped = line.strip()
-                if stripped and not stripped.startswith("#") and ":" in stripped:
+                # Only consider lines with no leading whitespace (true top-level fields)
+                if (
+                    stripped
+                    and not stripped.startswith("#")
+                    and ":" in stripped
+                    and not line[0].isspace()
+                ):
                     field_name = stripped.split(":")[0].strip()
                     if field_name in cls.VALID_TOP_LEVEL_FIELDS:
                         if field_name in top_level_fields:

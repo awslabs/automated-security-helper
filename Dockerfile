@@ -1,5 +1,5 @@
 #checkov:skip=CKV_DOCKER_7:Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
-ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-bullseye
+ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-bookworm
 
 # First stage: Build UV requirements
 FROM ${BASE_IMAGE} AS uv-reqs
@@ -128,13 +128,15 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip
 #
 # cfn-nag
 #
+ARG CFN_NAG_VERSION="0.8.10"
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    gem install cfn-nag
+    gem install cfn-nag -v ${CFN_NAG_VERSION}
 
 #
 # JavaScript:
 #
-RUN npm install -g npm
+ARG NPM_VERSION="11.12.1"
+RUN npm install -g npm@${NPM_VERSION}
 RUN curl -o- -L https://yarnpkg.com/install.sh | bash
 RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
 
@@ -147,12 +149,14 @@ ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | \
-    sh -s -- -b /usr/local/bin
+ARG SYFT_VERSION="v1.42.4"
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | \
+    sh -s -- -b /usr/local/bin ${SYFT_VERSION}
 RUN syft --version
 
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | \
-    sh -s -- -b /usr/local/bin
+ARG GRYPE_VERSION="v0.111.0"
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | \
+    sh -s -- -b /usr/local/bin ${GRYPE_VERSION}
 RUN grype --version
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
@@ -161,8 +165,9 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
     for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
     fi
 
-RUN curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | \
-    sh -s -- -b /usr/local/bin 
+ARG TRIVY_VERSION="v0.69.3"
+RUN curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | \
+    sh -s -- -b /usr/local/bin ${TRIVY_VERSION}
 RUN trivy --version
 
 #
