@@ -1,8 +1,13 @@
 # Automated Security Helper - CHANGELOG
-- [v3.2.4](#v324)
-    - [Maintenance](#maintenance)
-- [v3.2.3](#v323)
+- [v3.2.6](#v326)
     - [Fixes](#fixes)
+    - [Maintenance](#maintenance)
+- [v3.2.5](#v325)
+    - [Fixes](#fixes-1)
+- [v3.2.4](#v324)
+    - [Maintenance](#maintenance-1)
+- [v3.2.3](#v323)
+    - [Fixes](#fixes-2)
 - [v2.0.1](#v201)
     - [What's Changed](#whats-changed)
 - [v2.0.0](#v200)
@@ -34,6 +39,32 @@
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
+
+## v3.2.6
+
+### Fixes
+
+- Fix `ash config init` generating invalid config files — internal-only fields (`build`, `mcp-resource-management`, `name`, `extension`, `tool_version`, `install_timeout`) were leaking into the generated YAML, causing `ash config validate` to reject the output with 38 errors
+- Fix config validator false positive on duplicate top-level fields — nested fields like `scanners` inside trivy-repo options were incorrectly flagged as duplicates
+- Fix `ash report` and container result parsing crash (`'NoneType' object has no attribute 'get'`) caused by Pydantic 2.13.0 tightening forward reference validation — `AshConfig` forward ref in `AshAggregatedResults` was not resolved before `model_validate_json`
+- Remove internal `build` field from `.ash/.ash_no_ignore.yaml`
+- Fix Docker base image compatibility — upgrade from `python:3.12-bullseye` (glibc 2.31) to `python:3.12-bookworm` (glibc 2.36) to support semgrep 1.158.0+ which requires `manylinux_2_35` wheels
+- Fix dependency vulnerabilities — upgrade `cryptography` 46.0.6 → 46.0.7 (GHSA-p423-j2cm-9vmq) and `uv` 0.11.3 → 0.11.6 (GHSA-pjjw-68hj-v9mw)
+
+### Maintenance
+
+- Pin Pydantic to `<2.13` in `pyproject.toml` to prevent forward ref breakage in uvx environments until forward refs are properly resolved
+- Tighten upper bounds on high-risk dependencies (`uv`, `mcp`, `python-multipart`, `aws-cdk-lib`, `boto3`) to prevent surprise breaking changes from fresh `uvx` resolution
+- Pin external tool versions in Dockerfile: Grype v0.111.0, Syft v1.42.4, Trivy v0.69.3, cfn-nag 0.8.10, npm 11.12.1
+- Upgrade GitHub Actions to Node.js 24 compatible versions: `actions/checkout` v6, `actions/setup-python` v6, `actions/upload-artifact` v7, `docker/setup-buildx-action` v4, `mikepenz/action-junit-report` v6, `github/codeql-action` v4, `mshick/add-pr-comment` v3
+- Add ASH scan artifact upload (7-day retention) to CI validation workflow for debugging scan failures
+- Add config validation step to CI validation workflow before scan execution
+
+## v3.2.5
+
+### Fixes
+
+- Fix detect-secrets scanner — propagate baseline exclude filters and fix multiprocessing issue
 
 ## v3.2.4
 

@@ -119,7 +119,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # - name: Install docker on MacOS
       #   if: runner.os == 'macos' && matrix.method == 'python-local'
@@ -129,17 +129,17 @@ jobs:
 
       # - name: Set up Docker Buildx on MacOS
       #   if: contains(matrix.os, 'macos') && matrix.method != 'python-local'
-      #   uses: docker/setup-buildx-action@v3
+      #   uses: docker/setup-buildx-action@v4
 
       # - name: Set up Docker Buildx on Windows
       #   if: contains(matrix.os, 'windows') && matrix.method != 'python-local'
-      #   uses: docker/setup-buildx-action@v3
+      #   uses: docker/setup-buildx-action@v4
       #   with:
       #     install: true
 
       - name: Set up Docker Buildx on Linux
         if: contains(matrix.os, 'ubuntu') && matrix.method != 'python-local'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Create output directory
         shell: bash
@@ -215,13 +215,13 @@ jobs:
       # Call the appropriate workflow based on matrix.method
       ############ Python #########
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         if: contains(matrix.method, 'python')
         with:
           enable-cache: true
       - name: Set up Python
         if: contains(matrix.method, 'python')
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
@@ -237,6 +237,17 @@ jobs:
         run: |
           pip install .
           echo "$env:APPDATA\Python\Scripts" >> $env:GITHUB_PATH
+
+      - name: Validate ASH config files
+        if: contains(matrix.method, 'python')
+        shell: bash
+        run: |
+          echo "Validating ASH configuration files..."
+          if [ "${{ matrix.config_file }}" = "community" ]; then
+            ash config validate --config .ash/.ash_community_plugins.yaml
+          else
+            ash config validate --config .ash/.ash.yaml
+          fi
 
       - name: Validate ASH using Python + Container
         if: matrix.method == 'python-container'
@@ -451,6 +462,16 @@ jobs:
           else
             echo "SUCCESS: No plugin execution errors found"
           fi
+
+      - name: Collect ASH output artifact
+        uses: actions/upload-artifact@v7
+        if: success() || failure()
+        continue-on-error: true
+        with:
+          name: ash_output-${{ matrix.os }}-${{ matrix.method }}-${{ matrix.config_file }}
+          path: .ash/ash_output
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Verify scan completed
         shell: pwsh

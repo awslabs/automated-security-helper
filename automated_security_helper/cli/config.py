@@ -11,7 +11,12 @@ import typer
 from rich import print
 from rich.syntax import Syntax
 
-from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.ash_config import (
+    AshConfig,
+    ConverterConfigSegment,
+    ReporterConfigSegment,
+    ScannerConfigSegment,
+)
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
@@ -83,6 +88,22 @@ def init(
     ash_config = AshConfig(
         project_name=project_name,
     )
+    # Exclude internal-only fields that should not appear in user configs.
+    # These are used at runtime but are not valid in user-facing config files.
+    internal_scanner_fields = {"name", "extension", "tool_version", "install_timeout"}
+    scanner_exclusions = {
+        scanner_name: internal_scanner_fields
+        for scanner_name in ScannerConfigSegment.model_fields
+    }
+    reporter_exclusions = {
+        reporter_name: internal_scanner_fields
+        for reporter_name in ReporterConfigSegment.model_fields
+    }
+    converter_exclusions = {
+        converter_name: internal_scanner_fields
+        for converter_name in ConverterConfigSegment.model_fields
+    }
+
     config_strings = [
         "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json",
         yaml.dump(
@@ -90,6 +111,13 @@ def init(
                 by_alias=True,
                 exclude_defaults=False,
                 exclude_none=False,
+                exclude={
+                    "build": True,
+                    "mcp_resource_management": True,
+                    "scanners": scanner_exclusions,
+                    "reporters": reporter_exclusions,
+                    "converters": converter_exclusions,
+                },
             ),
             Dumper=IndentableYamlDumper,
             default_flow_style=False,

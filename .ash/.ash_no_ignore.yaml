@@ -3,9 +3,6 @@ project_name: automated-security-helper
 fail_on_findings: true
 global_settings:
   severity_threshold: MEDIUM
-build:
-  build_mode: ONLINE
-  custom_scanners: []
 reporters:
   asff:
     enabled: false
