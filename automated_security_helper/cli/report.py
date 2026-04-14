@@ -146,6 +146,10 @@ def report_command(
 
     # Load the results file
     try:
+        # Ensure AshAggregatedResults model is fully defined (resolves AshConfig forward ref)
+        from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
+
+        AshAggregatedResults.model_rebuild()
         with open(results_file, "r") as f:
             model = AshAggregatedResults.model_validate_json(f.read())
     except Exception as e:
