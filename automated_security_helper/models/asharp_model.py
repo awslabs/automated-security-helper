@@ -850,6 +850,22 @@ class AshAggregatedResults(BaseModel):
         return cls.from_json(json_data)
 
 
+# Resolve the AshConfig forward reference so model_validate_json works
+# regardless of import order (e.g. in isolated uvx environments).
+# Uses a deferred function to avoid circular imports since ash_config.py
+# imports from this module's package.
+def _resolve_forward_refs():
+    try:
+        from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
+
+        AshAggregatedResults.model_rebuild()
+    except ImportError:
+        pass  # Will be resolved when AshConfig is eventually imported
+
+
+_resolve_forward_refs()
+
+
 if __name__ == "__main__":
     model = AshAggregatedResults()
     print(model.model_dump_json(indent=2))
