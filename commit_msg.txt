@@ -1,0 +1,4 @@
+chore: bump version to 3.2.7 and update changelog
+
+Update version references in pyproject.toml, docs, and changelog
+for the v3.2.7 release.

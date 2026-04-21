@@ -1,13 +1,17 @@
 # Automated Security Helper - CHANGELOG
-- [v3.2.6](#v326)
+- [v3.2.7](#v327)
     - [Fixes](#fixes)
+    - [Features](#features)
     - [Maintenance](#maintenance)
-- [v3.2.5](#v325)
+- [v3.2.6](#v326)
     - [Fixes](#fixes-1)
-- [v3.2.4](#v324)
     - [Maintenance](#maintenance-1)
-- [v3.2.3](#v323)
+- [v3.2.5](#v325)
     - [Fixes](#fixes-2)
+- [v3.2.4](#v324)
+    - [Maintenance](#maintenance-2)
+- [v3.2.3](#v323)
+    - [Fixes](#fixes-3)
 - [v2.0.1](#v201)
     - [What's Changed](#whats-changed)
 - [v2.0.0](#v200)
@@ -39,6 +43,28 @@
 - [1.0.5-e-06Mar2023](#105-e-06mar2023)
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
+
+## v3.2.7
+
+### Fixes
+
+- Fix Pydantic 2.13 compatibility — resolve `AshConfig` forward reference in `AshAggregatedResults` via deferred `model_rebuild()`, and guard against `ValidationInfo.data` being `None` in the `line_end` field validator
+- Fix suppression glob pattern `tests/**/*.py` not matching `tests/test_example.py` — `fnmatch` treats `**` as a single `*` (one path segment). Replaced with a custom recursive glob matcher that handles `**` as zero-or-more directories (#265)
+- Fix GitLab SAST reporter including suppressed findings as active vulnerabilities — suppressed findings are now downgraded to `Info` severity with the suppression reason in the `solution` field (#266)
+- Fix dependency vulnerabilities: upgrade `python-multipart` 0.0.24 → 0.0.26 (GHSA-mj87-hwqh-73pj), `pytest` 8.4.2 → 9.0.3 (GHSA-6w46-j5rx-g56g)
+- Fix 4 ruff F841 unused variable warnings and formatting drift across the codebase
+- Fix `pytest.ini` `asyncio_default_fixture_loop_scope` value — remove quotes that broke `pytest-asyncio` 1.3.0 parsing
+- Update B108 suppression line numbers in `.ash.yaml` after ruff reformatting
+
+### Features
+
+- Add `exclude_suppressed` option to GitLab SAST reporter config — when `true`, suppressed findings are omitted entirely from the report instead of being downgraded to Info severity
+
+### Maintenance
+
+- Lift Pydantic pin from `<2.13` to `<2.14` now that forward ref issues are resolved
+- Upgrade `pytest-asyncio` 0.26.0 → 1.3.0 (required for pytest 9.x)
+- Run `ruff format` on all files to resolve pre-commit formatting drift
 
 ## v3.2.6
 
