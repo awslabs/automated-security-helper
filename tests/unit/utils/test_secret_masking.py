@@ -1,6 +1,5 @@
 """Tests for secret masking utilities."""
 
-import pytest
 from automated_security_helper.utils.secret_masking import (
     mask_secret_in_text,
     _mask_bandit_b105_secret,
@@ -43,7 +42,9 @@ class TestSecretMasking:
     def test_mask_bandit_b105_double_quote(self):
         """Test masking of B105 findings with double quotes."""
         text = 'Possible hardcoded password: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"'
-        expected = 'Possible hardcoded password: "wJa**********************************KEY"'
+        expected = (
+            'Possible hardcoded password: "wJa**********************************KEY"'
+        )
         result = _mask_bandit_b105_secret(text)
         assert result == expected
 
@@ -85,7 +86,9 @@ class TestSecretMasking:
     def test_real_world_examples(self):
         """Test with real-world examples from the issue description."""
         # Example 1: AWS Secret Key
-        text1 = "Possible hardcoded password: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'"
+        text1 = (
+            "Possible hardcoded password: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'"
+        )
         result1 = mask_secret_in_text(text1, "B105")
         assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in result1
         assert "Possible hardcoded password:" in result1

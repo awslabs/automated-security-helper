@@ -3,8 +3,6 @@
 
 """Shared fixtures for Ferret Scan plugin tests."""
 
-import json
-from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
 
@@ -51,7 +49,7 @@ def custom_ferret_config():
             profile="security-audit",
             show_match=False,
             enable_preprocessors=True,
-        )
+        ),
     )
 
 
@@ -67,51 +65,39 @@ def mock_sarif_response():
                     "driver": {
                         "name": "ferret-scan",
                         "version": "1.0.0",
-                        "informationUri": "https://github.com/awslabs/ferret-scan"
+                        "informationUri": "https://github.com/awslabs/ferret-scan",
                     }
                 },
                 "results": [
                     {
                         "ruleId": "CREDIT_CARD",
                         "level": "warning",
-                        "message": {
-                            "text": "Potential credit card number detected"
-                        },
+                        "message": {"text": "Potential credit card number detected"},
                         "locations": [
                             {
                                 "physicalLocation": {
-                                    "artifactLocation": {
-                                        "uri": "test_file.txt"
-                                    },
-                                    "region": {
-                                        "startLine": 10
-                                    }
+                                    "artifactLocation": {"uri": "test_file.txt"},
+                                    "region": {"startLine": 10},
                                 }
                             }
-                        ]
+                        ],
                     },
                     {
                         "ruleId": "SECRETS",
                         "level": "error",
-                        "message": {
-                            "text": "Potential API key detected"
-                        },
+                        "message": {"text": "Potential API key detected"},
                         "locations": [
                             {
                                 "physicalLocation": {
-                                    "artifactLocation": {
-                                        "uri": "config.py"
-                                    },
-                                    "region": {
-                                        "startLine": 5
-                                    }
+                                    "artifactLocation": {"uri": "config.py"},
+                                    "region": {"startLine": 5},
                                 }
                             }
-                        ]
-                    }
-                ]
+                        ],
+                    },
+                ],
             }
-        ]
+        ],
     }
 
 
@@ -127,12 +113,12 @@ def mock_empty_sarif_response():
                     "driver": {
                         "name": "ferret-scan",
                         "version": "1.0.0",
-                        "informationUri": "https://github.com/awslabs/ferret-scan"
+                        "informationUri": "https://github.com/awslabs/ferret-scan",
                     }
                 },
-                "results": []
+                "results": [],
             }
-        ]
+        ],
     }
 
 

@@ -26,7 +26,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
-from automated_security_helper.utils.log import ASH_LOGGER
 
 # Path to the default ferret-scan config bundled with this plugin
 DEFAULT_FERRET_CONFIG = Path(__file__).parent / "ferret-config.yaml"
@@ -93,26 +92,21 @@ UNSUPPORTED_FERRET_OPTIONS = {
     # Output format options - ASH requires SARIF
     "format": "ASH requires SARIF format for result aggregation. Use ASH reporter plugins for other formats.",
     "output_format": "ASH requires SARIF format for result aggregation. Use ASH reporter plugins for other formats.",
-    
     # Web server options - not applicable
     "web": "Web server mode is not supported in ASH integration. Use ferret-scan CLI directly for web mode.",
     "port": "Web server mode is not supported in ASH integration. Use ferret-scan CLI directly for web mode.",
-    
     # Redaction options - post-processing
     "enable_redaction": "Redaction is not supported in ASH integration. Use ferret-scan CLI directly for redaction.",
     "redaction_output_dir": "Redaction is not supported in ASH integration. Use ferret-scan CLI directly for redaction.",
     "redaction_strategy": "Redaction is not supported in ASH integration. Use ferret-scan CLI directly for redaction.",
     "redaction_audit_log": "Redaction is not supported in ASH integration. Use ferret-scan CLI directly for redaction.",
     "memory_scrub": "Redaction is not supported in ASH integration. Use ferret-scan CLI directly for redaction.",
-    
     # Suppression options - ASH has its own system
     "generate_suppressions": "ASH manages suppressions centrally. Use .ash/suppressions.yaml instead.",
     "show_suppressed": "ASH manages suppressions centrally. Use 'ash inspect suppressions' instead.",
     "suppressions_file": "ASH manages suppressions centrally. Use .ash/suppressions.yaml instead.",
-    
     # Text extraction mode - not scanning
     "extract_text": "Text extraction mode is not supported. Use ferret-scan CLI directly for text extraction.",
-    
     # Debug/verbose - use ferret_debug/ferret_verbose instead
     "debug": "Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.",
     "verbose": "Use 'ferret_verbose: true' instead. Bare 'verbose' is blocked to avoid confusion with ASH's --verbose flag.",
@@ -121,38 +115,38 @@ UNSUPPORTED_FERRET_OPTIONS = {
 
 def parse_version(version_str: str) -> Tuple[int, ...]:
     """Parse a version string into a tuple of integers for comparison.
-    
+
     Args:
         version_str: Version string like "1.2.3" or "1.2.3-beta"
-        
+
     Returns:
         Tuple of integers representing the version (e.g., (1, 2, 3))
     """
     # Remove any pre-release suffixes (e.g., -beta, -rc1)
-    version_str = re.split(r'[-+]', version_str)[0]
+    version_str = re.split(r"[-+]", version_str)[0]
     # Extract numeric parts
-    parts = re.findall(r'\d+', version_str)
+    parts = re.findall(r"\d+", version_str)
     return tuple(int(p) for p in parts) if parts else (0,)
 
 
 def compare_versions(v1: str, v2: str) -> int:
     """Compare two version strings.
-    
+
     Args:
         v1: First version string
         v2: Second version string
-        
+
     Returns:
         -1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2
     """
     v1_parts = parse_version(v1)
     v2_parts = parse_version(v2)
-    
+
     # Pad shorter version with zeros
     max_len = max(len(v1_parts), len(v2_parts))
     v1_parts = v1_parts + (0,) * (max_len - len(v1_parts))
     v2_parts = v2_parts + (0,) * (max_len - len(v2_parts))
-    
+
     if v1_parts < v2_parts:
         return -1
     elif v1_parts > v2_parts:
@@ -162,22 +156,24 @@ def compare_versions(v1: str, v2: str) -> int:
 
 def is_version_compatible(version: str, min_version: str, max_version: str) -> bool:
     """Check if a version is within the compatible range.
-    
+
     Args:
         version: Version to check
         min_version: Minimum supported version (inclusive)
         max_version: Maximum supported version (exclusive)
-        
+
     Returns:
         True if version is compatible, False otherwise
     """
-    return (compare_versions(version, min_version) >= 0 and 
-            compare_versions(version, max_version) < 0)
+    return (
+        compare_versions(version, min_version) >= 0
+        and compare_versions(version, max_version) < 0
+    )
 
 
 class FerretScannerConfigOptions(ScannerOptionsBase):
     """Configuration options for the Ferret scanner.
-    
+
     Unsupported options that will raise errors if used:
     - format/output_format: ASH requires SARIF format
     - web/port: Web server mode not applicable
@@ -188,7 +184,9 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
     """
 
     confidence_levels: Annotated[
-        Literal["all", "high", "medium", "low", "high,medium", "high,low", "medium,low"],
+        Literal[
+            "all", "high", "medium", "low", "high,medium", "high,low", "medium,low"
+        ],
         Field(
             description="Confidence levels to display: 'high', 'medium', 'low', or combinations"
         ),
@@ -235,9 +233,7 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
 
     exclude_patterns: Annotated[
         List[str],
-        Field(
-            description="File patterns to exclude from scanning (glob patterns)"
-        ),
+        Field(description="File patterns to exclude from scanning (glob patterns)"),
     ] = []
 
     # Tool-specific behavior options (these affect ferret-scan behavior, not ASH logging)
@@ -403,22 +399,22 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
     def _get_tool_version_constraint(self) -> Optional[str]:
         """Get version constraint for ferret-scan installation.
-        
+
         This method is called by the base class when installing tools via UV.
-        
+
         Returns:
             Version constraint string (e.g., ">=1.0.0,<2.0.0") or None for latest
         """
         # User-specified version takes priority
         if self.config and self.config.options.tool_version:
             return self.config.options.tool_version
-        
+
         # Return default version constraint
         return DEFAULT_VERSION_CONSTRAINT
 
     def _get_installed_version(self) -> Optional[str]:
         """Get the currently installed ferret-scan version.
-        
+
         Returns:
             Version string (e.g., "1.2.3") or None if not installed or version unknown
         """
@@ -426,19 +422,19 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             ferret_binary = find_executable("ferret-scan")
             if not ferret_binary:
                 return None
-            
+
             result = subprocess.run(
                 [ferret_binary, "--version"],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            
+
             if result.returncode == 0:
                 # Parse version from output (e.g., "ferret-scan version 1.2.3")
                 output = result.stdout.strip()
                 # Try to extract version number
-                version_match = re.search(r'(\d+\.\d+\.\d+(?:-[\w.]+)?)', output)
+                version_match = re.search(r"(\d+\.\d+\.\d+(?:-[\w.]+)?)", output)
                 if version_match:
                     return version_match.group(1)
                 # If no match, return the whole output as version
@@ -453,21 +449,23 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
     def _check_version_compatibility(self) -> Tuple[bool, Optional[str], Optional[str]]:
         """Check if the installed ferret-scan version is compatible.
-        
+
         Returns:
             Tuple of (is_compatible, installed_version, warning_message)
         """
         installed_version = self._get_installed_version()
-        
+
         if not installed_version:
             return True, None, None  # Can't check, assume compatible
-        
+
         # Store version for later use
         self.tool_version = installed_version
-        
-        if is_version_compatible(installed_version, MIN_SUPPORTED_VERSION, MAX_SUPPORTED_VERSION):
+
+        if is_version_compatible(
+            installed_version, MIN_SUPPORTED_VERSION, MAX_SUPPORTED_VERSION
+        ):
             return True, installed_version, None
-        
+
         # Version is outside supported range
         if compare_versions(installed_version, MIN_SUPPORTED_VERSION) < 0:
             warning = (
@@ -482,7 +480,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 f"with breaking changes in newer versions. Consider pinning to a compatible "
                 f"version using tool_version option, or set skip_version_check=true to proceed."
             )
-        
+
         return False, installed_version, warning
 
     def validate_plugin_dependencies(self) -> bool:
@@ -508,13 +506,13 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
         # Check version compatibility
         is_compatible, installed_version, warning = self._check_version_compatibility()
-        
+
         if installed_version:
             self._plugin_log(
                 f"Detected ferret-scan version: {installed_version}",
                 level=logging.DEBUG,
             )
-        
+
         if not is_compatible:
             if self.config.options.skip_version_check:
                 self._plugin_log(
@@ -538,12 +536,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
     def _process_config_options(self):
         """Process configuration options into command line arguments.
-        
+
         This method translates plugin configuration into ferret-scan CLI arguments.
-        
+
         Note: This method clears extra_args before populating them to prevent
         argument duplication when called multiple times (e.g., via _resolve_arguments).
-        
+
         Debug/verbose flags are passed to ferret-scan only when explicitly enabled
         via ferret_debug/ferret_verbose options. These control ferret-scan's own
         output independently of ASH's logging level.
@@ -567,9 +565,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
         # Recursive scanning
         if options.recursive:
-            self.args.extra_args.append(
-                ToolExtraArg(key="--recursive", value=None)
-            )
+            self.args.extra_args.append(ToolExtraArg(key="--recursive", value=None))
 
         # Config file
         config_file_path = self._find_config_file(options.config_file)
@@ -598,9 +594,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 "Disable this option in production environments.",
                 level=logging.WARNING,
             )
-            self.args.extra_args.append(
-                ToolExtraArg(key="--show-match", value=None)
-            )
+            self.args.extra_args.append(ToolExtraArg(key="--show-match", value=None))
 
         # Enable preprocessors (tool-specific behavior option)
         if options.enable_preprocessors:
@@ -610,19 +604,13 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
         # Ferret-scan's own debug/verbose (independent of ASH logging)
         if options.ferret_debug:
-            self.args.extra_args.append(
-                ToolExtraArg(key="--debug", value=None)
-            )
+            self.args.extra_args.append(ToolExtraArg(key="--debug", value=None))
 
         if options.ferret_verbose:
-            self.args.extra_args.append(
-                ToolExtraArg(key="--verbose", value=None)
-            )
+            self.args.extra_args.append(ToolExtraArg(key="--verbose", value=None))
 
         # Always disable color in ferret-scan output (ASH handles formatting)
-        self.args.extra_args.append(
-            ToolExtraArg(key="--no-color", value=None)
-        )
+        self.args.extra_args.append(ToolExtraArg(key="--no-color", value=None))
 
         return super()._process_config_options()
 
@@ -818,7 +806,9 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             original_patterns = self.config.options.exclude_patterns
             self.config.options.exclude_patterns = exclude_patterns
 
-            final_args = self._resolve_arguments(target=target, results_file=results_file)
+            final_args = self._resolve_arguments(
+                target=target, results_file=results_file
+            )
 
             # Restore original patterns to prevent state pollution
             self.config.options.exclude_patterns = original_patterns
@@ -865,8 +855,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                         "command_line": " ".join(final_args),
                         "arguments": final_args[1:],
                         "working_directory": get_shortest_name(input=target),
-                        "start_time": self.start_time.isoformat() if self.start_time else None,
-                        "end_time": self.end_time.isoformat() if self.end_time else None,
+                        "start_time": self.start_time.isoformat()
+                        if self.start_time
+                        else None,
+                        "end_time": self.end_time.isoformat()
+                        if self.end_time
+                        else None,
                         "exit_code": self.exit_code,
                     },
                 )
@@ -879,7 +873,9 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                         endTimeUtc=self.end_time,
                         executionSuccessful=self.exit_code == 0,
                         exitCode=self.exit_code,
-                        exitCodeDescription="\n".join(self.errors) if self.errors else None,
+                        exitCodeDescription="\n".join(self.errors)
+                        if self.errors
+                        else None,
                         workingDirectory=ArtifactLocation(
                             uri=get_shortest_name(input=target),
                         ),

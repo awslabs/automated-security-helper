@@ -711,11 +711,11 @@ class EventSubscriptionContextManager:
             subscription_info["registered"] = True
 
             # Add control methods to subscription info
-            subscription_info["unregister"] = (
-                lambda: self._event_manager.unregister_subscription(subscription_id)
+            subscription_info["unregister"] = lambda: (
+                self._event_manager.unregister_subscription(subscription_id)
             )
-            subscription_info["get_info"] = (
-                lambda: self._event_manager.get_subscription_info(subscription_id)
+            subscription_info["get_info"] = lambda: (
+                self._event_manager.get_subscription_info(subscription_id)
             )
 
             self._logger.debug(f"Managed subscription created: {subscription_id}")
