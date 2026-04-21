@@ -3,8 +3,6 @@
 
 """Shared fixtures for Trivy plugin tests."""
 
-import json
-from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
 
@@ -14,7 +12,6 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfig,
     TrivyRepoScannerConfigOptions,
 )
-from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 # Rebuild models to resolve forward references
 AshConfig.model_rebuild()
@@ -48,7 +45,7 @@ def custom_trivy_config():
             license_full=False,
             ignore_unfixed=False,
             disable_telemetry=True,
-        )
+        ),
     )
 
 
@@ -64,32 +61,26 @@ def mock_sarif_response():
                     "driver": {
                         "name": "Trivy",
                         "version": "0.45.0",
-                        "informationUri": "https://github.com/aquasecurity/trivy"
+                        "informationUri": "https://github.com/aquasecurity/trivy",
                     }
                 },
                 "results": [
                     {
                         "ruleId": "CVE-2023-1234",
                         "level": "error",
-                        "message": {
-                            "text": "High severity vulnerability found"
-                        },
+                        "message": {"text": "High severity vulnerability found"},
                         "locations": [
                             {
                                 "physicalLocation": {
-                                    "artifactLocation": {
-                                        "uri": "package.json"
-                                    },
-                                    "region": {
-                                        "startLine": 1
-                                    }
+                                    "artifactLocation": {"uri": "package.json"},
+                                    "region": {"startLine": 1},
                                 }
                             }
-                        ]
+                        ],
                     }
-                ]
+                ],
             }
-        ]
+        ],
     }
 
 
@@ -105,12 +96,12 @@ def mock_empty_sarif_response():
                     "driver": {
                         "name": "Trivy",
                         "version": "0.45.0",
-                        "informationUri": "https://github.com/aquasecurity/trivy"
+                        "informationUri": "https://github.com/aquasecurity/trivy",
                     }
                 },
-                "results": []
+                "results": [],
             }
-        ]
+        ],
     }
 
 
@@ -119,12 +110,12 @@ def mock_target_directory(tmp_path):
     """Create a mock target directory with some files."""
     target_dir = tmp_path / "test_project"
     target_dir.mkdir()
-    
+
     # Create some test files
     (target_dir / "package.json").write_text('{"name": "test"}')
     (target_dir / "requirements.txt").write_text("requests==2.28.0")
     (target_dir / "Dockerfile").write_text("FROM ubuntu:20.04")
-    
+
     return target_dir
 
 
@@ -141,8 +132,8 @@ def mock_results_directory(tmp_path):
     """Create a mock results directory structure."""
     results_dir = tmp_path / "results"
     results_dir.mkdir()
-    
+
     source_dir = results_dir / "source"
     source_dir.mkdir()
-    
+
     return results_dir, source_dir

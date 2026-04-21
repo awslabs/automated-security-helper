@@ -16,7 +16,6 @@ import string
 from pathlib import Path
 
 from docx import Document
-from docx.shared import Pt
 
 OUTPUT_PATH = Path("tests/test_data/scanners/ferret-scan/synthetic-pii-test.docx")
 
@@ -28,17 +27,61 @@ random.seed(42)
 # ============================================================================
 
 FIRST_NAMES = [
-    "Alice", "Bob", "Carol", "David", "Eve", "Frank", "Grace", "Henry",
-    "Iris", "Jack", "Karen", "Leo", "Mia", "Noah", "Olivia", "Paul",
-    "Quinn", "Rosa", "Sam", "Tina", "Uma", "Victor", "Wendy", "Xavier",
-    "Yara", "Zane",
+    "Alice",
+    "Bob",
+    "Carol",
+    "David",
+    "Eve",
+    "Frank",
+    "Grace",
+    "Henry",
+    "Iris",
+    "Jack",
+    "Karen",
+    "Leo",
+    "Mia",
+    "Noah",
+    "Olivia",
+    "Paul",
+    "Quinn",
+    "Rosa",
+    "Sam",
+    "Tina",
+    "Uma",
+    "Victor",
+    "Wendy",
+    "Xavier",
+    "Yara",
+    "Zane",
 ]
 
 LAST_NAMES = [
-    "Anderson", "Brown", "Clark", "Davis", "Evans", "Foster", "Garcia",
-    "Harris", "Ingram", "Johnson", "King", "Lopez", "Miller", "Nelson",
-    "Ortiz", "Parker", "Quinn", "Roberts", "Smith", "Taylor", "Underwood",
-    "Vance", "Williams", "Xu", "Young", "Zhang",
+    "Anderson",
+    "Brown",
+    "Clark",
+    "Davis",
+    "Evans",
+    "Foster",
+    "Garcia",
+    "Harris",
+    "Ingram",
+    "Johnson",
+    "King",
+    "Lopez",
+    "Miller",
+    "Nelson",
+    "Ortiz",
+    "Parker",
+    "Quinn",
+    "Roberts",
+    "Smith",
+    "Taylor",
+    "Underwood",
+    "Vance",
+    "Williams",
+    "Xu",
+    "Young",
+    "Zhang",
 ]
 
 
@@ -62,7 +105,11 @@ def fake_visa():
 
 def fake_mastercard():
     """Generate a fake MasterCard-like number (starts with 5)."""
-    digits = "5" + str(random.randint(1, 5)) + "".join(str(random.randint(0, 9)) for _ in range(14))
+    digits = (
+        "5"
+        + str(random.randint(1, 5))
+        + "".join(str(random.randint(0, 9)) for _ in range(14))
+    )
     return f"{digits[0:4]}-{digits[4:8]}-{digits[8:12]}-{digits[12:16]}"
 
 
@@ -111,7 +158,7 @@ def main():
     )
 
     # Title
-    title = doc.add_heading("Synthetic PII Test Data", level=1)
+    doc.add_heading("Synthetic PII Test Data", level=1)
     doc.add_paragraph(
         "This document contains synthetic (fake) PII data for testing "
         "ferret-scan's detection capabilities. All data is entirely fictional "
@@ -161,19 +208,14 @@ def main():
     narratives = [
         f"Customer {fake_name()} (SSN: {fake_ssn()}) reported unauthorized charges "
         f"on Visa card {fake_visa()}. Contact at {fake_phone()}.",
-
         f"Employee {fake_name()} submitted expense report. Corporate MasterCard "
         f"{fake_mastercard()} used for travel. Phone: {fake_phone()}.",
-
         f"Account holder {fake_name()} requested replacement AMEX card {fake_amex()}. "
         f"Verified identity with SSN {fake_ssn()} and passport {fake_passport()}.",
-
         f"HR record for {fake_name()}: SSN {fake_ssn()}, phone {fake_phone()}. "
         f"Travel document: passport {fake_passport()}. Company Visa: {fake_visa()}.",
-
         f"Please charge Visa card {fake_visa()} for the full amount. "
         f"The MasterCard ending in 3020 ({fake_mastercard()}) has been approved.",
-
         f"AMEX: {fake_amex()} - Expiration: 12/25. "
         f"Discover card {fake_discover()} authorized for recurring payments.",
     ]

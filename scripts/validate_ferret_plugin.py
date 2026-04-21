@@ -20,10 +20,17 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Files to scan (relative to project root)
 PLUGIN_FILES = list(
-    (PROJECT_ROOT / "automated_security_helper" / "plugin_modules" / "ash_ferret_plugins").rglob("*")
+    (
+        PROJECT_ROOT
+        / "automated_security_helper"
+        / "plugin_modules"
+        / "ash_ferret_plugins"
+    ).rglob("*")
 )
 TEST_FILES = list(
-    (PROJECT_ROOT / "tests" / "unit" / "plugin_modules" / "ash_ferret_plugins").rglob("*")
+    (PROJECT_ROOT / "tests" / "unit" / "plugin_modules" / "ash_ferret_plugins").rglob(
+        "*"
+    )
 )
 SCRIPT_FILES = [PROJECT_ROOT / "scripts" / "generate_test_docx.py"]
 
@@ -33,6 +40,7 @@ ALL_FILES = [f for f in PLUGIN_FILES + TEST_FILES + SCRIPT_FILES if f.is_file()]
 # ============================================================================
 # Suppression helpers
 # ============================================================================
+
 
 def load_community_suppressions():
     """Parse suppressions from .ash/.ash_community_plugins.yaml.
@@ -64,7 +72,12 @@ def load_community_suppressions():
             continue
         # End of suppressions block: non-indented, non-comment, non-empty line
         # that isn't a list item or a key-value under a list item
-        if stripped and not stripped.startswith("#") and not stripped.startswith("-") and ":" in stripped:
+        if (
+            stripped
+            and not stripped.startswith("#")
+            and not stripped.startswith("-")
+            and ":" in stripped
+        ):
             # Check indent level — suppressions items are deeply indented
             indent = len(line) - len(line.lstrip())
             if indent <= 2:
@@ -144,9 +157,11 @@ failures = []
 
 def check(name):
     """Decorator to register a check function."""
+
     def decorator(fn):
         CHECKS.append((name, fn))
         return fn
+
     return decorator
 
 
@@ -177,9 +192,9 @@ SECRET_KEYWORD_PATTERN = re.compile(
 
 # Allowlist: lines that are documenting the problem (not introducing it)
 SECRET_KEYWORD_ALLOWLIST = [
-    "SECRET-SECRET-KEYWORD",        # references to the rule name itself
-    "UNSUPPORTED_FERRET_OPTIONS",   # the dict defining blocked options
-    "# List of unsupported",       # comment above the dict
+    "SECRET-SECRET-KEYWORD",  # references to the rule name itself
+    "UNSUPPORTED_FERRET_OPTIONS",  # the dict defining blocked options
+    "# List of unsupported",  # comment above the dict
 ]
 
 
@@ -201,7 +216,11 @@ def check_secret_keywords():
                 stripped = line.lstrip()
                 if stripped.startswith("#") or stripped.startswith("//"):
                     # Allow comments that mention these as examples of what NOT to do
-                    if "e.g." in line or "example" in line.lower() or "don't" in line.lower():
+                    if (
+                        "e.g." in line
+                        or "example" in line.lower()
+                        or "don't" in line.lower()
+                    ):
                         continue
                 # Skip hits that have a matching suppression with line number
                 if has_matching_suppression(
@@ -232,9 +251,7 @@ CREDIT_CARD_PATTERN = re.compile(
     """,
 )
 
-SSN_PATTERN = re.compile(
-    r'(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)'
-)
+SSN_PATTERN = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
 
 PII_ALLOWLIST_FILES = {
     # The docx generator uses runtime-generated values, but the function
@@ -285,9 +302,7 @@ def check_hardcoded_pii():
 # ----------------------------------------------------------------------------
 # 3. HEX-HIGH-ENTROPY-STRING: hex strings that trigger entropy detection
 # ----------------------------------------------------------------------------
-HEX_ENTROPY_PATTERN = re.compile(
-    r'["\'][0-9a-fA-F]{32,}["\']'
-)
+HEX_ENTROPY_PATTERN = re.compile(r'["\'][0-9a-fA-F]{32,}["\']')
 
 
 @check("HEX-HIGH-ENTROPY-STRING: long hex strings in source")
@@ -315,10 +330,12 @@ def check_hex_entropy():
 # ----------------------------------------------------------------------------
 # 4. Exclude pattern syntax: globs instead of simple names
 # ----------------------------------------------------------------------------
-GLOB_EXCLUDE_PATTERN = re.compile(r'\*\*/')
+GLOB_EXCLUDE_PATTERN = re.compile(r"\*\*/")
 
 
-@check("EXCLUDE-GLOB-SYNTAX: exclude patterns using glob syntax instead of simple names")
+@check(
+    "EXCLUDE-GLOB-SYNTAX: exclude patterns using glob syntax instead of simple names"
+)
 def check_exclude_glob_syntax():
     config_files = [
         PROJECT_ROOT / ".ash" / ".ash_community_plugins.yaml",
@@ -360,14 +377,20 @@ EXPECTED_MIN_TESTS = 67
 @check(f"TEST-COUNT: at least {EXPECTED_MIN_TESTS} unit tests exist")
 def check_test_count():
     test_file = (
-        PROJECT_ROOT / "tests" / "unit" / "plugin_modules"
-        / "ash_ferret_plugins" / "test_ferret_scanner.py"
+        PROJECT_ROOT
+        / "tests"
+        / "unit"
+        / "plugin_modules"
+        / "ash_ferret_plugins"
+        / "test_ferret_scanner.py"
     )
     if not test_file.exists():
-        fail("TEST-COUNT", test_file.relative_to(PROJECT_ROOT), 0, "Test file not found")
+        fail(
+            "TEST-COUNT", test_file.relative_to(PROJECT_ROOT), 0, "Test file not found"
+        )
         return
     content = test_file.read_text(encoding="utf-8")
-    test_count = len(re.findall(r'def test_', content))
+    test_count = len(re.findall(r"def test_", content))
     if test_count < EXPECTED_MIN_TESTS:
         fail(
             "TEST-COUNT",
@@ -376,25 +399,29 @@ def check_test_count():
             f"Expected at least {EXPECTED_MIN_TESTS} tests, found {test_count}",
         )
 
+
 # ----------------------------------------------------------------------------
 # 6. Windows path separators: str(Path) instead of Path.as_posix()
 # ----------------------------------------------------------------------------
 # ferret-scan (and many CLI tools) don't handle backslash paths on Windows.
 # All paths passed to subprocess args must use as_posix().
 WINDOWS_PATH_PATTERN = re.compile(
-    r'str\(\s*(?:Path\(|results_file|target|self\.context\.source_dir)'
+    r"str\(\s*(?:Path\(|results_file|target|self\.context\.source_dir)"
 )
 # Pattern for args.append/extend with str() wrapping a Path
 ARGS_STR_PATH_PATTERN = re.compile(
-    r'args\.(?:append|extend)\(.*str\(\s*(?:Path|target|results_file)'
+    r"args\.(?:append|extend)\(.*str\(\s*(?:Path|target|results_file)"
 )
 
 
 @check("WINDOWS-PATH: str(Path) instead of Path.as_posix() in CLI arguments")
 def check_windows_paths():
     scanner_file = (
-        PROJECT_ROOT / "automated_security_helper" / "plugin_modules"
-        / "ash_ferret_plugins" / "ferret_scanner.py"
+        PROJECT_ROOT
+        / "automated_security_helper"
+        / "plugin_modules"
+        / "ash_ferret_plugins"
+        / "ferret_scanner.py"
     )
     if not scanner_file.exists():
         return
@@ -430,10 +457,10 @@ def check_windows_paths():
             )
 
 
-
 # ============================================================================
 # Runner
 # ============================================================================
+
 
 def main():
     print(f"Validating ferret-scan plugin ({len(ALL_FILES)} files)...\n")
@@ -442,7 +469,7 @@ def main():
         fn()
 
     if failures:
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print(f"FAILED: {len(failures)} issue(s) found\n")
         for check_name, filepath, line_num, message in failures:
             loc = f"{filepath}:{line_num}" if line_num else str(filepath)
@@ -458,19 +485,23 @@ def main():
         print(f"All {len(CHECKS)} checks passed.")
         return 0
 
+
 # ----------------------------------------------------------------------------
 # 7. Multiple --exclude args instead of single comma-separated value
 # ----------------------------------------------------------------------------
-MULTIPLE_EXCLUDE_PATTERN = re.compile(
-    r'for\s+\w+\s+in\s+.*exclude.*:\s*$'
+MULTIPLE_EXCLUDE_PATTERN = re.compile(r"for\s+\w+\s+in\s+.*exclude.*:\s*$")
+
+
+@check(
+    "EXCLUDE-MULTIPLE-ARGS: multiple --exclude args instead of comma-joined single arg"
 )
-
-
-@check("EXCLUDE-MULTIPLE-ARGS: multiple --exclude args instead of comma-joined single arg")
 def check_exclude_multiple_args():
     scanner_file = (
-        PROJECT_ROOT / "automated_security_helper" / "plugin_modules"
-        / "ash_ferret_plugins" / "ferret_scanner.py"
+        PROJECT_ROOT
+        / "automated_security_helper"
+        / "plugin_modules"
+        / "ash_ferret_plugins"
+        / "ferret_scanner.py"
     )
     if not scanner_file.exists():
         return
@@ -505,7 +536,9 @@ def check_exclude_multiple_args():
 # ----------------------------------------------------------------------------
 
 
-@check("FERRET-IN-ASH-YAML: ferret-scan should not be in .ash/.ash.yaml (use community plugins config)")
+@check(
+    "FERRET-IN-ASH-YAML: ferret-scan should not be in .ash/.ash.yaml (use community plugins config)"
+)
 def check_ferret_not_in_ash_yaml():
     ash_yaml = PROJECT_ROOT / ".ash" / ".ash.yaml"
     if not ash_yaml.exists():
@@ -544,7 +577,9 @@ def check_ferret_not_in_ash_yaml():
 # ----------------------------------------------------------------------------
 
 
-@check("CONFIG-OVERRIDE-EXCLUDES: use_default_config should be false when exclude_patterns are set")
+@check(
+    "CONFIG-OVERRIDE-EXCLUDES: use_default_config should be false when exclude_patterns are set"
+)
 def check_config_override_excludes():
     config_file = PROJECT_ROOT / ".ash" / ".ash_community_plugins.yaml"
     if not config_file.exists():
@@ -563,7 +598,7 @@ def check_config_override_excludes():
             ferret_start = i
             continue
         # Detect next scanner section (end of ferret block)
-        if in_ferret and re.match(r'^  \S', line) and "options:" not in line:
+        if in_ferret and re.match(r"^  \S", line) and "options:" not in line:
             break
         if in_ferret and "options:" in line:
             in_options = True
@@ -588,7 +623,9 @@ def check_config_override_excludes():
 # ----------------------------------------------------------------------------
 
 
-@check("SUPPRESSION-COVERAGE: SECRET-SECRET-KEYWORD hits in ferret plugin files have matching suppressions")
+@check(
+    "SUPPRESSION-COVERAGE: SECRET-SECRET-KEYWORD hits in ferret plugin files have matching suppressions"
+)
 def check_suppression_coverage():
     """Verify that every SECRET-SECRET-KEYWORD hit in ferret plugin files
     has a matching suppression with line_start/line_end in the community
@@ -610,7 +647,11 @@ def check_suppression_coverage():
                 continue
             stripped = line.lstrip()
             if stripped.startswith("#") or stripped.startswith("//"):
-                if "e.g." in line or "example" in line.lower() or "don't" in line.lower():
+                if (
+                    "e.g." in line
+                    or "example" in line.lower()
+                    or "don't" in line.lower()
+                ):
                     continue
             # This line triggers SECRET-SECRET-KEYWORD — check for suppression
             if not has_matching_suppression(
@@ -644,8 +685,6 @@ def check_suppression_coverage():
                                     f"for precision",
                                 )
                             break
-
-
 
 
 if __name__ == "__main__":

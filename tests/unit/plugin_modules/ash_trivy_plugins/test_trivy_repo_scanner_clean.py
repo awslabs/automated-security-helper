@@ -5,8 +5,7 @@
 
 import json
 import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, mock_open
 
 from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
     TrivyRepoScanner,
@@ -14,7 +13,6 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfigOptions,
 )
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import ToolExtraArg
 
 
 @pytest.mark.unit
@@ -525,7 +523,7 @@ class TestTrivyRepoScannerErrorHandling:
             patch.object(scanner, "_pre_scan", return_value=True),
             patch("pathlib.Path.mkdir", side_effect=OSError("Permission denied")),
         ):
-            with pytest.raises(ScannerError) as exc_info:
+            with pytest.raises(ScannerError):
                 scanner.scan(target=mock_target_directory, target_type="source")
 
     @patch(

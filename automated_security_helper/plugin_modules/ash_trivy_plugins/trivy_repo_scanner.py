@@ -44,19 +44,19 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         bool,
         Field(
             description="Eagerly look for licenses in source code headers and license files",
-        )
+        ),
     ] = True
     ignore_unfixed: Annotated[
         bool,
         Field(
             description="Display only fixed vulnerabilities",
-        )
+        ),
     ] = True
     disable_telemetry: Annotated[
         bool,
         Field(
             description="Disable sending anonymous usage data to Aqua",
-        )
+        ),
     ] = True
 
 

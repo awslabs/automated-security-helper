@@ -342,7 +342,7 @@ def run_ash_scan_cli_command(
     # Parse comma-separated output formats
     parsed_output_formats = []
     for item in output_formats:
-        for fmt in item.split(','):
+        for fmt in item.split(","):
             fmt = fmt.strip()
             if fmt:
                 try:
