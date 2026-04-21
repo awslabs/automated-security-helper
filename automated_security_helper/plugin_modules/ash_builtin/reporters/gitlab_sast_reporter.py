@@ -17,10 +17,22 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from pydantic import Field
+from typing import Annotated
 
 
 class GitLabSASTReporterConfigOptions(ReporterOptionsBase):
-    pass
+    exclude_suppressed: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, suppressed findings are excluded entirely from the "
+                "GitLab SAST report. When false (default), suppressed findings "
+                "are included with Info severity and the suppression reason in "
+                "the solution field."
+            ),
+        ),
+    ] = False
 
 
 class GitLabSASTReporterConfig(ReporterPluginConfigBase):
@@ -47,6 +59,24 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             if model.sarif and model.sarif.runs and model.sarif.runs[0].results:
                 ASH_LOGGER.trace("Creating rule dict")
                 for result in model.sarif.runs[0].results:
+                    # Check if finding is suppressed
+                    is_suppressed = (
+                        hasattr(result, "suppressions")
+                        and result.suppressions
+                        and len(result.suppressions) > 0
+                    )
+
+                    # Optionally exclude suppressed findings entirely
+                    if (
+                        is_suppressed
+                        and self.config
+                        and self.config.options.exclude_suppressed
+                    ):
+                        ASH_LOGGER.trace(
+                            f"Skipping suppressed finding: {result.ruleId}"
+                        )
+                        continue
+
                     ASH_LOGGER.trace(f"Processing result: {result.ruleId}")
 
                     # Determine severity
@@ -60,7 +90,20 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                         elif level_str == "note":
                             severity = "Low"
                         elif level_str == "none":
-                            severity = None  # Don't include severity for info level
+                            severity = None
+
+                    # Suppressed findings: downgrade to Info with solution
+                    suppression_solution = None
+                    if is_suppressed:
+                        severity = "Info"
+                        justification = (
+                            result.suppressions[0].justification or "No reason provided"
+                        )
+                        suppression_solution = (
+                            f"This finding was suppressed by ASH: {justification}. "
+                            "You can dismiss this vulnerability in the "
+                            "GitLab Security Dashboard."
+                        )
 
                     # Get location information
                     file_path = None
@@ -247,9 +290,13 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                         "details": details,
                     }
 
-                    # Only add severity if it's not None (info level findings don't have severity)
+                    # Only add severity if it's not None
                     if severity:
                         vuln["severity"] = severity
+
+                    # Add solution for suppressed findings
+                    if suppression_solution:
+                        vuln["solution"] = suppression_solution
 
                     vulnerabilities.append(vuln)
 
