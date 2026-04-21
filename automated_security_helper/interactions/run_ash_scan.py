@@ -236,10 +236,6 @@ def run_ash_scan(
             with open(output_file, mode="r", encoding="utf-8") as f:
                 content = f.read()
                 try:
-                    # Ensure AshAggregatedResults model is fully defined (resolves AshConfig forward ref)
-                    from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
-
-                    AshAggregatedResults.model_rebuild()
                     results = AshAggregatedResults.model_validate_json(content)
                 except Exception as e:
                     logger.error(f"Failed to parse results file: {e}")

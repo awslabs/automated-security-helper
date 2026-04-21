@@ -73,6 +73,7 @@ class AshSuppression(IgnorePathWithReason):
         if (
             v is not None
             and hasattr(values, "data")
+            and values.data is not None
             and values.data.get("line_start") is not None
             and v < values.data["line_start"]
         ):
