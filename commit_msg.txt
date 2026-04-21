@@ -1,5 +1,0 @@
-docs: add GitLab Security Dashboard suppression workflow to docs
-
-Document how suppressed findings appear in the GitLab SAST report
-(Info severity with solution field), the workflow for dismissing
-them in the Security Dashboard, and the exclude_suppressed option.
