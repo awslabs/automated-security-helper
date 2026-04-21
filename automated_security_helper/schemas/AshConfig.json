@@ -154,7 +154,9 @@
               "enabled": true,
               "extension": "gl-sast-report.json",
               "name": "gitlab-sast",
-              "options": {}
+              "options": {
+                "exclude_suppressed": false
+              }
             },
             "html": {
               "enabled": true,
@@ -1516,7 +1518,9 @@
         },
         "options": {
           "$ref": "#/$defs/GitLabSASTReporterConfigOptions",
-          "default": {}
+          "default": {
+            "exclude_suppressed": false
+          }
         }
       },
       "title": "GitLabSASTReporterConfig",
@@ -1524,7 +1528,14 @@
     },
     "GitLabSASTReporterConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "properties": {
+        "exclude_suppressed": {
+          "default": false,
+          "description": "When true, suppressed findings are excluded entirely from the GitLab SAST report. When false (default), suppressed findings are included with Info severity and the suppression reason in the solution field.",
+          "title": "Exclude Suppressed",
+          "type": "boolean"
+        }
+      },
       "title": "GitLabSASTReporterConfigOptions",
       "type": "object"
     },
@@ -2326,7 +2337,9 @@
             "enabled": true,
             "extension": "gl-sast-report.json",
             "name": "gitlab-sast",
-            "options": {}
+            "options": {
+              "exclude_suppressed": false
+            }
           },
           "description": "Configure the options for the GitLab SAST reporter"
         },
