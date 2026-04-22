@@ -327,7 +327,9 @@ class TestArchiveConverterPathTraversal:
         zip_path = temp_dir / "source-code.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("safe.py", 'print("safe")')
-            zf.writestr("../../../../../../tmp/evil.py", 'import os; os.system("whoami")')
+            zf.writestr(
+                "../../../../../../tmp/evil.py", 'import os; os.system("whoami")'
+            )
 
         def mock_scan_set(*args, **kwargs):
             return [str(zip_path)]

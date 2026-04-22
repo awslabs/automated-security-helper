@@ -243,3 +243,51 @@ if [ "$UNUSED_COUNT" -gt 0 ]; then
   # exit 1
 fi
 ```
+
+## Suppressions in GitLab Security Dashboard
+
+When using the GitLab SAST reporter, ASH handles suppressed findings in a way that integrates with GitLab's Security Dashboard:
+
+### Default Behavior
+
+By default, suppressed findings are **included** in the GitLab SAST report (`ash.gl-sast-report.json`) with two modifications:
+
+- **Severity is downgraded to `Info`** — suppressed findings won't trigger alerts or block pipelines
+- **The suppression reason is added to the `solution` field** — GitLab admins can see why the finding was suppressed
+
+This approach provides an audit trail: security teams can see that a finding was detected and deliberately suppressed, and use GitLab's built-in vulnerability dismissal workflow to close it.
+
+### Dismissing Suppressed Findings in GitLab
+
+Once suppressed findings appear in the GitLab Security Dashboard as Info-level vulnerabilities:
+
+1. Navigate to **Security & Compliance > Vulnerability Report**
+2. Filter by severity **Info** to find suppressed findings
+3. Select the finding and click **Dismiss**
+4. Choose a reason: "Acceptable risk", "False positive", or "Used in tests"
+5. Paste the ASH suppression reason from the solution field as the dismissal comment
+
+Once dismissed, GitLab tracks the dismissal across future scans — the finding won't reappear as active even if ASH reports it again.
+
+For automation, GitLab's REST API supports programmatic dismissal:
+
+```bash
+curl --request POST \
+  --header "PRIVATE-TOKEN: <your_access_token>" \
+  "https://gitlab.example.com/api/v4/projects/:id/vulnerabilities/:vulnerability_id/dismiss" \
+  --data "comment=Suppressed by ASH: <reason>"
+```
+
+### Excluding Suppressed Findings
+
+If you prefer suppressed findings to not appear in the GitLab Security Dashboard at all, set `exclude_suppressed: true` in your ASH configuration:
+
+```yaml
+reporters:
+  gitlab-sast:
+    enabled: true
+    options:
+      exclude_suppressed: true
+```
+
+With this option, suppressed findings are omitted entirely from the GitLab SAST report. This results in a cleaner dashboard but removes the audit trail from GitLab.

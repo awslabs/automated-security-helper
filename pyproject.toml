@@ -1,6 +1,6 @@
 [project]
 name = "automated-security-helper"
-version = "3.2.6"
+version = "3.2.7"
 description = "Automated Security Helper for GitHub Actions"
 requires-python = ">=3.10,<4"
 readme = "README.md"
@@ -17,7 +17,7 @@ dependencies = [
  "GitPython>=3.1.30,<4.0.0",
  "gitdb>=4.0.1,<5.0.0",
  "pyrsistent>=0.18.0,<1.0.0",
- "pydantic[email]>=2.11.3,<2.13",
+ "pydantic[email]>=2.11.3,<2.14",
  "typer>=0.16.0,<0.17",
  "rich>=13.5.3,<14",
  "pathspec>=0.12.1,<0.13",
@@ -63,7 +63,7 @@ name = "Nathan Theule"
 email = "ntheule@amazon.com"
 
 [dependency-groups]
-dev = [ "ruff>=0.11.2,<1.0.0", "pytest>=8.3.5,<9.0.0", "pytest-cov>=6.1.0,<7.0.0", "pytest-mock>=3.14.0,<4.0.0", "mypy>=1.15.0,<2.0.0", "types-pyyaml>=6.0.12.20250402", "lazydocs>=0.4.8,<1.0.0", "mkdocs>=1.6.1,<2.0.0", "mkdocs-material>=9.6.11,<10.0.0", "pymdown-extensions>=10.14.3,<11.0.0", "mkdocstrings[python]>=0.29.1,<1.0.0", "mkdocs-autorefs>=1.4.1,<2.0.0", "pytest-asyncio>=0.26.0,<1.0.0", "types-boto3[essential, logs, s3, securityhub, securitylake, sts]>=1.35.49,<2.0.0", "mkdocs-awesome-nav>=3.1.2,<4.0.0", "mkdocs-mermaid2-plugin>=1.2.1,<2.0.0", "pytest-xdist>=3.7.0,<4.0.0", "toml>=0.10.2", "hatchling>=1.27.0", "mcp>=1.23.3",]
+dev = [ "ruff>=0.11.2,<1.0.0", "pytest>=9.0.3,<10.0.0", "pytest-cov>=6.1.0,<7.0.0", "pytest-mock>=3.14.0,<4.0.0", "mypy>=1.15.0,<2.0.0", "types-pyyaml>=6.0.12.20250402", "lazydocs>=0.4.8,<1.0.0", "mkdocs>=1.6.1,<2.0.0", "mkdocs-material>=9.6.11,<10.0.0", "pymdown-extensions>=10.14.3,<11.0.0", "mkdocstrings[python]>=0.29.1,<1.0.0", "mkdocs-autorefs>=1.4.1,<2.0.0", "pytest-asyncio>=0.26.0,<2.0.0", "types-boto3[essential, logs, s3, securityhub, securitylake, sts]>=1.35.49,<2.0.0", "mkdocs-awesome-nav>=3.1.2,<4.0.0", "mkdocs-mermaid2-plugin>=1.2.1,<2.0.0", "pytest-xdist>=3.7.0,<4.0.0", "toml>=0.10.2", "hatchling>=1.27.0", "mcp>=1.23.3",]
 
 [build-system]
 requires = [ "hatchling",]
