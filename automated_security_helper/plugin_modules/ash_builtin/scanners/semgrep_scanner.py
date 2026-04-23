@@ -512,7 +512,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                             arguments=final_args[1:],
                             startTimeUtc=self.start_time,
                             endTimeUtc=self.end_time,
-                            executionSuccessful=True,
+                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
                             exitCode=self.exit_code,
                             exitCodeDescription="\n".join(self.errors),
                             workingDirectory=ArtifactLocation(

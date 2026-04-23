@@ -288,8 +288,9 @@ class PluginBase(BaseModel):
             if "stderr" in response and response["stderr"]:
                 self.errors.extend(response["stderr"].splitlines())
 
-            # Set exit code (default to 1 if not available)
-            self.exit_code = response.get("returncode", 1)
+            # Accumulate worst exit code across multiple subprocess calls
+            new_code = response.get("returncode", 1)
+            self.exit_code = max(self.exit_code, new_code)
 
             return response
 
@@ -385,8 +386,8 @@ class PluginBase(BaseModel):
             if response["stderr"]:
                 self.errors.extend(response["stderr"].splitlines())
 
-            # Set exit code
-            self.exit_code = response["returncode"]
+            # Accumulate worst exit code across multiple subprocess calls
+            self.exit_code = max(self.exit_code, response["returncode"])
 
             self._plugin_log(
                 f"UV tool execution completed for {self.command} with exit code {response['returncode']}",
