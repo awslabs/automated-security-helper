@@ -148,12 +148,6 @@ class TestSyftExcludePathPreservation:
         results_dir.mkdir(parents=True, exist_ok=True)
         scanner.results_dir = results_dir
 
-        # Extend excludes with global ignores (as scan() does)
-        global_ignores = [
-            IgnorePathWithReason(path=".git/", reason="vcs"),
-        ]
-        scanner.config.options.exclude.extend(global_ignores)
-
         # Trigger the args rebuild that scan() performs
         from automated_security_helper.models.core import ToolArgs
 
@@ -183,9 +177,6 @@ class TestSyftExcludePathPreservation:
         )
         assert "node_modules/" in post_rebuild_skip_paths, (
             "exclude paths lost after args rebuild"
-        )
-        assert ".git/" in post_rebuild_skip_paths, (
-            "global ignore paths lost after args rebuild"
         )
 
     def test_scan_method_preserves_excludes_end_to_end(self, _make_scanner, tmp_path):

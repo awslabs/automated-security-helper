@@ -213,8 +213,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             target_results_dir = Path(self.results_dir).joinpath(target_type)
             target_results_dir.mkdir(parents=True, exist_ok=True)
             results_file = target_results_dir.joinpath("syft.cdx.json")
-            self.config.options.exclude.extend(global_ignore_paths)
-
             self.args = ToolArgs(
                 format_arg="--output",
                 format_arg_value=f"cyclonedx-json={results_file.as_posix()}",
