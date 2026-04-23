@@ -30,8 +30,8 @@ class TestCancelScanWarnsOnNoneProcessId:
 
         entry = ScanRegistryEntry(
             scan_id="test-scan-1",
-            directory_path="/tmp/fakedir",
-            output_directory="/tmp/fakeout",
+            directory_path=str(Path(tempfile.gettempdir()) / "fakedir"),
+            output_directory=str(Path(tempfile.gettempdir()) / "fakeout"),
         )
         entry.status = ScanStatus.RUNNING
         entry.process_id = None  # thread-based scan, no pid

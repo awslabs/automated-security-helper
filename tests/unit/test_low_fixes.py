@@ -45,7 +45,8 @@ async def test_get_scan_summary_does_not_print_debug_to_stderr():
             "mcp_get_scan_results",
             new=AsyncMock(return_value={"error": "no results"}),
         ):
-            await mcp_server.get_scan_summary(ctx=ctx, output_dir="/tmp/nonexistent")
+            import tempfile as _tf
+            await mcp_server.get_scan_summary(ctx=ctx, output_dir=str(Path(_tf.gettempdir()) / "nonexistent"))
     finally:
         sys.stderr = original_stderr
 
