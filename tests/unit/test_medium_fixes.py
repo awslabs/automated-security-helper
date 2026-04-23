@@ -170,8 +170,12 @@ class TestGetScanSetGlobRecursive:
             lines = get_ash_ignorespec_lines(tmpdir)
 
             # The path is replaced with ${SOURCE_DIR} in the header lines
-            relative_suffix = "sub/deep/.gitignore"
-            found = any(relative_suffix in line for line in lines)
+            relative_suffix_fwd = "sub/deep/.gitignore"
+            relative_suffix_bck = "sub\\deep\\.gitignore"
+            found = any(
+                relative_suffix_fwd in line or relative_suffix_bck in line
+                for line in lines
+            )
             assert found, (
                 f"Nested .gitignore at {gitignore} not found in lines; "
                 f"glob likely missing recursive=True. Lines: {lines}"
@@ -190,8 +194,12 @@ class TestGetScanSetGlobRecursive:
 
             lines = get_ash_ignorespec_lines(tmpdir)
 
-            relative_suffix = "a/b/.ignore"
-            found = any(relative_suffix in line for line in lines)
+            relative_suffix_fwd = "a/b/.ignore"
+            relative_suffix_bck = "a\\b\\.ignore"
+            found = any(
+                relative_suffix_fwd in line or relative_suffix_bck in line
+                for line in lines
+            )
             assert found, (
                 f"Nested .ignore at {dotignore} not found in lines; "
                 f"glob likely missing recursive=True. Lines: {lines}"
