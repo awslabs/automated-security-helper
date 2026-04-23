@@ -21,7 +21,7 @@ Install the required dependencies:
 
 ```bash
 # ASH
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.2.7
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.3.0
 
 # Streamlit
 pip install streamlit
@@ -42,7 +42,7 @@ streamlit run https://raw.githubusercontent.com/awslabs/automated-security-helpe
 #### ...or clone and run from local
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.2.7
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.3.0
 streamlit run ./automated-security-helper/examples/streamlit_ui/ash_ui.py
 ```
 
