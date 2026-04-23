@@ -129,10 +129,10 @@ class TestSyftExcludePathPreservation:
         ]
         scanner = _make_scanner(excludes=excludes)
 
-        # After model_post_init, _process_config_options has run and added --skip-path args.
+        # After model_post_init, _process_config_options has run and added --exclude args.
         # Confirm they are present before scan() runs.
         pre_scan_skip_paths = [
-            ea.value for ea in scanner.args.extra_args if ea.key == "--skip-path"
+            ea.value for ea in scanner.args.extra_args if ea.key == "--exclude"
         ]
         assert "vendor/" in pre_scan_skip_paths
         assert "node_modules/" in pre_scan_skip_paths
@@ -176,7 +176,7 @@ class TestSyftExcludePathPreservation:
         scanner._process_config_options()
 
         post_rebuild_skip_paths = [
-            ea.value for ea in scanner.args.extra_args if ea.key == "--skip-path"
+            ea.value for ea in scanner.args.extra_args if ea.key == "--exclude"
         ]
         assert "vendor/" in post_rebuild_skip_paths, (
             "exclude paths lost after args rebuild"
@@ -189,7 +189,7 @@ class TestSyftExcludePathPreservation:
         )
 
     def test_scan_method_preserves_excludes_end_to_end(self, _make_scanner, tmp_path):
-        """Full integration: scan() must produce final args containing --skip-path entries."""
+        """Full integration: scan() must produce final args containing --exclude entries."""
         excludes = [
             IgnorePathWithReason(path="vendor/", reason="third-party"),
         ]
@@ -245,11 +245,11 @@ class TestSyftExcludePathPreservation:
 
         assert len(captured_commands) == 1
         cmd = captured_commands[0]
-        # Find --skip-path in the final command
+        # Find --exclude in the final command
         skip_path_values = []
         for i, arg in enumerate(cmd):
-            if arg == "--skip-path" and i + 1 < len(cmd):
+            if arg == "--exclude" and i + 1 < len(cmd):
                 skip_path_values.append(cmd[i + 1])
         assert "vendor/" in skip_path_values, (
-            f"--skip-path vendor/ missing from final command: {cmd}"
+            f"--exclude vendor/ missing from final command: {cmd}"
         )

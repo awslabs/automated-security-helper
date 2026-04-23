@@ -144,7 +144,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             )
             self.args.extra_args.append(
                 ToolExtraArg(
-                    key="--skip-path",
+                    key="--exclude",
                     value=item.path,
                 )
             )
