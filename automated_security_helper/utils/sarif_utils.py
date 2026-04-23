@@ -331,16 +331,18 @@ def get_severity_metrics_from_sarif(
                         exclude_none=True,
                     )
 
-                if hasattr(
-                    props, "issue_severity"
-                ) and props.issue_severity.upper() in [
-                    "INFO",
-                    "LOW",
-                    "MEDIUM",
-                    "HIGH",
-                    "CRITICAL",
-                ]:
-                    iss_sev_up = props.issue_severity.upper()
+                if (
+                    "issue_severity" in props
+                    and props["issue_severity"].upper()
+                    in [
+                        "INFO",
+                        "LOW",
+                        "MEDIUM",
+                        "HIGH",
+                        "CRITICAL",
+                    ]
+                ):
+                    iss_sev_up = props["issue_severity"].upper()
                     if iss_sev_up == "CRITICAL":
                         scanner_severity_count.critical += 1
                     elif iss_sev_up == "HIGH":

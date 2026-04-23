@@ -215,7 +215,7 @@ class AshAggregatedResults(BaseModel):
     )
     metadata: ReportMetadata = Field(
         default_factory=lambda: ReportMetadata(
-            report_id="ASH-" + datetime.now(timezone.utc).strftime("%Y%M%d"),
+            report_id="ASH-" + datetime.now(timezone.utc).strftime("%Y%m%d"),
             project_name="ASH",
             # tool_name="ASH",
             tool_version=get_ash_version(),

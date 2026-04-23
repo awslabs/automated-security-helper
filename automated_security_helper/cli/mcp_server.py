@@ -985,12 +985,6 @@ async def get_scan_summary(
     Args:
         output_dir: Path to the scan output directory (absolute path recommended)
     """
-    import sys
-
-    print("=" * 80, file=sys.stderr)
-    print("DEBUG: get_scan_summary FUNCTION CALLED!", file=sys.stderr)
-    print("=" * 80, file=sys.stderr)
-
     try:
         # Ensure output_dir is an absolute path
         if not Path(output_dir).is_absolute():

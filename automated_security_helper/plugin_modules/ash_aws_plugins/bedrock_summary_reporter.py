@@ -666,7 +666,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             if self.config.options.group_by_severity:
                 severity_groups = defaultdict(list)
                 for finding in findings:
-                    severity = finding.get("severity", "none")
+                    severity = finding.get("level", "none")
                     severity_groups[severity].append(finding)
 
                 # Sort severities in order of importance
@@ -794,7 +794,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             for finding in indexed_findings:
                 index = finding.get("index", "")
                 rule_id = finding.get("rule_id", "Unknown")
-                level = finding.get("severity", "none").capitalize()
+                level = finding.get("level", "none").capitalize()
 
                 # Get location info
                 file_path = "Unknown"

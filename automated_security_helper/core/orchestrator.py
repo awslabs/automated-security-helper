@@ -234,6 +234,7 @@ class ASHScanOrchestrator(BaseModel):
             debug=self.debug,
             python_based_plugins_only=self.python_based_plugins_only,
             ash_plugin_modules=self.ash_plugin_modules,  # Pass the ash_plugin_modules to the execution engine
+            output_formats=self.output_formats,
             **exec_engine_params,
         )
 

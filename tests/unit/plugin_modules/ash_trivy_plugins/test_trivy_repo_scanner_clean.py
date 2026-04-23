@@ -153,8 +153,7 @@ class TestTrivyRepoScannerConfigProcessing:
         assert ignore_arg is None
 
     def test_process_severity_threshold(self, mock_plugin_context):
-        """Test severity threshold processing."""
-        # Test with HIGH severity
+        """Test severity threshold processing uses --severity with inclusion list."""
         config = TrivyRepoScannerConfig(options=TrivyRepoScannerConfigOptions())
         config.options.severity_threshold = "HIGH"
 
@@ -163,13 +162,13 @@ class TestTrivyRepoScannerConfigProcessing:
 
         extra_args = scanner.args.extra_args
         severity_arg = next(
-            (arg for arg in extra_args if arg.key == "--severity-threshold"), None
+            (arg for arg in extra_args if arg.key == "--severity"), None
         )
         assert severity_arg is not None
-        assert severity_arg.value == "high"
+        assert severity_arg.value == "HIGH,CRITICAL"
 
     def test_process_critical_severity_threshold(self, mock_plugin_context):
-        """Test CRITICAL severity threshold maps to 'high'."""
+        """Test CRITICAL severity threshold maps to CRITICAL only."""
         config = TrivyRepoScannerConfig(options=TrivyRepoScannerConfigOptions())
         config.options.severity_threshold = "CRITICAL"
 
@@ -178,13 +177,13 @@ class TestTrivyRepoScannerConfigProcessing:
 
         extra_args = scanner.args.extra_args
         severity_arg = next(
-            (arg for arg in extra_args if arg.key == "--severity-threshold"), None
+            (arg for arg in extra_args if arg.key == "--severity"), None
         )
         assert severity_arg is not None
-        assert severity_arg.value == "high"
+        assert severity_arg.value == "CRITICAL"
 
     def test_process_all_severity_threshold(self, mock_plugin_context):
-        """Test ALL severity threshold is not added as argument."""
+        """Test ALL severity threshold omits --severity flag."""
         config = TrivyRepoScannerConfig(options=TrivyRepoScannerConfigOptions())
         config.options.severity_threshold = "ALL"
 
@@ -193,7 +192,7 @@ class TestTrivyRepoScannerConfigProcessing:
 
         extra_args = scanner.args.extra_args
         severity_arg = next(
-            (arg for arg in extra_args if arg.key == "--severity-threshold"), None
+            (arg for arg in extra_args if arg.key == "--severity"), None
         )
         assert severity_arg is None
 

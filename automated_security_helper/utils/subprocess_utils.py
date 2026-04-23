@@ -52,7 +52,7 @@ def find_executable(command: str) -> Optional[str]:
         except Exception as e:
             ASH_LOGGER.error(e)
 
-        return None
+    return None
 
 
 def run_command(

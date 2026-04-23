@@ -224,6 +224,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     ),
                 ],
             )
+            # Re-apply config options (exclude paths, config file) that were
+            # set during model_post_init but lost by the ToolArgs rebuild above.
+            self._process_config_options()
             conf: SyftScannerConfig = self.config
             opts: SyftScannerConfigOptions = conf.options
             for out in opts.additional_outputs:

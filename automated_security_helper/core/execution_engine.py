@@ -63,6 +63,7 @@ class ScanExecutionEngine:
         python_based_plugins_only: bool = False,
         simple_mode: bool = False,
         ash_plugin_modules: List[str] = [],
+        output_formats: List[str] = [],
     ):
         """Initialize the execution engine.
 
@@ -130,6 +131,7 @@ class ScanExecutionEngine:
             python_based_plugins_only  # Store the python_based_plugins_only flag
         )
         self._simple_mode = simple_mode  # Store the simple_mode flag
+        self._output_formats = output_formats  # CLI --output-formats
 
         # Get debug and verbose flags from environment or config
         debug_flag = debug or os.environ.get("ASH_DEBUG", "").lower() in [
@@ -510,11 +512,7 @@ class ScanExecutionEngine:
                     # )
                     self._results = report_phase.execute(
                         report_dir=self._context.output_dir.joinpath("reports"),
-                        cli_output_formats=(
-                            self._context.config.output_formats
-                            if hasattr(self._context.config, "output_formats")
-                            else None
-                        ),
+                        cli_output_formats=self._output_formats or None,
                         aggregated_results=self._results,
                         python_based_plugins_only=self._python_only,
                     )
