@@ -211,6 +211,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
         try:
             target_results_dir = Path(self.results_dir).joinpath(target_type)
+            target_results_dir.mkdir(parents=True, exist_ok=True)
             results_file = target_results_dir.joinpath("syft.cdx.json")
             self.config.options.exclude.extend(global_ignore_paths)
 
@@ -256,7 +257,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             )
 
             syft_results = {}
-            Path(results_file).parent.mkdir(exist_ok=True, parents=True)
             with open(results_file, mode="r", encoding="utf-8") as f:
                 syft_results = json.load(f)
             try:
