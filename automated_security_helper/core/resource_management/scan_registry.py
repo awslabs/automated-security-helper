@@ -383,7 +383,12 @@ class ScanRegistry:
                 return False
 
             # Try to terminate the process if we have a process ID
-            if entry.process_id:
+            if entry.process_id is None:
+                self._logger.warning(
+                    f"Scan {scan_id} has no process ID (thread-based scan); "
+                    "cannot send termination signal"
+                )
+            elif entry.process_id:
                 try:
                     os.kill(entry.process_id, signal.SIGTERM)
                     self._logger.info(

@@ -264,7 +264,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=True,
+                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                            exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target_path)
                             ),
@@ -317,7 +318,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=True,
+                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                            exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target)
                             ),
@@ -550,7 +552,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             invocations=[
                                 Invocation(
                                     commandLine="npm audit --json",
-                                    executionSuccessful=True,
+                                    executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                                    exitCode=self.exit_code,
                                     workingDirectory=ArtifactLocation(
                                         uri=get_shortest_name(input=target)
                                     ),

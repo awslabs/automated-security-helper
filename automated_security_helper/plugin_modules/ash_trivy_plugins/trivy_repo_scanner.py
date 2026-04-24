@@ -134,19 +134,18 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 )
             )
 
-        if not (
-            self.config.options.severity_threshold == "ALL"
-            or self.config.options.severity_threshold is None
-        ):
-            trivy_severity = (
-                str(self.config.options.severity_threshold).lower()
-                if self.config.options.severity_threshold != "CRITICAL"
-                else "high"
-            )
+        severity_inclusion_map = {
+            "LOW": "LOW,MEDIUM,HIGH,CRITICAL",
+            "MEDIUM": "MEDIUM,HIGH,CRITICAL",
+            "HIGH": "HIGH,CRITICAL",
+            "CRITICAL": "CRITICAL",
+        }
+        threshold = self.config.options.severity_threshold
+        if threshold is not None and threshold != "ALL":
             self.args.extra_args.append(
                 ToolExtraArg(
-                    key="--severity-threshold",
-                    value=trivy_severity,
+                    key="--severity",
+                    value=severity_inclusion_map[threshold],
                 )
             )
 
@@ -273,7 +272,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                             arguments=final_args[1:],
                             startTimeUtc=self.start_time,
                             endTimeUtc=self.end_time,
-                            executionSuccessful=True,
+                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
                             exitCode=self.exit_code,
                             exitCodeDescription="\n".join(self.errors),
                             workingDirectory=ArtifactLocation(

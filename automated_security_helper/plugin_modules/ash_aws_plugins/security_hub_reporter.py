@@ -71,10 +71,10 @@ class SecurityHubReporterConfig(ReporterPluginConfigBase):
 class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
     """Sends security findings to AWS Security Hub in ASFF format."""
 
-    def model_post_init__(self, context):
+    def model_post_init(self, context):
         if self.config is None:
             self.config = SecurityHubReporterConfig()
-        return super().model_post_init__(context)
+        return super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and AWS connectivity."""

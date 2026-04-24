@@ -111,7 +111,7 @@ class FindingDetailScreen(Screen):
                 if self.finding.get("code_snippet"):
                     md_text += f"""\n\n## Code
 
-```{Path(self.finding["file"]).name.split["."][-1]}
+```{Path(self.finding["file"]).name.split(".")[-1]}
 {self.finding.get("code_snippet")}
 ```
 """

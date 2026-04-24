@@ -32,6 +32,7 @@ from typing import Dict, Any, Optional, Tuple
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.schemas.sarif_schema_model import PropertyBag
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -372,9 +373,15 @@ class ScannerStatisticsCalculator:
                         if not is_suppressed:
                             # Check if scanner provides issue_severity in properties (e.g., Bandit)
                             properties = result.properties or {}
+                            if isinstance(properties, PropertyBag):
+                                properties = properties.model_dump(
+                                    mode="json",
+                                    exclude_unset=True,
+                                    exclude_none=True,
+                                )
                             issue_severity = (
                                 properties.get("issue_severity", "").upper()
-                                if hasattr(properties, "get")
+                                if isinstance(properties, dict)
                                 else ""
                             )
 

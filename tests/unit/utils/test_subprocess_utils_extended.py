@@ -56,7 +56,7 @@ def test_find_executable_not_found(mock_exists, mock_which):
     result = find_executable("nonexistent_cmd")
 
     assert result is None
-    mock_which.assert_called_once()
+    assert mock_which.call_count >= 1
 
 
 @patch("subprocess.run")

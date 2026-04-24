@@ -10,6 +10,7 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -87,7 +88,14 @@ class EnginePhase(ABC):
         self.initialize_progress()
 
         # Notify phase start
-        start_event = f"{self.phase_name.upper()}_PHASE_START"
+        start_event_name = f"{self.phase_name.upper()}_PHASE_START"
+        try:
+            start_event = AshEventType[start_event_name]
+        except KeyError:
+            ASH_LOGGER.warning(
+                f"No AshEventType member '{start_event_name}'; falling back to string"
+            )
+            start_event = start_event_name
         ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {start_event} event")
         self.notify_event(start_event, **kwargs)
 
@@ -126,7 +134,14 @@ class EnginePhase(ABC):
             self._update_summary_stats()
 
         # Notify phase complete
-        complete_event = f"{self.phase_name.upper()}_PHASE_COMPLETE"
+        complete_event_name = f"{self.phase_name.upper()}_PHASE_COMPLETE"
+        try:
+            complete_event = AshEventType[complete_event_name]
+        except KeyError:
+            ASH_LOGGER.warning(
+                f"No AshEventType member '{complete_event_name}'; falling back to string"
+            )
+            complete_event = complete_event_name
         ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {complete_event} event")
         self.notify_event(complete_event, results=results, **kwargs)
 
@@ -213,7 +228,11 @@ class EnginePhase(ABC):
             )
 
             # Notify progress event
-            progress_event = f"{self.phase_name.upper()}_PHASE_PROGRESS"
+            progress_event_name = f"{self.phase_name.upper()}_PHASE_PROGRESS"
+            try:
+                progress_event = AshEventType[progress_event_name]
+            except KeyError:
+                progress_event = progress_event_name
             self.notify_event(
                 progress_event, completed=completed, description=description
             )

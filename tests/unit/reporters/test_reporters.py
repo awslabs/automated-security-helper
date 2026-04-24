@@ -19,14 +19,15 @@ class TestJSONFormatter:
         self, sample_ash_model: AshAggregatedResults, test_plugin_context
     ):
         """Test JSON formatter output structure."""
+        import json
+
         formatter = FlatJSONReporter(context=test_plugin_context)
         result = formatter.report(sample_ash_model)
         assert result is not None
         assert isinstance(result, str)
-        assert result.startswith("{")
-        assert result.endswith("}")
-        assert "id" in result
-        assert "severity" in result
+        data = json.loads(result)
+        assert "findings" in data
+        assert isinstance(data["findings"], list)
 
 
 class TestHTMLFormatter:

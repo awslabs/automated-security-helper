@@ -33,6 +33,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters import (
     CsvReporter,
     CycloneDXReporter,
     FlatJsonReporter,
+    GitLabSASTReporter,
     HtmlReporter,
     JunitXmlReporter,
     MarkdownReporter,
@@ -40,6 +41,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters import (
     SarifReporter,
     SpdxReporter,
     TextReporter,
+    UnusedSuppressionsReporter,
     YamlReporter,
 )
 
@@ -73,6 +75,7 @@ ASH_REPORTERS = [
     CsvReporter,
     CycloneDXReporter,
     FlatJsonReporter,
+    GitLabSASTReporter,
     HtmlReporter,
     JunitXmlReporter,
     MarkdownReporter,
@@ -80,6 +83,7 @@ ASH_REPORTERS = [
     SarifReporter,
     SpdxReporter,
     TextReporter,
+    UnusedSuppressionsReporter,
     YamlReporter,
 ]
 

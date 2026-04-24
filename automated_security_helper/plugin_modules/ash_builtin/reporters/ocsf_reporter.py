@@ -662,7 +662,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 # Track finding status for statistics
                 if (
                     hasattr(finding, "status_id")
-                    and finding.status_id == StatusId.integer_4
+                    and finding.status_id == StatusId.integer_3
                 ):
                     suppressed_findings_count += 1
                     ASH_LOGGER.debug(

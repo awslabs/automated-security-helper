@@ -144,7 +144,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             )
             self.args.extra_args.append(
                 ToolExtraArg(
-                    key="--skip-path",
+                    key="--exclude",
                     value=item.path,
                 )
             )
@@ -211,9 +211,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
         try:
             target_results_dir = Path(self.results_dir).joinpath(target_type)
+            target_results_dir.mkdir(parents=True, exist_ok=True)
             results_file = target_results_dir.joinpath("syft.cdx.json")
-            self.config.options.exclude.extend(global_ignore_paths)
-
             self.args = ToolArgs(
                 format_arg="--output",
                 format_arg_value=f"cyclonedx-json={results_file.as_posix()}",
@@ -224,6 +223,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     ),
                 ],
             )
+            # Re-apply config options (exclude paths, config file) that were
+            # set during model_post_init but lost by the ToolArgs rebuild above.
+            self._process_config_options()
             conf: SyftScannerConfig = self.config
             opts: SyftScannerConfigOptions = conf.options
             for out in opts.additional_outputs:
@@ -253,7 +255,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             )
 
             syft_results = {}
-            Path(results_file).parent.mkdir(exist_ok=True, parents=True)
             with open(results_file, mode="r", encoding="utf-8") as f:
                 syft_results = json.load(f)
             try:
