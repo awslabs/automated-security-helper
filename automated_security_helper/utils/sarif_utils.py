@@ -2,6 +2,7 @@
 
 import os
 import random
+from contextlib import suppress
 from typing import List
 import uuid
 from pathlib import Path
@@ -63,16 +64,9 @@ def get_finding_id(
     end_line: int | None = None,
 ) -> str:
     seed = "::".join(
-        [
-            item
-            for item in [
-                rule_id,
-                file,
-                str(start_line),
-                str(end_line),
-            ]
-            if item
-        ]
+        str(item)
+        for item in [rule_id, file, start_line, end_line]
+        if item is not None
     )
     rd = random.Random()
     rd.seed(seed)
@@ -95,21 +89,17 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
         return uri
 
     # Remove file:// prefix if present
-    if uri.startswith("file://"):
-        uri = uri[7:]
+    uri = uri.removeprefix("file://")
 
     # Make path relative to source directory
     try:
         # Try to resolve the path and make it relative
         path_obj = Path(uri)
         if path_obj.is_absolute():
-            try:
+            with suppress(ValueError):
                 uri = str(path_obj.relative_to(source_dir_path))
-            except ValueError:
-                # If the path is not relative to source_dir, keep it as is
-                pass
         elif uri.startswith(source_dir_str):
-            uri = uri[len(source_dir_str) :]
+            uri = uri.removeprefix(source_dir_str)
     except Exception as e:
         ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
 
@@ -319,9 +309,7 @@ def get_severity_metrics_from_sarif(
         low=0,
         info=0,
     )
-    all_results = []
-    for run in sarif_report.runs:
-        all_results.extend(run.results or [])
+    all_results = [r for run in sarif_report.runs for r in (run.results or [])]
     for result in all_results:
         if result.suppressions and len(result.suppressions) > 0:
             scanner_severity_count.suppressed = 1 + scanner_severity_count.suppressed
@@ -347,29 +335,29 @@ def get_severity_metrics_from_sarif(
                         "CRITICAL",
                     ]
                 ):
-                    iss_sev_up = props["issue_severity"].upper()
-                    if iss_sev_up == "CRITICAL":
-                        scanner_severity_count.critical += 1
-                    elif iss_sev_up == "HIGH":
-                        scanner_severity_count.high += 1
-                    elif iss_sev_up == "MEDIUM":
-                        scanner_severity_count.medium += 1
-                    elif iss_sev_up == "LOW":
-                        scanner_severity_count.low += 1
-                    else:
-                        scanner_severity_count.info += 1
+                    match props["issue_severity"].upper():
+                        case "CRITICAL":
+                            scanner_severity_count.critical += 1
+                        case "HIGH":
+                            scanner_severity_count.high += 1
+                        case "MEDIUM":
+                            scanner_severity_count.medium += 1
+                        case "LOW":
+                            scanner_severity_count.low += 1
+                        case _:
+                            scanner_severity_count.info += 1
                     has_severity_in_properties = True
 
             if not has_severity_in_properties:
-                level = str(result.level).lower()
-                if level == "error":
-                    scanner_severity_count.critical += 1
-                elif level == "warning":
-                    scanner_severity_count.medium += 1
-                elif level == "note":
-                    scanner_severity_count.low += 1
-                else:
-                    scanner_severity_count.info += 1
+                match str(result.level).lower():
+                    case "error":
+                        scanner_severity_count.critical += 1
+                    case "warning":
+                        scanner_severity_count.medium += 1
+                    case "note":
+                        scanner_severity_count.low += 1
+                    case _:
+                        scanner_severity_count.info += 1
 
     return scanner_severity_count
 
@@ -426,20 +414,11 @@ def apply_suppressions_to_sarif(
     Returns:
         The modified SARIF report with suppressions applied
     """
-    known_ignore_formatted: List[IgnorePathWithReason] = []
-    for item in KNOWN_IGNORE_PATHS:
-        known_ignore_formatted.append(
-            IgnorePathWithReason(
-                path=item,
-                reason="Known ignore path",
-            )
-        )
-        known_ignore_formatted.append(
-            IgnorePathWithReason(
-                path=f"**/{item}",
-                reason="Known ignore path",
-            )
-        )
+    known_ignore_formatted: List[IgnorePathWithReason] = [
+        IgnorePathWithReason(path=p, reason="Known ignore path")
+        for item in KNOWN_IGNORE_PATHS
+        for p in (item, f"**/{item}")
+    ]
     ignore_paths = [
         *(plugin_context.config.global_settings.ignore_paths or []),
         *known_ignore_formatted,

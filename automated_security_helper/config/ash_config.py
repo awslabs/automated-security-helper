@@ -680,19 +680,15 @@ class AshConfig(BaseModel):
             plugin_name,
             flags=re.IGNORECASE,
         ).lower()
-        item_dict = (
-            self.scanners.model_dump(by_alias=True)
-            if plugin_type == "scanner"
-            else (
-                self.reporters.model_dump(by_alias=True)
-                if plugin_type == "reporter"
-                else (
-                    self.converters.model_dump(by_alias=True)
-                    if plugin_type == "converter"
-                    else {}
-                )
-            )
-        )
+        match plugin_type:
+            case "scanner":
+                item_dict = self.scanners.model_dump(by_alias=True)
+            case "reporter":
+                item_dict = self.reporters.model_dump(by_alias=True)
+            case "converter":
+                item_dict = self.converters.model_dump(by_alias=True)
+            case _:
+                item_dict = {}
         key_map = {}
         for item_name, item in item_dict.items():
             if found is not None:

@@ -402,14 +402,15 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 if result.level:
                     # result.level is already the string value from the enum
                     level_str = result.level.lower()
-                    if level_str == "error":
-                        severity_id = SeverityId.integer_4  # HIGH
-                    elif level_str == "warning":
-                        severity_id = SeverityId.integer_3  # MEDIUM
-                    elif level_str == "note":
-                        severity_id = SeverityId.integer_2  # LOW
-                    elif level_str == "none":
-                        severity_id = SeverityId.integer_1  # INFORMATIONAL
+                    match level_str:
+                        case "error":
+                            severity_id = SeverityId.integer_4  # HIGH
+                        case "warning":
+                            severity_id = SeverityId.integer_3  # MEDIUM
+                        case "note":
+                            severity_id = SeverityId.integer_2  # LOW
+                        case "none":
+                            severity_id = SeverityId.integer_1  # INFORMATIONAL
                     ASH_LOGGER.debug(
                         f"Mapped severity for {rule_id}: {level_str} -> {severity_id}"
                     )
@@ -635,9 +636,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             ASH_LOGGER.info("No SARIF runs found in model - returning empty array")
             return json.dumps([], indent=2)
 
-        all_results = []
-        for run in model.sarif.runs:
-            all_results.extend(run.results or [])
+        all_results = [r for run in model.sarif.runs for r in (run.results or [])]
 
         if not all_results:
             ASH_LOGGER.info(
