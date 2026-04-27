@@ -1,8 +1,8 @@
 """Regression tests for subprocess_utils bug fixes.
 
-Bug #4: TimeoutExpired returned as CompletedProcess from run_command
-Bug #5: CalledProcessError returned as CompletedProcess from run_command
-Bug #48: Popen orphaned on exception in run_command_stream_output
+PR#274 Bug #4: TimeoutExpired returned as CompletedProcess from run_command
+PR#274 Bug #5: CalledProcessError returned as CompletedProcess from run_command
+PR#274 Bug #48: Popen orphaned on exception in run_command_stream_output
 """
 
 import subprocess
@@ -12,7 +12,7 @@ import pytest
 
 
 class TestBug4TimeoutExpiredReturnType:
-    """Bug #4: run_command must return CompletedProcess when TimeoutExpired is caught."""
+    """PR#274 Bug #4: run_command must return CompletedProcess when TimeoutExpired is caught."""
 
     @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
     @patch("subprocess.run")
@@ -92,7 +92,7 @@ class TestBug4TimeoutExpiredReturnType:
 
 
 class TestBug5CalledProcessErrorReturnType:
-    """Bug #5: run_command must return CompletedProcess when CalledProcessError is caught."""
+    """PR#274 Bug #5: run_command must return CompletedProcess when CalledProcessError is caught."""
 
     @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
     @patch("subprocess.run")
@@ -171,7 +171,7 @@ class TestBug5CalledProcessErrorReturnType:
 
 
 class TestBug48PopenOrphanedOnException:
-    """Bug #48: Popen must be killed and waited on if an exception occurs
+    """PR#274 Bug #48: Popen must be killed and waited on if an exception occurs
     during stream reading in run_command_stream_output."""
 
     @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)

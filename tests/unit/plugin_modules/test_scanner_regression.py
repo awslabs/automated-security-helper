@@ -1,8 +1,8 @@
 """Regression tests for scanner and reporter mapping bug fixes.
 
-Bug #34: bandit excluded_paths accumulates across calls (from low)
-Bug #19: get_reporter_mappings __class__.__name__ on class object (from high)
-Bug #166: Duplicate "xml" in KNOWN_SCANNABLE_EXTENSIONS (from low)
+PR#274 Bug #34: bandit excluded_paths accumulates across calls (from low)
+PR#274 Bug #19: get_reporter_mappings __class__.__name__ on class object (from high)
+PR#274 Bug #166: Duplicate "xml" in KNOWN_SCANNABLE_EXTENSIONS (from low)
 """
 
 import inspect
@@ -12,7 +12,7 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Bug #34 -- bandit excluded_paths accumulates across calls
+# PR#274 Bug #34 -- bandit excluded_paths accumulates across calls
 # ---------------------------------------------------------------------------
 class TestBanditExcludedPathsNotAccumulated:
     """self.config.options.excluded_paths must not grow across scan() calls."""
@@ -49,7 +49,7 @@ class TestBanditExcludedPathsNotAccumulated:
 
 
 # ---------------------------------------------------------------------------
-# Bug #19 -- get_reporter_mappings.py: __class__.__name__ on class object
+# PR#274 Bug #19 -- get_reporter_mappings.py: __class__.__name__ on class object
 # ---------------------------------------------------------------------------
 class TestReporterClassName:
     """reporter.__class__.__name__ on a class yields 'type', not the class name."""
@@ -81,7 +81,7 @@ class TestReporterClassName:
 
 
 # ---------------------------------------------------------------------------
-# Bug #166 -- Duplicate "xml" in KNOWN_SCANNABLE_EXTENSIONS
+# PR#274 Bug #166 -- Duplicate "xml" in KNOWN_SCANNABLE_EXTENSIONS
 # ---------------------------------------------------------------------------
 class TestNoDuplicateExtensions:
     """KNOWN_SCANNABLE_EXTENSIONS should not contain duplicate entries."""

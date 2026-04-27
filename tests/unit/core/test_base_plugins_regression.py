@@ -1,9 +1,9 @@
 """Regression tests for base plugin bug fixes.
 
-Bug #194: reporter_plugin.py configure() writes self._config (from medium)
-Bug #51: suppression_matcher invalid expiration silently skips (from medium)
-Bug #147/148: are_values_equivalent broken list/dict comparison (from medium)
-Bug #167: models/core.py expiration validator rewraps semantic error (from medium)
+PR#274 Bug #194: reporter_plugin.py configure() writes self._config (from medium)
+PR#274 Bug #51: suppression_matcher invalid expiration silently skips (from medium)
+PR#274 Bug #147/148: are_values_equivalent broken list/dict comparison (from medium)
+PR#274 Bug #167: models/core.py expiration validator rewraps semantic error (from medium)
 
 finally:return fixes for reporters (from test_finally_return_fix):
 - uv_tool_runner.py :: is_tool_installed
@@ -21,7 +21,7 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Bug #194 -- base/reporter_plugin.py:45-51 -- configure() writes self._config
+# PR#274 Bug #194 -- base/reporter_plugin.py:45-51 -- configure() writes self._config
 # ---------------------------------------------------------------------------
 class TestReporterPluginConfigure:
     """configure() must write self.config, not self._config."""
@@ -41,7 +41,7 @@ class TestReporterPluginConfigure:
 
 
 # ---------------------------------------------------------------------------
-# Bug #51 -- suppression_matcher.py:247-251 -- Invalid expiration silently skips
+# PR#274 Bug #51 -- suppression_matcher.py:247-251 -- Invalid expiration silently skips
 # ---------------------------------------------------------------------------
 class TestInvalidExpirationWarnsInsteadOfSilentSkip:
     """A malformed expiration date must log a warning, not silently continue.
@@ -89,7 +89,7 @@ class TestInvalidExpirationWarnsInsteadOfSilentSkip:
 
 
 # ---------------------------------------------------------------------------
-# Bug #147/148 -- are_values_equivalent.py:37-46 -- Broken list/dict comparison
+# PR#274 Bug #147/148 -- are_values_equivalent.py:37-46 -- Broken list/dict comparison
 # ---------------------------------------------------------------------------
 class TestAreValuesEquivalent:
     """List comparison is broken for duplicates; dict ignores values."""
@@ -136,7 +136,7 @@ class TestAreValuesEquivalent:
 
 
 # ---------------------------------------------------------------------------
-# Bug #167 -- models/core.py:83-98 -- except ValueError rewraps semantic error
+# PR#274 Bug #167 -- models/core.py:83-98 -- except ValueError rewraps semantic error
 # ---------------------------------------------------------------------------
 class TestExpirationValidatorPreservesMessage:
     """'expiration must be in the future' must not be rewrapped as format error."""

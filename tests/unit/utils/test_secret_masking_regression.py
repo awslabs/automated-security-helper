@@ -1,8 +1,8 @@
 """Regression tests for secret_masking bug fixes.
 
-Bug #156: 4-char secrets reveal 50% (show first + last of 4)
-Bug #157: regex stops at internal quote
-Bug #158: B106 and B107 are not dispatched
+PR#274 Bug #156: 4-char secrets reveal 50% (show first + last of 4)
+PR#274 Bug #157: regex stops at internal quote
+PR#274 Bug #158: B106 and B107 are not dispatched
 """
 
 import pytest
@@ -11,7 +11,7 @@ import pytest
 class TestSecretMasking:
     """Tests for secret masking deficiencies."""
 
-    # Bug #156: 4-char secrets reveal 50% (show first + last of 4)
+    # PR#274 Bug #156: 4-char secrets reveal 50% (show first + last of 4)
     def test_short_secret_masking_ratio(self):
         """4-char secret must have >= 75% masked characters."""
         from automated_security_helper.utils.secret_masking import _mask_secret_value
@@ -40,7 +40,7 @@ class TestSecretMasking:
         ratio = star_count / len(masked)
         assert ratio >= 0.50, f"Only {ratio:.0%} masked for 10-char secret"
 
-    # Bug #158: B106 and B107 are not dispatched
+    # PR#274 Bug #158: B106 and B107 are not dispatched
     def test_b106_rule_masks_secret(self):
         """B106 (hardcoded password in funcarg) must be masked."""
         from automated_security_helper.utils.secret_masking import mask_secret_in_text
@@ -65,7 +65,7 @@ class TestSecretMasking:
         result = mask_secret_in_text(text, rule_id="B105")
         assert "secret123" not in result
 
-    # Bug #157: regex stops at internal quote
+    # PR#274 Bug #157: regex stops at internal quote
     def test_secret_with_internal_quote(self):
         """Secret containing a quote should still be fully masked."""
         from automated_security_helper.utils.secret_masking import mask_secret_in_text

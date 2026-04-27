@@ -1,6 +1,6 @@
 """Regression tests for get_scan_set bug fixes.
 
-Bug #175: debug_echo returns None, passes tuple to logger.
+PR#274 Bug #175: debug_echo returns None, passes tuple to logger.
 """
 
 from unittest.mock import patch
