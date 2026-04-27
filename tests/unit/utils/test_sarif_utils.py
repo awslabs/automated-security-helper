@@ -30,7 +30,7 @@ def test_get_finding_id():
 def test_sanitize_uri(test_source_dir):
     """Test the _sanitize_uri function."""
     source_dir_path = test_source_dir
-    source_dir_str = str(source_dir_path) + "/"
+    source_dir_str = source_dir_path.as_posix() + "/"
 
     # Test with file:// prefix - this should work without mocking
     uri = f"file://{source_dir_path}/src/file.py"
