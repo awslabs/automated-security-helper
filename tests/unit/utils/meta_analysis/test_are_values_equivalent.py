@@ -33,8 +33,8 @@ def test_are_values_equivalent_dicts():
 
 
 def test_are_values_equivalent_mixed_types():
-    """Test equivalence of mixed types."""
-    # String representations are considered equivalent
-    assert are_values_equivalent(1, "1")
-    assert are_values_equivalent(True, "True")
+    """Test that different types are NOT equivalent (bug #149 fix)."""
+    # Cross-type stringify comparison was the bug; now different types are never equivalent
+    assert not are_values_equivalent(1, "1")
+    assert not are_values_equivalent(True, "True")
     assert not are_values_equivalent(1, "2")

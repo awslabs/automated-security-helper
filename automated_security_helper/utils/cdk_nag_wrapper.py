@@ -153,6 +153,7 @@ def run_cdk_nag_against_cfn_template(
 
         ASH_LOGGER.debug(f"Validated model from template: {model}")
         ASH_LOGGER.debug(f"outdir: {outdir.as_posix() if outdir else 'None'}")
+        clean_template_filename = Path(template_path).as_posix()
         try:
             clean_template_filename = get_shortest_name(input=template_path)
         except ValueError as e:
@@ -160,11 +161,14 @@ def run_cdk_nag_against_cfn_template(
             clean_template_filename = Path(template_path).as_posix()
         except Exception as e:
             ASH_LOGGER.debug(f"Could not get relative path to template: {e}")
+            clean_template_filename = Path(template_path).as_posix()
         ASH_LOGGER.debug(f"clean_template_filename: {clean_template_filename}")
         clean_template_filename = re.sub(
             r"(\/|\\|\.)+", "--", clean_template_filename.lstrip("/")
         )
         ASH_LOGGER.debug(f"clean_template_filename: {clean_template_filename}")
+        if outdir is None:
+            raise ValueError("outdir is required for cdk_nag scanning")
         ASH_LOGGER.debug(f"cdk nag outdir pre: {outdir.__str__()}")
         outdir = outdir.joinpath(clean_template_filename)
         ASH_LOGGER.debug(f"cdk nag outdir post: {outdir.__str__()}")
@@ -272,10 +276,14 @@ def run_cdk_nag_against_cfn_template(
                 # number of the resource_log_id
                 resource_line = None
                 resource_column = None
+                resource_log_id_pattern = re.compile(
+                    r"(?<![a-zA-Z0-9_])" + re.escape(resource_log_id) + r"(?![a-zA-Z0-9_])"
+                )
                 for i, line_str in enumerate(template_lines, start=1):
-                    if resource_log_id in line_str:
+                    match = resource_log_id_pattern.search(line_str)
+                    if match:
                         resource_line = i
-                        resource_column = line_str.index(resource_log_id)
+                        resource_column = match.start()
                         break
 
                 cfn_resource_dict = {

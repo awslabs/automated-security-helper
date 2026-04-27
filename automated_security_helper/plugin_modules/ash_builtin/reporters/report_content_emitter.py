@@ -56,6 +56,19 @@ class ReportContentEmitter:
 
         if scan_time_str != "Unknown":
             try:
+                # Strip timezone offset or fractional seconds from the
+                # timestamp so strptime can parse the date/time portion.
+                # Handles +HH:MM, -HH:MM, Z suffix, and .fractional seconds.
+                import re as _re
+
+                cleaned = scan_time_str
+                # Remove trailing Z (Zulu/UTC indicator)
+                cleaned = cleaned.rstrip("Z")
+                # Remove timezone offset (+HH:MM or -HH:MM) at the end
+                cleaned = _re.sub(r'[+-]\d{2}:\d{2}$', '', cleaned)
+                # Remove fractional seconds
+                cleaned = cleaned.split(".")[0]
+
                 # Try to parse the scan time string to calculate delta
                 # Handle different possible formats
                 for fmt in [
@@ -64,9 +77,7 @@ class ReportContentEmitter:
                     "%Y-%m-%d %H:%M:%S",
                 ]:
                     try:
-                        scan_time = datetime.strptime(
-                            scan_time_str.split("+")[0].split(".")[0], fmt
-                        )
+                        scan_time = datetime.strptime(cleaned, fmt)
                         if fmt != "%Y-%m-%d - %H:%M (UTC)":
                             scan_time = scan_time.replace(tzinfo=timezone.utc)
                         time_delta = current_time - scan_time

@@ -347,7 +347,9 @@ class TaskManager:
         Returns:
             List of task information dictionaries
         """
-        return [self.get_task_info(task_id) for task_id in self._active_tasks.keys()]
+        # Copy keys under implicit snapshot to avoid RuntimeError from concurrent mutation
+        task_ids = list(self._active_tasks.keys())
+        return [self.get_task_info(task_id) for task_id in task_ids]
 
     def get_tasks_by_scan_id(self, scan_id: str) -> List[Dict[str, Any]]:
         """Get all tasks associated with a specific scan ID.
@@ -358,9 +360,11 @@ class TaskManager:
         Returns:
             List of task information dictionaries
         """
+        # Copy items under implicit snapshot to avoid RuntimeError from concurrent mutation
+        items = list(self._active_tasks.items())
         return [
             self.get_task_info(task_id)
-            for task_id, task_info in self._active_tasks.items()
+            for task_id, task_info in items
             if task_info.scan_id == scan_id
         ]
 

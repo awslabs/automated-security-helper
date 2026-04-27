@@ -4,6 +4,7 @@
 """Module containing the ArchiveConverter implementation."""
 
 import os
+import sys
 from pathlib import Path
 import tarfile
 from typing import Annotated, List, Literal, Optional
@@ -147,7 +148,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         archive_files = [
             f.strip()
             for f in archive_files
-            if f.strip().split(".")[-1] in ["zip", "tar", "gz"]
+            if f.strip().split(".")[-1].lower() in ["zip", "tar", "gz"]
         ]
 
         ASH_LOGGER.debug(f"Found {len(archive_files)} files to convert in scan set.")
@@ -196,7 +197,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 target_path.mkdir(parents=True, exist_ok=True)
 
                 # Extract ZIP to target path after inspecting members
-                if archive_file.endswith(".zip") and zipfile.is_zipfile(archive_file):
+                if archive_file.lower().endswith(".zip") and zipfile.is_zipfile(archive_file):
                     with zipfile.ZipFile(archive_file, "r") as zip_ref:
                         zip_ref.extractall(
                             path=target_path,
@@ -209,12 +210,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     with tarfile.open(
                         archive_file, mode="r", encoding="utf-8"
                     ) as tar_ref:
-                        tar_ref.extractall(
-                            path=target_path,
-                            members=self.inspect_members(
-                                tar_ref.getmembers(), target_path=target_path
-                            ),
+                        safe_members = self.inspect_members(
+                            tar_ref.getmembers(), target_path=target_path
                         )
+                        extract_kwargs = {"path": target_path, "members": safe_members}
+                        # Defense-in-depth: use filter='data' on Python 3.12+ to
+                        # restrict tar member attributes beyond our own inspect_members checks
+                        if sys.version_info >= (3, 12):
+                            extract_kwargs["filter"] = "data"
+                        tar_ref.extractall(**extract_kwargs)
                 else:
                     ASH_LOGGER.debug(
                         f"Skipping unsupported archive format: {archive_file}"

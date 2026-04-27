@@ -126,14 +126,9 @@ def _line_ranges_compatible(start1, end1, start2, end2) -> bool:
                 # For close matches (small difference in start lines), require exact matching
                 start_diff = abs(start1 - start2)
 
-                # If start lines are very close (1 line apart), require exact matching
-                # This handles cases like (10-15) vs (11-15) which should not match
-                # But allows (10-15) vs (12-18) which should match (2+ lines apart)
-                if start_diff == 1:
-                    return False
-                else:
-                    # Significant overlap, allow it (like 10-15 vs 12-18)
-                    return True
+                # Off-by-one in line numbers is common across different scanners,
+                # so accept overlapping ranges regardless of start-line difference.
+                return True
             else:
                 return False
         else:

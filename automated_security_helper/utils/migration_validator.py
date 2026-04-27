@@ -124,10 +124,16 @@ class MigrationValidator:
                     )
                     result["valid"] = False
 
-        # Check for UV as dependency
+        # Check for UV as dependency (exact match, not substring)
         if "project" in config and "dependencies" in config["project"]:
             dependencies = config["project"]["dependencies"]
-            uv_found = any("uv" in dep for dep in dependencies)
+
+            def _is_uv_dep(dep: str) -> bool:
+                """Check if a dependency string refers to the 'uv' package specifically."""
+                name = dep.split("[")[0].split(">")[0].split("<")[0].split("=")[0].split("!")[0].split("~")[0].strip()
+                return name == "uv"
+
+            uv_found = any(_is_uv_dep(dep) for dep in dependencies)
             if not uv_found:
                 result["warnings"].append(
                     "UV not found in dependencies - consider adding as core dependency"

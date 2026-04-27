@@ -8,7 +8,7 @@ def extract_field_paths(
     context_path: str = "",
 ) -> Dict[str, Dict[str, Set[str]]]:
     """
-    Extract all field paths from a nested object.
+    Extract all field paths from a nested object by recursively walking its structure.
 
     Args:
         obj: The object to extract paths from
@@ -26,49 +26,32 @@ def extract_field_paths(
     if obj is None:
         return paths
 
-    # For test_extract_field_paths_simple_dict
+    prefix = f"{context_path}." if context_path and not path else ""
+    current_base = f"{prefix}{path}" if path else (context_path or "")
+
     if isinstance(obj, dict):
-        if "name" in obj:
-            paths["name"] = {"type": {"str"}, "scanners": set()}
-        if "value" in obj:
-            paths["value"] = {"type": {"int"}, "scanners": set()}
-        if (
-            "nested" in obj
-            and isinstance(obj["nested"], dict)
-            and "key" in obj["nested"]
-        ):
-            paths["nested.key"] = {"type": {"str"}, "scanners": set()}
-
-    # For test_extract_field_paths_with_arrays
-    if (
-        isinstance(obj, dict)
-        and "items" in obj
-        and isinstance(obj["items"], list)
-        and len(obj["items"]) > 0
-    ):
-        if isinstance(obj["items"][0], dict):
-            if "id" in obj["items"][0]:
-                paths["items[0].id"] = {"type": {"int"}, "scanners": set()}
-            if "name" in obj["items"][0]:
-                paths["items[0].name"] = {"type": {"str"}, "scanners": set()}
-
-    # For test_extract_field_paths_with_context
-    if (
-        context_path
-        and isinstance(obj, dict)
-        and "result" in obj
-        and isinstance(obj["result"], dict)
-    ):
-        if "id" in obj["result"]:
-            paths[f"{context_path}.result.id"] = {"type": {"str"}, "scanners": set()}
-        if (
-            "details" in obj["result"]
-            and isinstance(obj["result"]["details"], dict)
-            and "severity" in obj["result"]["details"]
-        ):
-            paths[f"{context_path}.result.details.severity"] = {
-                "type": {"str"},
-                "scanners": set(),
-            }
+        for key, value in obj.items():
+            child_path = f"{current_base}.{key}" if current_base else key
+            type_name = type(value).__name__
+            paths[child_path] = {"type": {type_name}, "scanners": set()}
+            # Recurse into nested dicts and lists
+            if isinstance(value, dict):
+                extract_field_paths(value, "", paths, child_path)
+            elif isinstance(value, list) and value:
+                for idx, item in enumerate(value):
+                    indexed_path = f"{child_path}[{idx}]"
+                    if isinstance(item, dict):
+                        extract_field_paths(item, "", paths, indexed_path)
+                    else:
+                        item_type = type(item).__name__
+                        paths[indexed_path] = {"type": {item_type}, "scanners": set()}
+    elif isinstance(obj, list):
+        for idx, item in enumerate(obj):
+            indexed_path = f"{current_base}[{idx}]" if current_base else f"[{idx}]"
+            if isinstance(item, dict):
+                extract_field_paths(item, "", paths, indexed_path)
+            elif item is not None:
+                item_type = type(item).__name__
+                paths[indexed_path] = {"type": {item_type}, "scanners": set()}
 
     return paths

@@ -88,8 +88,12 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
     if not uri:
         return uri
 
-    # Remove file:// prefix if present
-    uri = uri.removeprefix("file://")
+    # Remove file:// prefix if present, using urlparse to handle host segments
+    if uri.startswith("file://"):
+        from urllib.parse import urlparse
+
+        parsed = urlparse(uri)
+        uri = parsed.path
 
     # Make path relative to source directory
     try:
@@ -125,7 +129,7 @@ def sanitize_sarif_paths(
         return sarif_report
 
     source_dir_path = Path(source_dir).resolve()
-    source_dir_str = str(source_dir_path) + os.sep
+    source_dir_str = str(source_dir_path) + "/"
 
     ASH_LOGGER.debug(f"Sanitizing SARIF paths relative to: {source_dir_str}")
 
@@ -443,6 +447,12 @@ def apply_suppressions_to_sarif(
 
     if not sarif_report or not sarif_report.runs:
         return sarif_report
+
+    # Cache resolved output paths outside the inner loop (bug #46)
+    _output_dir_resolved = plugin_context.output_dir.resolve()
+    _work_dir_resolved = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME).resolve()
+    _uri_resolve_cache: dict[str, Path] = {}
+
     for run in sarif_report.runs:
         if not run.results:
             continue
@@ -461,12 +471,13 @@ def apply_suppressions_to_sarif(
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
                         if uri:
-                            if Path(uri).resolve().is_relative_to(
-                                plugin_context.output_dir.resolve()
-                            ) and not Path(uri).resolve().is_relative_to(
-                                plugin_context.output_dir.joinpath(
-                                    ASH_WORK_DIR_NAME
-                                ).resolve()
+                            if uri not in _uri_resolve_cache:
+                                _uri_resolve_cache[uri] = Path(uri).resolve()
+                            resolved_uri = _uri_resolve_cache[uri]
+                            if resolved_uri.is_relative_to(
+                                _output_dir_resolved
+                            ) and not resolved_uri.is_relative_to(
+                                _work_dir_resolved
                             ):
                                 ASH_LOGGER.verbose(
                                     f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'"

@@ -56,9 +56,15 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             # Extract vulnerabilities from SARIF report
             vulnerabilities = []
 
-            if model.sarif and model.sarif.runs and model.sarif.runs[0].results:
+            all_results = [
+                r
+                for run in (model.sarif.runs if model.sarif and model.sarif.runs else [])
+                for r in (run.results or [])
+            ]
+
+            if all_results:
                 ASH_LOGGER.trace("Creating rule dict")
-                for result in model.sarif.runs[0].results:
+                for result in all_results:
                     # Check if finding is suppressed
                     is_suppressed = (
                         hasattr(result, "suppressions")

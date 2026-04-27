@@ -228,17 +228,22 @@ def validate_directory_path(
     """
     Validate a directory path with comprehensive error handling.
 
+    Resolves symlinks and '..' components via Path.resolve() before checking
+    existence and directory status. This prevents path traversal via symlinks
+    even in stdio-only contexts like MCP.
+
     Args:
         directory_path: Path to validate
 
     Returns:
         None if valid, MCPResourceError if invalid
     """
-    # First try the path as provided
+    # Canonicalize: resolve symlinks and '..' components
     path_obj = Path(directory_path)
     try:
-        # Check if path exists and is a directory
-        if path_obj.exists() and path_obj.is_dir():
+        resolved = path_obj.resolve()
+        # Check if the resolved path exists and is a directory
+        if resolved.exists() and resolved.is_dir():
             return None  # Path is valid
     except Exception as e:
         return MCPResourceError(
@@ -254,7 +259,7 @@ def validate_directory_path(
 
     # If the path doesn't exist as provided, try relative to current directory
     if not path_obj.is_absolute():
-        rel_path_obj = Path.cwd() / directory_path
+        rel_path_obj = (Path.cwd() / directory_path).resolve()
         try:
             if rel_path_obj.exists() and rel_path_obj.is_dir():
                 return None  # Relative path is valid

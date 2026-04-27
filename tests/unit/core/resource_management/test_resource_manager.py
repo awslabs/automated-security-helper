@@ -100,18 +100,24 @@ class TestResourceManager:
         assert success
 
     @pytest.mark.asyncio
-    async def test_get_executor_with_resource_exhaustion(self, resource_manager):
-        """Test get_executor when resource limits are exceeded."""
+    async def test_get_executor_available_even_at_operation_limit(self, resource_manager):
+        """Test get_executor returns executor even when operation slots are full.
+
+        Bug #69: get_executor should not enforce operation limits -- that is
+        the job of acquire_operation_slot. Monitoring callers that only need
+        the executor should not be blocked by the operation counter.
+        """
         # Fill up operation slots
         await resource_manager.acquire_operation_slot()
         await resource_manager.acquire_operation_slot()
 
-        # Try to get executor when at limit
-        with pytest.raises(ResourceExhaustionError) as exc_info:
-            await resource_manager.get_executor()
+        # get_executor should still succeed (it just returns the pool)
+        executor = await resource_manager.get_executor()
+        assert isinstance(executor, ThreadPoolExecutor)
 
-        assert "Maximum concurrent operations" in str(exc_info.value)
-        assert exc_info.value.context["active_operations"] == 2
+        # But acquire_operation_slot should correctly deny
+        denied = await resource_manager.acquire_operation_slot()
+        assert denied is False
 
     @pytest.mark.asyncio
     async def test_get_executor_after_shutdown_requested(self, resource_manager):

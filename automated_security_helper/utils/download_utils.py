@@ -138,7 +138,7 @@ def create_url_download_command(
             script,
             url,
             str(destination),
-            str(rename_to) if rename_to else "None",
+            str(rename_to) if rename_to is not None else "None",
         ],
         shell=False,
     )

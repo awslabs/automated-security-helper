@@ -88,16 +88,6 @@ class ResourceManager:
             if self._shutdown_requested:
                 raise MCPResourceError("ResourceManager is shutting down")
 
-            # Check concurrent operation limits
-            if self._active_operations >= self._max_concurrent_scans:
-                raise ResourceExhaustionError(
-                    f"Maximum concurrent operations ({self._max_concurrent_scans}) exceeded",
-                    context={
-                        "active_operations": self._active_operations,
-                        "max_concurrent": self._max_concurrent_scans,
-                    },
-                )
-
             # Create executor if it doesn't exist
             if self._shared_executor is None:
                 try:
@@ -197,7 +187,7 @@ class ResourceManager:
 
                     # Run shutdown wait in thread pool (if available) or new thread
                     try:
-                        loop = asyncio.get_event_loop()
+                        loop = asyncio.get_running_loop()
                         await loop.run_in_executor(None, wait_for_shutdown)
                     except Exception as e:
                         self._logger.error(

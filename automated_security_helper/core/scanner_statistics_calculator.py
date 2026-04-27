@@ -176,12 +176,8 @@ class ScannerStatisticsCalculator:
             ):
                 container_data = asharp_model.additional_reports[scanner_name]["source"]
                 if isinstance(container_data, dict) and "duration" in container_data:
-                    # Handle None duration (for skipped/missing scanners) by keeping it as None
-                    duration = (
-                        container_data["duration"]
-                        if container_data["duration"] is not None
-                        else None
-                    )
+                    # Guard against None duration to prevent downstream formatting crashes
+                    duration = container_data["duration"] or 0.0
                     ASH_LOGGER.debug(
                         f"Got duration for {scanner_name} from additional_reports: {duration}"
                     )

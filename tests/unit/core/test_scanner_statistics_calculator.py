@@ -630,8 +630,8 @@ class TestScannerStatisticsCalculator:
         assert failed_stats["total"] == 0
         assert failed_stats["actionable"] == 0
 
-        # Duration should be None for failed scanner
-        assert failed_stats["duration"] is None
+        # Duration should be 0.0 for failed scanner (None is coerced to 0.0 to prevent formatting crashes)
+        assert failed_stats["duration"] == 0.0
 
         # Error flag should be True
         assert failed_stats["error"] is True

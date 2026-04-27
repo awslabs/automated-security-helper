@@ -20,12 +20,11 @@ def are_values_equivalent(val1: Any, val2: Any) -> bool:
     # Handle None values
     if val1 is None and val2 is None:
         return True
+    if val1 is None or val2 is None:
+        return False
 
-    # Handle different types
+    # Handle different types -- do NOT stringify-compare across types
     if type(val1) is not type(val2):
-        # Special case: string representations might be equivalent
-        if str(val1) == str(val2):
-            return True
         return False
 
     # Handle strings - normalize paths, etc.

@@ -16,7 +16,7 @@ def discover_plugins(plugin_modules: List[str] | None = None):
     # Look for packages with the ash_plugins namespace
     for finder, name, ispkg in pkgutil.iter_modules():
         for namespace in plugin_modules:
-            if name.startswith(namespace) and ispkg:
+            if (name == namespace or name.startswith(namespace + ".")) and ispkg:
                 try:
                     # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
                     module = importlib.import_module(name)

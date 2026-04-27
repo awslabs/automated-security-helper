@@ -88,6 +88,9 @@ def run_command(
         subprocess.CalledProcessError: If check=True and the command fails
         subprocess.TimeoutExpired: If the command times out
     """
+    # Copy args to avoid mutating the caller's list
+    args = list(args)
+
     # Resolve the full path to the executable if possible
     if args and not shell:
         binary_full_path = find_executable(args[0])
@@ -378,6 +381,7 @@ def get_host_uid() -> int:
         return int(result.stdout.strip())
     except Exception as e:
         ASH_LOGGER.error(f"Error getting host UID: {e}")
+        ASH_LOGGER.warning("Falling back to default UID 1000 (command 'id -u' unavailable on this platform)")
         return 1000  # Default UID as fallback
 
 
@@ -392,6 +396,7 @@ def get_host_gid() -> int:
         return int(result.stdout.strip())
     except Exception as e:
         ASH_LOGGER.error(f"Error getting host GID: {e}")
+        ASH_LOGGER.warning("Falling back to default GID 1000 (command 'id -g' unavailable on this platform)")
         return 1000  # Default GID as fallback
 
 
