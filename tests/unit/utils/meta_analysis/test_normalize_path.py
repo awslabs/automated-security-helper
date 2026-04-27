@@ -16,7 +16,7 @@ def test_normalize_path_nested():
 def test_normalize_path_with_arrays():
     """Test normalizing paths strips array indices but keeps full structure."""
     assert normalize_path("runs[0].results[0].ruleId") == "runs.results.ruleId"
-    assert normalize_path("runs[].results[].ruleId") == "runs[].results[].ruleId"
+    assert normalize_path("runs[].results[].ruleId") == "runs.results.ruleId"
 
 
 def test_normalize_path_complex():

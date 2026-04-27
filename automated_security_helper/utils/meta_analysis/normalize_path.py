@@ -24,6 +24,7 @@ def normalize_path(path: str) -> str:
     if "/" in path or "\\" in path:
         return path.replace("\\", "/")
 
-    # SARIF field path: strip array indices but keep full dotted path
-    normalized = re.sub(r"\[\d+\]", "", path)
+    # SARIF field path: strip array indices (both [0] and []) so that
+    # paths using either notation normalize to the same string.
+    normalized = re.sub(r"\[\d*\]", "", path)
     return normalized
