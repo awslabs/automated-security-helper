@@ -40,7 +40,7 @@ def test_progress_py_does_not_reference_task_rows_or_task_table():
     """The phantom attributes should no longer appear in progress.py."""
     progress_py = (
         REPO_ROOT / "automated_security_helper" / "core" / "progress.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "self.task_rows" not in progress_py, (
         "self.task_rows referenced a never-initialized attribute"
     )
@@ -59,7 +59,7 @@ def test_run_ash_scan_has_no_commented_git_clone_block():
         / "automated_security_helper"
         / "interactions"
         / "run_ash_scan.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
 
     # Signatures of the commented-out block
     forbidden_markers = [
@@ -82,7 +82,7 @@ def test_run_ash_scan_preserves_temp_clone_dir_sentinel():
         / "automated_security_helper"
         / "interactions"
         / "run_ash_scan.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "temp_clone_dir = None" in run_ash_scan_py, (
         "temp_clone_dir=None is used by the cleanup block and must be kept"
     )
@@ -95,7 +95,7 @@ def test_run_ash_scan_drops_unused_original_dir_guard():
         / "automated_security_helper"
         / "interactions"
         / "run_ash_scan.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "original_dir = os.getcwd()" not in run_ash_scan_py, (
         "original_dir guarded a chdir that no longer exists"
     )
@@ -124,7 +124,7 @@ def test_execution_engine_has_no_call_to_register_custom_scanners():
         / "automated_security_helper"
         / "core"
         / "execution_engine.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "_register_custom_scanners" not in engine_py, (
         "all references to _register_custom_scanners should be gone"
     )
@@ -141,7 +141,7 @@ def test_snyk_code_scanner_has_no_unreachable_env_vars_branch():
         / "plugin_modules"
         / "ash_snyk_plugins"
         / "snyk_code_scanner.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
 
     assert "env_vars = {}" not in snyk_py, (
         "the always-empty env_vars initializer should be gone"
@@ -170,7 +170,7 @@ def test_snyk_code_scanner_still_runs_subprocess():
         / "plugin_modules"
         / "ash_snyk_plugins"
         / "snyk_code_scanner.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "self._run_subprocess(" in source, (
         "_run_subprocess call must still be in the scanner"
     )
