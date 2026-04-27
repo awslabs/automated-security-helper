@@ -248,14 +248,22 @@ class StateManager:
         Raises:
             StateManagementError: If registration fails
         """
-        async with self._directory_lock:
-            try:
-                # Check if directory already has an active scan
-                existing_scan_id = self._active_scans_by_directory.get(directory_path)
-                if existing_scan_id:
-                    # Check if the existing scan is still active
-                    async with self._scan_store_lock:
-                        existing_scan = self._scan_progress_store.get(existing_scan_id)
+        # Lock ordering: always acquire _scan_store_lock before _directory_lock
+        # to prevent ABBA deadlock with validate_state_consistency,
+        # get_health_status, and get_resource_usage (Bug #13).
+        async with self._scan_store_lock:
+            async with self._directory_lock:
+                try:
+                    # Check if directory already has an active scan
+                    existing_scan_id = self._active_scans_by_directory.get(
+                        directory_path
+                    )
+                    if existing_scan_id:
+                        # Check if the existing scan is still active
+                        # (_scan_store_lock already held)
+                        existing_scan = self._scan_progress_store.get(
+                            existing_scan_id
+                        )
                         if existing_scan and existing_scan.status not in [
                             "completed",
                             "failed",
@@ -271,21 +279,24 @@ class StateManager:
                                 f"Cleaning up stale directory registration for {directory_path}"
                             )
 
-                # Register the directory
-                self._active_scans_by_directory[directory_path] = scan_id
-                self._logger.debug(
-                    f"Registered directory scan: {directory_path} -> {scan_id}"
-                )
-                return True
+                    # Register the directory
+                    self._active_scans_by_directory[directory_path] = scan_id
+                    self._logger.debug(
+                        f"Registered directory scan: {directory_path} -> {scan_id}"
+                    )
+                    return True
 
-            except Exception as e:
-                self._logger.error(
-                    f"Failed to register directory scan for {directory_path}: {str(e)}"
-                )
-                raise StateManagementError(
-                    f"Failed to register directory scan: {str(e)}",
-                    context={"directory_path": directory_path, "scan_id": scan_id},
-                )
+                except Exception as e:
+                    self._logger.error(
+                        f"Failed to register directory scan for {directory_path}: {str(e)}"
+                    )
+                    raise StateManagementError(
+                        f"Failed to register directory scan: {str(e)}",
+                        context={
+                            "directory_path": directory_path,
+                            "scan_id": scan_id,
+                        },
+                    )
 
     async def unregister_directory_scan(
         self, directory_path: str, scan_id: str

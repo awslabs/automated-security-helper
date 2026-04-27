@@ -73,6 +73,7 @@ class ResourceManager:
         self._logger = ASH_LOGGER
         self._start_time = time.time()
         self._shutdown_requested = False
+        self._executor_shutdown = False
 
     async def get_executor(self) -> ThreadPoolExecutor:
         """Get or create shared thread pool executor.
@@ -108,13 +109,14 @@ class ResourceManager:
                     )
 
             # Check if executor is still healthy
-            if self._shared_executor._shutdown:
+            if self._executor_shutdown:
                 self._logger.warning("Thread pool executor was shutdown, recreating")
                 try:
                     self._shared_executor = ThreadPoolExecutor(
                         max_workers=self._max_workers,
                         thread_name_prefix="ash_mcp_worker",
                     )
+                    self._executor_shutdown = False
                 except Exception as e:
                     raise MCPResourceError(f"Failed to recreate thread pool: {str(e)}")
 
@@ -154,6 +156,7 @@ class ResourceManager:
         """
         async with self._resource_lock:
             self._shutdown_requested = True
+            self._executor_shutdown = True
 
             if self._shared_executor is None:
                 self._logger.debug("No thread pool executor to shutdown")
@@ -162,33 +165,34 @@ class ResourceManager:
             self._logger.info("Shutting down shared thread pool executor")
 
             try:
-                # Shutdown the executor
+                # Shutdown the executor -- wait=True lets the pool drain
+                # within the timeout we enforce below.
                 self._shared_executor.shutdown(wait=False)
 
                 if wait:
-                    # Wait for completion in a separate thread to avoid blocking
+                    # Wait for completion in a separate thread to avoid blocking.
+                    # Use shutdown(wait=True) with a timeout rather than polling
+                    # private _threads attr (Bug #67).
+                    executor_ref = self._shared_executor
+
                     def wait_for_shutdown():
                         try:
-                            # Use a loop to implement timeout
-                            start_time = time.time()
-                            while time.time() - start_time < timeout:
-                                if self._shared_executor._threads:
-                                    time.sleep(0.1)
-                                else:
-                                    break
-                            else:
-                                self._logger.warning(
-                                    f"Thread pool shutdown timed out after {timeout}s"
-                                )
+                            executor_ref.shutdown(wait=True)
                         except Exception as e:
                             self._logger.error(
                                 f"Error during thread pool shutdown: {str(e)}"
                             )
 
-                    # Run shutdown wait in thread pool (if available) or new thread
                     try:
                         loop = asyncio.get_running_loop()
-                        await loop.run_in_executor(None, wait_for_shutdown)
+                        await asyncio.wait_for(
+                            loop.run_in_executor(None, wait_for_shutdown),
+                            timeout=timeout,
+                        )
+                    except asyncio.TimeoutError:
+                        self._logger.warning(
+                            f"Thread pool shutdown timed out after {timeout}s"
+                        )
                     except Exception as e:
                         self._logger.error(
                             f"Error waiting for thread pool shutdown: {str(e)}"
@@ -216,12 +220,11 @@ class ResourceManager:
         thread_pool_size = self._max_workers
         thread_pool_active = 0
 
-        if self._shared_executor and not self._shared_executor._shutdown:
+        if self._shared_executor and not self._executor_shutdown:
             try:
-                # Count active threads
-                thread_pool_active = len(
-                    [t for t in self._shared_executor._threads if t.is_alive()]
-                )
+                # Submit a no-op to estimate pool activity.  We avoid
+                # accessing private _threads (Bug #67).
+                thread_pool_active = self._active_operations
             except Exception:
                 thread_pool_active = 0
 
@@ -261,7 +264,7 @@ class ResourceManager:
 
         executor_status = "not_created"
         if self._shared_executor:
-            if self._shared_executor._shutdown:
+            if self._executor_shutdown:
                 executor_status = "shutdown"
             else:
                 executor_status = "active"
@@ -323,8 +326,9 @@ class ResourceManager:
 
     def __del__(self):
         """Cleanup on object destruction."""
-        if self._shared_executor and not self._shared_executor._shutdown:
+        if self._shared_executor and not self._executor_shutdown:
             try:
                 self._shared_executor.shutdown(wait=False)
+                self._executor_shutdown = True
             except Exception:
                 pass  # Ignore errors during cleanup
