@@ -26,6 +26,10 @@ global_settings:
       reason: "Test verifies exception propagation behavior"
 
     - rule_id: "B110"
+      path: "tests/unit/config/test_ash_config_regression.py"
+      reason: "Test verifies yaml loader isolation with exception handling"
+
+    - rule_id: "B110"
       path: "tests/unit/test_environ_mutation_fix.py"
       reason: "Test catches expected exceptions to verify env restoration"
 
