@@ -261,7 +261,12 @@ def test_run_command_with_output_handling_forwards_env_to_subprocess(tmp_path):
         results_dir=None,
         stdout_preference="return",
         stderr_preference="return",
-        env={"ASH_TEST_ENV": "propagated", "PATH": os.environ.get("PATH", "")},
+        env={
+            "ASH_TEST_ENV": "propagated",
+            "PATH": os.environ.get("PATH", ""),
+            "SystemRoot": os.environ.get("SystemRoot", ""),
+            "COMSPEC": os.environ.get("COMSPEC", ""),
+        },
     )
     assert "propagated" in response.get("stdout", ""), (
         f"env= was not forwarded to subprocess. stdout={response.get('stdout')!r}"
