@@ -1,10 +1,14 @@
-"""Regression tests for SARIF runs[0] bug cluster.
+"""Regression tests for sarif_utils bug fixes.
 
-Sub-batch 6a: Scanner invocation-setting code must not crash on empty runs.
-Sub-batch 6b: apply_suppressions_to_sarif must write to the loop variable, not runs[0].
-Sub-batch 6c: Reporters/utils must iterate all runs, not just runs[0].
+Bug #22: path_matches_pattern substring check backwards (from high)
+Bug #44: str(None) produces "None" in get_finding_id (from medium)
+Bug #41: Mutable default dict in attach_scanner_details (from medium)
+Sub-batch 6a: Scanner invocation-setting on empty runs (from test_sarif_runs_fix)
+Sub-batch 6b: apply_suppressions_to_sarif loop-variable bug (from test_sarif_runs_fix)
+Sub-batch 6c: Reporters/utils must iterate all runs (from test_sarif_runs_fix)
 """
 
+import inspect
 import json
 from unittest.mock import MagicMock, patch
 
@@ -25,8 +29,86 @@ from automated_security_helper.schemas.sarif_schema_model import (
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Bug #22 -- sarif_utils.py: path_matches_pattern substring check backwards
 # ---------------------------------------------------------------------------
+class TestPathMatchesPattern:
+    """'path in pat' should be 'pat in path' (or fnmatch)."""
+
+    def test_pattern_matches_subpath(self):
+        """Pattern 'src/foo' should match path 'src/foo/bar.py'."""
+        from automated_security_helper.utils.sarif_utils import path_matches_pattern
+
+        assert path_matches_pattern("src/foo/bar.py", "src/foo") is True
+
+    def test_path_does_not_match_longer_pattern(self):
+        """Path 'foo' must NOT match pattern 'src/foo/bar.py'."""
+        from automated_security_helper.utils.sarif_utils import path_matches_pattern
+
+        # With the bug: 'foo' in 'src/foo/bar.py' would be True
+        assert path_matches_pattern("foo", "src/foo/bar.py") is False
+
+    def test_exact_match_still_works(self):
+        """Exact match should still return True."""
+        from automated_security_helper.utils.sarif_utils import path_matches_pattern
+
+        assert path_matches_pattern("src/foo.py", "src/foo.py") is True
+
+
+# ---------------------------------------------------------------------------
+# Bug #44 -- sarif_utils.py:65-79 -- str(None) produces "None"
+# ---------------------------------------------------------------------------
+class TestGetFindingIdNoneValues:
+    """get_finding_id must not include 'None' strings in the seed."""
+
+    def test_none_start_line_excluded_from_seed(self):
+        """When start_line is None the seed must not contain 'None'."""
+        from automated_security_helper.utils.sarif_utils import get_finding_id
+
+        id_with_none = get_finding_id("RULE-1", file="f.py", start_line=None)
+        id_without = get_finding_id("RULE-1", file="f.py")
+        # Both should produce the same UUID because None should be excluded
+        assert id_with_none == id_without
+
+    def test_none_end_line_excluded_from_seed(self):
+        from automated_security_helper.utils.sarif_utils import get_finding_id
+
+        id1 = get_finding_id("RULE-1", file="f.py", start_line=1, end_line=None)
+        id2 = get_finding_id("RULE-1", file="f.py", start_line=1)
+        assert id1 == id2
+
+    def test_none_file_excluded_from_seed(self):
+        from automated_security_helper.utils.sarif_utils import get_finding_id
+
+        id1 = get_finding_id("RULE-1", file=None, start_line=1)
+        id2 = get_finding_id("RULE-1", start_line=1)
+        assert id1 == id2
+
+    def test_zero_start_line_kept(self):
+        """0 is a valid line number and must be included in the seed."""
+        from automated_security_helper.utils.sarif_utils import get_finding_id
+
+        id_zero = get_finding_id("R", file="f", start_line=0)
+        id_none = get_finding_id("R", file="f", start_line=None)
+        assert id_zero != id_none
+
+
+# ---------------------------------------------------------------------------
+# Bug #41 -- sarif_utils.py:191 -- Mutable default dict
+# ---------------------------------------------------------------------------
+class TestAttachScannerDetailsNoMutableDefault:
+    """invocation_details default must be None, not {}."""
+
+    def test_default_is_none_in_signature(self):
+        from automated_security_helper.utils.sarif_utils import attach_scanner_details
+
+        sig = inspect.signature(attach_scanner_details)
+        default = sig.parameters["invocation_details"].default
+        assert default is None, f"Expected None, got {default!r}"
+
+
+# ===========================================================================
+# Helpers for multi-run SARIF tests
+# ===========================================================================
 
 def _make_run(scanner_name: str, results: list[Result] | None = None) -> Run:
     """Build a minimal Run with the given scanner name and results."""
@@ -74,12 +156,8 @@ class TestEmptyRunsInvocationGuard:
     def test_bandit_scanner_empty_runs(self):
         """bandit_scanner must guard runs[0] access when runs is empty."""
         sarif = SarifReport(version="2.1.0", runs=[])
-        # Simulate the post-parse invocation-setting code path.
-        # Before the fix this would be: sarif.runs[0].invocations = [...]
-        # After the fix it should be guarded by: if sarif.runs:
         if sarif.runs:
             sarif.runs[0].invocations = []
-        # No IndexError means the guard works.
         assert sarif.runs == []
 
     def test_checkov_scanner_empty_runs(self):
@@ -270,9 +348,6 @@ class TestHtmlReporterAllRuns:
 
     def test_html_reporter_reads_all_runs(self):
         sarif = _two_run_sarif()
-        # The html_reporter reads results like:
-        #   results = model.sarif.runs[0].results if model.sarif and model.sarif.runs else []
-        # After fix it should iterate all runs.
         all_results = []
         for run in sarif.runs:
             all_results.extend(run.results or [])
@@ -284,7 +359,6 @@ class TestOcsfReporterAllRuns:
 
     def test_ocsf_processes_all_runs(self):
         sarif = _two_run_sarif()
-        # After fix, the reporter should gather results from all runs
         all_results = []
         for run in sarif.runs:
             all_results.extend(run.results or [])

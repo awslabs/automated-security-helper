@@ -1,18 +1,184 @@
-"""Regression tests for ``return`` inside ``finally:`` blocks.
+"""Regression tests for base plugin bug fixes.
 
-A ``return`` in a ``finally:`` clause silently swallows any exception that
-was propagating at that point. Each of the sites below previously returned
-a fallback value from ``finally:``, masking real failures (OSError,
-KeyboardInterrupt, SystemExit, etc.) from callers.
+Bug #194: reporter_plugin.py configure() writes self._config (from medium)
+Bug #51: suppression_matcher invalid expiration silently skips (from medium)
+Bug #147/148: are_values_equivalent broken list/dict comparison (from medium)
+Bug #167: models/core.py expiration validator rewraps semantic error (from medium)
 
-These tests pin the fix: exceptions that are not explicitly handled by the
-function's own ``except`` clauses must propagate to the caller.
+finally:return fixes for reporters (from test_finally_return_fix):
+- uv_tool_runner.py :: is_tool_installed
+- get_shortest_name.py :: get_shortest_name
+- s3_reporter.py :: validate_plugin_dependencies
+- cloudwatch_logs_reporter.py :: validate_plugin_dependencies
 """
 
-from unittest.mock import patch
+import inspect
+import logging
+from datetime import date, timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+# ---------------------------------------------------------------------------
+# Bug #194 -- base/reporter_plugin.py:45-51 -- configure() writes self._config
+# ---------------------------------------------------------------------------
+class TestReporterPluginConfigure:
+    """configure() must write self.config, not self._config."""
+
+    def test_configure_sets_public_config(self):
+        """After configure(cfg), self.config should be cfg."""
+        from automated_security_helper.base.reporter_plugin import ReporterPluginBase
+
+        source = inspect.getsource(ReporterPluginBase.configure)
+        # The fix should write self.config = config, not self._config = config
+        assert "self.config = config" in source, (
+            "configure() must assign to self.config, not self._config"
+        )
+        assert "self._config" not in source, (
+            "configure() must not use self._config"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bug #51 -- suppression_matcher.py:247-251 -- Invalid expiration silently skips
+# ---------------------------------------------------------------------------
+class TestInvalidExpirationWarnsInsteadOfSilentSkip:
+    """A malformed expiration date must log a warning, not silently continue.
+
+    NOTE: This was already fixed by a previous batch. This test verifies
+    the fix remains in place.
+    """
+
+    def test_invalid_expiration_logs_warning(self, caplog):
+        """When expiration is 'not-a-date', a warning must be logged."""
+        from automated_security_helper.utils.suppression_matcher import (
+            should_suppress_finding,
+        )
+        from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        # Build minimal finding
+        finding = MagicMock(spec=FlatVulnerability)
+        finding.rule_id = "TEST-RULE"
+        finding.file_path = "test.py"
+        finding.line_start = 1
+        finding.line_end = 1
+
+        suppression = MagicMock()
+        suppression.rule_id = "TEST-RULE"
+        suppression.expiration = "not-a-date"
+        suppression.paths = []
+        suppression.reason = "test"
+        suppression.justification = "test"
+
+        # ASH_LOGGER uses name "ash" and propagate=False, so caplog won't
+        # capture it by default. Temporarily enable propagation.
+        old_propagate = ASH_LOGGER.propagate
+        ASH_LOGGER.propagate = True
+        try:
+            with caplog.at_level(logging.WARNING, logger="ash"):
+                should_suppress_finding(finding, [suppression])
+        finally:
+            ASH_LOGGER.propagate = old_propagate
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("Invalid expiration" in m for m in warning_msgs), (
+            f"Expected a warning about invalid expiration, got: {warning_msgs}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bug #147/148 -- are_values_equivalent.py:37-46 -- Broken list/dict comparison
+# ---------------------------------------------------------------------------
+class TestAreValuesEquivalent:
+    """List comparison is broken for duplicates; dict ignores values."""
+
+    def test_list_multiset_different(self):
+        """[1,1,2] != [1,2,2] -- different multiplicities."""
+        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+            are_values_equivalent,
+        )
+
+        assert are_values_equivalent([1, 1, 2], [1, 2, 2]) is False
+
+    def test_list_multiset_same(self):
+        """[1,1,2] == [1,1,2] even if order differs."""
+        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+            are_values_equivalent,
+        )
+
+        assert are_values_equivalent([1, 2, 1], [1, 1, 2]) is True
+
+    def test_dict_values_matter(self):
+        """{"a": 1} != {"a": 2} -- values must be compared."""
+        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+            are_values_equivalent,
+        )
+
+        assert are_values_equivalent({"a": 1}, {"a": 2}) is False
+
+    def test_dict_equal_values(self):
+        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+            are_values_equivalent,
+        )
+
+        assert are_values_equivalent({"a": 1, "b": 2}, {"b": 2, "a": 1}) is True
+
+    def test_dict_nested_values(self):
+        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+            are_values_equivalent,
+        )
+
+        assert are_values_equivalent({"a": [1, 2]}, {"a": [1, 2]}) is True
+        assert are_values_equivalent({"a": [1, 2]}, {"a": [2, 1]}) is True
+        assert are_values_equivalent({"a": [1, 1]}, {"a": [1, 2]}) is False
+
+
+# ---------------------------------------------------------------------------
+# Bug #167 -- models/core.py:83-98 -- except ValueError rewraps semantic error
+# ---------------------------------------------------------------------------
+class TestExpirationValidatorPreservesMessage:
+    """'expiration must be in the future' must not be rewrapped as format error."""
+
+    def test_past_date_gives_future_error(self):
+        """A past date should say 'must be in the future', not 'Invalid format'."""
+        from automated_security_helper.models.core import AshSuppression
+
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        with pytest.raises(Exception) as exc_info:
+            AshSuppression(
+                rule_id="R1",
+                reason="test",
+                justification="test",
+                expiration=yesterday,
+            )
+        # The error should mention "future", not "Invalid format"
+        error_str = str(exc_info.value)
+        assert "future" in error_str.lower(), (
+            f"Expected 'future' in error message, got: {error_str}"
+        )
+
+    def test_bad_format_gives_format_error(self):
+        """A truly malformed date should give the format error."""
+        from automated_security_helper.models.core import AshSuppression
+
+        with pytest.raises(Exception) as exc_info:
+            AshSuppression(
+                rule_id="R1",
+                reason="test",
+                justification="test",
+                expiration="not-a-date",
+            )
+        error_str = str(exc_info.value)
+        assert "format" in error_str.lower() or "YYYY-MM-DD" in error_str, (
+            f"Expected format-related error, got: {error_str}"
+        )
+
+
+# ===========================================================================
+# finally:return regression tests (from test_finally_return_fix.py)
+# ===========================================================================
 
 # ---------------------------------------------------------------------------
 # Site 1: utils/uv_tool_runner.py :: UVToolRunner.is_tool_installed

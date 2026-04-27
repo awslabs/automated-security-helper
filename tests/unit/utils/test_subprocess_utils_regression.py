@@ -1,4 +1,4 @@
-"""Tests for subprocess_utils bug fixes.
+"""Regression tests for subprocess_utils bug fixes.
 
 Bug #4: TimeoutExpired returned as CompletedProcess from run_command
 Bug #5: CalledProcessError returned as CompletedProcess from run_command
