@@ -54,12 +54,11 @@ class TestBug45SanitizeUriSeparator:
 
         source_dir = "/home/user/project"
         source_dir_path = Path(source_dir)
-        # After fix: should use "/" not os.sep
-        source_dir_str = str(source_dir_path) + "/"
+        # Use as_posix() to match production code's SARIF URI convention
+        source_dir_str = source_dir_path.as_posix() + "/"
 
         uri = "/home/user/project/src/main.py"
         result = _sanitize_uri(uri, source_dir_path, source_dir_str)
-        # The URI should be relative and use forward slashes
         assert "\\" not in result
         assert result == "src/main.py"
 
