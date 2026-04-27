@@ -1,8 +1,8 @@
 """Regression tests for metrics bug fixes.
 
-PR#274 Bug #64: Typo "errorn" in metrics_table.py (from low)
-PR#274 Bug #79: error log on success in metrics_alignment (from low)
-PR#274 Bug #80: print() calls in metrics_alignment.py (from low)
+PR#274 Bug #54: Typo "errorn" in metrics_table.py (from low)
+PR#274 Bug #69: error log on success in metrics_alignment (from low)
+PR#274 Bug #21: print() calls in metrics_alignment.py (from low)
 """
 
 import inspect
@@ -11,7 +11,7 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #64 -- Typo "errorn" in metrics_table.py
+# PR#274 Bug #54 -- Typo "errorn" in metrics_table.py
 # ---------------------------------------------------------------------------
 class TestErrornTypo:
     """The literal string 'errorn' should not appear in the metrics table legend."""
@@ -26,7 +26,7 @@ class TestErrornTypo:
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #79 -- error log on success in metrics_alignment
+# PR#274 Bug #69 -- error log on success in metrics_alignment
 # ---------------------------------------------------------------------------
 class TestMetricsAlignmentSuccessNotLoggedAsError:
     """On the SUCCESS branch of verify_metrics_alignment, the logger should not
@@ -50,7 +50,7 @@ class TestMetricsAlignmentSuccessNotLoggedAsError:
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #80 -- print() calls in metrics_alignment.py
+# PR#274 Bug #21 -- print() calls in metrics_alignment.py
 # ---------------------------------------------------------------------------
 class TestMetricsAlignmentNoPrintCalls:
     """verify_metrics_alignment should not use print() -- only logger calls."""

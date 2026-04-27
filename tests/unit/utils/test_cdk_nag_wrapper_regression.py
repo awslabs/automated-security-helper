@@ -1,7 +1,7 @@
 """Regression tests for cdk_nag_wrapper bug fixes.
 
-PR#274 Bug #125: except FileNotFoundError on import (should also catch ImportError)
-PR#274 Bug #126: Off-by-one line numbers from enumerate without start=1
+PR#274 Bug #22: except FileNotFoundError on import (should also catch ImportError)
+PR#274 Bug #23: Off-by-one line numbers from enumerate without start=1
 """
 
 import inspect

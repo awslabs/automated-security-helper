@@ -1,6 +1,6 @@
 """Regression tests for version_management bug fixes.
 
-PR#274 Bug #24: re.sub replaces all occurrences without count=1.
+PR#274 Bug #14: re.sub replaces all occurrences without count=1.
 """
 
 import re

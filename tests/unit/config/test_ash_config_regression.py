@@ -1,6 +1,6 @@
 """Regression tests for ash_config bug fixes.
 
-PR#274 Bug #37: yaml.SafeLoader class mutation -- !ENV constructor leaks globally.
+PR#274 Bug #27: yaml.SafeLoader class mutation -- !ENV constructor leaks globally.
 """
 
 import textwrap

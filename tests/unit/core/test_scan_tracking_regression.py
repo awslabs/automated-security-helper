@@ -1,6 +1,6 @@
 """Regression tests for scan_tracking bug fixes.
 
-PR#274 Bug #15: severity key case mismatch in extract_findings_summary.
+PR#274 Bug #8: severity key case mismatch in extract_findings_summary.
 """
 
 import pytest

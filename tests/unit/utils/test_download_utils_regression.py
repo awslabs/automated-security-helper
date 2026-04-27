@@ -1,6 +1,6 @@
 """Regression tests for download_utils bug fixes.
 
-PR#274 Bug #2: code injection via f-string in create_url_download_command.
+PR#274 Bug #1: code injection via f-string in create_url_download_command.
 """
 
 import shutil

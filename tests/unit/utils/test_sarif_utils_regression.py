@@ -1,8 +1,8 @@
 """Regression tests for sarif_utils bug fixes.
 
-PR#274 Bug #22: path_matches_pattern substring check backwards (from high)
-PR#274 Bug #44: str(None) produces "None" in get_finding_id (from medium)
-PR#274 Bug #41: Mutable default dict in attach_scanner_details (from medium)
+PR#274 Bug #12: path_matches_pattern substring check backwards (from high)
+PR#274 Bug #34: str(None) produces "None" in get_finding_id (from medium)
+PR#274 Bug #31: Mutable default dict in attach_scanner_details (from medium)
 Sub-batch 6a: Scanner invocation-setting on empty runs (from test_sarif_runs_fix)
 Sub-batch 6b: apply_suppressions_to_sarif loop-variable bug (from test_sarif_runs_fix)
 Sub-batch 6c: Reporters/utils must iterate all runs (from test_sarif_runs_fix)
@@ -29,7 +29,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #22 -- sarif_utils.py: path_matches_pattern substring check backwards
+# PR#274 Bug #12 -- sarif_utils.py: path_matches_pattern substring check backwards
 # ---------------------------------------------------------------------------
 class TestPathMatchesPattern:
     """'path in pat' should be 'pat in path' (or fnmatch)."""
@@ -55,7 +55,7 @@ class TestPathMatchesPattern:
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #44 -- sarif_utils.py:65-79 -- str(None) produces "None"
+# PR#274 Bug #34 -- sarif_utils.py:65-79 -- str(None) produces "None"
 # ---------------------------------------------------------------------------
 class TestGetFindingIdNoneValues:
     """get_finding_id must not include 'None' strings in the seed."""
@@ -93,7 +93,7 @@ class TestGetFindingIdNoneValues:
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #41 -- sarif_utils.py:191 -- Mutable default dict
+# PR#274 Bug #31 -- sarif_utils.py:191 -- Mutable default dict
 # ---------------------------------------------------------------------------
 class TestAttachScannerDetailsNoMutableDefault:
     """invocation_details default must be None, not {}."""

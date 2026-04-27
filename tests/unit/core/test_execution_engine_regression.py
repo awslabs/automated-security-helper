@@ -1,8 +1,8 @@
 """Regression tests for execution_engine bug fixes.
 
-PR#274 Bug #6: operator precedence on _max_workers (from high)
-PR#274 Bug #7: split delimiter mismatch ", " vs "," (from high)
-PR#274 Bug #164: Unbound vars in finally (from medium)
+PR#274 Bug #5: operator precedence on _max_workers (from high)
+PR#274 Bug #6: split delimiter mismatch ", " vs "," (from high)
+PR#274 Bug #30: Unbound vars in finally (from medium)
 """
 
 import inspect
@@ -13,7 +13,7 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #6 -- execution_engine.py: operator precedence on _max_workers
+# PR#274 Bug #5 -- execution_engine.py: operator precedence on _max_workers
 # ---------------------------------------------------------------------------
 class TestMaxWorkersOperatorPrecedence:
     """os.cpu_count() or 1 + 4 must parse as (os.cpu_count() or 1) + 4."""
@@ -40,7 +40,7 @@ class TestMaxWorkersOperatorPrecedence:
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #7 -- execution_engine.py: split delimiter mismatch ", " vs ","
+# PR#274 Bug #6 -- execution_engine.py: split delimiter mismatch ", " vs ","
 # ---------------------------------------------------------------------------
 class TestSplitDelimiterMismatch:
     """Config values like 'a,b' (no space) must still split correctly."""
@@ -65,7 +65,7 @@ class TestSplitDelimiterMismatch:
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #164 -- execution_engine.py:571-607 -- Unbound vars in finally
+# PR#274 Bug #30 -- execution_engine.py:571-607 -- Unbound vars in finally
 # ---------------------------------------------------------------------------
 class TestExecutionEngineUnboundVars:
     """hours/minutes/seconds must be initialized before the try block."""

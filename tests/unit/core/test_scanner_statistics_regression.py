@@ -1,6 +1,6 @@
 """Regression tests for scanner_statistics_calculator bug fixes.
 
-PR#274 Bug #77: total includes suppressed, but verify adds suppressed again.
+PR#274 Bug #67: total includes suppressed, but verify adds suppressed again.
 """
 
 import inspect

@@ -1,6 +1,6 @@
 """Regression tests for orchestrator bug fixes.
 
-PR#274 Bug #10: shutil.rmtree(None) crash when work_dir is None.
+PR#274 Bug #7: shutil.rmtree(None) crash when work_dir is None.
 """
 
 import shutil
