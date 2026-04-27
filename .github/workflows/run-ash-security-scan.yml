@@ -126,13 +126,9 @@ jobs:
         run: |
           INSTALL_DIR="$HOME/.opengrep/cli/latest"
           mkdir -p "$INSTALL_DIR"
-          # Fetch latest release asset via gh CLI (authenticated, avoids API rate limits).
-          gh release download --repo opengrep/opengrep --pattern 'opengrep-*-linux-x86_64*' --dir /tmp/opengrep-dl || \
-            gh release download --repo opengrep/opengrep --pattern '*.tar.gz' --dir /tmp/opengrep-dl
-          # Extract or copy binary into install dir.
-          for f in /tmp/opengrep-dl/*.tar.gz; do [ -f "$f" ] && tar -xzf "$f" -C "$INSTALL_DIR"; done
-          for f in /tmp/opengrep-dl/*; do [ -f "$f" ] && [ ! "${f%.tar.gz}" = "$f" ] || cp "$f" "$INSTALL_DIR/"; done
-          chmod +x "$INSTALL_DIR"/* 2>/dev/null || true
+          gh release download --repo opengrep/opengrep --pattern 'opengrep_manylinux_x86' --dir "$INSTALL_DIR"
+          chmod +x "$INSTALL_DIR/opengrep_manylinux_x86"
+          ln -sf "$INSTALL_DIR/opengrep_manylinux_x86" "$INSTALL_DIR/opengrep"
           echo "$INSTALL_DIR" >> $GITHUB_PATH
 
       - name: Run ASH
