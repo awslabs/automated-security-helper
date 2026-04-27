@@ -131,12 +131,22 @@ def run_command(
             ASH_LOGGER.debug(f"Command stderr: {e.stderr}")
         if check:
             raise
-        return e
+        return subprocess.CompletedProcess(
+            args=e.cmd,
+            returncode=e.returncode,
+            stdout=e.output or "",
+            stderr=e.stderr or "",
+        )
     except subprocess.TimeoutExpired as e:
         ASH_LOGGER.error(f"Command timed out after {timeout} seconds: {cmd_str}")
         if check:
             raise
-        return e
+        return subprocess.CompletedProcess(
+            args=e.cmd,
+            returncode=-1,
+            stdout=e.stdout or "",
+            stderr=e.stderr or f"Command timed out after {e.timeout}s",
+        )
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
         if check:
@@ -336,13 +346,21 @@ def run_command_stream_output(
             errors=errors,
         )
 
-        # Stream output
-        for line in process.stdout:
-            print(line.rstrip())
+        try:
+            # Stream output
+            for line in process.stdout:
+                print(line.rstrip())
 
-        # Wait for process to complete
-        process.wait()
-        return process.returncode
+            # Wait for process to complete
+            process.wait()
+            return process.returncode
+        except Exception as e:
+            ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
+            return 1
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
 
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")

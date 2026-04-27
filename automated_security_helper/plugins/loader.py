@@ -58,12 +58,14 @@ def load_internal_plugins():
     return loaded_plugins
 
 
-def load_additional_plugin_modules(plugin_modules: List[str] = []) -> dict:
+def load_additional_plugin_modules(plugin_modules: List[str] | None = None) -> dict:
     """Load additional plugin modules specified in configuration.
 
     Args:
         plugin_modules: List of module paths to import
     """
+    if plugin_modules is None:
+        plugin_modules = []
     discovered = {"converters": [], "scanners": [], "reporters": []}
 
     unique = list(set(plugin_modules))

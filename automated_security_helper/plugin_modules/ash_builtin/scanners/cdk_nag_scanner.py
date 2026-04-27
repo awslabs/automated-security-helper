@@ -115,7 +115,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: CdkNagScannerConfig | None = None,
     ) -> SarifReport | bool:
         """Scan the target and return findings.
@@ -129,6 +129,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         Raises:
             ScannerError: If scanning fails
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         tool_component = ToolComponent(
             name="ash-cdk-nag-wrapper",
             fullName="awslabs/automated-security-helper",

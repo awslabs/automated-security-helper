@@ -169,9 +169,11 @@ def test_create_url_download_command(mock_mkdir, mock_exists):
     assert result.args[0] == sys.executable
     assert result.args[1] == "-c"
     assert "install_binary_from_url" in result.args[2]
-    assert "https://example.com/file" in result.args[2]
-    assert "/custom/destination" in result.args[2]
-    assert "renamed_file" in result.args[2]
+    # After the code-injection fix, values are passed as separate args
+    # rather than interpolated into the -c script
+    assert "https://example.com/file" in result.args
+    assert "/custom/destination" in result.args
+    assert "renamed_file" in result.args
     assert result.shell is False
 
 

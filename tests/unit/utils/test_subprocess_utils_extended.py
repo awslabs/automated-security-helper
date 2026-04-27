@@ -118,7 +118,9 @@ def test_run_command_timeout(mock_find_executable, mock_run):
 
     result = run_command(["test_cmd", "arg1"], timeout=10)
 
-    assert isinstance(result, subprocess.TimeoutExpired)
+    assert isinstance(result, subprocess.CompletedProcess)
+    assert result.returncode == -1
+    assert "10" in result.stderr
     mock_run.assert_called_once()
 
 

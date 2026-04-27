@@ -286,7 +286,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: NpmAuditScannerConfig | None = None,
     ) -> SarifReport | bool:
         """Execute NpmAudit scan and return results.
@@ -303,6 +303,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         tool_component = ToolComponent(
             name="npm-audit",
             version=self.tool_version,

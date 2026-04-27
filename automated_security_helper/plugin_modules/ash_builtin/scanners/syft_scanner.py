@@ -155,7 +155,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: SyftScannerConfig | None = None,
     ) -> CycloneDXReport | bool:
         """Execute Syft scan and return results.
@@ -169,6 +169,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (

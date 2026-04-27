@@ -282,7 +282,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: DetectSecretsScannerConfig | None = None,
     ) -> SarifReport | bool:
         """Execute detect-secrets scan and return results.
@@ -296,6 +296,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         tool_component = ToolComponent(
             name="detect-secrets",
             version=self.tool_version,

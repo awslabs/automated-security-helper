@@ -220,12 +220,12 @@ def test_apply_suppressions_to_sarif(mock_check, test_output_dir):
 
     result = apply_suppressions_to_sarif(sarif, plugin_context)
 
-    # Initialize suppressions if needed
-    if not hasattr(result.runs[0].results[0], "suppressions"):
-        result.runs[0].results[0].suppressions = []
-
-    # Check that suppressions were applied
+    # The ignore path "to/test.py" matches the finding's URI
+    # "file:///absolute/path/to/test.py", so the finding should be
+    # filtered out (removed from results).
     assert result is not None
+    # The result was ignored via path matching, so results list should be empty
+    assert len(result.runs[0].results) == 0
 
 
 @patch(
@@ -247,11 +247,11 @@ def test_apply_suppressions_with_ignore_flag(mock_check):
 
     result = apply_suppressions_to_sarif(sarif, plugin_context)
 
-    # Check that suppressions were not applied
-    assert (
-        not hasattr(result.runs[0].results[0], "suppressions")
-        or not result.runs[0].results[0].suppressions
-    )
+    # Even with ignore_suppressions=True, ignore_paths are still applied
+    # (ignore_suppressions only affects rule-based suppressions, not path ignoring).
+    # The path "to/test.py" matches the URI, so the finding is still filtered.
+    assert result is not None
+    assert len(result.runs[0].results) == 0
 
 
 @patch(

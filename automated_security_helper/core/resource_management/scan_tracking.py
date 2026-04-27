@@ -50,14 +50,7 @@ class ScannerProgress:
         status: ScannerStatus = ScannerStatus.PENDING,
         duration: Optional[float] = None,
         finding_count: int = 0,
-        severity_counts: Dict[str, int] = {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 0,
-            "suppressed": 0,
-        },
+        severity_counts: Optional[Dict[str, int]] = None,
     ):
         """
         Initialize a scanner progress tracker.
@@ -75,14 +68,20 @@ class ScannerProgress:
         self.status = status
         self.duration = duration
         self.finding_count = finding_count
-        self.severity_counts = severity_counts or {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 0,
-            "suppressed": 0,
-        }
+        # Copy the dict (if provided) so caller's dict isn't aliased; otherwise
+        # build a fresh default so instances don't share the same dict.
+        self.severity_counts = (
+            dict(severity_counts)
+            if severity_counts
+            else {
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "info": 0,
+                "suppressed": 0,
+            }
+        )
         self.start_time: Optional[datetime] = None
         self.end_time: Optional[datetime] = None
 
@@ -303,7 +302,7 @@ class ScanProgress:
 
 
 def check_scan_completion(
-    output_dir: Path = Path.cwd().joinpath(".ash", "ash_output"),
+    output_dir: Path | None = None,
 ) -> bool:
     """
     Check if a scan has completed by looking for the aggregated results file.
@@ -314,12 +313,14 @@ def check_scan_completion(
     Returns:
         True if the scan has completed, False otherwise
     """
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output")
     aggregated_results_path = output_dir / "ash_aggregated_results.json"
     return aggregated_results_path.exists()
 
 
 def find_scanner_result_files(
-    output_dir: Path = Path.cwd().joinpath(".ash", "ash_output"),
+    output_dir: Path | None = None,
 ) -> Dict[str, Dict[str, Path]]:
     """
     Find individual scanner result files to determine partial progress.
@@ -330,6 +331,8 @@ def find_scanner_result_files(
     Returns:
         Dictionary mapping scanner names to target types and result file paths
     """
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output")
     scanner_results: Dict[str, Dict[str, Path]] = {}
 
     # Look for scanner result files in the pattern:
@@ -360,7 +363,7 @@ def find_scanner_result_files(
 
 
 def get_completed_scanners(
-    output_dir: Path = Path.cwd().joinpath(".ash", "ash_output"),
+    output_dir: Path | None = None,
 ) -> Set[str]:
     """
     Get the set of scanners that have completed at least one target.
@@ -371,12 +374,14 @@ def get_completed_scanners(
     Returns:
         Set of scanner names that have completed at least one target
     """
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output")
     scanner_results = find_scanner_result_files(output_dir)
     return set(scanner_results.keys())
 
 
 def get_scanner_progress(
-    output_dir: Path = Path.cwd().joinpath(".ash", "ash_output"),
+    output_dir: Path | None = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Get progress information for each scanner.
@@ -387,6 +392,8 @@ def get_scanner_progress(
     Returns:
         Dictionary mapping scanner names to progress information
     """
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output")
     scanner_progress: Dict[str, Dict[str, Any]] = {}
     scanner_results = find_scanner_result_files(output_dir)
 
@@ -411,9 +418,7 @@ def get_scanner_progress(
 
 
 def parse_scanner_result_file(
-    result_file: Path = Path.cwd().joinpath(
-        ".ash", "ash_output", "ash_aggregated_results.json"
-    ),
+    result_file: Path | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Parse a scanner result file to extract findings.
@@ -424,6 +429,10 @@ def parse_scanner_result_file(
     Returns:
         List of findings from the scanner result file
     """
+    if result_file is None:
+        result_file = Path.cwd().joinpath(
+            ".ash", "ash_output", "ash_aggregated_results.json"
+        )
     from automated_security_helper.core.resource_management.error_handling import (
         safe_read_json_file,
     )
@@ -481,7 +490,7 @@ def parse_scanner_result_file(
 
 
 def parse_aggregated_results(
-    output_dir: Path = Path.cwd().joinpath(".ash", "ash_output"),
+    output_dir: Path | None = None,
 ) -> Dict[str, Any] | None:
     """
     Parse the aggregated results file to extract scan results.
@@ -495,6 +504,8 @@ def parse_aggregated_results(
     Raises:
         MCPResourceError: If the aggregated results file is not found or cannot be parsed
     """
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output")
     from automated_security_helper.core.resource_management.error_handling import (
         safe_read_json_file,
         ErrorCategory,
@@ -529,7 +540,7 @@ def parse_aggregated_results(
 
 
 def create_scan_progress_from_files(
-    scan_id: str, output_dir: Path = Path.cwd().joinpath(".ash", "ash_output")
+    scan_id: str, output_dir: Path | None = None
 ) -> ScanProgress:
     """
     Create a ScanProgress object by analyzing scan result files.
@@ -541,6 +552,8 @@ def create_scan_progress_from_files(
     Returns:
         ScanProgress object with information from scan result files
     """
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output")
     # Check if scan has completed
     is_complete = check_scan_completion(output_dir)
 
@@ -665,7 +678,7 @@ def create_scan_progress_from_files(
 
 
 def get_scan_progress_info(
-    output_dir: Path = Path.cwd().joinpath(".ash", "ash_output"),
+    output_dir: Path | None = None,
 ) -> Dict[str, Any]:
     """
     Get comprehensive scan progress information.
@@ -676,6 +689,8 @@ def get_scan_progress_info(
     Returns:
         Dictionary containing scan progress information
     """
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output")
     # Check if scan has completed
     is_complete = check_scan_completion(output_dir)
 
@@ -779,7 +794,7 @@ def extract_findings_summary(findings: List[Dict[str, Any]]) -> Dict[str, int]:
     }
 
     for finding in findings:
-        severity = finding.get("severity", "UNKNOWN").upper()
+        severity = finding.get("severity", "UNKNOWN").lower()
         if severity in summary:
             summary[severity] += 1
 
@@ -817,7 +832,7 @@ def validate_output_directory(output_dir: Path) -> Tuple[bool, Optional[str]]:
 
 
 def get_scan_results(
-    output_dir: Path = Path.cwd().joinpath(".ash", "ash_output"),
+    output_dir: Path | None = None,
 ) -> Dict[str, Any]:
     """
     Get the results of a completed scan.
@@ -832,6 +847,8 @@ def get_scan_results(
     Raises:
         MCPResourceError: If the scan results cannot be retrieved
     """
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output")
     from automated_security_helper.core.resource_management.error_handling import (
         validate_directory_path,
         ErrorCategory,

@@ -49,9 +49,10 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         scanner_results = emitter.get_scanner_results()
 
         # Get results from SARIF report for backward compatibility
-        results = (
-            model.sarif.runs[0].results if model.sarif and model.sarif.runs else []
-        )
+        results = []
+        if model.sarif and model.sarif.runs:
+            for run in model.sarif.runs:
+                results.extend(run.results or [])
 
         # Group results by severity and rule
         findings_by_severity = self._group_results_by_severity(results)

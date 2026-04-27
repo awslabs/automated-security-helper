@@ -46,15 +46,15 @@ class ScanExecutionEngine:
         # at runtime for a more focused scan (e.g. during finding remediation where
         # there is only a single scanner failing, isolating scans to just that
         # scanner will allow quicker retesting until passing and a full scan can be )
-        enabled_scanners: List[str] = [],
+        enabled_scanners: List[str] | None = None,
         # excluded_scanners is the list of scanner names that should be excluded from running
         # This takes precedence over enabled_scanners
-        excluded_scanners: List[str] = [],
+        excluded_scanners: List[str] | None = None,
         strategy: Optional[ExecutionStrategy] = ExecutionStrategy.PARALLEL,
         asharp_model: Optional[AshAggregatedResults] = None,
         show_progress: bool = True,
         show_summary: bool = True,
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         color_system: Literal[
             "auto", "standard", "256", "truecolor", "windows"
         ] = "auto",
@@ -62,8 +62,8 @@ class ScanExecutionEngine:
         debug: bool = False,
         python_based_plugins_only: bool = False,
         simple_mode: bool = False,
-        ash_plugin_modules: List[str] = [],
-        output_formats: List[str] = [],
+        ash_plugin_modules: List[str] | None = None,
+        output_formats: List[str] | None = None,
     ):
         """Initialize the execution engine.
 
@@ -83,6 +83,18 @@ class ScanExecutionEngine:
             verbose: Enable verbose logging
             debug: Enable debug logging
         """
+        # Rebind mutable defaults so each instance gets its own collections.
+        if enabled_scanners is None:
+            enabled_scanners = []
+        if excluded_scanners is None:
+            excluded_scanners = []
+        if global_ignore_paths is None:
+            global_ignore_paths = []
+        if ash_plugin_modules is None:
+            ash_plugin_modules = []
+        if output_formats is None:
+            output_formats = []
+
         # Set up logging and initial state
         ASH_LOGGER.debug("Initializing ScanExecutionEngine")
         if context is None:
@@ -167,7 +179,7 @@ class ScanExecutionEngine:
             subitem.strip()
             for item in config_plugin_modules
             if item is not None
-            for subitem in item.split(", ")
+            for subitem in item.split(",")
         ]
         combined_plugin_modules = list(set(ash_plugin_modules + config_plugin_modules))
 
@@ -235,10 +247,7 @@ class ScanExecutionEngine:
         self._completed_scanners = []
         self._results = self._asharp_model
         self._progress = None
-        self._max_workers = min(32, (os.cpu_count() or 1 + 4))
-
-        # Register custom scanners from configuration
-        self._register_custom_scanners()
+        self._max_workers = min(32, (os.cpu_count() or 1) + 4)
 
         # Initialize scanner components
         self._scanners = {}
@@ -255,34 +264,6 @@ class ScanExecutionEngine:
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
 
         self.ensure_initialized(self._context.config)
-
-    def _register_custom_scanners(self):
-        """Register custom scanners from configuration."""
-        if not self._context.config:
-            return
-
-        # Register custom scanners from build configuration
-        # for scanner_config in self._context.config.build.custom_scanners:
-        #     try:
-        #         from automated_security_helper.plugin_modules.ash_builtin.scanners.custom_scanner import (
-        #             CustomScanner,
-        #         )
-
-        #         # Create and register the custom scanner
-        #         custom_scanner = CustomScanner(
-        #             config=scanner_config, context=self._context
-        #         )
-
-        #         # Register with plugin manager
-        #         ash_plugin_manager.register_plugin_module(
-        #             "scanner",
-        #             custom_scanner.__class__,
-        #             f"automated_security_helper.scanners.custom.{scanner_config.name}",
-        #         )
-
-        #         ASH_LOGGER.debug(f"Registered custom scanner: {scanner_config.name}")
-        #     except Exception as e:
-        #         ASH_LOGGER.error(f"Failed to register custom scanner: {e}")
 
     def get_scanner(
         self, scanner_name: str, check_enabled: bool = True
@@ -364,7 +345,7 @@ class ScanExecutionEngine:
 
     def execute_phases(
         self,
-        phases: List[ExecutionPhaseType] = ["convert", "scan", "report"],
+        phases: List[ExecutionPhaseType] | None = None,
     ) -> AshAggregatedResults:
         """Execute the specified phases in the correct order.
 
@@ -378,6 +359,8 @@ class ScanExecutionEngine:
         Returns:
             AshAggregatedResults: The results of the scan.
         """
+        if phases is None:
+            phases = ["convert", "scan", "report"]
         ASH_LOGGER.debug(f"Entering: ScanExecutionEngine.execute_phases({phases})")
 
         # Always execute phases in the correct order, regardless of input order
@@ -399,6 +382,9 @@ class ScanExecutionEngine:
 
         # Record the start time for calculating scan duration
         scan_start_time = datetime.now(timezone.utc)
+        # Initialize duration variables so the finally block can reference
+        # them even when the try block raises before computing them.
+        hours = minutes = seconds = 0
         # Start the progress display before executing any phases
         # Only start if it's not already started
         if (

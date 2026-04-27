@@ -266,20 +266,21 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                         },
                     )
 
-                    sarif_report.runs[0].invocations = [
-                        Invocation(
-                            commandLine=" ".join(final_args),
-                            arguments=final_args[1:],
-                            startTimeUtc=self.start_time,
-                            endTimeUtc=self.end_time,
-                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
-                            exitCode=self.exit_code,
-                            exitCodeDescription="\n".join(self.errors),
-                            workingDirectory=ArtifactLocation(
-                                uri=get_shortest_name(input=target),
-                            ),
-                        )
-                    ]
+                    if sarif_report.runs:
+                        sarif_report.runs[0].invocations = [
+                            Invocation(
+                                commandLine=" ".join(final_args),
+                                arguments=final_args[1:],
+                                startTimeUtc=self.start_time,
+                                endTimeUtc=self.end_time,
+                                executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                                exitCode=self.exit_code,
+                                exitCodeDescription="\n".join(self.errors),
+                                workingDirectory=ArtifactLocation(
+                                    uri=get_shortest_name(input=target),
+                                ),
+                            )
+                        ]
                     self._post_scan(
                         target=target,
                         target_type=target_type,

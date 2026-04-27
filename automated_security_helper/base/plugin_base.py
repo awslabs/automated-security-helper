@@ -227,6 +227,7 @@ class PluginBase(BaseModel):
         stdout_preference: Literal["return", "write", "both", "none"] = "write",
         stderr_preference: Literal["return", "write", "both", "none"] = "write",
         cwd: Path | str | None = None,
+        env: Dict[str, str] | None = None,
     ) -> Dict[str, str]:
         """Run a subprocess with the given command.
 
@@ -241,6 +242,12 @@ class PluginBase(BaseModel):
             stdout_preference: How to handle stdout
             stderr_preference: How to handle stderr
             cwd: Working directory for the command (defaults to context.source_dir)
+            env: Environment variables for the child process. When None, the
+                child inherits the parent env. Pass a local dict (e.g.
+                ``{**os.environ, "MY_VAR": "v"}``) to add/override vars
+                without mutating the parent process ``os.environ`` — this
+                matters because scanners run in parallel threads and share
+                the parent env.
 
         Returns:
             Dictionary with stdout and stderr if requested
@@ -263,6 +270,7 @@ class PluginBase(BaseModel):
                         results_dir=Path(results_dir) if results_dir else None,
                         stdout_preference=stdout_preference,
                         stderr_preference=stderr_preference,
+                        env=env,
                     )
                     if uv_result is not None:
                         return uv_result
@@ -275,6 +283,7 @@ class PluginBase(BaseModel):
                 stdout_preference=stdout_preference,
                 stderr_preference=stderr_preference,
                 cwd=working_dir,
+                env=env,
                 shell=False,
                 class_name=self.__class__.__name__,
                 encoding="utf-8",
@@ -288,9 +297,11 @@ class PluginBase(BaseModel):
             if "stderr" in response and response["stderr"]:
                 self.errors.extend(response["stderr"].splitlines())
 
-            # Accumulate worst exit code across multiple subprocess calls
+            # Accumulate worst exit code across multiple subprocess calls.
+            # Use abs() so negative codes (e.g. -1 for timeout) aren't
+            # silently swallowed by max(0, -1).
             new_code = response.get("returncode", 1)
-            self.exit_code = max(self.exit_code, new_code)
+            self.exit_code = max(self.exit_code, abs(new_code) if new_code < 0 else new_code)
 
             return response
 
@@ -315,6 +326,7 @@ class PluginBase(BaseModel):
         results_dir: Optional[Path] = None,
         stdout_preference: str = "write",
         stderr_preference: str = "write",
+        env: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, str]]:
         """Attempt to execute command using UV tool run.
 
@@ -324,6 +336,9 @@ class PluginBase(BaseModel):
             results_dir: Directory to write output files to
             stdout_preference: How to handle stdout
             stderr_preference: How to handle stderr
+            env: Environment variables for the child process. Passed through
+                to the underlying tool runner; when ``None`` the child
+                inherits the parent env unchanged.
 
         Returns:
             Dictionary with command results if successful, None if UV execution should fall back
@@ -370,6 +385,7 @@ class PluginBase(BaseModel):
                 stdout_preference=stdout_preference,
                 stderr_preference=stderr_preference,
                 class_name=self.__class__.__name__,
+                env=env,
             )
 
             # Convert subprocess result to expected format
@@ -386,8 +402,9 @@ class PluginBase(BaseModel):
             if response["stderr"]:
                 self.errors.extend(response["stderr"].splitlines())
 
-            # Accumulate worst exit code across multiple subprocess calls
-            self.exit_code = max(self.exit_code, response["returncode"])
+            # Accumulate worst exit code across multiple subprocess calls.
+            new_code = response["returncode"]
+            self.exit_code = max(self.exit_code, abs(new_code) if new_code < 0 else new_code)
 
             self._plugin_log(
                 f"UV tool execution completed for {self.command} with exit code {response['returncode']}",

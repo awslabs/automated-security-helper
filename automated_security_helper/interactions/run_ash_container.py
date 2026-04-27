@@ -232,23 +232,19 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
 
 def run_ash_container(
     ctx=None,
-    source_dir: str | Path = Path.cwd().as_posix(),
-    output_dir: str | Path = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    source_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
     log_level: AshLogLevel = AshLogLevel.INFO,
     config: str | None = None,
-    config_overrides: List[str] = [],
+    config_overrides: List[str] | None = None,
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
-    scanners: List[str] = [],
-    exclude_scanners: List[str] = [],
+    scanners: List[str] | None = None,
+    exclude_scanners: List[str] | None = None,
     progress: bool = True,
-    output_formats: List[ExportFormat] = [],
+    output_formats: List[ExportFormat] | None = None,
     cleanup: bool = False,
-    phases: List[Phases] = [
-        Phases.convert,
-        Phases.scan,
-        Phases.report,
-    ],
+    phases: List[Phases] | None = None,
     inspect: bool = False,
     existing_results: str | None = None,
     python_based_plugins_only: bool = False,
@@ -269,8 +265,8 @@ def run_ash_container(
     container_gid: str | None = None,
     ash_revision_to_install: str | None = None,
     custom_containerfile: str | None = None,
-    custom_build_arg: List[str] = [],
-    ash_plugin_modules: List[str] = [],
+    custom_build_arg: List[str] | None = None,
+    ash_plugin_modules: List[str] | None = None,
 ):
     """Build and run the ASH container image.
 
@@ -295,6 +291,28 @@ def run_ash_container(
     Returns:
         CompletedProcess: The result of the container execution
     """
+    # Resolve cwd-based defaults at call time (not import time).
+    if source_dir is None:
+        source_dir = Path.cwd().as_posix()
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
+
+    # Rebind mutable defaults so each call gets its own collection.
+    if config_overrides is None:
+        config_overrides = []
+    if scanners is None:
+        scanners = []
+    if exclude_scanners is None:
+        exclude_scanners = []
+    if output_formats is None:
+        output_formats = []
+    if phases is None:
+        phases = [Phases.convert, Phases.scan, Phases.report]
+    if custom_build_arg is None:
+        custom_build_arg = []
+    if ash_plugin_modules is None:
+        ash_plugin_modules = []
+
     # Get host UID and GID using safe subprocess calls
     try:
         host_uid = subprocess_utils.get_host_uid()

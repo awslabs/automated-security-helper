@@ -92,7 +92,7 @@ def update_version_in_pyproject(new_version: str) -> bool:
         if not match:
             return False
 
-        new_content = re.sub(pattern, rf"\g<1>{new_version}\g<3>", content)
+        new_content = re.sub(pattern, rf"\g<1>{new_version}\g<3>", content, count=1)
 
         # Write back
         with open(pyproject_path, "w", encoding="utf-8") as f:

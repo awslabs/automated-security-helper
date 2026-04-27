@@ -97,13 +97,11 @@ class UVToolRunner:
 
     def is_tool_installed(self, tool_name: str) -> bool:
         """Check if a specific tool is installed via UV."""
-        installed_tools = []
         try:
             installed_tools = self.list_available_tools()
         except UVToolRunnerError:
             return False
-        finally:
-            return tool_name in installed_tools
+        return tool_name in installed_tools
 
     def get_tool_version(
         self, tool_name: str, package_name: Optional[str] = None
@@ -306,6 +304,7 @@ class UVToolRunner:
         stdout_preference: str = "write",
         stderr_preference: str = "write",
         class_name: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
     ) -> subprocess.CompletedProcess:
         """Run a UV tool with specified arguments and output handling support.
 
@@ -323,6 +322,9 @@ class UVToolRunner:
             stdout_preference: How to handle stdout ("return", "write", "both", "none")
             stderr_preference: How to handle stderr ("return", "write", "both", "none")
             class_name: Optional class name for log file naming
+            env: Environment variables for the child process. When supplied,
+                offline-mode additions are layered on top; when ``None``,
+                the child inherits the parent env.
 
         Returns:
             CompletedProcess result with enhanced output handling
@@ -340,10 +342,11 @@ class UVToolRunner:
 
         command = [self.uv_executable, "tool", "run"]
 
-        # Set up environment for offline mode if needed
-        env = None
+        # Set up environment for offline mode if needed. If the caller
+        # passed an explicit env, start from it; otherwise start from
+        # os.environ when we need to set offline flags.
         if os.environ.get("ASH_OFFLINE", "NO").upper() in ["YES", "TRUE", "1"]:
-            env = os.environ.copy()
+            env = dict(env) if env is not None else os.environ.copy()
             env["UV_OFFLINE"] = "1"
             command.append("--offline")
 

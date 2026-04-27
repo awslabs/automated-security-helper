@@ -215,7 +215,7 @@ def display_metrics_table(
             "  - [bold red]FAILED[/bold red] = Findings at or above threshold\n"
             "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
             "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
-            "  - [bold red]ERROR[/bold red] = Scanner execution errorn"
+            "  - [bold red]ERROR[/bold red] = Scanner execution error\n"
             "- [bold]*Threshold (Thresh)*[/bold]: The minimum severity level that will cause a scanner to fail\n"
             "  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL\n"
             "  - Source: (g)lobal, (c)onfig, (s)canner\n"

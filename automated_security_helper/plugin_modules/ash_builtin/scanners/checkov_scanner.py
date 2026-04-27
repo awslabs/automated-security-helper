@@ -301,7 +301,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: CheckovScannerConfig | None = None,
     ) -> SarifReport | bool:
         """Execute Checkov scan and return results.
@@ -315,6 +315,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -380,20 +382,21 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 checkov_results = json.load(f)
             try:
                 sarif_report: SarifReport = SarifReport.model_validate(checkov_results)
-                sarif_report.runs[0].invocations = [
-                    Invocation(
-                        commandLine=final_args[0],
-                        arguments=final_args[1:],
-                        startTimeUtc=self.start_time,
-                        endTimeUtc=self.end_time,
-                        executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
-                        exitCode=self.exit_code,
-                        exitCodeDescription="\n".join(self.errors),
-                        workingDirectory=ArtifactLocation(
-                            uri=get_shortest_name(input=target),
-                        ),
-                    )
-                ]
+                if sarif_report.runs:
+                    sarif_report.runs[0].invocations = [
+                        Invocation(
+                            commandLine=final_args[0],
+                            arguments=final_args[1:],
+                            startTimeUtc=self.start_time,
+                            endTimeUtc=self.end_time,
+                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                            exitCode=self.exit_code,
+                            exitCodeDescription="\n".join(self.errors),
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target),
+                            ),
+                        )
+                    ]
             except Exception as e:
                 ASH_LOGGER.warning(
                     f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}"

@@ -289,7 +289,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: T | ScannerPluginConfigBase | None = None,
         *args,
         **kwargs,
@@ -312,7 +312,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: T | ScannerPluginConfigBase | None = None,
         *args,
         **kwargs,
@@ -334,6 +334,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         Returns:
             Dict containing scan results or error information
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         try:
             return self.scan(
                 target=target,

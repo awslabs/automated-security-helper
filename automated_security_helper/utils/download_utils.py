@@ -126,12 +126,19 @@ def create_url_download_command(
         ASH_LOGGER.verbose(f"Creating ASH bin path directory @ {destination}")
         Path(destination).mkdir(parents=True, exist_ok=True)
 
+    script = (
+        "import sys; from pathlib import Path; "
+        "from automated_security_helper.utils.download_utils import install_binary_from_url; "
+        "install_binary_from_url(sys.argv[1], Path(sys.argv[2]), sys.argv[3] if sys.argv[3] != 'None' else None)"
+    )
     return CustomCommand(
         args=[
             sys.executable,
             "-c",
-            f"from pathlib import Path; from automated_security_helper.utils.download_utils import install_binary_from_url; "
-            rf"install_binary_from_url('{url}', Path('{destination}'), '{rename_to}')",
+            script,
+            url,
+            str(destination),
+            str(rename_to) if rename_to else "None",
         ],
         shell=False,
     )

@@ -1,3 +1,5 @@
+from collections import Counter
+
 from automated_security_helper.utils.meta_analysis.normalize_path import normalize_path
 
 
@@ -33,17 +35,27 @@ def are_values_equivalent(val1: Any, val2: Any) -> bool:
             return normalize_path(val1) == normalize_path(val2)
         return val1 == val2
 
-    # Handle lists
+    # Handle lists -- use Counter for proper multiset comparison so that
+    # [1,1,2] is not considered equal to [1,2,2].
     if isinstance(val1, list) and isinstance(val2, list):
         if len(val1) != len(val2):
             return False
-        # For simplicity, just check if all items in val1 are in val2
-        return all(item in val2 for item in val1)
+        try:
+            return Counter(val1) == Counter(val2)
+        except TypeError:
+            # Unhashable elements: fall back to sorted comparison
+            try:
+                return sorted(val1, key=repr) == sorted(val2, key=repr)
+            except TypeError:
+                return val1 == val2
 
-    # Handle dictionaries
+    # Handle dictionaries -- compare keys AND values recursively
     if isinstance(val1, dict) and isinstance(val2, dict):
-        # For simplicity, just check if keys match
-        return set(val1.keys()) == set(val2.keys())
+        if set(val1.keys()) != set(val2.keys()):
+            return False
+        return all(
+            are_values_equivalent(val1[k], val2[k]) for k in val1
+        )
 
     # Default comparison
     return val1 == val2

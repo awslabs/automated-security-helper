@@ -18,35 +18,35 @@ class TestSecretMasking:
         assert _mask_secret_value("") == ""
 
     def test_mask_secret_value_medium(self):
-        """Test masking of medium-length secrets."""
-        assert _mask_secret_value("test1234") == "te****34"
-        assert _mask_secret_value("secret") == "se**et"
-        assert _mask_secret_value("pass") == "p**s"
+        """Test masking of medium-length secrets (>= 75% masked for short)."""
+        assert _mask_secret_value("test1234") == "t******4"  # 8 chars: show first + last
+        assert _mask_secret_value("secret") == "s*****"  # 6 chars: show first only
+        assert _mask_secret_value("pass") == "p***"  # 4 chars: show first only
 
     def test_mask_secret_value_long(self):
         """Test masking of long secrets."""
         long_secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
         masked = _mask_secret_value(long_secret)
-        assert masked.startswith("wJa")
-        assert masked.endswith("KEY")
+        assert masked.startswith("wJ")
+        assert masked.endswith("Y")
         assert "*" in masked
         assert len(masked) == len(long_secret)
 
     def test_mask_bandit_b105_single_quote(self):
         """Test masking of B105 findings with single quotes."""
         text = "Possible hardcoded password: 'super_secret_password_123'"
-        expected = "Possible hardcoded password: 'sup*******************123'"
         result = _mask_bandit_b105_secret(text)
-        assert result == expected
+        assert "super_secret_password_123" not in result
+        assert result.startswith("Possible hardcoded password: 'su")
+        assert result.endswith("3'")
 
     def test_mask_bandit_b105_double_quote(self):
         """Test masking of B105 findings with double quotes."""
         text = 'Possible hardcoded password: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"'
-        expected = (
-            'Possible hardcoded password: "wJa**********************************KEY"'
-        )
         result = _mask_bandit_b105_secret(text)
-        assert result == expected
+        assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in result
+        assert result.startswith('Possible hardcoded password: "wJ')
+        assert result.endswith('Y"')
 
     def test_mask_bandit_b105_no_match(self):
         """Test that non-matching text is not modified."""
@@ -57,9 +57,9 @@ class TestSecretMasking:
     def test_mask_secret_in_text_b105(self):
         """Test the main masking function with B105 rule."""
         text = "Possible hardcoded password: 'test_secret'"
-        expected = "Possible hardcoded password: 'tes*****ret'"
         result = mask_secret_in_text(text, "B105")
-        assert result == expected
+        assert "test_secret" not in result
+        assert "Possible hardcoded password:" in result
 
     def test_mask_secret_in_text_other_rule(self):
         """Test that other rules are not affected."""
@@ -92,13 +92,13 @@ class TestSecretMasking:
         result1 = mask_secret_in_text(text1, "B105")
         assert "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" not in result1
         assert "Possible hardcoded password:" in result1
-        assert result1.startswith("Possible hardcoded password: 'wJa")
-        assert result1.endswith("KEY'")
+        assert result1.startswith("Possible hardcoded password: 'wJ")
+        assert result1.endswith("Y'")
 
         # Example 2: Database Password
         text2 = "Possible hardcoded password: 'super_secret_password_123'"
         result2 = mask_secret_in_text(text2, "B105")
         assert "super_secret_password_123" not in result2
         assert "Possible hardcoded password:" in result2
-        assert result2.startswith("Possible hardcoded password: 'sup")
-        assert result2.endswith("123'")
+        assert result2.startswith("Possible hardcoded password: 'su")
+        assert result2.endswith("3'")

@@ -159,7 +159,7 @@ class ScannerStatisticsCalculator:
                 )
             )
 
-            total = critical + high + medium + low + info + suppressed
+            total = critical + high + medium + low + info
 
             # Calculate actionable findings based on threshold
             actionable = ScannerStatisticsCalculator.calculate_actionable_count(

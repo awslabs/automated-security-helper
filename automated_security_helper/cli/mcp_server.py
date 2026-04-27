@@ -42,7 +42,7 @@ mcp = FastMCP(name="ASH Security Scanner")
 @mcp.tool()
 async def run_ash_scan(
     ctx: Context,
-    source_dir: str = str(Path.cwd().absolute()),
+    source_dir: Optional[str] = None,
     severity_threshold: str = "MEDIUM",
     config_path: Optional[str] = None,
     clean_output: bool = True,
@@ -87,6 +87,9 @@ async def run_ash_scan(
         Dict with scan_id, status, and connection management guidance
     """
     try:
+        # Resolve cwd-based default at call time (not import time).
+        if source_dir is None:
+            source_dir = str(Path.cwd().absolute())
         # Ensure source_dir is an absolute path
         await ctx.info(f"run_ash_scan tool called in cwd: {Path.cwd()}")
         if not Path(source_dir).is_absolute():
@@ -1355,8 +1358,10 @@ ASH is a security scanning orchestrator that runs multiple security tools:
     title="Run ASH Security Scan",
     description="This prompt invokes an ASH security scan of the source directory, defaulting to the current one",
 )
-def run_ash_security_scan(source_dir: str = str(Path.cwd().absolute())) -> str:
+def run_ash_security_scan(source_dir: Optional[str] = None) -> str:
     """Create a prompt for analyzing ASH security scan results"""
+    if source_dir is None:
+        source_dir = str(Path.cwd().absolute())
     return f"""Please run an ASH security scan of the following directory: {source_dir}
 
 The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
@@ -1373,8 +1378,10 @@ provided in an actionable summary."""
     title="Analyze ASH Security Findings",
     description="This prompt advises the agent to review an existing ASH scan and provide and overview and opinionated guidance",
 )
-def analyze_security_findings(source_dir: str = str(Path.cwd().absolute())) -> str:
+def analyze_security_findings(source_dir: Optional[str] = None) -> str:
     """Create a prompt for analyzing ASH security scan results"""
+    if source_dir is None:
+        source_dir = str(Path.cwd().absolute())
     return f"""Please analyze these ASH security scan results in the source_dir:
 {source_dir} and provide:
 

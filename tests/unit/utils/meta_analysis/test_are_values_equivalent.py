@@ -22,10 +22,10 @@ def test_are_values_equivalent_lists():
 
 
 def test_are_values_equivalent_dicts():
-    """Test equivalence of dictionaries."""
-    # The implementation only checks if keys match, not values
+    """Test equivalence of dictionaries -- keys AND values must match."""
     assert are_values_equivalent({"a": 1, "b": 2}, {"a": 1, "b": 2})
-    assert are_values_equivalent(
+    # Different nested values must NOT be equivalent
+    assert not are_values_equivalent(
         {"a": {"nested": "value"}}, {"a": {"nested": "different"}}
     )
     assert not are_values_equivalent({"a": 1, "b": 2}, {"a": 1, "c": 3})

@@ -188,7 +188,7 @@ def attach_scanner_details(
     sarif_report: SarifReport,
     scanner_name: str,
     scanner_version: str | None = None,
-    invocation_details: dict = {},
+    invocation_details: dict | None = None,
 ) -> SarifReport:
     """
     Attach scanner details to a SARIF report.
@@ -203,6 +203,8 @@ def attach_scanner_details(
     Returns:
         The updated SARIF report
     """
+    if invocation_details is None:
+        invocation_details = {}
     if not sarif_report or not sarif_report.runs:
         return sarif_report
 
@@ -293,7 +295,7 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
         # Check for exact match
         if path == pat:
             return True
-        elif path in pat:
+        elif pat in path:
             return True
         elif fnmatch.fnmatch(path, pat):
             return True
@@ -317,7 +319,10 @@ def get_severity_metrics_from_sarif(
         low=0,
         info=0,
     )
-    for result in sarif_report.runs[0].results:
+    all_results = []
+    for run in sarif_report.runs:
+        all_results.extend(run.results or [])
+    for result in all_results:
         if result.suppressions and len(result.suppressions) > 0:
             scanner_severity_count.suppressed = 1 + scanner_severity_count.suppressed
         elif result.level:
@@ -584,5 +589,5 @@ def apply_suppressions_to_sarif(
             # Add the result to the updated results list
             updated_results.append(result)
 
-        sarif_report.runs[0].results = updated_results
+        run.results = updated_results
     return sarif_report

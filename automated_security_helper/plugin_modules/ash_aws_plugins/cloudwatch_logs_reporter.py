@@ -135,8 +135,7 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
                 target_type="source",
                 append_to_stream="stderr",
             )
-        finally:
-            return self.dependencies_satisfied
+        return self.dependencies_satisfied
 
     def report(self, model: "AshAggregatedResults") -> str:
         """Publishes AshAggregatedResults as a CloudWatchLogs event"""

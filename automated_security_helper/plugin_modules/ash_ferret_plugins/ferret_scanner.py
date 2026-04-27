@@ -730,7 +730,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[Any] = [],
+        global_ignore_paths: List[Any] | None = None,
         config: FerretScannerConfig | None = None,
         *args,
         **kwargs,
@@ -760,6 +760,8 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         Raises:
             ScannerError: If the scan fails fatally
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or (target.is_dir() and not any(target.iterdir())):
             message = (
@@ -865,22 +867,23 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     },
                 )
 
-                sarif_report.runs[0].invocations = [
-                    Invocation(
-                        commandLine=" ".join(final_args),
-                        arguments=final_args[1:],
-                        startTimeUtc=self.start_time,
-                        endTimeUtc=self.end_time,
-                        executionSuccessful=self.exit_code == 0,
-                        exitCode=self.exit_code,
-                        exitCodeDescription="\n".join(self.errors)
-                        if self.errors
-                        else None,
-                        workingDirectory=ArtifactLocation(
-                            uri=get_shortest_name(input=target),
-                        ),
-                    )
-                ]
+                if sarif_report.runs:
+                    sarif_report.runs[0].invocations = [
+                        Invocation(
+                            commandLine=" ".join(final_args),
+                            arguments=final_args[1:],
+                            startTimeUtc=self.start_time,
+                            endTimeUtc=self.end_time,
+                            executionSuccessful=self.exit_code == 0,
+                            exitCode=self.exit_code,
+                            exitCodeDescription="\n".join(self.errors)
+                            if self.errors
+                            else None,
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target),
+                            ),
+                        )
+                    ]
 
                 return sarif_report
 

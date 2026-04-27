@@ -150,7 +150,7 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
 def resolve_config(
     config_path: Path | str | None = None,
-    source_dir: Path | str | None = Path.cwd(),
+    source_dir: Path | str | None = None,
     fallback_to_default: bool = True,
     config_overrides: List[str] = None,
 ) -> AshConfig:
@@ -175,6 +175,10 @@ def resolve_config(
             if config_overrides:
                 return apply_config_overrides(config, config_overrides)
             return config
+
+        # Resolve cwd default at call time, not import time.
+        if source_dir is None:
+            source_dir = Path.cwd()
 
         if isinstance(source_dir, str):
             source_dir = Path(source_dir)

@@ -206,7 +206,7 @@ def verify_metrics_alignment(aggregated_results: AshAggregatedResults) -> bool:
     """
     # Get unified metrics
     unified_metrics = get_unified_scanner_metrics(aggregated_results)
-    print(f"unified_metrics: {unified_metrics}")
+    ASH_LOGGER.debug(f"unified_metrics: {unified_metrics}")
 
     # Calculate expected totals
     expected_totals = {
@@ -219,7 +219,7 @@ def verify_metrics_alignment(aggregated_results: AshAggregatedResults) -> bool:
         "total": sum(m.total for m in unified_metrics),
         "actionable": sum(m.actionable for m in unified_metrics),
     }
-    print(f"expected_totals: {expected_totals}")
+    ASH_LOGGER.debug(f"expected_totals: {expected_totals}")
 
     # Check summary_stats
     summary_stats = aggregated_results.metadata.summary_stats
@@ -233,7 +233,7 @@ def verify_metrics_alignment(aggregated_results: AshAggregatedResults) -> bool:
         "total": summary_stats.total,
         "actionable": summary_stats.actionable,
     }
-    print(f"summary_totals: {summary_totals}")
+    ASH_LOGGER.debug(f"summary_totals: {summary_totals}")
 
     # Check scanner_results totals
     scanner_results_totals = {
@@ -259,7 +259,7 @@ def verify_metrics_alignment(aggregated_results: AshAggregatedResults) -> bool:
         scanner_results_totals["total"] += scanner_info.finding_count or 0
         scanner_results_totals["actionable"] += scanner_info.actionable_finding_count
 
-    print(f"scanner_results_totals: {scanner_results_totals}")
+    ASH_LOGGER.debug(f"scanner_results_totals: {scanner_results_totals}")
 
     # Compare all three sources
     alignment_ok = True
@@ -275,7 +275,7 @@ def verify_metrics_alignment(aggregated_results: AshAggregatedResults) -> bool:
             )
             alignment_ok = False
         else:
-            ASH_LOGGER.error(
+            ASH_LOGGER.debug(
                 f"Metrics alignment passed for {metric}: "
                 f"unified={expected}, summary_stats={summary}, scanner_results={scanner_results}"
             )

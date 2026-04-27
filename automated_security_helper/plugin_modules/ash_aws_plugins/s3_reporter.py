@@ -127,8 +127,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 target_type="source",
                 append_to_stream="stderr",
             )
-        finally:
-            return self.dependencies_satisfied
+        return self.dependencies_satisfied
 
     def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model and upload to S3 bucket."""

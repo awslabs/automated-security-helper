@@ -53,15 +53,19 @@ def black(msg) -> str:
 
 
 def debug_echo(*msg, debug: bool = False) -> str | None:
+    message = " ".join(str(m) for m in msg)
     if debug:
-        ASH_LOGGER.debug(msg)
+        ASH_LOGGER.debug(message)
+    return message
 
 
 def get_ash_ignorespec_lines(
     path,
-    ignorefiles: List[str] = [],
+    ignorefiles: List[str] | None = None,
     debug: bool = False,
 ) -> List[str]:
+    if ignorefiles is None:
+        ignorefiles = []
     dotignores = [f"{path}/.ignore", *[item for item in glob(f"{path}/**/.ignore", recursive=True)]]
     # ashignores = [
     #     f"{path}/.ashignore",
@@ -172,7 +176,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def scan_set(
-    source: str = os.getcwd(),
+    source: Optional[str] = None,
     output: Optional[str] = None,
     ignorefile: Optional[list[str]] = None,
     debug: bool = False,
@@ -192,6 +196,8 @@ def scan_set(
     Returns:
         List of files not matching ignore specifications.
     """
+    if source is None:
+        source = os.getcwd()
     if ignorefile is None:
         ignorefile = []
 
