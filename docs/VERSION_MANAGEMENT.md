@@ -138,24 +138,30 @@ The system automatically detects and converts these patterns:
 
 ## Development Workflow
 
-### Making a Release
+### Version Bumping
 
-1. **Update Version**:
-   ```bash
-   python scripts/version_bump.py bump patch  # or minor/major
-   ```
+Every PR to `main` must include a version bump. A required status check compares `pyproject.toml` on the PR branch against `main` and blocks merge if the version isn't incremented:
 
-2. **Verify Changes**:
-   ```bash
-   python scripts/version_bump.py validate
-   ```
+```bash
+uv run python scripts/version_bump.py bump patch   # or minor / major
+```
 
-3. **Commit and Tag**:
-   ```bash
-   git add .
-   git commit -m "Bump version to $(python scripts/version_bump.py current)"
-   git tag "v$(python scripts/version_bump.py current)"
-   ```
+Add the `no-version-bump` label to skip the check for docs-only or CI-only changes.
+
+Maintainers can also bump versions directly via **Actions > Version Bump: Patch / Minor / Major > Run workflow**. These push directly to `main` via a GitHub Actions bypass in the repository ruleset.
+
+### Manual Version Bumping (Local)
+
+```bash
+# Bump version locally
+python scripts/version_bump.py bump patch  # or minor/major
+
+# Set a specific version
+python scripts/version_bump.py set 4.0.0
+
+# Verify consistency
+python scripts/version_bump.py validate
+```
 
 ### Adding New Documentation
 

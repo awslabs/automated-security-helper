@@ -1,0 +1,71 @@
+name: ASH - Version Bump Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    name: Verify version bump
+    if: >-
+      !contains(github.event.pull_request.labels.*.name, 'no-version-bump')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Get PR branch version
+        id: pr-version
+        run: |
+          VERSION=$(grep -oE 'version = "[0-9]+\.[0-9]+\.[0-9]+"' pyproject.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "PR branch version: $VERSION"
+
+      - name: Get main branch version
+        id: main-version
+        run: |
+          VERSION=$(git show origin/main:pyproject.toml | grep -oE 'version = "[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Main branch version: $VERSION"
+
+      - name: Compare versions
+        env:
+          PR_VERSION: ${{ steps.pr-version.outputs.version }}
+          MAIN_VERSION: ${{ steps.main-version.outputs.version }}
+        run: |
+          if [[ "$PR_VERSION" == "$MAIN_VERSION" ]]; then
+            echo "::error::Version not bumped. PR has $PR_VERSION, same as main."
+            echo ""
+            echo "Run this command and push the result:"
+            echo ""
+            echo "  uv run python scripts/version_bump.py bump patch"
+            echo ""
+            echo "Or add the 'no-version-bump' label to skip this check."
+            exit 1
+          fi
+
+          # Compare semver components
+          IFS='.' read -r PR_MAJOR PR_MINOR PR_PATCH <<< "$PR_VERSION"
+          IFS='.' read -r MAIN_MAJOR MAIN_MINOR MAIN_PATCH <<< "$MAIN_VERSION"
+
+          PR_NUM=$((PR_MAJOR * 1000000 + PR_MINOR * 1000 + PR_PATCH))
+          MAIN_NUM=$((MAIN_MAJOR * 1000000 + MAIN_MINOR * 1000 + MAIN_PATCH))
+
+          if [[ "$PR_NUM" -le "$MAIN_NUM" ]]; then
+            echo "::error::PR version ($PR_VERSION) is not greater than main ($MAIN_VERSION)."
+            echo ""
+            echo "Run this command and push the result:"
+            echo ""
+            echo "  uv run python scripts/version_bump.py bump patch"
+            echo ""
+            exit 1
+          fi
+
+          echo "Version bump verified: $MAIN_VERSION -> $PR_VERSION"

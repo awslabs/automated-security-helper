@@ -188,17 +188,17 @@ ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `
 - Documentation files that reference the version (README, install guides, etc.) have corresponding `.template` files containing `{{VERSION}}` placeholders.
 - The `scripts/version_bump.py` script updates `pyproject.toml` and regenerates all documentation from templates.
 
-### Automated Version Bumping (CI)
+### Version Bumping
 
-When a PR is merged to `main`, the version is automatically bumped if the PR has one of these labels:
+Every PR to `main` must include a version bump. A required status check ("Verify version bump") compares `pyproject.toml` on the PR branch against `main` and blocks merge if the version isn't incremented:
 
-| Label | Effect | Example |
-|---|---|---|
-| `version:patch` | Bump patch version | `3.2.1` → `3.2.2` |
-| `version:minor` | Bump minor version | `3.2.1` → `3.3.0` |
-| `version:major` | Bump major version | `3.2.1` → `4.0.0` |
+```bash
+uv run python scripts/version_bump.py bump patch   # or minor / major
+```
 
-If no version label is present, no bump occurs. If multiple labels are present, the highest takes precedence (major > minor > patch).
+Add the `no-version-bump` label to skip the check for docs-only or CI-only changes.
+
+Maintainers can also bump versions directly via **Actions > Version Bump: Patch / Minor / Major > Run workflow**. These push directly to `main` via a GitHub Actions bypass in the repository ruleset.
 
 ### Manual Version Bumping
 
