@@ -13,6 +13,11 @@ on:
         required: false
         default: "main"
         type: string
+      ash-repo:
+        description: "GitHub repository to install ASH from (owner/repo). For fork PRs, pass the fork repo."
+        required: false
+        default: "awslabs/automated-security-helper"
+        type: string
       ash-mode:
         description: 'Mode to run ASH in. Defaults to "local" for CI compatibility. Use "container" for full scanner support.'
         required: false
@@ -85,7 +90,7 @@ on:
         type: boolean
 
 env:
-  ASH_UVX_SOURCE: git+https://github.com/awslabs/automated-security-helper@${{ inputs.ash-version }}
+  ASH_UVX_SOURCE: git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
   ASH_OUTPUT_DIR: ${{ inputs.output-dir }}
   ASH_CONFIG: ${{ inputs.config }}
 
