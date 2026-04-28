@@ -58,16 +58,38 @@ def load_internal_plugins():
     return loaded_plugins
 
 
-def load_additional_plugin_modules(plugin_modules: List[str] = []) -> dict:
+_ALLOWED_MODULE_PREFIXES = (
+    "automated_security_helper.",
+    "ash_plugins.",
+    "ash_plugins",
+)
+
+
+def load_additional_plugin_modules(plugin_modules: List[str] | None = None) -> dict:
     """Load additional plugin modules specified in configuration.
 
     Args:
         plugin_modules: List of module paths to import
     """
+    if plugin_modules is None:
+        plugin_modules = []
     discovered = {"converters": [], "scanners": [], "reporters": []}
 
     unique = list(set(plugin_modules))
     for module_path in unique:
+        # Validate module path matches expected namespace patterns
+        if not any(
+            module_path == prefix or module_path.startswith(prefix + ".")
+            if not prefix.endswith(".")
+            else module_path.startswith(prefix)
+            for prefix in _ALLOWED_MODULE_PREFIXES
+        ):
+            ASH_LOGGER.warning(
+                f"Skipping module with unexpected namespace: {module_path}. "
+                f"Module paths must start with one of: {', '.join(_ALLOWED_MODULE_PREFIXES)}"
+            )
+            continue
+
         try:
             ASH_LOGGER.info(f"Importing additional plugin module: {module_path}")
             # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import

@@ -116,7 +116,7 @@ def get_reporter_mappings() -> Dict[str, Dict[str, str]]:
             if hasattr(reporter, "sarif_field_mappings") and callable(
                 getattr(reporter, "sarif_field_mappings")
             ):
-                reporter_name = reporter.__class__.__name__.replace(
+                reporter_name = reporter.__name__.replace(
                     "Reporter", ""
                 ).lower()
                 reporter_mappings = reporter.sarif_field_mappings()

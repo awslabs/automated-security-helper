@@ -87,12 +87,13 @@ class AshSuppression(IgnorePathWithReason):
             try:
                 # Parse the date string to ensure it's a valid date
                 expiration_date = datetime.strptime(v, "%Y-%m-%d").date()
-                # Check if the date is in the future
-                if expiration_date < date.today():
-                    raise ValueError("expiration date must be in the future")
-                return v
-            except ValueError as e:
+            except ValueError:
                 raise ValueError(
-                    f"Invalid expiration date format. Use YYYY-MM-DD: {str(e)}"
+                    f"Invalid expiration date format. Use YYYY-MM-DD: {v}"
                 )
+            # Check if the date is in the future (outside the try so the
+            # semantic error is not rewrapped as a format error).
+            if expiration_date < date.today():
+                raise ValueError("expiration date must be in the future")
+            return v
         return v

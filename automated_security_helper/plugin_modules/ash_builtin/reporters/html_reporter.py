@@ -49,9 +49,10 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         scanner_results = emitter.get_scanner_results()
 
         # Get results from SARIF report for backward compatibility
-        results = (
-            model.sarif.runs[0].results if model.sarif and model.sarif.runs else []
-        )
+        results = []
+        if model.sarif and model.sarif.runs:
+            for run in model.sarif.runs:
+                results.extend(run.results or [])
 
         # Group results by severity and rule
         findings_by_severity = self._group_results_by_severity(results)
@@ -346,7 +347,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         """Format the type summary section."""
         summary = "<h3>Findings by Type</h3><ul>"
         for type_name, findings in findings_by_type.items():
-            summary += f"<li>{type_name}: {len(findings)} finding(s)</li>"
+            summary += f"<li>{html.escape(str(type_name or 'UNKNOWN'))}: {len(findings)} finding(s)</li>"
         summary += "</ul>"
         return summary
 
@@ -397,7 +398,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             <tr>
                 <td class="{severity_class}">{html.escape(finding_level.upper() if finding.level else "NONE")}</td>
                 <td>{html.escape(finding.ruleId or "N/A")}</td>
-                <td>{html.escape(finding.message.root.text if finding.message else "N/A")}</td>
+                <td>{html.escape((finding.message.root.text if finding.message else None) or "N/A")}</td>
                 <td>{html.escape(location_str)}</td>
             </tr>
             """

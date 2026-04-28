@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import shlex
 from subprocess import (
     CalledProcessError,
@@ -35,6 +36,26 @@ from automated_security_helper.utils.subprocess_utils import (
     raise_called_process_error,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+
+# Pattern for safe git revision values: alphanumeric, dots, hyphens, underscores, forward slashes
+_SAFE_REVISION_PATTERN = re.compile(r"^[A-Za-z0-9._\-/]+$")
+
+
+def _validate_ash_revision(revision: str) -> bool:
+    """Validate that an ASH revision string is safe for use as a Docker build-arg.
+
+    Rejects values containing shell metacharacters that could enable
+    command injection in build-arg contexts.
+
+    Args:
+        revision: The revision string to validate.
+
+    Returns:
+        True if the revision is safe, False otherwise.
+    """
+    if not revision:
+        return False
+    return _SAFE_REVISION_PATTERN.match(revision) is not None
 
 
 def get_ash_revision() -> str | None:
@@ -198,15 +219,20 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
         while process.poll() is None:
             time.sleep(0.1)
     except KeyboardInterrupt:
-        # Handle Ctrl+C gracefully
+        # Handle Ctrl+C gracefully: terminate, wait, then escalate to kill
         process.terminate()
+        try:
+            process.wait(timeout=5)
+        except Exception:
+            process.kill()
+            process.wait()
         print("Command interrupted by user", file=sys.stderr)
 
-    # Wait for threads to complete with timeout
-    stdout_thread.join(timeout=2.0)
-    stderr_thread.join(timeout=2.0)
+    # Join threads before reading buffers to avoid race condition
+    stdout_thread.join(timeout=5.0)
+    stderr_thread.join(timeout=5.0)
 
-    # Get the captured output
+    # Get the captured output (safe now that threads are joined)
     stdout = stdout_buffer.getvalue()
     stderr = stderr_buffer.getvalue()
 
@@ -232,23 +258,19 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
 
 def run_ash_container(
     ctx=None,
-    source_dir: str | Path = Path.cwd().as_posix(),
-    output_dir: str | Path = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    source_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
     log_level: AshLogLevel = AshLogLevel.INFO,
     config: str | None = None,
-    config_overrides: List[str] = [],
+    config_overrides: List[str] | None = None,
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
-    scanners: List[str] = [],
-    exclude_scanners: List[str] = [],
+    scanners: List[str] | None = None,
+    exclude_scanners: List[str] | None = None,
     progress: bool = True,
-    output_formats: List[ExportFormat] = [],
+    output_formats: List[ExportFormat] | None = None,
     cleanup: bool = False,
-    phases: List[Phases] = [
-        Phases.convert,
-        Phases.scan,
-        Phases.report,
-    ],
+    phases: List[Phases] | None = None,
     inspect: bool = False,
     existing_results: str | None = None,
     python_based_plugins_only: bool = False,
@@ -269,8 +291,8 @@ def run_ash_container(
     container_gid: str | None = None,
     ash_revision_to_install: str | None = None,
     custom_containerfile: str | None = None,
-    custom_build_arg: List[str] = [],
-    ash_plugin_modules: List[str] = [],
+    custom_build_arg: List[str] | None = None,
+    ash_plugin_modules: List[str] | None = None,
 ):
     """Build and run the ASH container image.
 
@@ -295,6 +317,28 @@ def run_ash_container(
     Returns:
         CompletedProcess: The result of the container execution
     """
+    # Resolve cwd-based defaults at call time (not import time).
+    if source_dir is None:
+        source_dir = Path.cwd().as_posix()
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
+
+    # Rebind mutable defaults so each call gets its own collection.
+    if config_overrides is None:
+        config_overrides = []
+    if scanners is None:
+        scanners = []
+    if exclude_scanners is None:
+        exclude_scanners = []
+    if output_formats is None:
+        output_formats = []
+    if phases is None:
+        phases = [Phases.convert, Phases.scan, Phases.report]
+    if custom_build_arg is None:
+        custom_build_arg = []
+    if ash_plugin_modules is None:
+        ash_plugin_modules = []
+
     # Get host UID and GID using safe subprocess calls
     try:
         host_uid = subprocess_utils.get_host_uid()
@@ -356,6 +400,22 @@ def run_ash_container(
     resolved_revision = (
         ash_revision_to_install if ash_revision_to_install is not None else rev
     )
+
+    # Validate the revision string to prevent shell metacharacter injection
+    if resolved_revision is not None and resolved_revision != "LOCAL":
+        if not _validate_ash_revision(resolved_revision):
+            typer.secho(
+                f"Invalid ASH revision value: {resolved_revision!r}. "
+                "Only alphanumeric characters, dots, hyphens, underscores, "
+                "and forward slashes are allowed.",
+                fg=typer.colors.RED,
+            )
+            return create_completed_process(
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr=f"Invalid ASH revision value: {resolved_revision!r}",
+            )
 
     if resolved_revision == "LOCAL":
         # For LOCAL builds, use current working directory as repository root
@@ -515,6 +575,14 @@ def run_ash_container(
                 # Add the build context
                 custom_build_cmd.append(Path(custom_containerfile).parent.as_posix())
 
+                # Actually execute the custom build command
+                custom_build_result = run_cmd_direct(custom_build_cmd, debug=debug)
+                # Override the image name so the run phase uses the custom image
+                ash_base_image_name = "automated-security-helper:custom"
+
+                if debug:
+                    print(f"Custom build completed with return code: {custom_build_result.returncode}")
+
         except Exception as e:
             typer.secho(f"Error building ASH image: {e}", fg=typer.colors.RED)
             if debug:
@@ -598,6 +666,7 @@ def run_ash_container(
         # Add offline mode flag
         if offline:
             run_cmd.append("--network=none")
+            run_cmd.extend(["-e", "ASH_OFFLINE=YES"])
 
         # Add terminal size environment variables
         try:

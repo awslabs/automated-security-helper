@@ -88,6 +88,9 @@ def run_command(
         subprocess.CalledProcessError: If check=True and the command fails
         subprocess.TimeoutExpired: If the command times out
     """
+    # Copy args to avoid mutating the caller's list
+    args = list(args)
+
     # Resolve the full path to the executable if possible
     if args and not shell:
         binary_full_path = find_executable(args[0])
@@ -131,12 +134,22 @@ def run_command(
             ASH_LOGGER.debug(f"Command stderr: {e.stderr}")
         if check:
             raise
-        return e
+        return subprocess.CompletedProcess(
+            args=e.cmd,
+            returncode=e.returncode,
+            stdout=e.output or "",
+            stderr=e.stderr or "",
+        )
     except subprocess.TimeoutExpired as e:
         ASH_LOGGER.error(f"Command timed out after {timeout} seconds: {cmd_str}")
         if check:
             raise
-        return e
+        return subprocess.CompletedProcess(
+            args=e.cmd,
+            returncode=-1,
+            stdout=e.stdout or "",
+            stderr=e.stderr or f"Command timed out after {e.timeout}s",
+        )
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
         if check:
@@ -336,13 +349,21 @@ def run_command_stream_output(
             errors=errors,
         )
 
-        # Stream output
-        for line in process.stdout:
-            print(line.rstrip())
+        try:
+            # Stream output
+            for line in process.stdout:
+                print(line.rstrip())
 
-        # Wait for process to complete
-        process.wait()
-        return process.returncode
+            # Wait for process to complete
+            process.wait()
+            return process.returncode
+        except Exception as e:
+            ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
+            return 1
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
 
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
@@ -360,6 +381,7 @@ def get_host_uid() -> int:
         return int(result.stdout.strip())
     except Exception as e:
         ASH_LOGGER.error(f"Error getting host UID: {e}")
+        ASH_LOGGER.warning("Falling back to default UID 1000 (command 'id -u' unavailable on this platform)")
         return 1000  # Default UID as fallback
 
 
@@ -374,6 +396,7 @@ def get_host_gid() -> int:
         return int(result.stdout.strip())
     except Exception as e:
         ASH_LOGGER.error(f"Error getting host GID: {e}")
+        ASH_LOGGER.warning("Falling back to default GID 1000 (command 'id -g' unavailable on this platform)")
         return 1000  # Default GID as fallback
 
 

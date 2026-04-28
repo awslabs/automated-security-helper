@@ -53,14 +53,14 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         """
         return {
             "runs[].results[].ruleId": "rule_id",
-            "runs[]results[0].message.text": "description",
-            "runs[0].results[0].level": "severity",
-            "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri": "file_path",
-            "runs[0].results[0].locations[0].physicalLocation.region.startLine": "line_start",
-            "runs[0].results[0].locations[0].physicalLocation.region.endLine": "line_end",
-            "runs[0].tool.driver.name": "scanner",
-            "runs[0].tool.driver.version": "scanner_version",
-            "runs[0].results[0].properties.tags": "tags",
+            "runs[].results[].message.text": "description",
+            "runs[].results[].level": "severity",
+            "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "file_path",
+            "runs[].results[].locations[].physicalLocation.region.startLine": "line_start",
+            "runs[].results[].locations[].physicalLocation.region.endLine": "line_end",
+            "runs[].tool.driver.name": "scanner",
+            "runs[].tool.driver.version": "scanner_version",
+            "runs[].results[].properties.tags": "tags",
         }
 
     def report(self, model: "AshAggregatedResults") -> str:

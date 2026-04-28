@@ -1,0 +1,39 @@
+global_settings:
+  # Ignore test data that intentionally contains insecure patterns
+  # (these are scanner test fixtures, not production code)
+  ignore_paths:
+    - "tests/test_data/**"
+
+  suppressions:
+    # Test files for secret masking contain intentional fake passwords
+    # to verify the masking logic works correctly.
+    - rule_id: "SECRET-SECRET-KEYWORD"
+      path: "tests/unit/utils/test_secret_masking*.py"
+      reason: "Intentional test fixtures for secret masking regression tests"
+
+    - rule_id: "SECRET-SECRET-KEYWORD"
+      path: "tests/unit/utils/test_secret_masking_regression.py"
+      reason: "Intentional test fixtures for secret masking regression tests"
+
+    # B108 (insecure temp file) in test that validates shutil.rmtree behavior
+    - rule_id: "B108"
+      path: "tests/unit/core/test_orchestrator_regression.py"
+      reason: "Test intentionally uses temp paths to verify cleanup guard"
+
+    # B110 (try/except/pass) in tests that verify exception behavior
+    - rule_id: "B110"
+      path: "tests/unit/core/test_base_plugins_regression.py"
+      reason: "Test verifies exception propagation behavior"
+
+    - rule_id: "B110"
+      path: "tests/unit/config/test_ash_config_regression.py"
+      reason: "Test verifies yaml loader isolation with exception handling"
+
+    - rule_id: "B110"
+      path: "tests/unit/test_environ_mutation_fix.py"
+      reason: "Test catches expected exceptions to verify env restoration"
+
+    # B404 (subprocess import) in subprocess regression tests
+    - rule_id: "B404"
+      path: "tests/unit/utils/test_subprocess_utils_regression.py"
+      reason: "Test file for subprocess_utils must import subprocess"

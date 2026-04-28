@@ -227,33 +227,11 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 level=15,
             )
 
-            # Set environment variables for offline mode if needed
-            env_vars = {}
-
-            # Run the subprocess with the environment variables
-            if env_vars:
-                # Need to modify environment for the subprocess
-                orig_env = os.environ.copy()
-                for k, v in env_vars.items():
-                    os.environ[k] = v
-
-                self._run_subprocess(
-                    command=final_args,
-                    results_dir=target_results_dir,
-                )
-
-                # Restore original environment
-                for k in env_vars.keys():
-                    if k in orig_env:
-                        os.environ[k] = orig_env[k]
-                    else:
-                        del os.environ[k]
-            else:
-                # No environment modifications needed
-                self._run_subprocess(
-                    command=final_args,
-                    results_dir=target_results_dir,
-                )
+            # No environment modifications are currently needed for Snyk Code.
+            self._run_subprocess(
+                command=final_args,
+                results_dir=target_results_dir,
+            )
 
             self._post_scan(
                 target=target,
@@ -295,20 +273,21 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                         },
                     )
 
-                    sarif_report.runs[0].invocations = [
-                        Invocation(
-                            commandLine=" ".join(final_args),
-                            arguments=final_args[1:],
-                            startTimeUtc=self.start_time,
-                            endTimeUtc=self.end_time,
-                            executionSuccessful=True,
-                            exitCode=self.exit_code,
-                            exitCodeDescription="\n".join(self.errors),
-                            workingDirectory=ArtifactLocation(
-                                uri=get_shortest_name(input=target),
-                            ),
-                        )
-                    ]
+                    if sarif_report.runs:
+                        sarif_report.runs[0].invocations = [
+                            Invocation(
+                                commandLine=" ".join(final_args),
+                                arguments=final_args[1:],
+                                startTimeUtc=self.start_time,
+                                endTimeUtc=self.end_time,
+                                executionSuccessful=True,
+                                exitCode=self.exit_code,
+                                exitCodeDescription="\n".join(self.errors),
+                                workingDirectory=ArtifactLocation(
+                                    uri=get_shortest_name(input=target),
+                                ),
+                            )
+                        ]
                     self._post_scan(
                         target=target,
                         target_type=target_type,

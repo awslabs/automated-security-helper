@@ -100,18 +100,24 @@ class TestResourceManager:
         assert success
 
     @pytest.mark.asyncio
-    async def test_get_executor_with_resource_exhaustion(self, resource_manager):
-        """Test get_executor when resource limits are exceeded."""
+    async def test_get_executor_available_even_at_operation_limit(self, resource_manager):
+        """Test get_executor returns executor even when operation slots are full.
+
+        Bug #69: get_executor should not enforce operation limits -- that is
+        the job of acquire_operation_slot. Monitoring callers that only need
+        the executor should not be blocked by the operation counter.
+        """
         # Fill up operation slots
         await resource_manager.acquire_operation_slot()
         await resource_manager.acquire_operation_slot()
 
-        # Try to get executor when at limit
-        with pytest.raises(ResourceExhaustionError) as exc_info:
-            await resource_manager.get_executor()
+        # get_executor should still succeed (it just returns the pool)
+        executor = await resource_manager.get_executor()
+        assert isinstance(executor, ThreadPoolExecutor)
 
-        assert "Maximum concurrent operations" in str(exc_info.value)
-        assert exc_info.value.context["active_operations"] == 2
+        # But acquire_operation_slot should correctly deny
+        denied = await resource_manager.acquire_operation_slot()
+        assert denied is False
 
     @pytest.mark.asyncio
     async def test_get_executor_after_shutdown_requested(self, resource_manager):
@@ -127,12 +133,12 @@ class TestResourceManager:
         """Test successful executor shutdown."""
         # Create executor
         executor = await resource_manager.get_executor()
-        assert not executor._shutdown
+        assert not resource_manager._executor_shutdown
 
         # Shutdown
         await resource_manager.shutdown_executor(wait=False)
 
-        assert executor._shutdown
+        assert resource_manager._executor_shutdown
         assert resource_manager._shutdown_requested
 
     @pytest.mark.asyncio
@@ -257,18 +263,19 @@ class TestResourceManager:
         self, resource_manager
     ):
         """Test resource limit enforcement with high thread utilization."""
-        # Create executor and mock high utilization
-        executor = await resource_manager.get_executor()
+        # Create executor so the pool exists
+        await resource_manager.get_executor()
 
-        # Mock threads to simulate high utilization
-        mock_threads = [MagicMock() for _ in range(4)]  # More than max_workers
-        for thread in mock_threads:
-            thread.is_alive.return_value = True
+        # Simulate high utilization via _active_operations, which
+        # get_resource_stats now uses instead of private _threads.
+        resource_manager._active_operations = resource_manager._max_workers
 
-        with patch.object(executor, "_threads", mock_threads):
-            actions = await resource_manager.enforce_resource_limits()
-            assert len(actions) == 1
-            assert "High thread pool utilization" in actions[0]
+        actions = await resource_manager.enforce_resource_limits()
+        assert len(actions) >= 1
+        assert any("High thread pool utilization" in a for a in actions)
+
+        # Clean up
+        resource_manager._active_operations = 0
 
     @pytest.mark.asyncio
     async def test_concurrent_executor_access(self, resource_manager):
@@ -352,7 +359,7 @@ class TestResourceManager:
 
         # Test shutdown without wait
         await resource_manager.shutdown_executor(wait=False)
-        assert executor._shutdown
+        assert resource_manager._executor_shutdown
         assert resource_manager._shutdown_requested
 
         # Test that new operations are rejected after shutdown
@@ -361,6 +368,7 @@ class TestResourceManager:
 
         # Reset for testing shutdown with wait
         resource_manager._shutdown_requested = False
+        resource_manager._executor_shutdown = False
         resource_manager._shared_executor = None
 
         # Create new executor
@@ -368,7 +376,7 @@ class TestResourceManager:
 
         # Test shutdown with wait and timeout
         await resource_manager.shutdown_executor(wait=True, timeout=1.0)
-        assert executor2._shutdown
+        assert resource_manager._executor_shutdown
 
     @pytest.mark.asyncio
     async def test_error_handling_during_executor_creation(self, resource_manager):
@@ -390,13 +398,15 @@ class TestResourceManager:
         # Create executor
         executor1 = await resource_manager.get_executor()
 
-        # Simulate unexpected shutdown
+        # Simulate unexpected shutdown -- set the public flag since we
+        # no longer check private executor._shutdown (Bug #67).
         executor1.shutdown(wait=False)
+        resource_manager._executor_shutdown = True
 
         # Getting executor again should create new one
         executor2 = await resource_manager.get_executor()
         assert executor2 is not executor1
-        assert not executor2._shutdown
+        assert not resource_manager._executor_shutdown
 
     def test_resource_stats_edge_cases(self):
         """Test ResourceStats edge cases."""
@@ -482,29 +492,26 @@ class TestResourceManager:
         # Shutdown and verify state
         await resource_manager.shutdown_executor(wait=False)
         assert resource_manager._shutdown_requested
-        assert executor._shutdown
+        assert resource_manager._executor_shutdown
 
     @pytest.mark.asyncio
     async def test_thread_pool_active_count_calculation(self, resource_manager):
-        """Test thread pool active count calculation."""
-        # Create executor
-        executor = await resource_manager.get_executor()
+        """Test thread pool active count calculation.
 
-        # Mock threads with different states
-        mock_threads = []
-        for i in range(3):
-            thread = MagicMock()
-            thread.is_alive.return_value = i < 2  # First 2 are alive
-            mock_threads.append(thread)
+        After Bug #67 fix, active count is derived from _active_operations
+        rather than private _threads.
+        """
+        await resource_manager.get_executor()
 
-        with patch.object(executor, "_threads", mock_threads):
-            stats = resource_manager.get_resource_stats()
-            assert stats.thread_pool_active == 2
+        # Simulate 2 active operations
+        resource_manager._active_operations = 2
+        stats = resource_manager.get_resource_stats()
+        assert stats.thread_pool_active == 2
 
-        # Test with exception during thread counting
-        with patch.object(executor, "_threads", side_effect=Exception("Thread error")):
-            stats = resource_manager.get_resource_stats()
-            assert stats.thread_pool_active == 0
+        # With 0 operations
+        resource_manager._active_operations = 0
+        stats = resource_manager.get_resource_stats()
+        assert stats.thread_pool_active == 0
 
     @pytest.mark.asyncio
     async def test_enforce_resource_limits_exception_handling(self, resource_manager):

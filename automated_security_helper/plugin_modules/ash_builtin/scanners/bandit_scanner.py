@@ -333,7 +333,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: BanditScannerConfig | None = None,
     ) -> SarifReport | bool:
         """Execute Bandit scan and return results.
@@ -347,6 +347,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -390,9 +392,13 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         target_results_dir = Path(self.results_dir).joinpath(target_type)
         results_file = target_results_dir.joinpath("bandit.sarif")
         Path(results_file).parent.mkdir(exist_ok=True, parents=True)
-        self.config.options.excluded_paths.extend(global_ignore_paths)
+        # Save original excluded_paths and restore after _resolve_arguments
+        # to avoid accumulating paths across repeated scan() calls.
+        original_excluded_paths = self.config.options.excluded_paths
+        self.config.options.excluded_paths = list(original_excluded_paths) + list(global_ignore_paths)
 
         final_args = self._resolve_arguments(target=target, results_file=results_file)
+        self.config.options.excluded_paths = original_excluded_paths
         command_str = " ".join(str(arg) for arg in final_args)
         ASH_LOGGER.info(f"Executing bandit command: {command_str}")
         self._run_subprocess(
@@ -425,20 +431,21 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             bandit_results = json.loads(content)
         try:
             sarif_report: SarifReport = SarifReport.model_validate(bandit_results)
-            sarif_report.runs[0].invocations = [
-                Invocation(
-                    commandLine=final_args[0],
-                    arguments=final_args[1:],
-                    startTimeUtc=self.start_time,
-                    endTimeUtc=self.end_time,
-                    executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
-                    exitCode=self.exit_code,
-                    exitCodeDescription="\n".join(self.errors),
-                    workingDirectory=ArtifactLocation(
-                        uri=get_shortest_name(input=target),
-                    ),
-                )
-            ]
+            if sarif_report.runs:
+                sarif_report.runs[0].invocations = [
+                    Invocation(
+                        commandLine=final_args[0],
+                        arguments=final_args[1:],
+                        startTimeUtc=self.start_time,
+                        endTimeUtc=self.end_time,
+                        executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                        exitCode=self.exit_code,
+                        exitCodeDescription="\n".join(self.errors),
+                        workingDirectory=ArtifactLocation(
+                            uri=get_shortest_name(input=target),
+                        ),
+                    )
+                ]
 
             # Mask secrets in the SARIF report before returning
             sarif_report = mask_secrets_in_sarif(sarif_report)

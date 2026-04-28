@@ -3,7 +3,7 @@
 
 import logging
 from pathlib import Path
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 import typer
 from rich import print, print_json
 from rich.markdown import Markdown
@@ -39,12 +39,12 @@ def report_command(
         ),
     ] = ReportFormat.markdown.value,
     output_dir: Annotated[
-        str,
+        str | None,
         typer.Option(
             help="The directory to output results to",
             envvar="ASH_OUTPUT_DIR",
         ),
-    ] = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    ] = None,
     log_level: Annotated[
         AshLogLevel,
         typer.Option(
@@ -62,12 +62,12 @@ def report_command(
         ),
     ] = None,
     config_overrides: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Option(
             "--config-overrides",
             help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
         ),
-    ] = [],
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
     ] = False,
@@ -77,6 +77,8 @@ def report_command(
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ):
     """Generate a report from ASH scan results using the specified reporter plugin."""
+    if config_overrides is None:
+        config_overrides = []
     # Set up logging
     final_log_level = (
         AshLogLevel.VERBOSE
@@ -104,6 +106,9 @@ def report_command(
         show_progress=False,
         use_color=color,
     )
+    # Resolve cwd-based default at call time (not import time).
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
     results_file = None
     output_dir_path = Path(output_dir)
     results_file_paths = [

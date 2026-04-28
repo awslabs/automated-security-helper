@@ -27,50 +27,50 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 def run_ash_scan_cli_command(
     ctx: typer.Context,
     source_dir: Annotated[
-        str,
+        str | None,
         typer.Option(
             help="The source directory to scan",
             envvar="ASH_SOURCE_DIR",
             writable=False,
         ),
-    ] = Path.cwd().as_posix(),
+    ] = None,
     output_dir: Annotated[
-        str,
+        str | None,
         typer.Option(
             help="The directory to output results to",
             envvar="ASH_OUTPUT_DIR",
             writable=True,
         ),
-    ] = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    ] = None,
     scanners: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Option(
             help="Specific scanner names to run. Defaults to all scanners.",
             envvar="ASH_SCANNERS",
         ),
-    ] = [],
+    ] = None,
     exclude_scanners: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Option(
             help="Specific scanner names to exclude from running. Takes precedence over scanners parameter.",
             envvar="ASH_EXCLUDED_SCANNERS",
         ),
-    ] = [],
+    ] = None,
     ash_plugin_modules: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Option(
             help="List of Python modules to import containing ASH plugins and/or event subscribers. These are loaded in addition to the default modules.",
             envvar="ASH_PLUGIN_MODULES",
         ),
-    ] = [],
+    ] = None,
     config_overrides: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Option(
             "--config-overrides",
             help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2'). "
             "Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. See docs/config-overrides.md",
         ),
-    ] = [],
+    ] = None,
     offline: Annotated[
         bool,
         typer.Option(
@@ -97,7 +97,7 @@ def run_ash_scan_cli_command(
         ),
     ] = True,
     output_formats: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Option(
             "--output-formats",
             "--output-format",
@@ -106,7 +106,7 @@ def run_ash_scan_cli_command(
             "-f",
             help=f"The output formats to use (comma-separated). Available formats: {', '.join([f.value for f in ExportFormat])}",
         ),
-    ] = [],
+    ] = None,
     cleanup: Annotated[
         bool,
         typer.Option(
@@ -114,15 +114,11 @@ def run_ash_scan_cli_command(
         ),
     ] = False,
     phases: Annotated[
-        List[Phases],
+        Optional[List[Phases]],
         typer.Option(
             help="The phases to run. Defaults to all phases except inspect.",
         ),
-    ] = [
-        Phases.convert,
-        Phases.scan,
-        Phases.report,
-    ],
+    ] = None,
     inspect: Annotated[
         bool,
         typer.Option(
@@ -286,11 +282,11 @@ def run_ash_scan_cli_command(
         ),
     ] = None,
     custom_build_arg: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Option(
             help="Custom build arguments to pass to the container build",
         ),
-    ] = [],
+    ] = None,
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
     # Skip if this is tab completion or if a subcommand was invoked
@@ -302,6 +298,30 @@ def run_ash_scan_cli_command(
     if version:
         typer.echo(f"awslabs/automated-security-helper v{get_ash_version()}")
         raise typer.Exit()
+
+    # Rebind list defaults to fresh empty lists at call time so each CLI
+    # invocation gets its own collection (typer will populate them if the
+    # user supplies --scanners etc., but we guard against reusing aliases).
+    if scanners is None:
+        scanners = []
+    if exclude_scanners is None:
+        exclude_scanners = []
+    if ash_plugin_modules is None:
+        ash_plugin_modules = []
+    if config_overrides is None:
+        config_overrides = []
+    if output_formats is None:
+        output_formats = []
+    if phases is None:
+        phases = [Phases.convert, Phases.scan, Phases.report]
+    if custom_build_arg is None:
+        custom_build_arg = []
+
+    # Resolve cwd-based defaults at call time (not import time).
+    if source_dir is None:
+        source_dir = Path.cwd().as_posix()
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
 
     if Path(source_dir).absolute().as_posix() == Path(output_dir).absolute().as_posix():
         output_dir = Path(output_dir).joinpath(".ash", "ash_output")

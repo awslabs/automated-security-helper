@@ -45,8 +45,8 @@ class CsvReporter(ReporterPluginBase[CSVReporterConfig]):
             "runs[].results[].message.text": "Description",
             "runs[].results[].level": "Severity",
             "runs[].results[].locations[].physicalLocation.artifactLocation.uri": "File Path",
-            "runs[].results[]locations[].physicalLocation.region.startLine": "Line Start",
-            "runs[].results[]locations[].physicalLocation.region.endLine": "Line End",
+            "runs[].results[].locations[].physicalLocation.region.startLine": "Line Start",
+            "runs[].results[].locations[].physicalLocation.region.endLine": "Line End",
             "runs[].tool.driver.name": "Scanner",
         }
 

@@ -335,7 +335,7 @@ class ASHScanOrchestrator(BaseModel):
             raise e
 
     def execute_scan(
-        self, phases: List[ExecutionPhaseType] = ["convert", "scan", "report"]
+        self, phases: List[ExecutionPhaseType] | None = None
     ) -> AshAggregatedResults:
         """Execute the security scan and return results.
 
@@ -346,6 +346,8 @@ class ASHScanOrchestrator(BaseModel):
         Returns:
             AshAggregatedResults: The results of the scan.
         """
+        if phases is None:
+            phases = ["convert", "scan", "report"]
         ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
         ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
         ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")
@@ -467,8 +469,9 @@ class ASHScanOrchestrator(BaseModel):
                 #                 f"Unexpected response when formatting {fmt}: {outfile}"
                 #             )
             if not self.no_cleanup:
-                ASH_LOGGER.verbose("Cleaning up working directory...")
-                shutil.rmtree(self.work_dir)
+                if self.work_dir and Path(self.work_dir).exists():
+                    ASH_LOGGER.verbose("Cleaning up working directory...")
+                    shutil.rmtree(self.work_dir)
                 # ASH_LOGGER.info("Cleaning up scanners directory...")
                 # shutil.rmtree(self.output_dir.joinpath("scanners"))
 

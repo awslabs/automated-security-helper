@@ -94,18 +94,18 @@ def build_ash_image_cli_command(
         ),
     ] = None,
     custom_build_arg: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Option(
             help="Custom build arguments to pass to the container build",
         ),
-    ] = [],
+    ] = None,
     config_overrides: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Option(
             "--config-overrides",
             help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
         ),
-    ] = [],
+    ] = None,
     # General Options
     offline: Annotated[
         bool,
@@ -140,6 +140,12 @@ def build_ash_image_cli_command(
 ):
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "image"]:
         return
+
+    # Rebind list defaults to fresh empty lists at call time.
+    if custom_build_arg is None:
+        custom_build_arg = []
+    if config_overrides is None:
+        config_overrides = []
 
     # Call run_ash_scan with all parameters
     run_ash_scan(

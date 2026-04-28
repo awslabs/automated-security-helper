@@ -49,6 +49,7 @@ class TaskManager:
         self._logger = ASH_LOGGER
         self._task_counter = 0
         self._max_tasks = max_tasks
+        self._cleanup_tasks: set = set()
 
     async def create_tracked_task(
         self,
@@ -138,8 +139,11 @@ class TaskManager:
         """
         task_id = str(id(task))
 
-        # Schedule async cleanup
-        asyncio.create_task(self._cleanup_completed_task(task_id, task))
+        # Schedule async cleanup and store the reference so GC cannot
+        # collect the coroutine mid-execution (Bug #12).
+        cleanup_task = asyncio.create_task(self._cleanup_completed_task(task_id, task))
+        self._cleanup_tasks.add(cleanup_task)
+        cleanup_task.add_done_callback(self._cleanup_tasks.discard)
 
     async def _cleanup_completed_task(self, task_id: str, task: asyncio.Task) -> None:
         """Clean up a completed task.
@@ -191,6 +195,9 @@ class TaskManager:
         Returns:
             True if task was cancelled successfully, False otherwise
         """
+        # Acquire lock to look up and cancel the task, then release before
+        # awaiting.  The done-callback needs this lock for cleanup, so holding
+        # it during the await would deadlock (Bug #11).
         async with self._task_lock:
             task_info = self._active_tasks.get(task_id)
             if task_info is None:
@@ -198,29 +205,39 @@ class TaskManager:
                 return False
 
             task = task_info.task
+            task_name = task_info.name
             if task.done():
-                self._logger.debug(f"Task '{task_info.name}' already completed")
+                self._logger.debug(f"Task '{task_name}' already completed")
                 return True
 
-            # Cancel the task
+            # Request cancellation while we hold the lock.
             task.cancel()
 
-            try:
-                # Wait for cancellation with timeout
-                await asyncio.wait_for(task, timeout=timeout)
-            except asyncio.CancelledError:
-                self._logger.debug(f"Task '{task_info.name}' cancelled successfully")
-                return True
-            except asyncio.TimeoutError:
-                self._logger.warning(
-                    f"Task '{task_info.name}' cancellation timed out after {timeout}s"
-                )
-                return False
-            except Exception as e:
-                self._logger.error(
-                    f"Unexpected error during task cancellation: {str(e)}"
-                )
-                return False
+        # Lock released -- the done-callback can now run its cleanup.
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        except Exception as e:
+            self._logger.error(
+                f"Unexpected error during task cancellation: {str(e)}"
+            )
+
+        # Re-acquire to clean up any residual entry.
+        async with self._task_lock:
+            self._active_tasks.pop(task_id, None)
+
+        if task.cancelled():
+            self._logger.debug(f"Task '{task_name}' cancelled successfully")
+            return True
+
+        if task.done():
+            return True
+
+        self._logger.warning(
+            f"Task '{task_name}' cancellation timed out after {timeout}s"
+        )
+        return False
 
     async def cancel_tasks_by_scan_id(
         self, scan_id: str, timeout: float = 30.0
@@ -347,7 +364,9 @@ class TaskManager:
         Returns:
             List of task information dictionaries
         """
-        return [self.get_task_info(task_id) for task_id in self._active_tasks.keys()]
+        # Copy keys under implicit snapshot to avoid RuntimeError from concurrent mutation
+        task_ids = list(self._active_tasks.keys())
+        return [self.get_task_info(task_id) for task_id in task_ids]
 
     def get_tasks_by_scan_id(self, scan_id: str) -> List[Dict[str, Any]]:
         """Get all tasks associated with a specific scan ID.
@@ -358,9 +377,11 @@ class TaskManager:
         Returns:
             List of task information dictionaries
         """
+        # Copy items under implicit snapshot to avoid RuntimeError from concurrent mutation
+        items = list(self._active_tasks.items())
         return [
             self.get_task_info(task_id)
-            for task_id, task_info in self._active_tasks.items()
+            for task_id, task_info in items
             if task_info.scan_id == scan_id
         ]
 

@@ -180,10 +180,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
 
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 
+                safe_scanner = result['scanner_name'].replace("|", "\\|")
+                safe_threshold = threshold_text.replace("|", "\\|")
                 md_parts.append(
-                    f"| {result['scanner_name']} | {result['suppressed']} | {result['critical']} | {result['high']} | "
+                    f"| {safe_scanner} | {result['suppressed']} | {result['critical']} | {result['high']} | "
                     f"{result['medium']} | {result['low']} | {result['info']} | {result['actionable']} | "
-                    f"{status_text} | {threshold_text} |"
+                    f"{status_text} | {safe_threshold} |"
                 )
 
             md_parts.append("")
@@ -215,9 +217,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     # Escape pipe characters in markdown table
                     title = finding["title"].replace("|", "\\|")
                     file_path = finding["file_path"].replace("|", "\\|")
+                    severity = finding["severity"].replace("|", "\\|")
+                    scanner = finding["scanner"].replace("|", "\\|")
+                    rule_id = finding["rule_id"].replace("|", "\\|")
 
                     md_parts.append(
-                        f"| {finding['severity']} | {finding['scanner']} | {finding['rule_id']} | {title} | {file_path} |"
+                        f"| {severity} | {scanner} | {rule_id} | {title} | {file_path} |"
                     )
 
                 md_parts.append("")

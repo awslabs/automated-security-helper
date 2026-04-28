@@ -30,23 +30,18 @@ def test_get_finding_id():
 def test_sanitize_uri(test_source_dir):
     """Test the _sanitize_uri function."""
     source_dir_path = test_source_dir
-    source_dir_str = str(source_dir_path) + "/"
+    source_dir_str = source_dir_path.as_posix() + "/"
 
-    # Test with file:// prefix - this should work without mocking
-    uri = f"file://{source_dir_path}/src/file.py"
-    with patch.object(Path, "relative_to", return_value=Path("src/file.py")):
-        sanitized = _sanitize_uri(uri, source_dir_path, source_dir_str)
-        # Use partial matching for the parts that don't involve path separators
-        assert "src" in sanitized
-        assert "file.py" in sanitized
-        assert not sanitized.startswith("file://")  # file:// prefix should be removed
-        # On Windows, backslashes get converted to forward slashes
-        if sys.platform.lower() == "windows":
-            assert (
-                "/" in sanitized or "\\" not in sanitized
-            )  # Should have forward slashes
-        else:
-            assert sanitized == "src/file.py"
+    # Test with file:// prefix using a fixed Unix-style path
+    # (file:// URIs in SARIF always use forward slashes)
+    fixed_source = "/project/repo"
+    fixed_source_str = fixed_source + "/"
+    uri = f"file://{fixed_source}/src/file.py"
+    sanitized = _sanitize_uri(uri, Path(fixed_source), fixed_source_str)
+    assert "src" in sanitized
+    assert "file.py" in sanitized
+    assert not sanitized.startswith("file://")
+    assert "src/file.py" in sanitized
 
     # Test with backslashes - this is where Windows conversion happens
     uri = "src\\file.py"

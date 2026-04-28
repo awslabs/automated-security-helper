@@ -15,8 +15,9 @@ from automated_security_helper.plugins.loader import load_plugins
 @pytest.fixture
 def mock_plugin_module():
     """Create a mock plugin module for testing."""
-    # Create a temporary module
-    module_name = "ash_plugins_test"
+    # Use a dotted name under the ash_plugins namespace to match the
+    # tightened prefix check: exact match or dotted subpackage only.
+    module_name = "ash_plugins.test"
     spec = importlib.util.find_spec("builtins")
     module = importlib.util.module_from_spec(spec)
     module.__name__ = module_name

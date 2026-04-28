@@ -48,7 +48,7 @@ class ReporterPluginBase(PluginBase, Generic[T]):
     ) -> None:
         """Configure the reporter with provided configuration."""
         if config:
-            self._config = config
+            self.config = config
 
     def _pre_report(self) -> None:
         self.start_time = datetime.now(timezone.utc)

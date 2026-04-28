@@ -121,9 +121,15 @@ jobs:
 
       - name: Install OpenGrep
         if: inputs.install-opengrep
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh | bash
-          echo "$HOME/.opengrep/cli/latest" >> $GITHUB_PATH
+          INSTALL_DIR="$HOME/.opengrep/cli/latest"
+          mkdir -p "$INSTALL_DIR"
+          gh release download --repo opengrep/opengrep --pattern 'opengrep_manylinux_x86' --dir "$INSTALL_DIR"
+          chmod +x "$INSTALL_DIR/opengrep_manylinux_x86"
+          ln -sf "$INSTALL_DIR/opengrep_manylinux_x86" "$INSTALL_DIR/opengrep"
+          echo "$INSTALL_DIR" >> $GITHUB_PATH
 
       - name: Run ASH
         id: ash

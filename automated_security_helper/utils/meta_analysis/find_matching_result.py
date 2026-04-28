@@ -37,18 +37,23 @@ def find_matching_result(original_result: Dict, aggregated_results: List[Dict]) 
             agg_location = extract_location_info(agg_result)
 
             # Compare locations, allowing for path normalization
-            if locations_match(location_info, agg_location):
+            loc_matched = locations_match(location_info, agg_location)
+            if loc_matched:
                 return agg_result
 
-            # If locations don't match but messages do, consider it a match
-            if (
-                original_result.get("message")
-                and agg_result.get("message")
-                and get_message_text(original_result) == get_message_text(agg_result)
-            ):
-                return agg_result
+            # If locations explicitly don't match, a message-only match
+            # is not reliable enough -- skip to avoid false positives.
+            # Only fall back to analysisTarget when locations are absent.
+            if not location_info and not agg_location:
+                # No location info on either side; fall back to message match
+                if (
+                    original_result.get("message")
+                    and agg_result.get("message")
+                    and get_message_text(original_result) == get_message_text(agg_result)
+                ):
+                    return agg_result
 
-            # Check analysisTarget if available
+            # Check analysisTarget if available (independent of location match)
             if (
                 original_result.get("analysisTarget")
                 and agg_result.get("analysisTarget")

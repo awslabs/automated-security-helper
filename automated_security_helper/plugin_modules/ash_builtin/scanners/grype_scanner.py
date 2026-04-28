@@ -60,6 +60,10 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     """GrypeScanner implements IaC scanning using Grype."""
 
     check_conf: str = "NOT_PROVIDED"
+    # Env vars to layer onto the subprocess. Populated by
+    # _process_config_options (e.g. offline-mode flags). Kept local to the
+    # scanner instance so concurrent scanners don't race on os.environ.
+    extra_env: Annotated[dict, Field(default_factory=dict)]
 
     def model_post_init(self, context):
         if self.config is None:
@@ -151,12 +155,17 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 )
                 break
 
-        # Handle offline mode
+        # Handle offline mode. Stash offline-mode env vars on the instance
+        # rather than writing to os.environ — scanners run concurrently
+        # in thread pools and would race on the shared parent env.
         if self.config.options.offline:
-            # Add environment variables for offline mode
-            os.environ["GRYPE_DB_VALIDATE_AGE"] = "false"
-            os.environ["GRYPE_DB_AUTO_UPDATE"] = "false"
-            os.environ["GRYPE_CHECK_FOR_APP_UPDATE"] = "false"
+            self.extra_env.update(
+                {
+                    "GRYPE_DB_VALIDATE_AGE": "false",
+                    "GRYPE_DB_AUTO_UPDATE": "false",
+                    "GRYPE_CHECK_FOR_APP_UPDATE": "false",
+                }
+            )
 
             # Validate offline mode requirements
             from automated_security_helper.utils.offline_mode_validator import (
@@ -175,7 +184,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: GrypeScannerConfig | None = None,
     ) -> SarifReport | bool:
         """Execute Grype scan and return results.
@@ -189,6 +198,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -238,9 +249,13 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 target=f"dir:{target.as_posix()}",
                 results_file=results_file,
             )
+            subprocess_env = (
+                {**os.environ, **self.extra_env} if self.extra_env else None
+            )
             self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
+                env=subprocess_env,
             )
 
             self._post_scan(
@@ -287,7 +302,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                         arguments=final_args[1:],
                         startTimeUtc=self.start_time,
                         endTimeUtc=self.end_time,
-                        executionSuccessful=(self.exit_code != 1),
+                        executionSuccessful=(self.exit_code in (0, 2)),
                         exitCode=self.exit_code,
                         exitCodeDescription="\n".join(self.errors),
                         workingDirectory=ArtifactLocation(

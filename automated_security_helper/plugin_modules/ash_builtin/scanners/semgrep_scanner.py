@@ -359,7 +359,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: SemgrepScannerConfig | None = None,
     ) -> SarifReport | bool | None:
         """Execute Semgrep scan and return results.
@@ -376,6 +376,8 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -443,35 +445,19 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 level=15,
             )
 
-            # Set environment variables for offline mode if needed
+            # Build a local environment with offline-mode additions. Do
+            # not mutate os.environ: scanners run concurrently in thread
+            # pools and share the parent process env.
             env_vars = {}
             if self.config.options.offline and "SEMGREP_RULES_CACHE_DIR" in os.environ:
                 env_vars["SEMGREP_RULES"] = f"{os.environ['SEMGREP_RULES_CACHE_DIR']}/*"
 
-            # Run the subprocess with the environment variables
-            if env_vars:
-                # Need to modify environment for the subprocess
-                orig_env = os.environ.copy()
-                for k, v in env_vars.items():
-                    os.environ[k] = v
-
-                self._run_subprocess(
-                    command=final_args,
-                    results_dir=target_results_dir,
-                )
-
-                # Restore original environment
-                for k in env_vars.keys():
-                    if k in orig_env:
-                        os.environ[k] = orig_env[k]
-                    else:
-                        del os.environ[k]
-            else:
-                # No environment modifications needed
-                self._run_subprocess(
-                    command=final_args,
-                    results_dir=target_results_dir,
-                )
+            subprocess_env = {**os.environ, **env_vars} if env_vars else None
+            self._run_subprocess(
+                command=final_args,
+                results_dir=target_results_dir,
+                env=subprocess_env,
+            )
 
             self._post_scan(
                 target=target,
@@ -506,20 +492,21 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                         },
                     )
 
-                    sarif_report.runs[0].invocations = [
-                        Invocation(
-                            commandLine=" ".join(final_args),
-                            arguments=final_args[1:],
-                            startTimeUtc=self.start_time,
-                            endTimeUtc=self.end_time,
-                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
-                            exitCode=self.exit_code,
-                            exitCodeDescription="\n".join(self.errors),
-                            workingDirectory=ArtifactLocation(
-                                uri=get_shortest_name(input=target),
-                            ),
-                        )
-                    ]
+                    if sarif_report.runs:
+                        sarif_report.runs[0].invocations = [
+                            Invocation(
+                                commandLine=" ".join(final_args),
+                                arguments=final_args[1:],
+                                startTimeUtc=self.start_time,
+                                endTimeUtc=self.end_time,
+                                executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                                exitCode=self.exit_code,
+                                exitCodeDescription="\n".join(self.errors),
+                                workingDirectory=ArtifactLocation(
+                                    uri=get_shortest_name(input=target),
+                                ),
+                            )
+                        ]
                     self._post_scan(
                         target=target,
                         target_type=target_type,

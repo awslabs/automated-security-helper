@@ -53,18 +53,30 @@ def run_cdk_nag_against_cfn_template(
             "NIST80053R5Checks",
             "PCIDSS321Checks",
         ]
-    ] = [
-        "AwsSolutionsChecks",
-    ],
+    ]
+    | None = None,
     outdir: Path | None = None,
     include_compliant_checks: bool = True,
     stack_name: str = "ASHCDKNagScanner",
 ) -> CdkNagWrapperResponse | None:
+    if nag_packs is None:
+        nag_packs = ["AwsSolutionsChecks"]
     results: Dict[str, List[dict]] = {}
 
-    os.environ["NODE_NO_WARNINGS"] = "1"
-    os.environ["JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION"] = "1"
-    os.environ["JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION"] = "1"
+    # JSII (used by cdk_nag) reads these env vars at Python module import
+    # time, so we can't pass them via env= to a subprocess — we have to
+    # set them in this process. Snapshot the original values so we can
+    # restore them in the finally block and not leak into the parent
+    # process after the scan (scanners run in parallel threads, so
+    # permanent writes would race with other work).
+    _jsii_env_keys = (
+        "NODE_NO_WARNINGS",
+        "JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION",
+        "JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION",
+    )
+    _original_jsii_env = {k: os.environ.get(k) for k in _jsii_env_keys}
+    for _k in _jsii_env_keys:
+        os.environ[_k] = "1"
 
     # Suppress JSII stack traces by redirecting stderr for entire function
     import sys
@@ -77,7 +89,7 @@ def run_cdk_nag_against_cfn_template(
 
         try:
             import cdk_nag
-        except FileNotFoundError:
+        except (ImportError, FileNotFoundError):
             sys.stderr = original_stderr
             ASH_LOGGER.warning(
                 "NodeJS is missing and CDK Nag depends on it due to transitive dependencies. "
@@ -141,6 +153,7 @@ def run_cdk_nag_against_cfn_template(
 
         ASH_LOGGER.debug(f"Validated model from template: {model}")
         ASH_LOGGER.debug(f"outdir: {outdir.as_posix() if outdir else 'None'}")
+        clean_template_filename = Path(template_path).as_posix()
         try:
             clean_template_filename = get_shortest_name(input=template_path)
         except ValueError as e:
@@ -148,11 +161,14 @@ def run_cdk_nag_against_cfn_template(
             clean_template_filename = Path(template_path).as_posix()
         except Exception as e:
             ASH_LOGGER.debug(f"Could not get relative path to template: {e}")
+            clean_template_filename = Path(template_path).as_posix()
         ASH_LOGGER.debug(f"clean_template_filename: {clean_template_filename}")
         clean_template_filename = re.sub(
             r"(\/|\\|\.)+", "--", clean_template_filename.lstrip("/")
         )
         ASH_LOGGER.debug(f"clean_template_filename: {clean_template_filename}")
+        if outdir is None:
+            raise ValueError("outdir is required for cdk_nag scanning")
         ASH_LOGGER.debug(f"cdk nag outdir pre: {outdir.__str__()}")
         outdir = outdir.joinpath(clean_template_filename)
         ASH_LOGGER.debug(f"cdk nag outdir post: {outdir.__str__()}")
@@ -260,10 +276,14 @@ def run_cdk_nag_against_cfn_template(
                 # number of the resource_log_id
                 resource_line = None
                 resource_column = None
-                for i, line_str in enumerate(template_lines):
-                    if resource_log_id in line_str:
+                resource_log_id_pattern = re.compile(
+                    r"(?<![a-zA-Z0-9_])" + re.escape(resource_log_id) + r"(?![a-zA-Z0-9_])"
+                )
+                for i, line_str in enumerate(template_lines, start=1):
+                    match = resource_log_id_pattern.search(line_str)
+                    if match:
                         resource_line = i
-                        resource_column = line_str.index(resource_log_id)
+                        resource_column = match.start()
                         break
 
                 cfn_resource_dict = {
@@ -394,6 +414,13 @@ def run_cdk_nag_against_cfn_template(
         sys.stderr = original_stderr
         if devnull_file:
             devnull_file.close()
+        # Restore JSII-related env vars so we don't leak into the parent
+        # process. Vars that didn't exist originally are removed.
+        for _k, _orig in _original_jsii_env.items():
+            if _orig is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _orig
 
 
 if __name__ == "__main__":

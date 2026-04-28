@@ -47,8 +47,10 @@ def _rule_id_matches(finding_rule_id: Optional[str], suppression_rule_id: str) -
     if finding_rule_id is None:
         return False
 
-    # Allow glob pattern matching for rule IDs
-    return fnmatch.fnmatch(finding_rule_id, suppression_rule_id)
+    # Normalize to lowercase for OS-independent case-insensitive matching.
+    # fnmatch.fnmatch is case-insensitive on macOS/Windows but case-sensitive
+    # on Linux, so we force lowercase on both sides for consistent behavior.
+    return fnmatch.fnmatch(finding_rule_id.lower(), suppression_rule_id.lower())
 
 
 def _file_path_matches(
@@ -63,7 +65,11 @@ def _file_path_matches(
     if finding_file_path is None:
         return False
 
-    if finding_file_path == suppression_file_path:
+    # Normalize to lowercase for OS-independent case-insensitive matching.
+    finding_lower = finding_file_path.lower()
+    suppression_lower = suppression_file_path.lower()
+
+    if finding_lower == suppression_lower:
         return True
 
     # When the pattern contains "**", we need special handling because
@@ -71,10 +77,10 @@ def _file_path_matches(
     # recursive directory matching.  We split on "**" and check that
     # each segment matches in order, allowing any number of path
     # components (including zero) in place of each "**".
-    if "**" in suppression_file_path:
-        return _recursive_glob_match(finding_file_path, suppression_file_path)
+    if "**" in suppression_lower:
+        return _recursive_glob_match(finding_lower, suppression_lower)
 
-    return fnmatch.fnmatch(finding_file_path, suppression_file_path)
+    return fnmatch.fnmatch(finding_lower, suppression_lower)
 
 
 def _recursive_glob_match(path: str, pattern: str) -> bool:
@@ -196,8 +202,13 @@ def _line_range_matches(
 
     # If only start line is specified in suppression
     if suppression.line_start is not None and suppression.line_end is None:
-        # Match if finding starts at or after the suppression start line
-        return finding.line_start >= suppression.line_start
+        # Match if finding overlaps with the suppression start line:
+        # either the finding starts at/after suppression start, or the
+        # finding spans across the suppression start (multi-line finding).
+        finding_end = (
+            finding.line_end if finding.line_end is not None else finding.line_start
+        )
+        return finding_end >= suppression.line_start
 
     # If only end line is specified in suppression
     if suppression.line_start is None and suppression.line_end is not None:
@@ -239,7 +250,7 @@ def should_suppress_finding(
                 expiration_date = datetime.strptime(
                     suppression.expiration, "%Y-%m-%d"
                 ).date()
-                if expiration_date < datetime.now().date():
+                if expiration_date <= datetime.now().date():
                     ASH_LOGGER.debug(
                         f"Suppression for rule {suppression.rule_id} has expired on {suppression.expiration}"
                     )

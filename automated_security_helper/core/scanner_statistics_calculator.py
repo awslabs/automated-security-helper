@@ -159,7 +159,7 @@ class ScannerStatisticsCalculator:
                 )
             )
 
-            total = critical + high + medium + low + info + suppressed
+            total = critical + high + medium + low + info
 
             # Calculate actionable findings based on threshold
             actionable = ScannerStatisticsCalculator.calculate_actionable_count(
@@ -176,12 +176,8 @@ class ScannerStatisticsCalculator:
             ):
                 container_data = asharp_model.additional_reports[scanner_name]["source"]
                 if isinstance(container_data, dict) and "duration" in container_data:
-                    # Handle None duration (for skipped/missing scanners) by keeping it as None
-                    duration = (
-                        container_data["duration"]
-                        if container_data["duration"] is not None
-                        else None
-                    )
+                    # Guard against None duration to prevent downstream formatting crashes
+                    duration = container_data["duration"] or 0.0
                     ASH_LOGGER.debug(
                         f"Got duration for {scanner_name} from additional_reports: {duration}"
                     )
@@ -505,17 +501,19 @@ class ScannerStatisticsCalculator:
         Returns:
             Number of actionable findings based on the threshold
         """
-        if threshold == "ALL":
-            return critical + high + medium + low + info
-        elif threshold == "LOW":
-            return critical + high + medium + low
-        elif threshold == "MEDIUM":
-            return critical + high + medium
-        elif threshold == "HIGH":
-            return critical + high
-        elif threshold == "CRITICAL":
-            return critical
-        return 0
+        match threshold:
+            case "ALL":
+                return critical + high + medium + low + info
+            case "LOW":
+                return critical + high + medium + low
+            case "MEDIUM":
+                return critical + high + medium
+            case "HIGH":
+                return critical + high
+            case "CRITICAL":
+                return critical
+            case _:
+                return 0
 
     @staticmethod
     def get_scanner_threshold_info(
@@ -638,23 +636,21 @@ class ScannerStatisticsCalculator:
             == scanner_name
         ):
             status = asharp_model.additional_reports[scanner_name]["None"]["status"]
-            if status == "SKIPPED":
-                excluded = True
-            elif status == "MISSING":
-                dependencies_missing = True
-            elif status == "ERROR":
-                error = True
-            elif status == "FAILED":
-                # FAILED means scanner ran successfully and found actionable findings
-                # This is a valid completion status, not an error or exclusion
-                pass
-            elif status == "PASSED":
-                # PASSED means scanner ran successfully with no actionable findings
-                # This is a valid completion status
-                pass
-            else:
-                # For any other unknown status, treat as excluded for backward compatibility
-                excluded = True
+            match status:
+                case "SKIPPED":
+                    excluded = True
+                case "MISSING":
+                    dependencies_missing = True
+                case "ERROR":
+                    error = True
+                case "FAILED" | "PASSED":
+                    # FAILED means scanner ran successfully and found actionable findings
+                    # PASSED means scanner ran successfully with no actionable findings
+                    # Both are valid completion statuses
+                    pass
+                case _:
+                    # For any other unknown status, treat as excluded for backward compatibility
+                    excluded = True
         elif scanner_name in asharp_model.scanner_results:
             scanner_status_info = asharp_model.scanner_results[scanner_name]
 
@@ -675,19 +671,21 @@ class ScannerStatisticsCalculator:
         ):
             # If the scanner is not found in the dictionary, check for errors
             status = asharp_model.additional_reports[scanner_name]["source"]["status"]
-            if status == "SKIPPED":
-                excluded = True
-            elif status == "MISSING":
-                dependencies_missing = True
-            elif status == "ERROR":
-                error = True
-            elif status == "FAILED":
-                # FAILED means scanner ran successfully and found actionable findings
-                # This is a valid completion status, not an error or exclusion
-                pass
-            elif status != "PASSED":
-                # For any other unknown status, treat as excluded for backward compatibility
-                excluded = True
+            match status:
+                case "SKIPPED":
+                    excluded = True
+                case "MISSING":
+                    dependencies_missing = True
+                case "ERROR":
+                    error = True
+                case "FAILED" | "PASSED":
+                    # FAILED means scanner ran successfully and found actionable findings
+                    # PASSED means scanner ran successfully with no actionable findings
+                    # Both are valid completion statuses
+                    pass
+                case _:
+                    # For any other unknown status, treat as excluded for backward compatibility
+                    excluded = True
         else:
             # If the scanner is not found in the dictionary, check for errors
             error = True

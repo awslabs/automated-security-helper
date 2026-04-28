@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import logging
+import re
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
@@ -13,6 +14,10 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from pydantic import Field
 from typing import Annotated, Any, Generic, List, Literal, Optional, TypeVar
 from abc import abstractmethod
+
+# Pattern for valid CLI flag keys: one or two leading dashes followed by
+# a letter, then alphanumerics/underscores/hyphens.
+_VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*$")
 from pathlib import Path
 
 
@@ -135,6 +140,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         ]
 
         for tool_extra_arg in self.args.extra_args:
+            if not _VALID_FLAG_KEY_PATTERN.match(tool_extra_arg.key):
+                ASH_LOGGER.warning(
+                    f"Skipping extra arg with invalid key: {tool_extra_arg.key!r}. "
+                    "Keys must match pattern: -<letter> or --<letter>[alphanumeric_-]*"
+                )
+                continue
             args.append(tool_extra_arg.key)
             args.append(tool_extra_arg.value)
 
@@ -289,7 +300,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: T | ScannerPluginConfigBase | None = None,
         *args,
         **kwargs,
@@ -312,7 +323,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: T | ScannerPluginConfigBase | None = None,
         *args,
         **kwargs,
@@ -334,6 +345,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         Returns:
             Dict containing scan results or error information
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         try:
             return self.scan(
                 target=target,

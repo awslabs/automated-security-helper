@@ -891,7 +891,7 @@ def map_level_to_severity(level):
 
 def findings_command(
     output_dir: Path = typer.Option(
-        Path.cwd().joinpath(".ash", "ash_output"),
+        None,
         help="Path to the output directory containing an ASH Aggregated Results JSON report file to analyze.",
     ),
     report_file: str = typer.Option(

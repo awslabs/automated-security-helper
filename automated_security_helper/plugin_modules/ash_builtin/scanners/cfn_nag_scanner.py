@@ -162,7 +162,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         config: CfnNagScannerConfig | None = None,
     ) -> SarifReport | bool:
         """Execute CFN Nag scan and return results.
@@ -176,6 +176,8 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         Raises:
             ScannerError: If the scan fails or results cannot be parsed
         """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         tool_component = ToolComponent(
             name="cfn_nag",
             semanticVersion=self.tool_version,
@@ -382,7 +384,8 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     tool=sarif_tool,
                 ),
             )
-            sarif_report.runs[0].invocations = [sarif_invocation]
+            if sarif_report.runs:
+                sarif_report.runs[0].invocations = [sarif_invocation]
             with open(sarif_output_file, mode="w", encoding="utf-8") as fp:
                 report_str = sarif_report.model_dump_json(
                     exclude_none=True,

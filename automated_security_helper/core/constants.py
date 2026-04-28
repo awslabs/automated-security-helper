@@ -138,7 +138,6 @@ KNOWN_SCANNABLE_EXTENSIONS = [
     "html",
     "htm",
     "xhtml",
-    "xml",
     "svg",
     "md",
     "markdown",

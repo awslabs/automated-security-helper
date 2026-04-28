@@ -54,11 +54,11 @@ class ScanPhase(EnginePhase):
     def _execute_phase(
         self,
         aggregated_results: AshAggregatedResults,
-        enabled_scanners: List[str] = [],
-        excluded_scanners: List[str] = [],
+        enabled_scanners: List[str] | None = None,
+        excluded_scanners: List[str] | None = None,
         parallel: bool = True,
         max_workers: int = 4,
-        global_ignore_paths: List[IgnorePathWithReason] = [],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
         python_based_plugins_only: bool = False,
         **kwargs,
     ) -> AshAggregatedResults:
@@ -74,6 +74,12 @@ class ScanPhase(EnginePhase):
         Returns:
             AshAggregatedResults: Results of the scan
         """
+        if enabled_scanners is None:
+            enabled_scanners = []
+        if excluded_scanners is None:
+            excluded_scanners = []
+        if global_ignore_paths is None:
+            global_ignore_paths = []
         ASH_LOGGER.debug("Entering: ScanPhase.execute()")
 
         # Initialize progress

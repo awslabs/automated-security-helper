@@ -22,7 +22,7 @@ class EnginePhase(ABC):
         plugin_context: PluginContext,
         plugins: List[
             ConverterPluginBase | ScannerPluginBase | ReporterPluginBase
-        ] = [],
+        ] | None = None,
         progress_display: Optional[Any] = None,
         asharp_model: Optional[AshAggregatedResults] = None,
     ):
@@ -33,6 +33,8 @@ class EnginePhase(ABC):
             progress_display: Progress display to use for reporting progress
             asharp_model: AshAggregatedResults to update with results
         """
+        if plugins is None:
+            plugins = []
         self.plugin_context = plugin_context
         self.plugins = plugins
         self.progress_display = progress_display

@@ -386,7 +386,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         indexed_findings = []
 
         if model.sarif and model.sarif.runs and len(model.sarif.runs) > 0:
-            sarif_results = model.sarif.runs[0].results
+            sarif_results = []
+            for run in model.sarif.runs:
+                sarif_results.extend(run.results or [])
             if sarif_results:
                 for i, result in enumerate(sarif_results):
                     # Convert SARIF Result to dict

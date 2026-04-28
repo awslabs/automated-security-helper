@@ -28,11 +28,12 @@ def test_locations_match_null_end_line():
 
 
 def test_locations_match_different_start_lines():
-    """Test locations_match with different start_line values."""
+    """Test locations_match with off-by-one start lines (common across scanners)."""
     loc1 = {"file_path": "test.py", "start_line": 10, "end_line": 15}
     loc2 = {"file_path": "test.py", "start_line": 11, "end_line": 15}
 
-    assert locations_match(loc1, loc2) is False
+    # Off-by-one with overlapping ranges should match (bug #152 fix)
+    assert locations_match(loc1, loc2) is True
 
 
 def test_locations_match_different_end_lines():

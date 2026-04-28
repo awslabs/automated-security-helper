@@ -48,22 +48,18 @@ def format_duration(seconds):
 
 
 def run_ash_scan(
-    source_dir: str | Path = Path.cwd().as_posix(),
-    output_dir: str | Path = Path.cwd().joinpath(".ash", "ash_output").as_posix(),
+    source_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
     config: str | None = None,
-    config_overrides: List[str] = [],
+    config_overrides: List[str] | None = None,
     offline: bool = False,
     strategy: Strategy = Strategy.parallel.value,
-    scanners: List[str] = [],
-    exclude_scanners: List[str] = [],
+    scanners: List[str] | None = None,
+    exclude_scanners: List[str] | None = None,
     progress: bool = True,
-    output_formats: List[ExportFormat] = [],
+    output_formats: List[ExportFormat] | None = None,
     cleanup: bool = False,
-    phases: List[Phases] = [
-        Phases.convert,
-        Phases.scan,
-        Phases.report,
-    ],
+    phases: List[Phases] | None = None,
     inspect: bool = False,
     existing_results: str | None = None,
     python_based_plugins_only: bool = False,
@@ -88,12 +84,34 @@ def run_ash_scan(
     container_gid: str | None = None,
     ash_revision_to_install: str | None = None,
     custom_containerfile: str | None = None,
-    custom_build_arg: List[str] = [],
-    ash_plugin_modules: List[str] = [],
+    custom_build_arg: List[str] | None = None,
+    ash_plugin_modules: List[str] | None = None,
     *args,
     **kwargs,
 ):
     """Runs an ASH scan against the source-dir, outputting results to the output-dir. This is the default command used when there is no explicit. subcommand specified."""
+
+    # Resolve cwd-based defaults at call time (not import time).
+    if source_dir is None:
+        source_dir = Path.cwd().as_posix()
+    if output_dir is None:
+        output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
+
+    # Rebind mutable defaults so each call gets its own collection.
+    if config_overrides is None:
+        config_overrides = []
+    if scanners is None:
+        scanners = []
+    if exclude_scanners is None:
+        exclude_scanners = []
+    if output_formats is None:
+        output_formats = []
+    if phases is None:
+        phases = [Phases.convert, Phases.scan, Phases.report]
+    if custom_build_arg is None:
+        custom_build_arg = []
+    if ash_plugin_modules is None:
+        ash_plugin_modules = []
 
     # Record the start time for calculating scan duration
     scan_start_time = time.time()
@@ -253,70 +271,11 @@ def run_ash_scan(
             source_dir = Path(source_dir)
             output_dir = Path(output_dir)
 
-            # Check if source_dir is a git repository and create a shallow clone if it is
-
-            # Create a temporary directory for the clone if needed
+            # Placeholder for an optional shallow-clone of the source tree.
+            # The cleanup block at the end of this branch still references
+            # temp_clone_dir, so keep the sentinel even though no code path
+            # currently assigns it.
             temp_clone_dir = None
-
-            # Check if we're in a git repository
-            try:
-                # Save current directory
-                original_dir = os.getcwd()
-
-                # # Change to source directory to check git status
-                # os.chdir(source_dir)
-
-                # # Check if this is a git repository
-                # returncode, stdout, stderr = run_command_get_output(
-                #     ["git", "rev-parse", "--is-inside-work-tree"],
-                #     cwd=source_dir
-                # )
-
-                # is_git_repo = returncode == 0 and stdout.strip() == "true"
-
-                # if is_git_repo:
-                #     # Create temporary directory for the clone
-                #     temp_clone_dir = tempfile.mkdtemp(prefix="ash_git_clone_")
-
-                #     # Configure git to allow operations in the source and temp directories
-                #     run_command_get_output(
-                #         ["git", "config", "--global", "--add", "safe.directory", str(source_dir)],
-                #         cwd=source_dir
-                #     )
-                #     run_command_get_output(
-                #         ["git", "config", "--global", "--add", "safe.directory", temp_clone_dir],
-                #         cwd=source_dir
-                #     )
-
-                #     # Clone the repository to the temporary directory
-                #     logger.info(f"Cloning git repository to temporary directory: {temp_clone_dir}")
-                #     returncode, stdout, stderr = run_command_get_output(
-                #         ["git", "clone", str(source_dir), temp_clone_dir, "--depth=1"],
-                #         cwd=source_dir
-                #     )
-
-                #     if returncode == 0:
-                #         logger.info("Repository cloned successfully.")
-                #         # Update source_dir to point to the cloned repository
-                #         source_dir = Path(temp_clone_dir)
-                #     else:
-                #         logger.warning(f"Failed to clone repository: {stderr}")
-                #         # Clean up the temporary directory if clone failed
-                #         if os.path.exists(temp_clone_dir):
-                #             import shutil
-                #             shutil.rmtree(temp_clone_dir)
-                #         temp_clone_dir = None
-                # else:
-                #     logger.debug("No git repository found in source folder.")
-
-                # # Return to original directory
-                # os.chdir(original_dir)
-
-            except Exception as e:
-                logger.warning(f"Error while checking git repository: {e}")
-                # Ensure we return to the original directory
-                if "original_dir" in locals():
-                    os.chdir(original_dir)
 
             if not quiet and not simple:
                 logger.verbose(f"Source directory: {source_dir.as_posix()}")

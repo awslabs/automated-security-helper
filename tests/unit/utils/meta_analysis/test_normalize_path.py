@@ -8,22 +8,22 @@ def test_normalize_path_simple():
 
 
 def test_normalize_path_nested():
-    """Test normalizing a nested path."""
-    assert normalize_path("tool.driver.name") == "name"
-    assert normalize_path("message.text") == "text"
+    """Test normalizing a nested SARIF field path preserves full dotted structure."""
+    assert normalize_path("tool.driver.name") == "tool.driver.name"
+    assert normalize_path("message.text") == "message.text"
 
 
 def test_normalize_path_with_arrays():
-    """Test normalizing paths with array notation."""
-    assert normalize_path("runs[0].results[0].ruleId") == "ruleId"
-    assert normalize_path("runs[].results[].ruleId") == "ruleId"
+    """Test normalizing paths strips array indices but keeps full structure."""
+    assert normalize_path("runs[0].results[0].ruleId") == "runs.results.ruleId"
+    assert normalize_path("runs[].results[].ruleId") == "runs.results.ruleId"
 
 
 def test_normalize_path_complex():
-    """Test normalizing complex paths."""
+    """Test normalizing complex paths strips indices, keeps full dotted path."""
     assert (
         normalize_path(
             "runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri"
         )
-        == "uri"
+        == "runs.results.locations.physicalLocation.artifactLocation.uri"
     )

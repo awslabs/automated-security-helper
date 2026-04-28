@@ -517,8 +517,12 @@ class AshConfig(BaseModel):
                 config_data = json.load(f)
             else:
                 pattern = re.compile(r"^\${(\w+):?(.*)?}")
-                loader = yaml.SafeLoader
-                loader.add_implicit_resolver("!ENV", pattern, None)
+
+                # Use a local subclass to avoid mutating the global SafeLoader
+                class _AshConfigLoader(yaml.SafeLoader):
+                    pass
+
+                _AshConfigLoader.add_implicit_resolver("!ENV", pattern, None)
 
                 def constructor_env_variables(loader, node):
                     value = loader.construct_scalar(node)
@@ -554,17 +558,19 @@ class AshConfig(BaseModel):
                         return full_value.strip()
                     return value
 
-                loader.add_constructor("!ENV", constructor_env_variables)
-                config_data = yaml.load(f, Loader=loader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation
+                _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
+                config_data = yaml.load(f, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation
         return cls.model_validate(config_data, strict=True)
 
     @classmethod
     def load_config(
         cls,
         config_path: Path | str | None = None,
-        source_dir: Path | None = Path.cwd(),
+        source_dir: Path | None = None,
     ) -> "AshConfig":
         """Load configuration from file or return default configuration."""
+        if source_dir is None:
+            source_dir = Path.cwd()
         try:
             config = get_default_config()
             if not config_path:
@@ -674,19 +680,15 @@ class AshConfig(BaseModel):
             plugin_name,
             flags=re.IGNORECASE,
         ).lower()
-        item_dict = (
-            self.scanners.model_dump(by_alias=True)
-            if plugin_type == "scanner"
-            else (
-                self.reporters.model_dump(by_alias=True)
-                if plugin_type == "reporter"
-                else (
-                    self.converters.model_dump(by_alias=True)
-                    if plugin_type == "converter"
-                    else {}
-                )
-            )
-        )
+        match plugin_type:
+            case "scanner":
+                item_dict = self.scanners.model_dump(by_alias=True)
+            case "reporter":
+                item_dict = self.reporters.model_dump(by_alias=True)
+            case "converter":
+                item_dict = self.converters.model_dump(by_alias=True)
+            case _:
+                item_dict = {}
         key_map = {}
         for item_name, item in item_dict.items():
             if found is not None:
