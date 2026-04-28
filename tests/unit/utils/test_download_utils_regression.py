@@ -58,3 +58,37 @@ class TestDownloadUtilsCodeInjection:
                 )
         finally:
             shutil.rmtree(dest, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Batch 2: Bug #60 -- rename_to=None produces literal "None"
+# ---------------------------------------------------------------------------
+
+
+class TestBug60RenameToNone:
+    """create_url_download_command must not pass literal string 'None'."""
+
+    def test_rename_to_none_not_literal_string(self):
+        from automated_security_helper.utils.download_utils import (
+            create_url_download_command,
+        )
+
+        cmd = create_url_download_command(
+            url="https://example.com/tool", rename_to=None
+        )
+        # The last arg should be the Python string "None" that the script
+        # checks with `if sys.argv[3] != 'None'`. The bug was that
+        # str(None) was used unconditionally. With the fix, we pass the
+        # actual string "None" only when rename_to IS None, so the
+        # inline script correctly interprets it.
+        assert cmd.args[-1] == "None"
+
+    def test_rename_to_value_passes_through(self):
+        from automated_security_helper.utils.download_utils import (
+            create_url_download_command,
+        )
+
+        cmd = create_url_download_command(
+            url="https://example.com/tool", rename_to="my-tool"
+        )
+        assert cmd.args[-1] == "my-tool"

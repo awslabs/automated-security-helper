@@ -225,3 +225,72 @@ class TestBug48PopenOrphanedOnException:
         result = run_command_stream_output(["echo", "hello"])
 
         assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# Batch 2: subprocess_utils regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestBug49ArgsNotMutated:
+    """run_command must not mutate the caller's list."""
+
+    def test_run_command_does_not_mutate_caller_list(self):
+        original = ["echo", "hello"]
+        caller_copy = original.copy()
+
+        with patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value="/usr/bin/echo",
+        ):
+            with patch(
+                "automated_security_helper.utils.subprocess_utils.subprocess.run"
+            ) as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout="hello\n", stderr=""
+                )
+                from automated_security_helper.utils.subprocess_utils import (
+                    run_command,
+                )
+
+                run_command(original)
+
+        # The caller's list must not have been modified
+        assert original == caller_copy, (
+            f"run_command mutated caller's args list: {original} != {caller_copy}"
+        )
+
+
+class TestBug50SilentFallbackWarning:
+    """get_host_uid / get_host_gid should log a warning when falling back."""
+
+    def test_get_host_uid_logs_warning_on_fallback(self):
+        from automated_security_helper.utils.subprocess_utils import get_host_uid
+
+        with patch(
+            "automated_security_helper.utils.subprocess_utils.run_command",
+            side_effect=Exception("not available"),
+        ):
+            with patch(
+                "automated_security_helper.utils.subprocess_utils.ASH_LOGGER"
+            ) as mock_logger:
+                uid = get_host_uid()
+
+        assert uid == 1000
+        # Must have logged a warning (not just error)
+        mock_logger.warning.assert_called()
+
+    def test_get_host_gid_logs_warning_on_fallback(self):
+        from automated_security_helper.utils.subprocess_utils import get_host_gid
+
+        with patch(
+            "automated_security_helper.utils.subprocess_utils.run_command",
+            side_effect=Exception("not available"),
+        ):
+            with patch(
+                "automated_security_helper.utils.subprocess_utils.ASH_LOGGER"
+            ) as mock_logger:
+                gid = get_host_gid()
+
+        assert gid == 1000
+        mock_logger.warning.assert_called()

@@ -14,10 +14,13 @@ finally:return fixes for reporters (from test_finally_return_fix):
 
 import inspect
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 
 
 # ---------------------------------------------------------------------------
@@ -392,3 +395,183 @@ def test_cwlogs_reporter_validate_plugin_dependencies_returns_false_on_missing_c
     reporter = CloudWatchLogsReporter.model_construct(config=config)
     reporter.dependencies_satisfied = True
     assert reporter.validate_plugin_dependencies() is False
+
+
+# ---------------------------------------------------------------------------
+# Batch 2: suppression_matcher.py regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestBug23LineStartOnlyIgnoresEnd:
+    """#23: When suppression has only line_start, a multi-line finding that
+    starts before suppression.line_start but ends at or after it should be
+    suppressed (overlap), but the old code only checked finding.line_start."""
+
+    def test_multiline_finding_overlapping_start_only_suppression(self):
+        """A finding spanning lines 5-15 should be suppressed by a
+        suppression with line_start=10 (no line_end) because the finding
+        overlaps."""
+        from automated_security_helper.utils.suppression_matcher import _line_range_matches
+
+        finding = FlatVulnerability(
+            id="test", title="t", description="d", severity="HIGH",
+            scanner="s", scanner_type="SAST", rule_id="R1",
+            file_path="f.py",
+            line_start=5,
+            line_end=15,
+        )
+        suppression = AshSuppression(
+            reason="r", path="f.py", line_start=10, line_end=None,
+        )
+        assert _line_range_matches(finding, suppression), (
+            "Bug #23: multi-line finding (5-15) overlapping suppression "
+            "line_start=10 should match"
+        )
+
+    def test_finding_entirely_before_start_only_suppression(self):
+        """A finding on lines 1-5 should NOT be suppressed by
+        suppression line_start=10."""
+        from automated_security_helper.utils.suppression_matcher import _line_range_matches
+
+        finding = FlatVulnerability(
+            id="test", title="t", description="d", severity="HIGH",
+            scanner="s", scanner_type="SAST", rule_id="R1",
+            file_path="f.py",
+            line_start=1,
+            line_end=5,
+        )
+        suppression = AshSuppression(
+            reason="r", path="f.py", line_start=10, line_end=None,
+        )
+        assert not _line_range_matches(finding, suppression), (
+            "Finding entirely before suppression start should not match"
+        )
+
+    def test_finding_starts_at_suppression_start(self):
+        """A finding starting exactly at suppression line_start should match."""
+        from automated_security_helper.utils.suppression_matcher import _line_range_matches
+
+        finding = FlatVulnerability(
+            id="test", title="t", description="d", severity="HIGH",
+            scanner="s", scanner_type="SAST", rule_id="R1",
+            file_path="f.py",
+            line_start=10,
+            line_end=20,
+        )
+        suppression = AshSuppression(
+            reason="r", path="f.py", line_start=10, line_end=None,
+        )
+        assert _line_range_matches(finding, suppression), (
+            "Finding starting at suppression line_start should match"
+        )
+
+
+class TestBug52SameDayExpiry:
+    """#52: should_suppress_finding uses `<` for expiry check while
+    check_for_expiring_suppressions uses `<=`. After fix, both use `<=`,
+    so a suppression expiring today is treated as expired (not active)."""
+
+    def test_same_day_expiry_does_not_suppress(self):
+        """A suppression expiring today should NOT suppress (consistent
+        with check_for_expiring_suppressions treating day-0 as expiring)."""
+        from automated_security_helper.utils.suppression_matcher import should_suppress_finding
+
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        finding = FlatVulnerability(
+            id="test", title="t", description="d", severity="HIGH",
+            scanner="s", scanner_type="SAST", rule_id="R1",
+            file_path="f.py",
+        )
+        # Use model_construct to bypass the expiration-in-future validator
+        suppression = AshSuppression.model_construct(
+            reason="r", path="f.py", rule_id="R1",
+            expiration=today_str,
+            line_start=None, line_end=None,
+        )
+        suppressed, _ = should_suppress_finding(finding, [suppression])
+        assert not suppressed, (
+            "Bug #52: suppression expiring today should not suppress "
+            "(consistent with <= semantics)"
+        )
+
+    def test_yesterday_expiry_does_not_suppress(self):
+        """A suppression that expired yesterday should not suppress."""
+        from automated_security_helper.utils.suppression_matcher import should_suppress_finding
+
+        yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        finding = FlatVulnerability(
+            id="test", title="t", description="d", severity="HIGH",
+            scanner="s", scanner_type="SAST", rule_id="R1",
+            file_path="f.py",
+        )
+        # Use model_construct to bypass the expiration-in-future validator
+        suppression = AshSuppression.model_construct(
+            reason="r", path="f.py", rule_id="R1",
+            expiration=yesterday_str,
+            line_start=None, line_end=None,
+        )
+        suppressed, _ = should_suppress_finding(finding, [suppression])
+        assert not suppressed, (
+            "Suppression that expired yesterday should not suppress"
+        )
+
+    def test_tomorrow_expiry_still_suppresses(self):
+        """A suppression expiring tomorrow should still suppress."""
+        from automated_security_helper.utils.suppression_matcher import should_suppress_finding
+
+        tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        finding = FlatVulnerability(
+            id="test", title="t", description="d", severity="HIGH",
+            scanner="s", scanner_type="SAST", rule_id="R1",
+            file_path="f.py",
+        )
+        suppression = AshSuppression(
+            reason="r", path="f.py", rule_id="R1",
+            expiration=tomorrow_str,
+        )
+        suppressed, _ = should_suppress_finding(finding, [suppression])
+        assert suppressed, (
+            "Suppression expiring tomorrow should still suppress"
+        )
+
+
+class TestBug54FnmatchCaseSensitivity:
+    """#54: fnmatch case sensitivity is OS-dependent. On macOS/Windows,
+    fnmatch.fnmatch is case-insensitive, but on Linux it's case-sensitive.
+    Fix: normalize both sides to lowercase."""
+
+    def test_rule_id_match_case_insensitive(self):
+        """Rule ID matching should be case-insensitive regardless of OS."""
+        from automated_security_helper.utils.suppression_matcher import _rule_id_matches
+
+        # These should match regardless of platform
+        assert _rule_id_matches("AWS-S3-001", "aws-s3-*"), (
+            "Bug #54: rule ID match should be case-insensitive"
+        )
+        assert _rule_id_matches("aws-s3-001", "AWS-S3-*"), (
+            "Bug #54: rule ID match should be case-insensitive (reverse)"
+        )
+
+    def test_rule_id_exact_match_case_insensitive(self):
+        """Exact rule ID should match case-insensitively."""
+        from automated_security_helper.utils.suppression_matcher import _rule_id_matches
+
+        assert _rule_id_matches("MyRule", "myrule"), (
+            "Bug #54: exact rule ID match should be case-insensitive"
+        )
+
+    def test_file_path_match_case_insensitive(self):
+        """File path matching should be case-insensitive regardless of OS."""
+        from automated_security_helper.utils.suppression_matcher import _file_path_matches
+
+        assert _file_path_matches("SRC/File.py", "src/file.py"), (
+            "Bug #54: file path match should be case-insensitive"
+        )
+
+    def test_file_path_glob_case_insensitive(self):
+        """File path glob matching should be case-insensitive."""
+        from automated_security_helper.utils.suppression_matcher import _file_path_matches
+
+        assert _file_path_matches("SRC/MyFile.py", "src/*.py"), (
+            "Bug #54: file path glob should be case-insensitive"
+        )
