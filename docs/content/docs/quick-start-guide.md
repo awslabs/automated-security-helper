@@ -25,7 +25,7 @@ Prerequisites: Python 3.10+, [uv](https://docs.astral.sh/uv/getting-started/inst
 curl -sSf https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.3.5"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.3.6"
 ```
 
 #### Windows PowerShell
@@ -34,17 +34,17 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.3
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.3.5 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.3.6 $args }
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of a specific version to stay up to date automatically. Pin a specific version (e.g., `@v3.3.5`) when you need reproducible builds.
+> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of a specific version to stay up to date automatically. Pin a specific version (e.g., `@v3.3.6`) when you need reproducible builds.
 
 ### Option 2: Using pipx
 
 Prerequisites: Python 3.10+, [pipx](https://pipx.pypa.io/stable/installation/)
 
 ```bash
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.3.5
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.3.6
 ```
 
 ### Option 3: Using pip
@@ -52,7 +52,7 @@ pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.3.5
 Prerequisites: Python 3.10+
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.3.5
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.3.6
 ```
 
 ## Basic Usage
