@@ -90,9 +90,13 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
     if not uri:
         return uri
 
-    # Remove file:// prefix if present
+    # Remove file:// prefix if present, using urlparse to strip the host
+    # segment and url2pathname to decode percent-encoding and fix Windows paths
     if uri.startswith("file:"):
-        uri = url2pathname(uri[5:])
+        from urllib.parse import urlparse
+
+        parsed = urlparse(uri)
+        uri = url2pathname(parsed.path)
 
     # Make path relative to source directory
     try:

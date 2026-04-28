@@ -33,14 +33,14 @@ def test_sanitize_uri(test_source_dir):
     source_dir_path = test_source_dir
     source_dir_str = source_dir_path.as_posix() + "/"
 
-    # Test with file:// prefix
+    # Test with file: prefix (pathname2url produces single-slash on Linux, triple on Windows)
     uri = "file:" + pathname2url(f"{source_dir_path}/src/file.py")
-    assert uri.startswith("file://")
+    assert uri.startswith("file:")
     with patch.object(Path, "relative_to", return_value=Path("src/file.py")):
         sanitized = _sanitize_uri(uri, source_dir_path, source_dir_str)
         assert "src" in sanitized
         assert "file.py" in sanitized
-        assert not sanitized.startswith("file://")
+        assert not sanitized.startswith("file:")
         if sys.platform.lower() == "windows":
             assert "/" in sanitized or "\\" not in sanitized
         else:
