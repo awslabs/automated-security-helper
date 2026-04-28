@@ -138,24 +138,25 @@ The system automatically detects and converts these patterns:
 
 ## Development Workflow
 
-### Making a Release
+### Automated Version Bumping (CI)
 
-1. **Update Version**:
-   ```bash
-   python scripts/version_bump.py bump patch  # or minor/major
-   ```
+Every PR merged to `main` automatically receives a **patch** version bump. The CI workflow pushes directly to `main` via a GitHub Actions bypass in the repository ruleset.
 
-2. **Verify Changes**:
-   ```bash
-   python scripts/version_bump.py validate
-   ```
+- To skip the bump (docs-only, CI-only changes), add the `no-version-bump` label before merging.
+- For **minor** or **major** bumps, go to **Actions > ASH - Auto Version Bump > Run workflow** and select the bump type.
 
-3. **Commit and Tag**:
-   ```bash
-   git add .
-   git commit -m "Bump version to $(python scripts/version_bump.py current)"
-   git tag "v$(python scripts/version_bump.py current)"
-   ```
+### Manual Version Bumping (Local)
+
+```bash
+# Bump version locally
+python scripts/version_bump.py bump patch  # or minor/major
+
+# Set a specific version
+python scripts/version_bump.py set 4.0.0
+
+# Verify consistency
+python scripts/version_bump.py validate
+```
 
 ### Adding New Documentation
 

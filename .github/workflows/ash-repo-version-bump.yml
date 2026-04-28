@@ -18,12 +18,18 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
 jobs:
   version-bump:
     name: Bump version on merge
     if: >-
       (github.event_name == 'workflow_dispatch') ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       !contains(github.event.pull_request.labels.*.name, 'no-version-bump'))
     runs-on: ubuntu-latest
 
     steps:
@@ -53,6 +59,10 @@ jobs:
           DISPATCH_BUMP_TYPE: ${{ github.event.inputs.bump_type }}
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ -z "$DISPATCH_BUMP_TYPE" ]]; then
+              echo "::error::workflow_dispatch requires bump_type input"
+              exit 1
+            fi
             echo "type=$DISPATCH_BUMP_TYPE" >> "$GITHUB_OUTPUT"
           else
             echo "type=patch" >> "$GITHUB_OUTPUT"
@@ -61,27 +71,47 @@ jobs:
       - name: Get current version
         id: current-version
         run: |
-          VERSION=$(uv run python scripts/version_bump.py current | grep -oP '\d+\.\d+\.\d+')
+          VERSION=$(uv run python scripts/version_bump.py current | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Bump version
         env:
           BUMP_TYPE: ${{ steps.bump-type.outputs.type }}
-        run: uv run python scripts/version_bump.py bump "$BUMP_TYPE"
+        run: |
+          if ! uv run python scripts/version_bump.py bump "$BUMP_TYPE"; then
+            echo "::error::Version bump failed"
+            exit 1
+          fi
 
       - name: Get new version
         id: new-version
         run: |
-          VERSION=$(uv run python scripts/version_bump.py current | grep -oP '\d+\.\d+\.\d+')
+          VERSION=$(uv run python scripts/version_bump.py current | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push version bump
         env:
           OLD_VERSION: ${{ steps.current-version.outputs.version }}
           NEW_VERSION: ${{ steps.new-version.outputs.version }}
+          BUMP_TYPE: ${{ steps.bump-type.outputs.type }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTOR: ${{ github.actor }}
         run: |
+          if git diff --quiet; then
+            echo "No version changes detected, skipping"
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "chore: bump version $OLD_VERSION → $NEW_VERSION"
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            TRAILER="Triggered-by: @${ACTOR} (${BUMP_TYPE} via workflow_dispatch)"
+          else
+            TRAILER="Triggered-by: PR #${PR_NUMBER} merge (auto-patch)"
+          fi
+
+          git commit -m "chore: bump version ${OLD_VERSION} -> ${NEW_VERSION}" -m "$TRAILER"
           git push

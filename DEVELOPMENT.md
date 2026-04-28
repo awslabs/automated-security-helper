@@ -190,15 +190,11 @@ ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `
 
 ### Automated Version Bumping (CI)
 
-When a PR is merged to `main`, the version is automatically bumped if the PR has one of these labels:
+Every PR merged to `main` automatically receives a **patch** version bump. To skip the bump (e.g., docs-only or CI-only changes), add the `no-version-bump` label to the PR before merging.
 
-| Label | Effect | Example |
-|---|---|---|
-| `version:patch` | Bump patch version | `3.2.1` → `3.2.2` |
-| `version:minor` | Bump minor version | `3.2.1` → `3.3.0` |
-| `version:major` | Bump major version | `3.2.1` → `4.0.0` |
+For **minor** or **major** bumps, use the manual workflow dispatch: go to **Actions > ASH - Auto Version Bump > Run workflow** and select the bump type from the dropdown. The commit message includes who triggered it for auditability.
 
-If no version label is present, no bump occurs. If multiple labels are present, the highest takes precedence (major > minor > patch).
+The workflow pushes directly to `main` via a GitHub Actions bypass in the repository ruleset.
 
 ### Manual Version Bumping
 
