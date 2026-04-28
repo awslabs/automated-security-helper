@@ -198,7 +198,7 @@ uv run python scripts/version_bump.py bump patch   # or minor / major
 
 Add the `no-version-bump` label to skip the check for docs-only or CI-only changes.
 
-Maintainers can also bump versions directly via **Actions > Version Bump: Patch / Minor / Major > Run workflow**. These push directly to `main` via a GitHub Actions bypass in the repository ruleset.
+Maintainers can also bump versions via **Actions > Version Bump: Patch / Minor / Major > Run workflow**. These create a PR with the version bump and the `no-version-bump` label applied.
 
 ### Manual Version Bumping
 
