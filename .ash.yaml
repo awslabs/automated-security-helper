@@ -2,7 +2,8 @@ global_settings:
   # Ignore test data that intentionally contains insecure patterns
   # (these are scanner test fixtures, not production code)
   ignore_paths:
-    - "tests/test_data/**"
+    - path: "tests/test_data/**"
+      reason: "Scanner test fixtures with intentional insecure patterns"
 
   suppressions:
     # Test files for secret masking contain intentional fake passwords

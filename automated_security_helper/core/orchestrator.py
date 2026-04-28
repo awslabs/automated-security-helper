@@ -160,6 +160,7 @@ class ASHScanOrchestrator(BaseModel):
 
         self.config = resolve_config(
             config_path=self.config_path,
+            source_dir=self.source_dir,
             config_overrides=self.config_overrides
             if hasattr(self, "config_overrides")
             else [],
