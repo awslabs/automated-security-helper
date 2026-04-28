@@ -6,6 +6,8 @@ from contextlib import suppress
 from typing import List
 import uuid
 from pathlib import Path
+from urllib.request import url2pathname
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
@@ -88,12 +90,13 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
     if not uri:
         return uri
 
-    # Remove file:// prefix if present, using urlparse to handle host segments
-    if uri.startswith("file://"):
+    # Remove file:// prefix if present, using urlparse to strip the host
+    # segment and url2pathname to decode percent-encoding and fix Windows paths
+    if uri.startswith("file:"):
         from urllib.parse import urlparse
 
         parsed = urlparse(uri)
-        uri = parsed.path
+        uri = url2pathname(parsed.path)
 
     # Make path relative to source directory
     try:
