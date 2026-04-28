@@ -1,5 +1,6 @@
 """Module containing the detect-secrets security scanner implementation."""
 
+import fnmatch
 from importlib.metadata import version
 import json
 import multiprocessing
@@ -430,6 +431,23 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         f"based on baseline exclude patterns",
                         level=15,
                         target_type=target_type,
+                    )
+
+            if global_ignore_paths:
+                original_count = len(scannable)
+                scannable = [
+                    file_path
+                    for file_path in scannable
+                    if not any(
+                        fnmatch.fnmatch(file_path, ignore_path.path)
+                        or fnmatch.fnmatch(Path(file_path).name, ignore_path.path)
+                        or file_path.endswith(ignore_path.path)
+                        for ignore_path in global_ignore_paths
+                    )
+                ]
+                if original_count != len(scannable):
+                    ASH_LOGGER.debug(
+                        f"Filtered {original_count - len(scannable)} files using global_ignore_paths"
                     )
 
             if len(scannable) == 0:
