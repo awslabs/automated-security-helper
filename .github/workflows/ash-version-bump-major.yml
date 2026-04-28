@@ -1,7 +1,7 @@
 name: "Version Bump: Major"
 
 on:
-  workflow_dismajor:
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -68,5 +68,5 @@ jobs:
           git add -A
           git commit \
             -m "chore: bump version ${OLD_VERSION} -> ${NEW_VERSION}" \
-            -m "Triggered-by: @${ACTOR} (major via workflow_dismajor)"
+            -m "Triggered-by: @${ACTOR} (major via workflow_dispatch)"
           git push
