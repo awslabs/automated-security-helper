@@ -23,25 +23,25 @@ No. ASH is designed to help identify common security issues early in the develop
 You have several options:
 ```bash
 # Using uvx (recommended)
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.3.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.3.2"
 
 # Using pipx
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.3.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.3.2
 
 # Using pip
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.3.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.3.2
 ```
 
 ### What are the prerequisites for ASH v3?
 
 ### What is the `v3` floating tag?
-We maintain a `v3` Git tag that always points to the latest stable v3.x release. This means you can use `@v3` in your installation commands instead of a specific version like `@v3.3.0`:
+We maintain a `v3` Git tag that always points to the latest stable v3.x release. This means you can use `@v3` in your installation commands instead of a specific version like `@v3.3.2`:
 
 ```bash
 alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3"
 ```
 
-This is convenient for local development where you always want the latest version. For CI/CD pipelines or environments where reproducibility matters, we recommend pinning to a specific release tag (e.g., `@v3.3.0`).
+This is convenient for local development where you always want the latest version. For CI/CD pipelines or environments where reproducibility matters, we recommend pinning to a specific release tag (e.g., `@v3.3.2`).
 
 ### What are the prerequisites for ASH v3?
 - For local mode: Python 3.10 or later, UV package manager

@@ -138,12 +138,17 @@ The system automatically detects and converts these patterns:
 
 ## Development Workflow
 
-### Automated Version Bumping (CI)
+### Version Bumping
 
-Every PR merged to `main` automatically receives a **patch** version bump. The CI workflow pushes directly to `main` via a GitHub Actions bypass in the repository ruleset.
+Every PR to `main` must include a version bump. A required status check compares `pyproject.toml` on the PR branch against `main` and blocks merge if the version isn't incremented:
 
-- To skip the bump (docs-only, CI-only changes), add the `no-version-bump` label before merging.
-- For **minor** or **major** bumps, go to **Actions > ASH - Auto Version Bump > Run workflow** and select the bump type.
+```bash
+uv run python scripts/version_bump.py bump patch   # or minor / major
+```
+
+Add the `no-version-bump` label to skip the check for docs-only or CI-only changes.
+
+Maintainers can also bump versions directly via **Actions > Version Bump: Patch / Minor / Major > Run workflow**. These push directly to `main` via a GitHub Actions bypass in the repository ruleset.
 
 ### Manual Version Bumping (Local)
 
