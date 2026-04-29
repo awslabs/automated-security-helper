@@ -44,6 +44,29 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.4.0 (2026-04-29)
+
+### Feat
+
+- adopt commitizen for unified release management (#280)
+
+### Fix
+
+- configure git identity before cz bump in release workflow (#281)
+- config file discovery broken since v3.2.7 (#279)
+- **detect-secrets**: apply global_ignore_paths to scanner (#239)
+- SAST scan fails on fork PRs due to hardcoded repo URL (#278)
+- version bump workflows create PRs instead of pushing to main (#277)
+- replace label-gated version bump with required check and dispatch workflows (#276)
+- replace label-gated version bump with required check and dispatch workflows (#275)
+- resolve ~187 bugs across 119 files with 276 TDD regression tests (#274)
+
+## v3.3.0 (2026-04-24)
+
+### Fix
+
+- resolve 14 bugs with TDD regression tests (#273)
+
 ## v3.2.7
 
 ### Fixes
