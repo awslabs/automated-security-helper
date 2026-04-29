@@ -34,6 +34,11 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Determine bump and create release artifacts
         id: bump
         env:
@@ -66,8 +71,6 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           BRANCH="release/v${NEW_VERSION}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add -A
           git commit -m "chore(release): ${OLD_VERSION} -> ${NEW_VERSION}" \
