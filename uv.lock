@@ -49,7 +49,7 @@ wheels = [
 
 [[package]]
 name = "automated-security-helper"
-version = "3.3.7"
+version = "3.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "attrs" },
