@@ -1,0 +1,81 @@
+name: ASH - Create Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: create-release
+  cancel-in-progress: false
+
+jobs:
+  create-release-pr:
+    name: Bump version and create release PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Determine bump and create release artifacts
+        id: bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OLD_VERSION=$(uv run cz version --project)
+          echo "old_version=$OLD_VERSION" >> "$GITHUB_OUTPUT"
+
+          uv run cz bump --changelog --yes
+          NEW_VERSION=$(uv run cz version --project)
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "$OLD_VERSION" == "$NEW_VERSION" ]]; then
+            echo "::notice::No version bump needed (no conventional commits since last tag)"
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Regenerate documentation templates
+        if: steps.bump.outputs.bumped == 'true'
+        run: uv run python scripts/version_template_manager.py generate
+
+      - name: Create release PR
+        if: steps.bump.outputs.bumped == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OLD_VERSION: ${{ steps.bump.outputs.old_version }}
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          BRANCH="release/v${NEW_VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "chore(release): ${OLD_VERSION} -> ${NEW_VERSION}" \
+                     -m "Triggered-by: @${ACTOR} via workflow_dispatch"
+          git push -u origin "$BRANCH"
+
+          gh pr create \
+            --title "chore(release): ${OLD_VERSION} -> ${NEW_VERSION}" \
+            --body "Automated release PR. Merging this will trigger tag creation and GitHub Release publishing." \
+            --base main \
+            --head "$BRANCH"

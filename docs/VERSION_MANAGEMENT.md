@@ -138,29 +138,20 @@ The system automatically detects and converts these patterns:
 
 ## Development Workflow
 
-### Version Bumping
+### Releasing
 
-Every PR to `main` must include a version bump. A required status check compares `pyproject.toml` on the PR branch against `main` and blocks merge if the version isn't incremented:
+Releases are managed with [commitizen](https://commitizen-tools.github.io/commitizen/). The bump type (patch/minor/major) is determined automatically from conventional commit messages.
 
-```bash
-uv run python scripts/version_bump.py bump patch   # or minor / major
-```
-
-Add the `no-version-bump` label to skip the check for docs-only or CI-only changes.
-
-Maintainers can also bump versions via **Actions > Version Bump: Patch / Minor / Major > Run workflow**. These create a PR with the version bump and the `no-version-bump` label applied.
+To cut a release, run **Actions > ASH - Create Release > Run workflow**. This creates a release PR with the version bump, changelog update, and documentation regeneration. After merging, a tag and GitHub Release are created automatically.
 
 ### Manual Version Bumping (Local)
 
 ```bash
-# Bump version locally
-python scripts/version_bump.py bump patch  # or minor/major
+# Preview the next bump
+uv run cz bump --changelog --dry-run
 
-# Set a specific version
-python scripts/version_bump.py set 4.0.0
-
-# Verify consistency
-python scripts/version_bump.py validate
+# Perform the bump
+uv run cz bump --changelog
 ```
 
 ### Adding New Documentation

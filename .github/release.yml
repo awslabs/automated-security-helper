@@ -1,0 +1,23 @@
+changelog:
+  categories:
+    - title: Breaking Changes
+      labels:
+        - "version:major"
+        - "breaking"
+    - title: Features
+      labels:
+        - "enhancement"
+        - "feature"
+    - title: Bug Fixes
+      labels:
+        - "bug"
+        - "fix"
+    - title: Maintenance
+      labels:
+        - "dependencies"
+        - "chore"
+        - "documentation"
+        - "ci"
+  exclude:
+    labels:
+      - "no-version-bump"

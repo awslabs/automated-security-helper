@@ -188,32 +188,44 @@ ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `
 - Documentation files that reference the version (README, install guides, etc.) have corresponding `.template` files containing `{{VERSION}}` placeholders.
 - The `scripts/version_bump.py` script updates `pyproject.toml` and regenerates all documentation from templates.
 
-### Version Bumping
+### Commit Messages
 
-Every PR to `main` must include a version bump. A required status check ("Verify version bump") compares `pyproject.toml` on the PR branch against `main` and blocks merge if the version isn't incremented:
+PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) format. A required check ("Validate PR title") enforces this. Since PRs are squash-merged, the PR title becomes the commit message that drives changelog generation.
 
-```bash
-uv run python scripts/version_bump.py bump patch   # or minor / major
+```
+feat: add OpenGrep scanner support
+fix(detect-secrets): apply global_ignore_paths
+chore: bump dependencies
+feat!: redesign plugin API (breaking change)
 ```
 
-Add the `no-version-bump` label to skip the check for docs-only or CI-only changes.
+A pre-commit hook (`commitizen`) also validates local commit messages.
 
-Maintainers can also bump versions via **Actions > Version Bump: Patch / Minor / Major > Run workflow**. These create a PR with the version bump and the `no-version-bump` label applied.
+### Releasing
+
+Releases are cut by maintainers via **Actions > ASH - Create Release > Run workflow**. The workflow:
+
+1. Determines the bump type from commit history (patch/minor/major based on conventional commits)
+2. Bumps the version in `pyproject.toml`, updates `CHANGELOG.md`
+3. Regenerates version references in documentation
+4. Creates a release PR
+
+After merging the release PR, a second workflow automatically:
+- Creates the git tag (`v{version}`)
+- Publishes a GitHub Release with auto-generated notes
+- Updates the `v3` floating tag
 
 ### Manual Version Bumping
 
 ```bash
 # Show current version
-uv run python scripts/version_bump.py current
+uv run cz version --project
 
-# Bump version (patch, minor, or major)
-uv run python scripts/version_bump.py bump patch
+# Bump version (auto-detects type from commits)
+uv run cz bump --changelog
 
-# Set a specific version
-uv run python scripts/version_bump.py set 4.0.0
-
-# Validate version consistency across files
-uv run python scripts/version_bump.py validate
+# Dry run to preview
+uv run cz bump --changelog --dry-run
 ```
 
 ## Scanner Plugin Development

@@ -1,0 +1,85 @@
+name: ASH - Tag and Publish Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag-and-release:
+    name: Create tag and GitHub Release
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.title, 'chore(release):')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(uv run cz version --project)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Create tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists, skipping"
+            exit 0
+          fi
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target main \
+            --generate-notes \
+            --title "$TAG"
+
+          echo "Created release $TAG"
+
+      - name: Update v3 floating tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          MAIN_SHA=$(git rev-parse HEAD)
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/v3" >/dev/null 2>&1; then
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/v3" \
+              -X PATCH \
+              --field sha="$MAIN_SHA" \
+              --field force=true
+            echo "Moved v3 tag to $MAIN_SHA (v${VERSION})"
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -X POST \
+              --field ref="refs/tags/v3" \
+              --field sha="$MAIN_SHA"
+            echo "Created v3 tag at $MAIN_SHA (v${VERSION})"
+          fi
