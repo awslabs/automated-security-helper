@@ -170,16 +170,25 @@ def test_suppression_model_invalid_expiration_format():
 
 
 def test_suppression_model_past_expiration():
-    """Test the Suppression model with a past expiration date."""
-    # Create a date in the past
+    """Test the Suppression model with a past expiration date.
+
+    Fixed in #171: past dates now warn and set expiration to None instead
+    of raising ValueError, so config parsing is not blocked by expired
+    suppressions.
+    """
+    import warnings
+
     past_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    with pytest.raises(ValueError) as excinfo:
-        AshSuppression(
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        suppression = AshSuppression(
             reason="Test suppression",
             rule_id="TEST001",
             path="src/main.py",
             expiration=past_date,
         )
 
-    assert "expiration date must be in the future" in str(excinfo.value)
+    assert suppression.expiration is None
+    assert len(w) == 1
+    assert "past" in str(w[0].message).lower()

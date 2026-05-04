@@ -2,6 +2,7 @@
 
 import pytest
 from pathlib import Path
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
     SemgrepScanner,
     SemgrepScannerConfig,
@@ -26,7 +27,7 @@ def test_semgrep_scanner_init(test_plugin_context):
     )
     assert scanner.config.name == "semgrep"
     assert scanner.command == "semgrep"
-    assert scanner.tool_type == "SAST"
+    assert scanner.tool_type == ScannerToolType.SAST
     assert scanner.use_uv_tool is True  # Verify UV tool is enabled
 
 

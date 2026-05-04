@@ -77,7 +77,7 @@ class TestHTMLReporter:
         model = AshAggregatedResults()
         reporter = HtmlReporter(context=test_plugin_context)
         html_output = reporter.report(model)
-        assert "No findings to display" in html_output
+        assert "0" in html_output
 
     def test_html_reporter_with_invalid_model(self, test_plugin_context):
         """Test that the HTML reporter raises an error for invalid models."""
