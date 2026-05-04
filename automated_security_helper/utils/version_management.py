@@ -43,25 +43,24 @@ def get_version() -> str:
     Get the current version of the package.
 
     Tries multiple methods in order:
-    1. From pyproject.toml (for development - prioritized)
-    2. From installed package metadata (for installed package)
+    1. From installed package metadata (works for pip install and editable installs)
+    2. From pyproject.toml (fallback for bare-checkout development)
     3. Fallback to "unknown" (should not happen in normal cases)
 
     Returns:
         Version string.
     """
-    # Try to get version from pyproject.toml first (development priority)
-    version = get_version_from_pyproject()
-    if version:
-        return version
-
-    # Try to get version from installed package
+    # Prefer importlib.metadata -- works for both regular and editable installs
     try:
         return importlib.metadata.version("automated_security_helper")
     except importlib.metadata.PackageNotFoundError:
         pass
 
-    # Final fallback (should not happen in normal cases)
+    # Fallback to pyproject.toml for bare-checkout development
+    version = get_version_from_pyproject()
+    if version:
+        return version
+
     return "unknown"
 
 

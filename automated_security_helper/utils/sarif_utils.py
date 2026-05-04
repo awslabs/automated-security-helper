@@ -1,6 +1,5 @@
 """Utility functions for working with SARIF reports."""
 
-import os
 import random
 from contextlib import suppress
 from typing import List
@@ -30,6 +29,7 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.utils.normalizers import path_matches_pattern
 
 
 def _get_suppression_id(suppression: AshSuppression) -> str:
@@ -261,44 +261,6 @@ def attach_scanner_details(
                 setattr(result.properties, "scanner_details", scanner_details)
 
     return sarif_report
-
-
-def path_matches_pattern(path: str, pattern: str) -> bool:
-    """
-    Check if a path matches a pattern.
-
-    Args:
-        path: The path to check
-        pattern: The pattern to match against
-
-    Returns:
-        True if the path matches the pattern, False otherwise
-    """
-    import fnmatch
-
-    # Normalize paths for comparison
-    path = str(path).replace("\\", "/")
-    pattern = str(pattern).replace("\\", "/")
-    patterns = [
-        pattern + "/**/*.*",
-        pattern + "/*.*",
-        pattern,
-    ]
-
-    for pat in patterns:
-        # Check for exact match
-        if path == pat:
-            return True
-        elif pat in path:
-            return True
-        elif fnmatch.fnmatch(path, pat):
-            return True
-
-        # Check for directory match (e.g., "dir/" should match "dir/file.txt")
-        if pat.endswith("/") and path.startswith(pat):
-            return True
-
-    return False
 
 
 def get_severity_metrics_from_sarif(
