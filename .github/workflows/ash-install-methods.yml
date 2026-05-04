@@ -1,0 +1,122 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Install Method Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "hatch_build.py"
+      - "automated_security_helper/**"
+      - ".pre-commit-hooks.yaml"
+      - "Formula/**"
+      - ".github/workflows/ash-install-methods.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-install:
+    name: pip install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install via pip
+        run: pip install .
+      - name: Verify installation
+        run: |
+          ash --version
+          ash --help
+
+  pipx-install:
+    name: pipx install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pipx
+        run: pip install pipx
+      - name: Install via pipx
+        run: pipx install .
+      - name: Verify installation
+        run: |
+          ash --version
+          ash --help
+
+  uvx-install:
+    name: uvx install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install via uvx
+        run: uvx --from . ash --version
+
+  homebrew-formula:
+    name: Homebrew formula (syntax)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate formula syntax
+        run: ruby -c Formula/ash.rb
+
+  pre-commit-hook:
+    name: pre-commit hook
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pre-commit
+        run: pip install pre-commit
+      - name: Validate hooks manifest
+        run: pre-commit validate-manifest .pre-commit-hooks.yaml
+
+  container-podman:
+    name: Container (Podman)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ASH
+        run: pip install .
+      - name: Verify Podman available
+        run: podman --version
+      - name: Build container with Podman
+        run: ash image build --oci-runner podman --force 2>&1 | tail -10
+        continue-on-error: true
+
+  mcp-server:
+    name: MCP server startup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ASH
+        run: pip install .
+      - name: Verify MCP command
+        run: ash mcp --help
+      - name: Test MCP server import
+        run: python -c "from automated_security_helper.cli.mcp_server import create_mcp_server; print('OK')"
