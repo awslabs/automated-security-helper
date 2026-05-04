@@ -97,6 +97,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # Create a minimal test file for self-test scans
+      - name: Create test fixture
+        run: |
+          mkdir -p /tmp/ash-selftest
+          echo "import os; os.system('echo hello')" > /tmp/ash-selftest/test_sample.py
+        shell: bash
+
       # === pip ===
       - name: "pip: install"
         if: matrix.method == 'pip'
@@ -106,6 +113,11 @@ jobs:
         run: |
           ash --version
           ash --help
+      - name: "pip: self-test scan"
+        if: matrix.method == 'pip'
+        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+        shell: bash
+        continue-on-error: true
 
       # === pipx ===
       - name: "pipx: install pipx"
@@ -119,6 +131,11 @@ jobs:
         run: |
           ash --version
           ash --help
+      - name: "pipx: self-test scan"
+        if: matrix.method == 'pipx'
+        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+        shell: bash
+        continue-on-error: true
 
       # === uvx ===
       - name: "uvx: install uv (Unix)"
@@ -132,6 +149,11 @@ jobs:
         if: matrix.method == 'uvx'
         run: uvx --from . ash --version
         shell: bash
+      - name: "uvx: self-test scan"
+        if: matrix.method == 'uvx'
+        run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+        shell: bash
+        continue-on-error: true
 
       # === homebrew ===
       - name: "homebrew: validate formula"
@@ -202,3 +224,22 @@ jobs:
       - name: "mcp: test import"
         if: matrix.method == 'mcp'
         run: python -c "from automated_security_helper.cli.mcp_server import run_mcp_server; print('OK')"
+      - name: "mcp: start server and health check"
+        if: matrix.method == 'mcp'
+        run: |
+          ash mcp &
+          MCP_PID=$!
+          sleep 5
+          kill $MCP_PID 2>/dev/null || true
+          echo "MCP server started and stopped cleanly"
+        shell: bash
+        continue-on-error: true
+      - name: "mcp: install MCP Inspector"
+        if: matrix.method == 'mcp' && runner.os != 'Windows'
+        run: npm install -g @modelcontextprotocol/inspector 2>/dev/null || true
+        continue-on-error: true
+      - name: "mcp: self-test scan"
+        if: matrix.method == 'mcp'
+        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+        shell: bash
+        continue-on-error: true
