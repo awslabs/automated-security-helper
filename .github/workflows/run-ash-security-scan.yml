@@ -145,7 +145,7 @@ jobs:
           FAIL_ON_FINDINGS_PARAM: ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}}
           VERBOSE: ${{ inputs.verbose }}
         run: |-
-          uvx --from ${ASH_UVX_SOURCE} ash \
+          uvx --reinstall --from ${ASH_UVX_SOURCE} ash \
             --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose}
 
       - name: Show ASH Summary Report
@@ -154,7 +154,7 @@ jobs:
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
         run: |-
-          uvx --from ${ASH_UVX_SOURCE} ash \
+          uvx --reinstall --from ${ASH_UVX_SOURCE} ash \
             --output-dir "${ASH_OUTPUT_DIR}" report
 
       - name: Update step summary
