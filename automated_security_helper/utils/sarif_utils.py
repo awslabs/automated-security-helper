@@ -533,7 +533,7 @@ def apply_suppressions_to_sarif(
                             f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
                         )
                         suppression = Suppression(
-                            kind=Kind1.external,
+                            kind=Kind1.inSource,
                             justification=f"(ASH) Suppressing finding for rule '{result.ruleId}' in '{flat_finding.file_path}' with reason: {reason}",
                         )
                         result.suppressions.append(suppression)
