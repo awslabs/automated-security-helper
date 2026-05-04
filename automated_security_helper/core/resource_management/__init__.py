@@ -4,9 +4,9 @@
 """
 Resource management module for ASH MCP server.
 
-This module provides resource management classes to handle async task tracking,
-thread-safe global state management, shared resource management, and graceful
-shutdown mechanisms for the MCP server implementation.
+This module provides resource management classes to handle scan tracking,
+scan registry, scan management, error handling, and exceptions for the
+MCP server implementation.
 """
 
 from automated_security_helper.core.resource_management.exceptions import (
@@ -15,29 +15,10 @@ from automated_security_helper.core.resource_management.exceptions import (
     StateManagementError,
     ResourceExhaustionError,
 )
-from automated_security_helper.core.resource_management.task_manager import TaskManager
-from automated_security_helper.core.resource_management.state_manager import (
-    StateManager,
-)
-from automated_security_helper.core.resource_management.resource_manager import (
-    ResourceManager,
-)
 from automated_security_helper.core.resource_management.event_manager import (
     EventSubscriptionManager,
     EventSubscriptionContextManager,
     EventSubscription,
-)
-from automated_security_helper.core.resource_management.shutdown_manager import (
-    ShutdownManager,
-)
-from automated_security_helper.core.resource_management.monitoring import (
-    ResourceMonitor,
-    HealthStatus,
-    AlertLevel,
-    HealthCheckResult,
-    ResourceMetrics,
-    AlertThresholds,
-    Alert,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
     check_scan_completion,
@@ -53,7 +34,7 @@ from automated_security_helper.core.resource_management.scan_tracking import (
 from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
     ScanRegistryEntry,
-    ScanStatus,
+    MCScanStatus,
     get_scan_registry,
 )
 from automated_security_helper.core.resource_management.scan_management import (
@@ -73,20 +54,9 @@ __all__ = [
     "TaskManagementError",
     "StateManagementError",
     "ResourceExhaustionError",
-    "TaskManager",
-    "StateManager",
-    "ResourceManager",
     "EventSubscriptionManager",
     "EventSubscriptionContextManager",
     "EventSubscription",
-    "ShutdownManager",
-    "ResourceMonitor",
-    "HealthStatus",
-    "AlertLevel",
-    "HealthCheckResult",
-    "ResourceMetrics",
-    "AlertThresholds",
-    "Alert",
     # Scan tracking utilities
     "check_scan_completion",
     "find_scanner_result_files",
@@ -100,7 +70,7 @@ __all__ = [
     # Scan registry components
     "ScanRegistry",
     "ScanRegistryEntry",
-    "ScanStatus",
+    "MCScanStatus",
     "get_scan_registry",
     # Scan management functions
     "list_active_scans",

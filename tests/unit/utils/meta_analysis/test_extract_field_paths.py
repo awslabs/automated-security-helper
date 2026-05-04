@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.extract_field_paths import (
+from automated_security_helper.utils.meta_analysis.field_mapping import (
     extract_field_paths,
 )
 

@@ -1,0 +1,304 @@
+name: "Run Scan Test"
+description: "Run ASH scan with a configurable method and validate results"
+
+inputs:
+  method:
+    description: "Scan method: python-local, python-container, bash, powershell"
+    required: true
+  os:
+    description: "Runner OS label"
+    required: true
+  platform:
+    description: "Platform string (linux/amd64, darwin/amd64, etc.)"
+    required: true
+  config-file:
+    description: "Config variant: default or community"
+    required: false
+    default: "default"
+  snyk-token:
+    description: "Snyk token for community plugin validation"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Docker Buildx on Linux
+      if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local'
+      uses: docker/setup-buildx-action@v4
+
+    - name: Create output directory
+      shell: bash
+      run: mkdir -p .ash/ash_output
+
+    # Community plugin tools
+    - name: Install Community Plugin Tools
+      if: inputs.config-file == 'community'
+      shell: bash
+      env:
+        SNYK_TOKEN: ${{ inputs.snyk-token }}
+      run: |
+        echo "Installing tools needed for community plugins..."
+        npm install -g snyk
+        snyk version
+
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy version
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          brew install trivy
+          trivy version
+        elif [[ "$RUNNER_OS" == "Windows" ]]; then
+          curl -sfL -o trivy.zip "https://get.trivy.dev/trivy?type=zip&os=windows&arch=amd64"
+          mkdir -p /tmp/trivy-install
+          mv trivy.zip /tmp/trivy-install/
+          cd /tmp/trivy-install
+          unzip trivy.zip
+          mkdir -p /c/tools
+          mv trivy.exe /c/tools/
+          echo "C:\tools" >> $GITHUB_PATH
+          export PATH="/c/tools:$PATH"
+          trivy version
+        fi
+
+        pip install ferret-scan
+        ferret-scan --version
+
+    # Validate config
+    - name: Validate ASH config files
+      if: contains(inputs.method, 'python')
+      shell: bash
+      run: |
+        if [ "${{ inputs.config-file }}" = "community" ]; then
+          ash config validate --config .ash/.ash_community_plugins.yaml
+        else
+          ash config validate --config .ash/.ash.yaml
+        fi
+
+    # Python Container scan
+    - name: Validate ASH using Python + Container
+      if: inputs.method == 'python-container'
+      shell: bash
+      env:
+        SNYK_TOKEN: ${{ inputs.snyk-token }}
+      run: |
+        echo "Testing ASH using Python (Container) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        ash --version
+        if [ "${{ inputs.config-file }}" = "community" ]; then
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL --config .ash/.ash_community_plugins.yaml
+        else
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL
+        fi
+
+    - name: Validate No Plugin Errors (Python Container)
+      if: inputs.method == 'python-container'
+      shell: bash
+      run: |
+        echo "Checking for plugin execution errors..."
+        export PATH="$HOME/.local/bin:$PATH"
+        if command -v ash >/dev/null 2>&1; then
+          ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+          REPORT_CMD="ash report --format text"
+        else
+          ERROR_COUNT=$(python -m automated_security_helper report --format text | grep ERROR | wc -l)
+          REPORT_CMD="python -m automated_security_helper report --format text"
+        fi
+        if [ "$ERROR_COUNT" -gt 1 ]; then
+          echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+          $REPORT_CMD | grep ERROR | tail -n +2
+          exit 1
+        else
+          echo "SUCCESS: No plugin execution errors found"
+        fi
+
+    # Python Local scan (Windows)
+    - name: Validate ASH using Python Local (Windows)
+      if: inputs.method == 'python-local' && runner.os == 'Windows'
+      shell: pwsh
+      env:
+        SNYK_TOKEN: ${{ inputs.snyk-token }}
+      run: |
+        Write-Host "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        ash --version
+        ash --help
+        ash dependencies install
+        ash config get
+        if ("${{ inputs.config-file }}" -eq "community") {
+          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml
+        } else {
+          ash --mode local --build-target ci --verbose --no-progress
+        }
+
+    - name: Validate No Plugin Errors (Python Local Windows)
+      if: inputs.method == 'python-local' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Write-Host "Checking for plugin execution errors..."
+        $ErrorOutput = ash report --format text | Select-String "ERROR"
+        if ($ErrorOutput -and $ErrorOutput.Count -gt 1) {
+          Write-Host "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+          $ErrorOutput | Select-Object -Skip 1
+          exit 1
+        } else {
+          Write-Host "SUCCESS: No plugin execution errors found"
+        }
+
+    # Python Local scan (Unix)
+    - name: Validate ASH using Python Local (Unix)
+      if: inputs.method == 'python-local' && runner.os != 'Windows'
+      shell: bash
+      env:
+        SNYK_TOKEN: ${{ inputs.snyk-token }}
+      run: |
+        echo "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        ash --version
+        ash --help
+        ash dependencies install
+        ash config get
+        if [ "${{ inputs.config-file }}" = "community" ]; then
+          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml
+        else
+          ash --mode local --build-target ci --verbose --no-progress
+        fi
+
+    - name: Validate No Plugin Errors (Python Local Unix)
+      if: inputs.method == 'python-local' && runner.os != 'Windows'
+      shell: bash
+      run: |
+        echo "Checking for plugin execution errors..."
+        ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+        if [ "$ERROR_COUNT" -gt 1 ]; then
+          echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+          ash report --format text | grep ERROR | tail -n +2
+          exit 1
+        else
+          echo "SUCCESS: No plugin execution errors found"
+        fi
+
+    # PowerShell scan
+    - name: Validate ASH using PowerShell
+      if: inputs.method == 'powershell'
+      shell: pwsh
+      env:
+        SNYK_TOKEN: ${{ inputs.snyk-token }}
+      run: |
+        Write-Host "Testing ASH using PowerShell on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        . ./utils/ash_helpers.ps1
+        Get-Help Invoke-ASH -Full
+        if ("${{ inputs.config-file }}" -eq "community") {
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions -ConfigFile ".ash/.ash_community_plugins.yaml"
+        } else {
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions
+        }
+
+    - name: Validate No Plugin Errors (PowerShell)
+      if: inputs.method == 'powershell'
+      shell: pwsh
+      run: |
+        Write-Host "Checking for plugin execution errors..."
+        $ResultsFile = ".ash/ash_output/ash_aggregated_results.json"
+        if (Test-Path $ResultsFile) {
+          $Results = Get-Content $ResultsFile | ConvertFrom-Json
+          $ErrorCount = 0
+          foreach ($Scanner in $Results.scanners.PSObject.Properties) {
+            if ($Scanner.Value.result -eq "ERROR") {
+              $ErrorCount++
+              Write-Host "ERROR: Scanner $($Scanner.Name) failed with error"
+            }
+          }
+          if ($ErrorCount -gt 0) {
+            Write-Host "ERROR: Found $ErrorCount plugin execution errors"
+            exit 1
+          } else {
+            Write-Host "SUCCESS: No plugin execution errors found"
+          }
+        } else {
+          Write-Host "ERROR: Results file not found at $ResultsFile"
+          exit 1
+        }
+
+    # Bash scan
+    - name: Validate ASH using Bash
+      if: inputs.method == 'bash'
+      shell: bash
+      env:
+        SNYK_TOKEN: ${{ inputs.snyk-token }}
+      run: |
+        echo "Testing ASH using Bash on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        chmod +x ./ash
+        if [ "${{ inputs.config-file }}" = "community" ]; then
+          ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml
+        else
+          ./ash --build-target ci --verbose
+        fi
+
+    - name: Validate No Plugin Errors (Bash)
+      if: inputs.method == 'bash'
+      shell: bash
+      run: |
+        echo "Checking for plugin execution errors..."
+        ERROR_COUNT=$(./ash report --format text | grep ERROR | wc -l)
+        if [ "$ERROR_COUNT" -gt 1 ]; then
+          echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
+          ./ash report --format text | grep ERROR | tail -n +2
+          exit 1
+        else
+          echo "SUCCESS: No plugin execution errors found"
+        fi
+
+    # Common post-scan validation
+    - name: Collect ASH output artifact
+      uses: actions/upload-artifact@v7
+      if: success() || failure()
+      with:
+        name: ash_output-${{ inputs.os }}-${{ inputs.method }}-${{ inputs.config-file }}
+        path: .ash/ash_output
+        retention-days: 7
+        if-no-files-found: warn
+
+    - name: Verify scan completed
+      shell: pwsh
+      run: |
+        Write-Host "Verifying scan completed on ${{ inputs.os }} using method '${{ inputs.method }}' with config: ${{ inputs.config-file }}"
+        $PathsToValidate = @(
+          ".ash/ash_output/ash_aggregated_results.json"
+          ".ash/ash_output/reports/ash.sarif"
+        )
+        foreach ($ValPath in $PathsToValidate) {
+          if (Test-Path $ValPath) {
+            Write-Host "$ValPath found"
+          } else {
+            Write-Host "$ValPath NOT found"
+            exit 1
+          }
+        }
+
+    - name: Validate GitLab SAST Report Schema Compliance
+      shell: bash
+      run: |
+        echo "Validating GitLab SAST report schema compliance..."
+        GITLAB_REPORTS=$(find .ash/ash_output -name "*.gl-sast-report.json" 2>/dev/null || true)
+        if [ -z "$GITLAB_REPORTS" ]; then
+          echo "No GitLab SAST reports found to validate"
+          exit 0
+        fi
+        echo "Found GitLab SAST reports to validate:"
+        echo "$GITLAB_REPORTS"
+        npm install -g ajv-cli
+        curl -o gitlab-sast-schema.json "https://gitlab.com/gitlab-org/security-products/security-report-schemas/-/raw/master/dist/sast-report-format.json"
+        VALIDATION_FAILED=false
+        for report in $GITLAB_REPORTS; do
+          echo "Validating $report..."
+          if ajv validate -s gitlab-sast-schema.json -d "$report" --strict=false --all-errors; then
+            echo "PASS: $report passed schema validation"
+          else
+            echo "FAIL: $report failed schema validation"
+            VALIDATION_FAILED=true
+          fi
+        done
+        if [ "$VALIDATION_FAILED" = true ]; then
+          echo "ERROR: One or more GitLab SAST reports failed schema validation"
+          exit 1
+        else
+          echo "SUCCESS: All GitLab SAST reports passed schema validation"
+        fi

@@ -10,7 +10,8 @@ from typing import Annotated, List, Literal
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import ASH_ASSETS_DIR
+from automated_security_helper.core.constants import ASH_ASSETS_DIR, is_offline_mode
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -72,8 +73,9 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
         bool,
         Field(
             description="Run in offline mode, using locally cached rules.",
+            default_factory=is_offline_mode,
         ),
-    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
+    ]
 
     tool_version: Annotated[
         str | None,
@@ -107,7 +109,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         self.command = "semgrep"
         self.use_uv_tool = True  # Enable UV tool execution
         self.subcommands = ["scan"]
-        self.tool_type = "SAST"
+        self.tool_type = ScannerToolType.SAST
 
         # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
@@ -255,10 +257,17 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
 
             # Validate offline mode requirements
             from automated_security_helper.utils.offline_mode_validator import (
-                validate_semgrep_offline_mode,
+                OfflineModeValidator,
             )
 
-            offline_valid, offline_messages = validate_semgrep_offline_mode()
+            offline_valid, offline_messages = OfflineModeValidator.validate_cache_directory(
+                cache_dir=os.environ.get("SEMGREP_RULES_CACHE_DIR", ""),
+                file_extensions=[".yaml", ".yml"],
+                scanner_name="Semgrep",
+            )
+            if not offline_valid:
+                for msg in offline_messages:
+                    self._plugin_log(msg, level=logging.WARNING)
 
             # Check if SEMGREP_RULES_CACHE_DIR is set in environment
             semgrep_rules_cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
@@ -386,8 +395,8 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -395,23 +404,20 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             )
             return True
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -423,15 +429,6 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
 
-            # Add global ignore paths as exclude patterns
-            # for ignore_path in global_ignore_paths:
-            #     self.args.extra_args.append(
-            #         ToolExtraArg(
-            #             key="--exclude",
-            #             value=ignore_path.path,
-            #         )
-            #     )
-
             final_args = self._resolve_arguments(
                 target=target,
                 results_file=results_file,
@@ -442,7 +439,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",
                 target_type=target_type,
-                level=15,
+                level=logging.VERBOSE,
             )
 
             # Build a local environment with offline-mode additions. Do
@@ -457,11 +454,6 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 command=final_args,
                 results_dir=target_results_dir,
                 env=subprocess_env,
-            )
-
-            self._post_scan(
-                target=target,
-                target_type=target_type,
             )
 
             semgrep_results = {}

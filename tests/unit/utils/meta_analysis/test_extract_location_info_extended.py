@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.extract_location_info import (
+from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     extract_location_info,
 )
 

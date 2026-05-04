@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
-from automated_security_helper.core.enums import RunMode, Strategy, Phases
+from automated_security_helper.core.enums import RunMode, ExecutionStrategy, ExecutionPhase
 
 
 @pytest.fixture
@@ -34,12 +34,12 @@ def test_run_ash_scan_cli_command_with_all_options(mock_run_ash_scan):
         output_dir="./output",
         config_overrides=["key1=value1", "key2=value2"],
         offline=True,
-        strategy=Strategy.sequential,
+        strategy=ExecutionStrategy.SEQUENTIAL,
         scanners=["bandit", "checkov"],
         exclude_scanners=["semgrep"],
         progress=False,
         output_formats=["sarif", "html"],
-        phases=[Phases.convert, Phases.scan],
+        phases=[ExecutionPhase.CONVERT, ExecutionPhase.SCAN],
         python_based_plugins_only=True,
         debug=True,
         color=False,
@@ -75,13 +75,13 @@ def test_run_ash_scan_cli_command_with_all_options(mock_run_ash_scan):
     assert kwargs["output_dir"] == "./output"
     assert kwargs["config_overrides"] == ["key1=value1", "key2=value2"]
     assert kwargs["offline"] is True
-    assert kwargs["strategy"] == Strategy.sequential
+    assert kwargs["strategy"] == ExecutionStrategy.SEQUENTIAL
     assert kwargs["scanners"] == ["bandit", "checkov"]
     assert kwargs["exclude_scanners"] == ["semgrep"]
     assert kwargs["progress"] is False
     assert kwargs["output_formats"] == ["sarif", "html"]
     assert kwargs["cleanup"] is True
-    assert kwargs["phases"] == [Phases.convert, Phases.scan]
+    assert kwargs["phases"] == [ExecutionPhase.CONVERT, ExecutionPhase.SCAN]
     assert kwargs["inspect"] is True
     assert kwargs["python_based_plugins_only"] is True
     assert kwargs["quiet"] is True

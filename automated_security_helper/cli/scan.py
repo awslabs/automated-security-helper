@@ -13,9 +13,9 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.core.enums import (
     AshLogLevel,
     BuildTarget,
-    Phases,
+    ExecutionPhase,
+    ExecutionStrategy,
     RunMode,
-    Strategy,
 )
 from automated_security_helper.interactions.run_ash_scan import (
     run_ash_scan,
@@ -85,9 +85,9 @@ def run_ash_scan_cli_command(
         ),
     ] = "p/ci",
     strategy: Annotated[
-        Strategy,
+        ExecutionStrategy,
         typer.Option(help="Whether to run scanners in parallel or sequential"),
-    ] = Strategy.parallel.value,
+    ] = ExecutionStrategy.PARALLEL.value,
     progress: Annotated[
         bool,
         typer.Option(
@@ -114,7 +114,7 @@ def run_ash_scan_cli_command(
         ),
     ] = False,
     phases: Annotated[
-        Optional[List[Phases]],
+        Optional[List[ExecutionPhase]],
         typer.Option(
             help="The phases to run. Defaults to all phases except inspect.",
         ),
@@ -187,12 +187,24 @@ def run_ash_scan_cli_command(
             help="Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value."
         ),
     ] = None,
+    simple: Annotated[
+        bool,
+        typer.Option(
+            help="Simplified output mode with minimal logging",
+        ),
+    ] = False,
     ignore_suppressions: Annotated[
         bool,
         typer.Option(
             help="Ignore all suppression rules and report all findings regardless of suppression status."
         ),
     ] = False,
+    min_severity: Annotated[
+        str,
+        typer.Option(
+            help="Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). 'critical' and 'high' are equivalent because SARIF does not distinguish them. Findings below this threshold are still reported but don't affect the exit code.",
+        ),
+    ] = "low",
     ### CONTAINER-RELATED OPTIONS
     build: Annotated[
         bool,
@@ -228,23 +240,6 @@ def run_ash_scan_cli_command(
             envvar="OCI_RUNNER",
         ),
     ] = None,
-    # preserve_report: Annotated[
-    #     bool,
-    #     typer.Option(
-    #         "--preserve-report",
-    #         "-p",
-    #         help="Add timestamp to the final report file to avoid overwriting it after multiple executions",
-    #     ),
-    # ] = False,
-    # extension: Annotated[
-    #     Optional[str],
-    #     typer.Option(
-    #         "--ext",
-    #         "--extension",
-    #         "-e",
-    #         help="Force a file extension to scan. Defaults to identify files automatically",
-    #     ),
-    # ] = None,
     build_target: Annotated[
         BuildTarget | None,
         typer.Option(
@@ -313,7 +308,7 @@ def run_ash_scan_cli_command(
     if output_formats is None:
         output_formats = []
     if phases is None:
-        phases = [Phases.convert, Phases.scan, Phases.report]
+        phases = [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
     if custom_build_arg is None:
         custom_build_arg = []
 
@@ -397,9 +392,11 @@ def run_ash_scan_cli_command(
         color=color,
         fail_on_findings=fail_on_findings,
         ignore_suppressions=ignore_suppressions,
+        min_severity=min_severity,
         mode=mode or RunMode.local,
         show_summary=show_summary,
-        simple=precommit_mode
+        simple=simple
+        or precommit_mode
         or log_level == AshLogLevel.SIMPLE
         or str(log_level).lower() == "simple",
         # Pass the ash_plugin_modules parameter

@@ -1,13 +1,15 @@
 """Module containing the Grype security scanner implementation."""
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Annotated, List, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -17,6 +19,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -43,8 +46,9 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
         bool,
         Field(
             description="Run in offline mode, disabling database updates and validation",
+            default_factory=is_offline_mode,
         ),
-    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
+    ]
 
 
 class GrypeScannerConfig(ScannerPluginConfigBase):
@@ -69,38 +73,15 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         if self.config is None:
             self.config = GrypeScannerConfig()
         self.command = "grype"
-        self.tool_type = "SAST"
+        self.tool_type = ScannerToolType.SCA
         self.args = ToolArgs(
             format_arg="--output",
             format_arg_value="sarif",
             output_arg="--file",
             scan_path_arg=None,
-            extra_args=[
-                # ToolExtraArg(key="--skip-framework", value="cloudformation"),
-            ],
+            extra_args=[],
         )
         super().model_post_init(context)
-
-    @model_validator(mode="after")
-    def setup_custom_install_commands(self) -> "GrypeScanner":
-        """Set up custom installation commands for Grype."""
-        # Get version and linux_type from config
-        # Linux
-        if "linux" not in self.custom_install_commands:
-            self.custom_install_commands["linux"] = {}
-        self.custom_install_commands["linux"]["amd64"] = []
-        self.custom_install_commands["linux"]["arm64"] = []
-        # macOS
-        if "darwin" not in self.custom_install_commands:
-            self.custom_install_commands["darwin"] = {}
-        self.custom_install_commands["darwin"]["amd64"] = []
-        self.custom_install_commands["darwin"]["arm64"] = []
-        # Windows
-        if "windows" not in self.custom_install_commands:
-            self.custom_install_commands["windows"] = {}
-        self.custom_install_commands["windows"]["amd64"] = []
-
-        return self
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -118,18 +99,31 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             )
         return found is not None
 
-    def _has_install_commands(self) -> bool:
-        """Check if scanner has non-empty custom install commands."""
-        import platform
-        import struct
+    @staticmethod
+    def _strip_leading_slash_from_uri(location) -> None:
+        """Strip leading slashes from the artifact location URI, if present."""
+        if (
+            location.physicalLocation
+            and location.physicalLocation.root
+            and location.physicalLocation.root.artifactLocation
+        ):
+            uri = location.physicalLocation.root.artifactLocation.uri
+            if uri:
+                location.physicalLocation.root.artifactLocation.uri = uri.lstrip("/")
 
-        system = platform.system().lower()
-        arch = "amd64" if struct.calcsize("P") * 8 == 64 else "arm64"
+    def _normalize_result_uris(self, result) -> None:
+        """Strip leading slashes from all URIs in a single SARIF result."""
+        try:
+            for loc in result.locations or []:
+                self._strip_leading_slash_from_uri(loc)
 
-        if system in self.custom_install_commands:
-            if arch in self.custom_install_commands[system]:
-                return len(self.custom_install_commands[system][arch]) > 0
-        return False
+            for rel in getattr(result, "relatedLocations", None) or []:
+                self._strip_leading_slash_from_uri(rel)
+
+            if result.analysisTarget and result.analysisTarget.uri:
+                result.analysisTarget.uri = result.analysisTarget.uri.lstrip("/")
+        except Exception as e:
+            ASH_LOGGER.warning(f"Error processing Grype result: {e}")
 
     def _process_config_options(self):
         # Grype config path
@@ -173,6 +167,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             )
 
             offline_valid, offline_messages = validate_grype_offline_mode()
+            if not offline_valid:
+                for msg in offline_messages:
+                    self._plugin_log(msg, level=logging.WARNING)
 
             ASH_LOGGER.info(
                 "Running Grype in offline mode - database updates and validation disabled"
@@ -208,8 +205,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -217,23 +214,20 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             )
             return True
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -314,58 +308,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                     )
                 ]
 
-                clean_runs = []
                 for run in sarif_report.runs:
-                    # Always include runs, even if they have no results
-                    clean_results = []
-                    if run.results:
-                        for result in run.results:
-                            try:
-                                # Process locations
-                                if result.locations:
-                                    for location in result.locations:
-                                        if (
-                                            location.physicalLocation
-                                            and location.physicalLocation.root
-                                            and location.physicalLocation.root.artifactLocation
-                                        ):
-                                            uri = location.physicalLocation.root.artifactLocation.uri
-                                            if uri:
-                                                uri = uri.lstrip("/")
-                                                location.physicalLocation.root.artifactLocation.uri = uri
-
-                                # Process related locations if present
-                                if (
-                                    hasattr(result, "relatedLocations")
-                                    and result.relatedLocations
-                                ):
-                                    for related in result.relatedLocations:
-                                        if (
-                                            related.physicalLocation
-                                            and related.physicalLocation.root
-                                            and related.physicalLocation.root.artifactLocation
-                                        ):
-                                            uri = related.physicalLocation.root.artifactLocation.uri
-                                            if uri:
-                                                uri = uri.lstrip("/")
-                                                related.physicalLocation.root.artifactLocation.uri = uri
-
-                                # Process analysis target if present
-                                if result.analysisTarget and result.analysisTarget.uri:
-                                    uri = result.analysisTarget.uri
-                                    uri = uri.lstrip("/")
-                                    result.analysisTarget.uri = uri
-                                clean_results.append(result)
-                            except Exception as e:
-                                ASH_LOGGER.warning(
-                                    f"Error processing Grype result: {e}"
-                                )
-                                # Still append the result even if processing failed
-                                clean_results.append(result)
-
-                    run.results = clean_results
-                    clean_runs.append(run)
-                sarif_report.runs = clean_runs
+                    for result in run.results or []:
+                        self._normalize_result_uris(result)
             except Exception as e:
                 ASH_LOGGER.warning(
                     f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}"

@@ -40,14 +40,3 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
             exclude_unset=True,
             # exclude_defaults=True,
         )
-        # clean_sarif = clean_dict(
-        #     input=model.sarif.model_dump(
-        #         by_alias=True,
-        #         exclude_unset=True,
-        #         exclude_none=True,
-        #         # exclude_defaults=True,
-        #         # round_trip=True,
-        #         mode="json",
-        #     )
-        # )
-        # return json.dumps(clean_sarif, default=str)

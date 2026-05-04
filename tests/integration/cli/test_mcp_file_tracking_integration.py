@@ -25,7 +25,7 @@ from automated_security_helper.cli.mcp_tools import (
 )
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
-    ScanStatus,
+    MCScanStatus,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
     check_scan_completion,
@@ -189,7 +189,7 @@ async def test_file_based_tracking_workflow(test_directory, mock_scan_process):
     aggregated_results_file.write_text(json.dumps(aggregated_results))
 
     # Update scan status in registry
-    registry.update_scan_status(scan_id, ScanStatus.COMPLETED)
+    registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
 
     # Check scan completion
     assert check_scan_completion(output_dir) is True

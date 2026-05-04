@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.extract_result_summary import (
+from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     extract_result_summary,
 )
 

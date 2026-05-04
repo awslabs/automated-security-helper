@@ -2,7 +2,7 @@
 
 from unittest.mock import patch, mock_open
 
-from automated_security_helper.utils.meta_analysis.generate_field_mapping_html_report import (
+from automated_security_helper.utils.meta_analysis.reporting import (
     generate_html_report,
 )
 
@@ -57,7 +57,7 @@ def test_generate_html_report():
 
     # Mock file writing more specifically to avoid system file calls
     with patch(
-        "automated_security_helper.utils.meta_analysis.generate_field_mapping_html_report.open",
+        "automated_security_helper.utils.meta_analysis.reporting.open",
         mock_open(),
     ) as mock_file:
         # Call function

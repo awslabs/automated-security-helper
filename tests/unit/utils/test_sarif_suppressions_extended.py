@@ -102,7 +102,7 @@ class TestSarifSuppressions:
         # Check that the first finding is suppressed
         assert result.runs[0].results[0].suppressions is not None
         assert len(result.runs[0].results[0].suppressions) == 1
-        assert result.runs[0].results[0].suppressions[0].kind == "external"
+        assert result.runs[0].results[0].suppressions[0].kind == "inSource"
         assert (
             "Test suppression"
             in result.runs[0].results[0].suppressions[0].justification
@@ -197,7 +197,7 @@ class TestSarifSuppressions:
         # Check that the first finding is suppressed
         assert result.runs[0].results[0].suppressions is not None
         assert len(result.runs[0].results[0].suppressions) == 1
-        assert result.runs[0].results[0].suppressions[0].kind == "external"
+        assert result.runs[0].results[0].suppressions[0].kind == "inSource"
         assert (
             "Test suppression"
             in result.runs[0].results[0].suppressions[0].justification
@@ -367,7 +367,7 @@ class TestSarifSuppressions:
         # Check that the remaining finding (first one) is suppressed
         assert result.runs[0].results[0].suppressions is not None
         assert len(result.runs[0].results[0].suppressions) == 1
-        assert result.runs[0].results[0].suppressions[0].kind == "external"
+        assert result.runs[0].results[0].suppressions[0].kind == "inSource"
         assert (
             "Test suppression"
             in result.runs[0].results[0].suppressions[0].justification
@@ -375,3 +375,59 @@ class TestSarifSuppressions:
 
         # The second finding should be completely removed due to ignore_path
         # (not present in results at all)
+
+    def test_apply_suppressions_with_absolute_uri(
+        self, test_source_dir, test_output_dir
+    ):
+        """Suppression config with relative path must match absolute SARIF URIs."""
+        abs_prefix = str(test_source_dir.resolve())
+        sarif_report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(
+                        driver=ToolComponent(
+                            name="semgrep",
+                            version="1.0.0",
+                        )
+                    ),
+                    results=[
+                        Result(
+                            ruleId="run-shell-injection",
+                            message=Message(text="Shell injection"),
+                            locations=[
+                                Location(
+                                    physicalLocation=PhysicalLocation2(
+                                        artifactLocation=ArtifactLocation(
+                                            uri=f"{abs_prefix}/.github/actions/run-scan-test/action.yml"
+                                        ),
+                                        region=Region(startLine=77, endLine=77),
+                                    )
+                                )
+                            ],
+                        ),
+                    ],
+                )
+            ],
+        )
+        config = AshConfig(
+            project_name="test-project",
+            global_settings={
+                "suppressions": [
+                    AshSuppression(
+                        rule_id="run-shell-injection",
+                        path=".github/actions/run-scan-test/action.yml",
+                        reason="inputs.* are author-defined, not attacker-controlled",
+                    )
+                ]
+            },
+        )
+        plugin_context = PluginContext(
+            source_dir=test_source_dir,
+            output_dir=test_output_dir,
+            config=config,
+        )
+        result = apply_suppressions_to_sarif(sarif_report, plugin_context)
+        assert result.runs[0].results[0].suppressions is not None
+        assert len(result.runs[0].results[0].suppressions) == 1
+        assert result.runs[0].results[0].suppressions[0].kind == "inSource"

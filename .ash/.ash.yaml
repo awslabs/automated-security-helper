@@ -72,6 +72,9 @@ global_settings:
       rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
       reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars
       expiration: "2026-06-01"
+    - path: .github/actions/run-scan-test/action.yml
+      rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
+      reason: "False positive — inputs.* interpolations in composite actions are author-defined values, not attacker-controlled github.event context"
     - path: tests/**/*.py
       rule_id: B101
       reason: Assert usage expected with Pytest
@@ -107,12 +110,6 @@ global_settings:
     - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
       path: ".ash/ash_output*/scanners/*.json"
       reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
-    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen1"
-      path: automated_security_helper/utils/subprocess_utils.py
-      reason: "False positive - ASH requires Python 3.10+, compatibility with Python3.6 and less is not required"
-    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen2"
-      path: automated_security_helper/utils/subprocess_utils.py
-      reason: "False positive - ASH requires Python 3.10+, compatibility with Python3.6 and less is not required"
     - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
       path: automated_security_helper/cli/main.py
       line_start: 75
@@ -120,25 +117,42 @@ global_settings:
       reason: "False positive - ASH requires Python 3.10+ (pyproject.toml), importlib.resources is available in Python 3.7+"
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/secret_masking.py
-      reason: "False positive - Secret found message string"
-      line_start: 37
-      line_end: 37
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: automated_security_helper/utils/secret_masking.py
-      reason: "False positive - Secret found message string"
-      line_start: 46
-      line_end: 46
+      reason: "False positive - module processes secret-related strings, keyword matches are inherent"
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/utils/test_secret_masking.py
       reason: "False positive - Multiple ocurrences of the keyword due to the nature of the test suite"
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: tests/unit/utils/test_secret_masking.py
       reason: "False positive - Multiple ocurrences of the keyword due to the nature of the test suite"
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/test_defense_in_depth.py
+      reason: "False positive - test data contains hex strings for tarfile extraction validation"
     - rule_id: B108
       path: tests/unit/converters/test_converters.py
       line_start: 318
       line_end: 322
       reason: "Test validates path traversal protection - checking /tmp/evil.py does NOT exist"
+    - rule_id: B108
+      path: tests/unit/core/test_orchestrator_regression.py
+      reason: "Test intentionally uses temp paths to verify cleanup guard"
+    - rule_id: B110
+      path: tests/unit/core/test_base_plugins_regression.py
+      reason: "Test verifies exception propagation behavior"
+    - rule_id: B110
+      path: tests/unit/config/test_ash_config_regression.py
+      reason: "Test verifies yaml loader isolation with exception handling"
+    - rule_id: B110
+      path: tests/unit/test_environ_mutation_fix.py
+      reason: "Test catches expected exceptions to verify env restoration"
+    - rule_id: B404
+      path: tests/unit/utils/test_subprocess_utils_regression.py
+      reason: "Test file for subprocess_utils must import subprocess"
+    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
+      path: automated_security_helper/plugin_modules/ash_builtin/__init__.py
+      reason: "Lazy plugin loading uses hardcoded module paths, not user input"
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: "tests/unit/utils/test_secret_masking*.py"
+      reason: "Intentional test fixtures for secret masking regression tests"
     - rule_id: B108
       path: tests/unit/converters/test_converters.py
       line_start: 352

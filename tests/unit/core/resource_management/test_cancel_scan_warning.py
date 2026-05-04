@@ -7,7 +7,7 @@ from unittest.mock import patch
 from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
     ScanRegistryEntry,
-    ScanStatus,
+    MCScanStatus,
 )
 
 
@@ -18,7 +18,7 @@ def _make_registry_with_running_scan():
         directory_path=str(Path(tempfile.gettempdir()) / "fakedir"),
         output_directory=str(Path(tempfile.gettempdir()) / "fakeout"),
     )
-    entry.status = ScanStatus.RUNNING
+    entry.status = MCScanStatus.RUNNING
     entry.process_id = None
     registry._registry["test-scan-1"] = entry
     return registry
@@ -38,4 +38,4 @@ def test_cancel_scan_still_marks_cancelled_when_no_pid():
     registry = _make_registry_with_running_scan()
     registry.cancel_scan("test-scan-1")
     entry = registry.get_scan("test-scan-1")
-    assert entry.status == ScanStatus.CANCELLED
+    assert entry.status == MCScanStatus.CANCELLED

@@ -9,7 +9,8 @@ from automated_security_helper.config.ash_config import (
     BuildConfig,
     ScannerConfigSegment,
 )
-from automated_security_helper.models.core import ExportFormat, ToolArgs, ToolExtraArg
+from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 
 
@@ -37,7 +38,7 @@ def basic_ash_config() -> AshConfig:
 def full_ash_config(mock_scanner_plugin) -> AshConfig:
     """Create a complete AshConfig with all options for testing."""
     # Lazy load required classes to avoid circular imports
-    from automated_security_helper.config.scanner_types import CustomScannerConfig
+    from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase as CustomScannerConfig
     from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         BanditScannerConfig,
     )

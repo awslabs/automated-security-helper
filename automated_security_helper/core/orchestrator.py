@@ -441,41 +441,10 @@ class ASHScanOrchestrator(BaseModel):
                 ASH_LOGGER.error(f"Execution failed: {str(e)}")
                 raise
 
-                # Process and validate results
-                # if not asharp_model_results:
-                #     ASH_LOGGER.debug("No results returned, using empty result set")
-                #     asharp_model_results = AshAggregatedResults(
-                #         description="ASH execution engine returned no results!"
-                #     )
-                # else:
-                #     for fmt in self.config.output_formats:
-                #         outfile = asharp_model_results.report(
-                #             output_format=fmt,
-                #             output_dir=self.output_dir,
-                #         )
-                #         if outfile is None:
-                #             ASH_LOGGER.warning(
-                #                 f"Failed to generate output for format {fmt}"
-                #             )
-                #         elif isinstance(outfile, Path) and not outfile.exists():
-                #             ASH_LOGGER.warning(
-                #                 f"Output file {outfile} does not exist for format {fmt}"
-                #             )
-                #         elif isinstance(outfile, Path) and outfile.exists():
-                #             ASH_LOGGER.debug(
-                #                 f"Generated output for format {fmt} at {outfile}"
-                #             )
-                #         else:
-                #             ASH_LOGGER.verbose(
-                #                 f"Unexpected response when formatting {fmt}: {outfile}"
-                #             )
             if not self.no_cleanup:
                 if self.work_dir and Path(self.work_dir).exists():
                     ASH_LOGGER.verbose("Cleaning up working directory...")
                     shutil.rmtree(self.work_dir)
-                # ASH_LOGGER.info("Cleaning up scanners directory...")
-                # shutil.rmtree(self.output_dir.joinpath("scanners"))
-
             return asharp_model_results
 
         except ASHValidationError:

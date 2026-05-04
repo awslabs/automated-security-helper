@@ -13,9 +13,9 @@ from typing import Dict, List, Optional, Any
 from automated_security_helper.core.enums import (
     AshLogLevel,
     BuildTarget,
-    Phases,
+    ExecutionPhase,
     RunMode,
-    Strategy,
+    ExecutionStrategy,
     ExportFormat,
 )
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
@@ -488,17 +488,17 @@ with tab1:
 
             strategy = st.selectbox(
                 "Execution Strategy",
-                options=[s.value for s in Strategy],
+                options=[s.value for s in ExecutionStrategy],
                 index=0,
                 help="Whether to run scanners in parallel or sequential",
             )
 
         with col2:
-            available_phases = [phase.value for phase in Phases]
+            available_phases = [phase.value for phase in ExecutionPhase]
             default_phases = [
-                Phases.convert.value,
-                Phases.scan.value,
-                Phases.report.value,
+                ExecutionPhase.CONVERT.value,
+                ExecutionPhase.SCAN.value,
+                ExecutionPhase.REPORT.value,
             ]
             phases = st.multiselect(
                 "Execution Phases",
@@ -694,10 +694,10 @@ with tab1:
         with st.spinner("Running ASH scan..."):
             try:
                 # Convert string values back to enum objects
-                strategy_enum = Strategy(strategy)
+                strategy_enum = ExecutionStrategy(strategy)
                 log_level_enum = AshLogLevel(log_level)
                 mode_enum = RunMode(mode)
-                phases_enum = [Phases(phase) for phase in phases]
+                phases_enum = [ExecutionPhase(phase) for phase in phases]
                 output_formats_enum = [ExportFormat(fmt) for fmt in output_formats]
 
                 if build_target:

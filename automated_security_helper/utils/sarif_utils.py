@@ -1,6 +1,5 @@
 """Utility functions for working with SARIF reports."""
 
-import os
 import random
 from contextlib import suppress
 from typing import List
@@ -30,6 +29,7 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.utils.normalizers import path_matches_pattern
 
 
 def _get_suppression_id(suppression: AshSuppression) -> str:
@@ -263,44 +263,6 @@ def attach_scanner_details(
     return sarif_report
 
 
-def path_matches_pattern(path: str, pattern: str) -> bool:
-    """
-    Check if a path matches a pattern.
-
-    Args:
-        path: The path to check
-        pattern: The pattern to match against
-
-    Returns:
-        True if the path matches the pattern, False otherwise
-    """
-    import fnmatch
-
-    # Normalize paths for comparison
-    path = str(path).replace("\\", "/")
-    pattern = str(pattern).replace("\\", "/")
-    patterns = [
-        pattern + "/**/*.*",
-        pattern + "/*.*",
-        pattern,
-    ]
-
-    for pat in patterns:
-        # Check for exact match
-        if path == pat:
-            return True
-        elif pat in path:
-            return True
-        elif fnmatch.fnmatch(path, pat):
-            return True
-
-        # Check for directory match (e.g., "dir/" should match "dir/file.txt")
-        if pat.endswith("/") and path.startswith(pat):
-            return True
-
-    return False
-
-
 def get_severity_metrics_from_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
@@ -452,6 +414,7 @@ def apply_suppressions_to_sarif(
     _output_dir_resolved = plugin_context.output_dir.resolve()
     _work_dir_resolved = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME).resolve()
     _uri_resolve_cache: dict[str, Path] = {}
+    _source_dir_prefix = str(plugin_context.source_dir.resolve()).replace("\\", "/") + "/"
 
     for run in sarif_report.runs:
         if not run.results:
@@ -470,6 +433,10 @@ def apply_suppressions_to_sarif(
                         and location.physicalLocation.root.artifactLocation
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
+                        if uri:
+                            uri_normalized = uri.replace("\\", "/")
+                            if uri_normalized.startswith(_source_dir_prefix):
+                                uri = uri_normalized[len(_source_dir_prefix):]
                         if uri:
                             if uri not in _uri_resolve_cache:
                                 _uri_resolve_cache[uri] = Path(uri).resolve()
@@ -510,6 +477,10 @@ def apply_suppressions_to_sarif(
                         and location.physicalLocation.root.artifactLocation
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
+                        if uri:
+                            uri_normalized = uri.replace("\\", "/")
+                            if uri_normalized.startswith(_source_dir_prefix):
+                                uri = uri_normalized[len(_source_dir_prefix):]
                         line_start = None
                         line_end = None
                         if (
@@ -571,7 +542,7 @@ def apply_suppressions_to_sarif(
                             f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
                         )
                         suppression = Suppression(
-                            kind=Kind1.external,
+                            kind=Kind1.inSource,
                             justification=f"(ASH) Suppressing finding for rule '{result.ruleId}' in '{flat_finding.file_path}' with reason: {reason}",
                         )
                         result.suppressions.append(suppression)

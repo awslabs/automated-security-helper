@@ -31,6 +31,14 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 uv --version
 ```
 
+### Windows: Enable Long Paths
+
+Windows has a 260-character path limit that can cause `git clone` or `git reset` failures due to deeply nested test file paths. Run this once before cloning:
+
+```ps1
+git config --global core.longpaths true
+```
+
 ## Project Setup
 
 ### Option 1: Manual Setup

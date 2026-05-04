@@ -411,30 +411,6 @@ class Color:
         return "\033[98m{}\033[00m".format(msg)
 
 
-# class CustomFormatter(logging.Formatter):
-
-#     grey = "\x1b[38;20m"
-#     cyan = "\x1b[36;20m"
-#     yellow = "\x1b[33;20m"
-#     red = "\x1b[31;20m"
-#     bold_red = "\x1b[31;1m"
-#     reset = "\x1b[0m"
-#     format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
-
-#     FORMATS = {
-#         logging.DEBUG: cyan + format + reset,
-#         logging.INFO: grey + format + reset,
-#         logging.WARNING: yellow + format + reset,
-#         logging.ERROR: red + format + reset,
-#         logging.CRITICAL: bold_red + format + reset
-#     }
-
-#     def format(self, record):
-#         log_fmt = self.FORMATS.get(record.levelno)
-#         formatter = logging.Formatter(log_fmt)
-#         return formatter.format(record)
-
-
 def get_logger(
     name: str = "ash",
     level: str | int | None = None,
@@ -581,14 +557,6 @@ def get_logger(
     if output_dir:
         """Add a file handler for this logger with the specified `name` (and
         store the log file under `output_dir`)."""
-        # Format for file log (use JSON Lines for easier indexing/querying)
-        # fmt = '{"time": "%(asctime)s", "level": "%(levelname)s", "source": "%(filename)s:%(lineno)d", "message": "%(message)s"}'
-        # fmt = "%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s "
-        # json_formatter = logging.Formatter(fmt)
-
-        # # Determine log path/file name; create output_dir if necessary
-        # now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
         # Determine file log level (default to INFO to avoid huge log files)
         final_file_log_level = (
             file_log_level if file_log_level is not None else logging.INFO

@@ -11,18 +11,17 @@ from rich.markdown import Markdown
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
-from automated_security_helper.core.enums import AshLogLevel, ReportFormat
+from automated_security_helper.core.enums import AshLogLevel, ExportFormat
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.interfaces import IReporter
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
 
 
 def get_report_formats(incomplete: str = None) -> List[str]:
     report_formats = []
-    # Get values from ReportFormat str enum
-    for report_format in ReportFormat:
+    # Get values from ExportFormat str enum
+    for report_format in ExportFormat:
         if incomplete != "" and incomplete not in report_format.value:
             continue
         report_formats.append(report_format.value)
@@ -37,7 +36,7 @@ def report_command(
             help=f"Report format to generate (reporter plugin name). Defaults to 'markdown'. Examples values: {', '.join(get_report_formats(''))}",
             autocompletion=get_report_formats,
         ),
-    ] = ReportFormat.markdown.value,
+    ] = ExportFormat.MARKDOWN.value,
     output_dir: Annotated[
         str | None,
         typer.Option(
@@ -159,7 +158,7 @@ def report_command(
 
     # Find the reporter plugin
     reporter_plugins = ash_plugin_manager.plugin_modules(
-        plugin_type=IReporter,
+        plugin_type="reporter",
     )
     reporter_plugin = None
 

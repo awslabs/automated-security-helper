@@ -9,7 +9,6 @@ from pathspec import PathSpec
 from pathlib import Path
 import argparse
 import os
-from glob import glob
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -59,35 +58,54 @@ def debug_echo(*msg, debug: bool = False) -> str | None:
     return message
 
 
+def _collect_ignorefiles_and_all_files(
+    path: str,
+    extra_ignorefiles: List[str] | None = None,
+    debug: bool = False,
+) -> tuple[List[str], List[str]]:
+    """Walk the directory tree once to collect ignore files and all file paths.
+
+    Returns a tuple of (ignore_file_paths, all_file_paths).
+    """
+    if extra_ignorefiles is None:
+        extra_ignorefiles = []
+
+    _ignore_names = {".ignore", ".gitignore"}
+    ignore_files: List[str] = []
+    all_files: List[str] = []
+
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            full_path = os.path.join(root, f)
+            if f in _ignore_names:
+                ignore_files.append(full_path)
+            all_files.append(full_path)
+
+    # Append any user-specified ignore files
+    for extra in extra_ignorefiles:
+        extra_path = os.path.join(path, extra)
+        if extra_path not in ignore_files:
+            ignore_files.append(extra_path)
+
+    return ignore_files, all_files
+
+
 def get_ash_ignorespec_lines(
     path,
     ignorefiles: List[str] | None = None,
     debug: bool = False,
+    _discovered_ignore_files: List[str] | None = None,
 ) -> List[str]:
     if ignorefiles is None:
         ignorefiles = []
-    dotignores = [f"{path}/.ignore", *[item for item in glob(f"{path}/**/.ignore", recursive=True)]]
-    # ashignores = [
-    #     f"{path}/.ashignore",
-    #     *[
-    #         item
-    #         for item in glob(f"{path}/**/.ashignore")
-    #     ]
-    # ]
-    gitignores = [
-        f"{path}/.gitignore",
-        *[item for item in glob(f"{path}/**/.gitignore", recursive=True)],
-    ]
-    all_ignores = list(
-        set(
-            [
-                *dotignores,
-                *gitignores,
-                # *ashignores,
-                *[f"{path}/{file}" for file in ignorefiles],
-            ]
-        )
-    )
+
+    if _discovered_ignore_files is not None:
+        all_ignores = list(set(_discovered_ignore_files))
+    else:
+        # Fallback: collect ignore files via a walk (used when called standalone)
+        all_ignores, _ = _collect_ignorefiles_and_all_files(path, ignorefiles, debug)
+        all_ignores = list(set(all_ignores))
+
     lines = []
     for ignorefile in all_ignores:
         if os.path.isfile(ignorefile):
@@ -120,22 +138,24 @@ def get_files_not_matching_spec(
     path,
     spec,
     debug: bool = False,
+    _all_files: List[str] | None = None,
 ):
-    full = []
+    if _all_files is None:
+        # Fallback: walk again if called standalone without pre-collected files
+        _all_files = []
+        for root, _dirs, files in os.walk(path):
+            for f in files:
+                _all_files.append(os.path.join(root, f))
+
     included = []
-    for item in os.walk(path):
-        for file in item[2]:
-            full.append(os.path.join(item[0], file))
-            inc_full = os.path.join(item[0], file)
-            clean = re.sub(
-                rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", inc_full
-            )
-            if not spec.match_file(inc_full):
-                if "/node_modules/aws-cdk" not in inc_full:
-                    debug_echo(f"Matched file for scan set: {clean}", debug=debug)
-                    included.append(inc_full)
-            # elif '/.git/' not in inc_full:
-            #     debug_echo(f"Ignoring file matching spec: {clean}", debug=debug)
+    for inc_full in _all_files:
+        clean = re.sub(
+            rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", inc_full
+        )
+        if not spec.match_file(inc_full):
+            if "/node_modules/aws-cdk" not in inc_full:
+                debug_echo(f"Matched file for scan set: {clean}", debug=debug)
+                included.append(inc_full)
     included = sorted(set(included))
     return included
 
@@ -224,12 +244,23 @@ def scan_set(
                 f"Imported ash-scan-set-files-list.txt from {output}", debug=debug
             )
 
+    if not ashignore_content or not ashscanset_list:
+        # Single os.walk pass collects both ignore files and the full file list
+        discovered_ignores, all_files = _collect_ignorefiles_and_all_files(
+            source, ignorefile, debug=debug
+        )
+
     if not ashignore_content:
-        ashignore_content = get_ash_ignorespec_lines(source, ignorefile, debug=debug)
+        ashignore_content = get_ash_ignorespec_lines(
+            source, ignorefile, debug=debug,
+            _discovered_ignore_files=discovered_ignores,
+        )
 
     if not ashscanset_list:
         spec = get_ash_ignorespec(ashignore_content, debug=debug)
-        ashscanset_list = get_files_not_matching_spec(source, spec, debug=debug)
+        ashscanset_list = get_files_not_matching_spec(
+            source, spec, debug=debug, _all_files=all_files,
+        )
 
     if output:
         # Ensure output is a Path object

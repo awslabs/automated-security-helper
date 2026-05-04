@@ -2,14 +2,14 @@
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Annotated, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
+from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS, is_offline_mode
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -105,8 +105,9 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
         bool,
         Field(
             description="Run in offline mode, disabling policy downloads",
+            default_factory=is_offline_mode,
         ),
-    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
+    ]
     frameworks: Annotated[
         List[CheckFrameworks],
         Field(
@@ -150,7 +151,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             self.config = CheckovScannerConfig()
         self.command = "checkov"
         self.use_uv_tool = True  # Enable UV tool execution
-        self.tool_type = "IAC"
+        self.tool_type = ScannerToolType.IAC
 
         # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
@@ -162,9 +163,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             format_arg_value="sarif",
             output_arg="--output-file-path",
             scan_path_arg="--directory",
-            extra_args=[
-                # ToolExtraArg(key="--skip-framework", value="cloudformation"),
-            ],
+            extra_args=[],
         )
         super().model_post_init(context)
 
@@ -325,8 +324,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -334,23 +333,20 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
             return True
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             return False
 
         try:
@@ -358,8 +354,6 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
 
-            # Extend the skip-paths args with the global exclusion list
-            # self.config.options.skip_path.extend(global_ignore_paths)
             final_args = self._resolve_arguments(
                 target=target,
                 # We want to use the parent here, not the results_file, as Checkov is expecting the output
