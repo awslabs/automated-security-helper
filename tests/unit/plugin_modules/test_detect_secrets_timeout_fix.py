@@ -46,7 +46,7 @@ def test_scan_timeout_does_not_hang(detect_secrets_scanner, tmp_path):
     # Create a real file in the target so the scanner doesn't skip
     target_dir = tmp_path / "source"
     target_dir.mkdir()
-    (target_dir / "app.py").write_text("password = 'hunter2'")
+    (target_dir / "app.py").write_text("x = 1")  # pragma: allowlist secret
 
     # Point context dirs at temp paths
     scanner.context.source_dir = target_dir
