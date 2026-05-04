@@ -106,6 +106,26 @@ jobs:
         run: ash image build --oci-runner podman --force 2>&1 | tail -10
         continue-on-error: true
 
+  container-finch:
+    name: Container (Finch)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Finch
+        run: brew install --cask finch
+      - name: Initialize Finch VM
+        run: finch vm init
+      - name: Start Finch VM
+        run: finch vm start
+      - name: Install ASH
+        run: pip install .
+      - name: Build container with Finch
+        run: ash image build --oci-runner finch --force 2>&1 | tail -10
+        continue-on-error: true
+
   mcp-server:
     name: MCP server startup
     runs-on: ubuntu-latest
