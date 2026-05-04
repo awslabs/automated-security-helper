@@ -444,11 +444,17 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
 
                 original_count = len(scannable)
+                source_prefix = str(self.context.source_dir.resolve()) + "/"
                 scannable = [
                     file_path
                     for file_path in scannable
                     if not any(
-                        path_matches_pattern(file_path, ignore_path.path)
+                        path_matches_pattern(
+                            file_path[len(source_prefix):]
+                            if file_path.startswith(source_prefix)
+                            else file_path,
+                            ignore_path.path,
+                        )
                         for ignore_path in global_ignore_paths
                     )
                 ]

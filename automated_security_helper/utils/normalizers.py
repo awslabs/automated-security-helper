@@ -35,13 +35,12 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
     """Check if a path matches a pattern.
 
     Args:
-        path: The path to check
-        pattern: The pattern to match against
+        path: The path to check (may be absolute or relative)
+        pattern: The pattern to match against (typically relative)
 
     Returns:
         True if the path matches the pattern, False otherwise
     """
-    # Normalize paths for comparison
     path = str(path).replace("\\", "/")
     pattern = str(pattern).replace("\\", "/")
     patterns = [
@@ -51,7 +50,6 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
     ]
 
     for pat in patterns:
-        # Check for exact match
         if path == pat:
             return True
         elif pat in path:
@@ -59,8 +57,18 @@ def path_matches_pattern(path: str, pattern: str) -> bool:
         elif fnmatch.fnmatch(path, pat):
             return True
 
-        # Check for directory match (e.g., "dir/" should match "dir/file.txt")
         if pat.endswith("/") and path.startswith(pat):
             return True
+
+        # When the path is absolute and the pattern is relative, try
+        # matching against the tail segments so callers that forget to
+        # normalize still get correct results.
+        if path.startswith("/") and not pat.startswith("/"):
+            parts = path.split("/")
+            depth = len(pat.split("/"))
+            if len(parts) >= depth:
+                tail = "/".join(parts[-depth:])
+                if tail == pat or fnmatch.fnmatch(tail, pat):
+                    return True
 
     return False

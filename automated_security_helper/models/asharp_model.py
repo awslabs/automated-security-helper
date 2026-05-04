@@ -421,6 +421,10 @@ class AshAggregatedResults(BaseModel):
                                 file_path = (
                                     location.physicalLocation.root.artifactLocation.uri
                                 )
+                                if file_path and file_path.startswith("file://"):
+                                    file_path = file_path[7:]
+                                    if file_path.startswith("///"):
+                                        file_path = file_path[2:]
 
                             if (
                                 hasattr(location.physicalLocation, "root")
