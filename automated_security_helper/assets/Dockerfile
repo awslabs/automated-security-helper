@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y python3-venv git tree curl && \
+    apt-get install -y --no-install-recommends python3-venv git tree curl && \
     rm -rf /var/lib/apt/lists/*
 
 ARG INSTALL_ASH_REVISION="LOCAL"
@@ -86,7 +86,7 @@ RUN mkdir -p ${HOME}/.ssh && \
 #
 RUN apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     curl \
     python3-venv \
     git \
@@ -100,7 +100,7 @@ RUN apt-get update && \
 #
 RUN set -uex; \
     apt-get update; \
-    apt-get install -y ca-certificates curl gnupg; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
@@ -118,7 +118,7 @@ ENV PATH="/root/.local/bin:$PATH"
 #
 # Python (no-op other than updating pip --- Python deps managed via Poetry @ pyproject.toml)
 #
-RUN with-retry 'wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py'
+RUN with-retry 'curl -sSf https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py'
 RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 
 # #
