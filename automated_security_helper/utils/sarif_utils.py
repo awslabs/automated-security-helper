@@ -414,6 +414,7 @@ def apply_suppressions_to_sarif(
     _output_dir_resolved = plugin_context.output_dir.resolve()
     _work_dir_resolved = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME).resolve()
     _uri_resolve_cache: dict[str, Path] = {}
+    _source_dir_prefix = str(plugin_context.source_dir.resolve()) + "/"
 
     for run in sarif_report.runs:
         if not run.results:
@@ -432,6 +433,8 @@ def apply_suppressions_to_sarif(
                         and location.physicalLocation.root.artifactLocation
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
+                        if uri and uri.startswith("/") and uri.startswith(_source_dir_prefix):
+                            uri = uri[len(_source_dir_prefix):]
                         if uri:
                             if uri not in _uri_resolve_cache:
                                 _uri_resolve_cache[uri] = Path(uri).resolve()
@@ -472,6 +475,8 @@ def apply_suppressions_to_sarif(
                         and location.physicalLocation.root.artifactLocation
                     ):
                         uri = location.physicalLocation.root.artifactLocation.uri
+                        if uri and uri.startswith("/") and uri.startswith(_source_dir_prefix):
+                            uri = uri[len(_source_dir_prefix):]
                         line_start = None
                         line_end = None
                         if (
