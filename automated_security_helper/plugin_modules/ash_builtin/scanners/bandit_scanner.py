@@ -8,6 +8,7 @@ from typing import Annotated, List, Literal
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -101,7 +102,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         if self.config is None:
             self.config = BanditScannerConfig()
         self.command = "bandit"
-        self.tool_type = "SAST"
+        self.tool_type = ScannerToolType.SAST
         self.use_uv_tool = True  # Enable UV tool execution
 
         # Set up explicit UV tool installation commands
@@ -357,8 +358,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=15,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.VERBOSE,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -366,23 +367,20 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             )
             return True
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             self._post_scan(
                 target=target,
                 target_type=target_type,

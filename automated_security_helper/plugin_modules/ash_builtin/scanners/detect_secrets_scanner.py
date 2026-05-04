@@ -1,6 +1,7 @@
+import logging
 """Module containing the detect-secrets security scanner implementation."""
 
-import fnmatch
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from importlib.metadata import version
 import json
 import multiprocessing
@@ -16,6 +17,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.core.constants import KNOWN_LOCKFILE_NAMES
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -86,6 +88,12 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
             description="Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
         ),
     ] = DetectSecretsScanSettings()
+    scan_timeout: Annotated[
+        int,
+        Field(
+            description="Maximum time in seconds to allow the detect-secrets scan to run before aborting. Prevents hangs on pathological files.",
+        ),
+    ] = 300
 
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):
@@ -105,7 +113,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if self.config is None:
             self.config = DetectSecretsScannerConfig()
         self.command = "detect-secrets"
-        self.tool_type = "SECRETS"
+        self.tool_type = ScannerToolType.SECRETS
         self.tool_version = version("detect-secrets")
         self._secrets_collection = SecretsCollection()
         super().model_post_init(context)
@@ -330,8 +338,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -339,23 +347,20 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
             return sarif_report
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -429,19 +434,21 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     self._plugin_log(
                         f"Excluded {excluded_count} files from detect-secrets scan "
                         f"based on baseline exclude patterns",
-                        level=15,
+                        level=logging.VERBOSE,
                         target_type=target_type,
                     )
 
             if global_ignore_paths:
+                from automated_security_helper.utils.normalizers import (
+                    path_matches_pattern,
+                )
+
                 original_count = len(scannable)
                 scannable = [
                     file_path
                     for file_path in scannable
                     if not any(
-                        fnmatch.fnmatch(file_path, ignore_path.path)
-                        or fnmatch.fnmatch(Path(file_path).name, ignore_path.path)
-                        or file_path.endswith(ignore_path.path)
+                        path_matches_pattern(file_path, ignore_path.path)
                         for ignore_path in global_ignore_paths
                     )
                 ]
@@ -455,8 +462,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 self._plugin_log(
                     message,
                     target_type=target_type,
-                    level=20,
-                    append_to_stream="stderr",  # This will add the message to self.errors
+                    level=logging.INFO,
+                    append_to_stream="stderr",
                 )
                 self._post_scan(
                     target=target,
@@ -466,7 +473,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             self._plugin_log(
                 f"Found {len(scannable)} files in scan set to scan with detect-secrets",
-                level=15,
+                level=logging.VERBOSE,
                 target_type=target_type,
             )
 
@@ -475,9 +482,25 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # can cause recursive process creation and significant overhead.
             self._ensure_fork_multiprocessing()
 
+            scan_timeout = self.config.options.scan_timeout
+
             with transient_settings(scan_settings_dict) as settings:
                 ASH_LOGGER.debug(f"Settings: {settings}")
-                self._secrets_collection.scan_files(*scannable)
+                executor = ThreadPoolExecutor(max_workers=1)
+                future = executor.submit(
+                    self._secrets_collection.scan_files, *scannable
+                )
+                try:
+                    future.result(timeout=scan_timeout)
+                except FuturesTimeoutError:
+                    future.cancel()
+                    self._plugin_log(
+                        f"detect-secrets scan timed out after {scan_timeout}s",
+                        level=logging.WARNING,
+                        append_to_stream="stderr",
+                    )
+                finally:
+                    executor.shutdown(wait=False, cancel_futures=True)
 
             self._post_scan(
                 target=target,

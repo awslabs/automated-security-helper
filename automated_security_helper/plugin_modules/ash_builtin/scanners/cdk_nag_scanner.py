@@ -1,6 +1,5 @@
 """Module containing the CDK Nag security scanner implementation."""
 
-from importlib.metadata import version
 import logging
 from typing import Annotated, List, Literal
 from pathlib import Path
@@ -8,6 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -27,15 +27,24 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
-from automated_security_helper.utils.cdk_nag_wrapper import (
-    run_cdk_nag_against_cfn_template,
-)
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.subprocess_utils import find_executable
+
+_CDK_AVAILABLE = True
+try:
+    from importlib.metadata import version as _get_version
+    _cdk_nag_version = _get_version("cdk_nag")
+    from automated_security_helper.utils.cdk_nag_wrapper import (
+        run_cdk_nag_against_cfn_template,
+    )
+except (ImportError, Exception):
+    _CDK_AVAILABLE = False
+    _cdk_nag_version = "unavailable"
+    run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
 
 
 class CdkNagPacks(BaseModel):
@@ -74,6 +83,12 @@ class CdkNagScannerConfigOptions(ScannerOptionsBase):
             description="CDK Nag packs to enable",
         ),
     ] = CdkNagPacks()
+    include_compliant_checks: Annotated[
+        bool,
+        Field(
+            description="Include INFO-level findings for compliant resources in the report.",
+        ),
+    ] = False
 
 
 class CdkNagScannerConfig(ScannerPluginConfigBase):
@@ -92,9 +107,9 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         if self.config is None:
             self.config = CdkNagScannerConfig()
         self.command = "python"
-        self.tool_type = "IAC"
+        self.tool_type = ScannerToolType.IAC
         self.description = "CDK Nag is a security scanner for AWS CloudFormation templates that applies industry standard checks against AWS infrastructure-as-code."
-        self.tool_version = version("cdk_nag")
+        self.tool_version = _cdk_nag_version
         return super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:
@@ -106,8 +121,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # CDK Nag scanner is built into this Python module, if the Python import got
-        # this far then we know we're in a valid runtime for this scanner.
+        if not _CDK_AVAILABLE:
+            ASH_LOGGER.warning(
+                "CDK dependencies (aws-cdk-lib, cdk-nag, constructs) are not installed. "
+                "Install them with: pip install 'automated-security-helper[cdk]'"
+            )
+            self.dependencies_satisfied = False
+            return False
         found = find_executable("node")
         return found is not None
 
@@ -165,24 +185,21 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             return sarif_report
 
-        try:
-            validated = self._pre_scan(
-                target=target,
-                target_type=target_type,
-                config=config,
-            )
-            if not validated:
-                return False
-        except ScannerError as exc:
-            raise exc
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             return False
 
         # Find all files to scan from the scan set
@@ -251,6 +268,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         if item in nag_packs and bool(value)
                     ],
                     outdir=outdir,
+                    include_compliant_checks=config_options.include_compliant_checks,
                 )
                 if nag_result_dict is None:
                     ASH_LOGGER.trace(f"Not a CloudFormation file: {cfn_file}")
@@ -355,28 +373,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         )
 
         return report
-
-        # return IaCScanReport(
-        #     name="CDK Nag",
-        #     iac_framework="CloudFormation",
-        #     scanners_used=[
-        #         Scanner(
-        #             name="cdk-nag",
-        #             description="CDK Nag - AWS Solutions Rules applied against rendered CloudFormation templates.",
-        #             type="IAC",
-        #             version=version("cdk_nag"),
-        #         ),
-        #     ],
-        #     resources_checked={},
-        #     scanner_name="cdk-nag",
-        #     template_path=str(target_path),
-        #     findings=all_findings,
-        #     template_format="CloudFormation",
-        #     metadata=ReportMetadata(
-        #         report_id=f"ASH-CDK-Nag-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%s')}",
-        #         tool_name="cdk-nag",
-        #     ),
-        # )
 
 
 if __name__ == "__main__":

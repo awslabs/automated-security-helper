@@ -16,6 +16,7 @@ from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -380,7 +381,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             self.config = FerretScannerConfig.model_validate(config_data)
 
         self.command = "ferret-scan"
-        self.tool_type = "Secrets"
+        self.tool_type = ScannerToolType.SECRETS
         self.tool_description = (
             "Ferret Scan is a sensitive data detection tool that scans files "
             "for potential sensitive information such as credit card numbers, "
@@ -776,17 +777,15 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             self._post_scan(target=target, target_type=target_type)
             return True
 
-        try:
-            validated = self._pre_scan(
-                target=target,
-                target_type=target_type,
-                config=config,
-            )
-            if not validated:
-                self._post_scan(target=target, target_type=target_type)
-                return False
-        except ScannerError as exc:
-            raise exc
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(target=target, target_type=target_type)
+            return False
+
 
         if not self.dependencies_satisfied:
             self._post_scan(target=target, target_type=target_type)

@@ -11,7 +11,8 @@ from typing import Annotated, List, Literal
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import ASH_ASSETS_DIR
+from automated_security_helper.core.constants import ASH_ASSETS_DIR, is_offline_mode
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -77,8 +78,9 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
         bool,
         Field(
             description="Run in offline mode, using locally cached rules.",
+            default_factory=is_offline_mode,
         ),
-    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
+    ]
 
     patterns: Annotated[
         List[str],
@@ -112,7 +114,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             self.config = OpengrepScannerConfig()
         self.command = "opengrep"
         self.subcommands = ["scan"]
-        self.tool_type = "SAST"
+        self.tool_type = ScannerToolType.SAST
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,
@@ -294,10 +296,17 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 )
             # Validate offline mode requirements
             from automated_security_helper.utils.offline_mode_validator import (
-                validate_opengrep_offline_mode,
+                OfflineModeValidator,
             )
 
-            offline_valid, offline_messages = validate_opengrep_offline_mode()
+            offline_valid, offline_messages = OfflineModeValidator.validate_cache_directory(
+                cache_dir=os.environ.get("OPENGREP_RULES_CACHE_DIR", ""),
+                file_extensions=[".yaml", ".yml"],
+                scanner_name="Opengrep",
+            )
+            if not offline_valid:
+                for msg in offline_messages:
+                    self._plugin_log(msg, level=logging.WARNING)
 
             # Check if OPENGREP_RULES_CACHE_DIR is set in environment
             opengrep_rules_cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
@@ -444,8 +453,8 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -453,23 +462,20 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             )
             return True
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -493,7 +499,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",
                 target_type=target_type,
-                level=15,
+                level=logging.VERBOSE,
             )
 
             # Build a local environment with offline-mode additions. Do
@@ -510,11 +516,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 command=final_args,
                 results_dir=target_results_dir,
                 env=subprocess_env,
-            )
-
-            self._post_scan(
-                target=target,
-                target_type=target_type,
             )
 
             # SARIF mode - parse SARIF results

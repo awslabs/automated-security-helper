@@ -1,3 +1,4 @@
+import logging
 """Module containing the Syft security scanner implementation."""
 
 import json
@@ -7,6 +8,7 @@ from typing import Annotated, List, Literal
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -20,7 +22,6 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class SyftScannerConfigOptions(ScannerOptionsBase):
@@ -72,7 +73,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         if self.config is None:
             self.config = SyftScannerConfig()
         self.command = "syft"
-        self.tool_type = "SBOM"
+        self.tool_type = ScannerToolType.SBOM
         super().model_post_init(context)
 
     @model_validator(mode="after")
@@ -96,18 +97,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
         return self
 
-    def validate_plugin_dependencies(self) -> bool:
-        """Validate the scanner configuration and requirements.
-
-        Returns:
-            True if validation passes, False otherwise
-
-        Raises:
-            ScannerError: If validation fails
-        """
-        found = find_executable(self.command)
-        return found is not None
-
     def _process_config_options(self):
         # Syft config path
         possible_config_paths = [
@@ -130,14 +119,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 )
                 break
 
-        # for item in self.config.options.additional_formats:
-        #     self.args.extra_args.append(ToolExtraArg(key="--output", value=item))
-        # for item in self.config.options.frameworks:
-        #     self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
-        # for item in self.config.options.skip_frameworks:
-        #     self.args.extra_args.append(
-        #         ToolExtraArg(key="--skip-framework", value=item)
-        #     )
         for item in self.config.options.exclude:
             ASH_LOGGER.debug(
                 f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
@@ -179,8 +160,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -188,23 +169,20 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             )
             return True
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -261,23 +239,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 syft_results = json.load(f)
             try:
                 sbom_report = CycloneDXReport.model_validate(syft_results)
-                # sbom_report.runs[0].invocations = [
-                #     Invocation(
-                #         commandLine=final_args[0],
-                #         arguments=final_args[1:],
-                #         startTimeUtc=self.start_time,
-                #         endTimeUtc=self.end_time,
-                #         executionSuccessful=True,
-                #         exitCode=self.exit_code,
-                #         exitCodeDescription="\n".join(self.errors),
-                #         workingDirectory=ArtifactLocation(
-                #             uri=target.as_posix(),
-                #         ),
-                #         properties=PropertyBag(
-                #             tool=sbom_report.runs[0].tool,
-                #         ),
-                #     )
-                # ]
             except Exception as e:
                 ASH_LOGGER.warning(
                     f"Failed to parse {self.__class__.__name__} results as CycloneDX: {str(e)}"
