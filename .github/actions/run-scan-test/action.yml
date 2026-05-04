@@ -79,16 +79,15 @@ runs:
     - name: Validate ASH using Python + Container
       if: inputs.method == 'python-container'
       shell: bash
-      continue-on-error: true
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
         echo "Testing ASH using Python (Container) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
         ash --version
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL --config .ash/.ash_community_plugins.yaml
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL --config .ash/.ash_community_plugins.yaml
         else
-          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL
         fi
 
     - name: Validate No Plugin Errors (Python Container)
@@ -115,7 +114,6 @@ runs:
     # Python Local scan (Windows)
     - name: Validate ASH using Python Local (Windows)
       if: inputs.method == 'python-local' && runner.os == 'Windows'
-      continue-on-error: true
       shell: pwsh
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
@@ -126,9 +124,9 @@ runs:
         ash dependencies install
         ash config get
         if ("${{ inputs.config-file }}" -eq "community") {
-          ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions --config .ash/.ash_community_plugins.yaml
+          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml
         } else {
-          ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
+          ash --mode local --build-target ci --verbose --no-progress
         }
 
     - name: Validate No Plugin Errors (Python Local Windows)
@@ -148,7 +146,6 @@ runs:
     # Python Local scan (Unix)
     - name: Validate ASH using Python Local (Unix)
       if: inputs.method == 'python-local' && runner.os != 'Windows'
-      continue-on-error: true
       shell: bash
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
@@ -159,9 +156,9 @@ runs:
         ash dependencies install
         ash config get
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions --config .ash/.ash_community_plugins.yaml
+          ash --mode local --build-target ci --verbose --no-progress --config .ash/.ash_community_plugins.yaml
         else
-          ash --mode local --build-target ci --verbose --no-progress --ignore-suppressions
+          ash --mode local --build-target ci --verbose --no-progress
         fi
 
     - name: Validate No Plugin Errors (Python Local Unix)
@@ -182,7 +179,6 @@ runs:
     - name: Validate ASH using PowerShell
       if: inputs.method == 'powershell'
       shell: pwsh
-      continue-on-error: true
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
@@ -224,7 +220,6 @@ runs:
     # Bash scan
     - name: Validate ASH using Bash
       if: inputs.method == 'bash'
-      continue-on-error: true
       shell: bash
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
@@ -232,9 +227,9 @@ runs:
         echo "Testing ASH using Bash on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
         chmod +x ./ash
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ./ash --build-target ci --verbose --ignore-suppressions --config .ash/.ash_community_plugins.yaml
+          ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml
         else
-          ./ash --build-target ci --verbose --ignore-suppressions
+          ./ash --build-target ci --verbose
         fi
 
     - name: Validate No Plugin Errors (Bash)
@@ -255,7 +250,6 @@ runs:
     - name: Collect ASH output artifact
       uses: actions/upload-artifact@v7
       if: success() || failure()
-      continue-on-error: true
       with:
         name: ash_output-${{ inputs.os }}-${{ inputs.method }}-${{ inputs.config-file }}
         path: .ash/ash_output
