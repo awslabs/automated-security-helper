@@ -38,3 +38,10 @@ global_settings:
     - rule_id: "B404"
       path: "tests/unit/utils/test_subprocess_utils_regression.py"
       reason: "Test file for subprocess_utils must import subprocess"
+
+    # non-literal-import in lazy plugin loading uses hardcoded module paths,
+    # not user input. The importlib.import_module calls are parameterized
+    # with string constants built from the ASH package namespace.
+    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
+      path: "automated_security_helper/plugin_modules/ash_builtin/__init__.py"
+      reason: "Lazy plugin loading uses hardcoded module paths, not user input"
