@@ -23,6 +23,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Kind1,
 )
 from automated_security_helper.utils.suppression_matcher import (
+    find_inline_suppressions,
     should_suppress_finding,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
@@ -424,6 +425,9 @@ def apply_suppressions_to_sarif(
     # Offline opengrep produces relative paths with source_dir basename prefix (e.g., "src/.github/...")
     _source_dir_basename = PurePosixPath(plugin_context.source_dir.resolve().name)
 
+    # Cache inline suppressions per file to avoid re-scanning the same file.
+    _inline_suppression_cache: dict[str, list] = {}
+
     for run in sarif_report.runs:
         if not run.results:
             continue
@@ -568,6 +572,63 @@ def apply_suppressions_to_sarif(
                             justification=f"(ASH) Suppressing finding for rule '{result.ruleId}' in '{flat_finding.file_path}' with reason: {reason}",
                         )
                         result.suppressions.append(suppression)
+
+            # --- Inline suppression check ---
+            # If the result was not already suppressed by config rules, look
+            # for ``# ash-ignore:`` / ``# ash-ignore-next-line:`` comments
+            # in the source file that target the same rule + line.
+            if not ignore_suppressions and not (
+                result.suppressions and len(result.suppressions) >= 1
+            ):
+                if result.ruleId and result.locations:
+                    for location in result.locations:
+                        if not (
+                            location.physicalLocation
+                            and location.physicalLocation.root.artifactLocation
+                        ):
+                            continue
+                        uri = location.physicalLocation.root.artifactLocation.uri
+                        if not uri:
+                            continue
+
+                        result_line = None
+                        if (
+                            hasattr(location.physicalLocation.root, "region")
+                            and location.physicalLocation.root.region
+                        ):
+                            result_line = (
+                                location.physicalLocation.root.region.startLine
+                            )
+
+                        if result_line is None:
+                            continue
+
+                        # Resolve the file path for reading the source
+                        file_path = Path(uri)
+                        file_key = str(file_path)
+                        if file_key not in _inline_suppression_cache:
+                            _inline_suppression_cache[file_key] = (
+                                find_inline_suppressions(file_path)
+                            )
+                        inline_sups = _inline_suppression_cache[file_key]
+
+                        for isup in inline_sups:
+                            if (
+                                isup.rule_id.lower() == result.ruleId.lower()
+                                and isup.line_number == result_line
+                            ):
+                                if not result.suppressions:
+                                    result.suppressions = []
+                                ASH_LOGGER.verbose(
+                                    f"Suppressing rule '{result.ruleId}' at line {result_line} in '{uri}' via inline comment: [yellow]{isup.reason}[/yellow]"
+                                )
+                                result.suppressions.append(
+                                    Suppression(
+                                        kind=Kind1.inSource,
+                                        justification=f"(ASH inline) {isup.reason}",
+                                    )
+                                )
+                                break  # one suppression per result is enough
 
             # Add the result to the updated results list
             updated_results.append(result)
