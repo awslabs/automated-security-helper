@@ -1,6 +1,6 @@
 [project]
 name = "automated-security-helper"
-version = "3.4.0"
+version = "3.4.1"
 description = "Automated Security Helper for GitHub Actions"
 requires-python = ">=3.10,<4"
 readme = "README.md"
@@ -105,7 +105,7 @@ automated-security-helper = "automated_security_helper.cli.main:app"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "3.4.0"
+version = "3.4.1"
 version_files = ["pyproject.toml:^version"]
 tag_format = "v$version"
 changelog_file = "CHANGELOG.md"

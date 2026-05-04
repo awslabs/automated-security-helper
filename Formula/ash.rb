@@ -3,7 +3,7 @@ class Ash < Formula
 
   desc "Automated Security Helper - security scanning tool for code repositories"
   homepage "https://github.com/awslabs/automated-security-helper"
-  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.4.0"
+  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.4.1"
   license "Apache-2.0"
 
   depends_on "python@3.12"

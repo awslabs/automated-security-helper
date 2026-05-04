@@ -91,7 +91,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1"
 ```
 
 ```powershell
@@ -99,10 +99,10 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1 $args }
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.4.0` to stay up to date automatically. Pin a specific version (e.g., `@v3.4.0`) when you need reproducible builds.
+> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.4.1` to stay up to date automatically. Pin a specific version (e.g., `@v3.4.1`) when you need reproducible builds.
 
 ### Other Installation Methods
 
@@ -129,13 +129,13 @@ ash --help
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.1
 cd automated-security-helper
 pip install .
 ```
