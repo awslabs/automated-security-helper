@@ -1,0 +1,205 @@
+name: ASH - Unified CI
+
+on:
+  push:
+    branches:
+      - "!main"
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch: {}
+
+env:
+  COLUMNS: 160
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Unit tests: all OS x all Python versions (matches ash-repo-unit-tests.yml)
+  # ---------------------------------------------------------------------------
+  unit-test:
+    name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+      statuses: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          # macOS ARM (macos-14) only has 3.12 and 3.13
+          - { os: macos-14, python-version: "3.10" }
+          - { os: macos-14, python-version: "3.11" }
+        include:
+          # Arch labels for artifact naming
+          - { os: ubuntu-latest, arch: x86_64 }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+          - { os: macos-latest, arch: x86_64 }
+          - { os: macos-14, arch: arm64 }
+          - { os: windows-latest, arch: x86_64 }
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: ${{ matrix.python-version }}
+          install-ash: "false"
+      - uses: ./.github/actions/run-unit-tests
+        with:
+          os: ${{ matrix.os }}
+          arch: ${{ matrix.arch }}
+          python-version: ${{ matrix.python-version }}
+
+  # ---------------------------------------------------------------------------
+  # Scan validation: method x platform (matches ash-repo-scan-validation.yml)
+  # Uses Python 3.12 exclusively.
+  # ---------------------------------------------------------------------------
+  scan-validation:
+    name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.config-file == 'community' && ' - Community Plugins' || '' }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86 -- all methods, default config
+          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default }
+          - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default }
+          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default }
+          - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: default }
+
+          # Linux ARM -- all methods, default config
+          - { os: ubuntu-24.04-arm, method: bash, platform: linux/aarch64, config-file: default }
+          - { os: ubuntu-24.04-arm, method: powershell, platform: linux/aarch64, config-file: default }
+          - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default }
+          - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: default }
+
+          # macOS x86 -- python-local only (Docker disabled on hosted macOS)
+          - { os: macos-latest, method: python-local, platform: darwin/amd64, config-file: default }
+
+          # Windows -- python-local only (Docker disabled on hosted Windows)
+          - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: default }
+
+          # Community plugins -- python-local on all platforms
+          - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: community }
+          - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: community }
+          - { os: macos-latest, method: python-local, platform: darwin/amd64, config-file: community }
+          - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: community }
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "true"
+      - uses: ./.github/actions/run-scan-test
+        with:
+          method: ${{ matrix.method }}
+          os: ${{ matrix.os }}
+          platform: ${{ matrix.platform }}
+          config-file: ${{ matrix.config-file }}
+          snyk-token: ${{ secrets.SNYK_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Install methods: method x OS x Python (matches ash-install-methods.yml)
+  # ---------------------------------------------------------------------------
+  install-validation:
+    name: "${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.method == 'finch' || matrix.method == 'podman' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, mcp]
+        exclude:
+          # Homebrew not on Windows
+          - { os: windows-latest, method: homebrew }
+          # Podman/Finch not on Windows
+          - { os: windows-latest, method: podman }
+          - { os: windows-latest, method: finch }
+          # Finch Linux is x86_64 only
+          - { os: ubuntu-24.04-arm, method: finch }
+
+          # Container runtimes only need Python 3.12
+          - { os: ubuntu-latest, python-version: "3.10", method: podman }
+          - { os: ubuntu-latest, python-version: "3.11", method: podman }
+          - { os: ubuntu-latest, python-version: "3.13", method: podman }
+          - { os: ubuntu-24.04-arm, python-version: "3.10", method: podman }
+          - { os: ubuntu-24.04-arm, python-version: "3.11", method: podman }
+          - { os: ubuntu-24.04-arm, python-version: "3.13", method: podman }
+          - { os: macos-latest, python-version: "3.10", method: podman }
+          - { os: macos-latest, python-version: "3.11", method: podman }
+          - { os: macos-latest, python-version: "3.13", method: podman }
+          - { os: macos-14, python-version: "3.10", method: podman }
+          - { os: macos-14, python-version: "3.11", method: podman }
+          - { os: macos-14, python-version: "3.13", method: podman }
+          - { os: ubuntu-latest, python-version: "3.10", method: finch }
+          - { os: ubuntu-latest, python-version: "3.11", method: finch }
+          - { os: ubuntu-latest, python-version: "3.13", method: finch }
+          - { os: macos-latest, python-version: "3.10", method: finch }
+          - { os: macos-latest, python-version: "3.11", method: finch }
+          - { os: macos-latest, python-version: "3.13", method: finch }
+          - { os: macos-14, python-version: "3.10", method: finch }
+          - { os: macos-14, python-version: "3.11", method: finch }
+          - { os: macos-14, python-version: "3.13", method: finch }
+
+          # Homebrew only needs Python 3.12
+          - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
+          - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
+          - { os: ubuntu-latest, python-version: "3.13", method: homebrew }
+          - { os: ubuntu-24.04-arm, python-version: "3.10", method: homebrew }
+          - { os: ubuntu-24.04-arm, python-version: "3.11", method: homebrew }
+          - { os: ubuntu-24.04-arm, python-version: "3.13", method: homebrew }
+          - { os: macos-latest, python-version: "3.10", method: homebrew }
+          - { os: macos-latest, python-version: "3.11", method: homebrew }
+          - { os: macos-latest, python-version: "3.13", method: homebrew }
+          - { os: macos-14, python-version: "3.10", method: homebrew }
+          - { os: macos-14, python-version: "3.11", method: homebrew }
+          - { os: macos-14, python-version: "3.13", method: homebrew }
+
+          # uvx bundles its own Python -- only needs 3.12
+          - { os: ubuntu-latest, python-version: "3.10", method: uvx }
+          - { os: ubuntu-latest, python-version: "3.11", method: uvx }
+          - { os: ubuntu-latest, python-version: "3.13", method: uvx }
+          - { os: ubuntu-24.04-arm, python-version: "3.10", method: uvx }
+          - { os: ubuntu-24.04-arm, python-version: "3.11", method: uvx }
+          - { os: ubuntu-24.04-arm, python-version: "3.13", method: uvx }
+          - { os: macos-latest, python-version: "3.10", method: uvx }
+          - { os: macos-latest, python-version: "3.11", method: uvx }
+          - { os: macos-latest, python-version: "3.13", method: uvx }
+          - { os: macos-14, python-version: "3.10", method: uvx }
+          - { os: macos-14, python-version: "3.11", method: uvx }
+          - { os: macos-14, python-version: "3.13", method: uvx }
+          - { os: windows-latest, python-version: "3.10", method: uvx }
+          - { os: windows-latest, python-version: "3.11", method: uvx }
+          - { os: windows-latest, python-version: "3.13", method: uvx }
+    steps:
+      - uses: actions/checkout@v6
+
+      # Python setup (skip for uvx which bundles its own)
+      - uses: actions/setup-python@v5
+        if: matrix.method != 'uvx'
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Route to the right composite action based on method type
+      - uses: ./.github/actions/validate-install
+        if: matrix.method == 'pip' || matrix.method == 'pipx' || matrix.method == 'uvx' || matrix.method == 'homebrew' || matrix.method == 'pre-commit'
+        with:
+          method: ${{ matrix.method }}
+
+      - uses: ./.github/actions/validate-container
+        if: matrix.method == 'podman' || matrix.method == 'finch'
+        with:
+          runtime: ${{ matrix.method }}
+
+      - uses: ./.github/actions/validate-mcp
+        if: matrix.method == 'mcp'

@@ -1,0 +1,62 @@
+name: "Validate Container Runtime"
+description: "Build ASH container with podman or finch"
+
+inputs:
+  runtime:
+    description: "Container runtime: podman or finch"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install ASH
+      shell: bash
+      run: pip install .
+
+    # === podman ===
+    - name: "podman: install (macOS)"
+      if: inputs.runtime == 'podman' && runner.os == 'macOS'
+      shell: bash
+      continue-on-error: true
+      run: |
+        brew install podman
+        podman machine init
+        podman machine start
+    - name: "podman: verify"
+      if: inputs.runtime == 'podman'
+      shell: bash
+      run: podman --version
+    - name: "podman: build container"
+      if: inputs.runtime == 'podman'
+      shell: bash
+      continue-on-error: true
+      run: ash image build --oci-runner podman --force 2>&1 | tail -10
+
+    # === finch ===
+    - name: "finch: install (macOS)"
+      if: inputs.runtime == 'finch' && runner.os == 'macOS'
+      shell: bash
+      run: brew install --cask finch
+    - name: "finch: install (Linux)"
+      if: inputs.runtime == 'finch' && runner.os == 'Linux'
+      shell: bash
+      continue-on-error: true
+      run: |
+        curl -LO https://github.com/runfinch/finch/releases/latest/download/finch-linux-amd64.tar.gz
+        sudo tar -xzf finch-linux-amd64.tar.gz -C /usr/local
+        rm finch-linux-amd64.tar.gz
+    - name: "finch: init VM"
+      if: inputs.runtime == 'finch'
+      shell: bash
+      continue-on-error: true
+      run: finch vm init
+    - name: "finch: start VM"
+      if: inputs.runtime == 'finch'
+      shell: bash
+      continue-on-error: true
+      run: finch vm start
+    - name: "finch: build container"
+      if: inputs.runtime == 'finch'
+      shell: bash
+      continue-on-error: true
+      run: ash image build --oci-runner finch --force 2>&1 | tail -10

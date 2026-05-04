@@ -1,0 +1,89 @@
+name: "Validate Install Method"
+description: "Install ASH via pip, pipx, uvx, homebrew, or pre-commit and verify"
+
+inputs:
+  method:
+    description: "Install method: pip, pipx, uvx, homebrew, pre-commit"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create test fixture
+      shell: bash
+      run: |
+        mkdir -p /tmp/ash-selftest
+        echo 'print("hello")' > /tmp/ash-selftest/test_sample.py
+
+    # === pip ===
+    - name: "pip: install"
+      if: inputs.method == 'pip'
+      shell: bash
+      run: pip install .
+    - name: "pip: verify"
+      if: inputs.method == 'pip'
+      shell: bash
+      run: |
+        ash --version
+        ash --help
+    - name: "pip: self-test scan"
+      if: inputs.method == 'pip'
+      shell: bash
+      continue-on-error: true
+      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+
+    # === pipx ===
+    - name: "pipx: install pipx"
+      if: inputs.method == 'pipx'
+      shell: bash
+      run: pip install pipx
+    - name: "pipx: install ASH"
+      if: inputs.method == 'pipx'
+      shell: bash
+      run: pipx install .
+    - name: "pipx: verify"
+      if: inputs.method == 'pipx'
+      shell: bash
+      run: |
+        ash --version
+        ash --help
+    - name: "pipx: self-test scan"
+      if: inputs.method == 'pipx'
+      shell: bash
+      continue-on-error: true
+      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+
+    # === uvx ===
+    - name: "uvx: install uv (Unix)"
+      if: inputs.method == 'uvx' && runner.os != 'Windows'
+      shell: bash
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+    - name: "uvx: install uv (Windows)"
+      if: inputs.method == 'uvx' && runner.os == 'Windows'
+      shell: pwsh
+      run: irm https://astral.sh/uv/install.ps1 | iex
+    - name: "uvx: verify"
+      if: inputs.method == 'uvx'
+      shell: bash
+      run: uvx --from . ash --version
+    - name: "uvx: self-test scan"
+      if: inputs.method == 'uvx'
+      shell: bash
+      continue-on-error: true
+      run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+
+    # === homebrew ===
+    - name: "homebrew: validate formula"
+      if: inputs.method == 'homebrew'
+      shell: bash
+      run: ruby -c Formula/ash.rb
+
+    # === pre-commit ===
+    - name: "pre-commit: install"
+      if: inputs.method == 'pre-commit'
+      shell: bash
+      run: pip install pre-commit
+    - name: "pre-commit: validate manifest"
+      if: inputs.method == 'pre-commit'
+      shell: bash
+      run: pre-commit validate-manifest .pre-commit-hooks.yaml
