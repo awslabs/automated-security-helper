@@ -80,7 +80,6 @@ runs:
       if: inputs.method == 'python-container'
       shell: bash
       continue-on-error: true
-      timeout-minutes: 10
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
@@ -118,7 +117,6 @@ runs:
     - name: Validate ASH using Python Local (Windows)
       if: inputs.method == 'python-local' && runner.os == 'Windows'
       continue-on-error: true
-      timeout-minutes: 10
       shell: pwsh
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
@@ -152,7 +150,6 @@ runs:
     - name: Validate ASH using Python Local (Unix)
       if: inputs.method == 'python-local' && runner.os != 'Windows'
       continue-on-error: true
-      timeout-minutes: 10
       shell: bash
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
@@ -187,7 +184,6 @@ runs:
       if: inputs.method == 'powershell'
       shell: pwsh
       continue-on-error: true
-      timeout-minutes: 10
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
@@ -230,7 +226,6 @@ runs:
     - name: Validate ASH using Bash
       if: inputs.method == 'bash'
       continue-on-error: true
-      timeout-minutes: 10
       shell: bash
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}

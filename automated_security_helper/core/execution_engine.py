@@ -384,14 +384,6 @@ class ScanExecutionEngine:
         # Initialize duration variables so the finally block can reference
         # them even when the try block raises before computing them.
         hours = minutes = seconds = 0
-        # Start the progress display before executing any phases
-        # Only start if it's not already started
-        if (
-            not hasattr(self.progress_display, "live")
-            or self.progress_display.live is None
-        ):
-            self.progress_display.start()
-
         # If we're only running the report phase (likely with existing results),
         # we don't need to set up the work directory or clean anything up
         report_only = len(ordered_phases) in [1, 2] and ordered_phases[0] == "report"
@@ -406,7 +398,6 @@ class ScanExecutionEngine:
         reports_dir = self._context.output_dir.joinpath("reports")
         reports_dir.mkdir(parents=True, exist_ok=True)
 
-        # Start the progress display before executing any phases
         self.progress_display.start()
 
         # Notify execution start
