@@ -82,7 +82,8 @@ runs:
       run: |
         echo "Building ASH container image on ${{ inputs.os }} (${{ inputs.platform }})"
         ash --version
-        ash build-image --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
+        chmod +x ./ash
+        ./ash --no-run --build-target ci --force
 
     - name: Validate ASH using Python + Container
       if: inputs.method == 'python-container'
@@ -191,7 +192,8 @@ runs:
       shell: bash
       run: |
         echo "Building ASH container image on ${{ inputs.os }} (${{ inputs.platform }})"
-        ash build-image --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
+        chmod +x ./ash
+        ./ash --no-run --build-target ci --force
 
     - name: Validate ASH using PowerShell
       if: inputs.method == 'powershell'
@@ -242,8 +244,7 @@ runs:
       run: |
         echo "Building ASH container image on ${{ inputs.os }} (${{ inputs.platform }})"
         chmod +x ./ash
-        ash --version
-        ash build-image --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
+        ./ash --no-run --build-target ci --force
 
     - name: Validate ASH using Bash
       if: inputs.method == 'bash'
@@ -254,9 +255,9 @@ runs:
       run: |
         echo "Testing ASH using Bash on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ./ash --build-target ci --verbose --ignore-suppressions --no-build --config .ash/.ash_community_plugins.yaml
+          ./ash --no-build --build-target ci --verbose --ignore-suppressions --config .ash/.ash_community_plugins.yaml
         else
-          ./ash --build-target ci --verbose --ignore-suppressions --no-build
+          ./ash --no-build --build-target ci --verbose --ignore-suppressions
         fi
 
     - name: Validate No Plugin Errors (Bash)
