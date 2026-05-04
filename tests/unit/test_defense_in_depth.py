@@ -311,17 +311,23 @@ class TestTarFilterDataKwarg:
 
         def spy_extractall(self_tar, *args, **kwargs):
             captured_kwargs.update(kwargs)
-            return original_extractall(self_tar, *args, **kwargs)
+            return original_extractall(self_tar, *args, **kwargs)  # nosec B202
 
         with patch.object(tarfile.TarFile, "extractall", spy_extractall):
             with tarfile.open(str(tar_path), mode="r") as tar_ref:
                 members = tar_ref.getmembers()
-                # Simulate what ArchiveConverter does
-                extract_kwargs = {"path": str(tmp_path / "out"), "members": members}
-                if sys.version_info >= (3, 12):
-                    extract_kwargs["filter"] = "data"
                 os.makedirs(str(tmp_path / "out"), exist_ok=True)
-                tar_ref.extractall(**extract_kwargs)
+                if sys.version_info >= (3, 12):
+                    tar_ref.extractall(  # nosec B202
+                        path=str(tmp_path / "out"),
+                        members=members,
+                        filter="data",
+                    )
+                else:
+                    tar_ref.extractall(  # nosec B202
+                        path=str(tmp_path / "out"),
+                        members=members,
+                    )
 
         if sys.version_info >= (3, 12):
             assert captured_kwargs.get("filter") == "data"
