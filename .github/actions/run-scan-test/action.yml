@@ -75,7 +75,15 @@ runs:
           ash config validate --config .ash/.ash.yaml
         fi
 
-    # Python Container scan
+    # Python Container scan — build image first (must succeed), then scan
+    - name: Build ASH container image
+      if: inputs.method == 'python-container'
+      shell: bash
+      run: |
+        echo "Building ASH container image on ${{ inputs.os }} (${{ inputs.platform }})"
+        ash --version
+        ash image build --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
+
     - name: Validate ASH using Python + Container
       if: inputs.method == 'python-container'
       shell: bash
@@ -84,12 +92,10 @@ runs:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
         echo "Testing ASH using Python (Container) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
-        ash --version
-        ash --help
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL --config .ash/.ash_community_plugins.yaml
+          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --no-build --config .ash/.ash_community_plugins.yaml
         else
-          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --ash-revision-to-install LOCAL
+          ash --mode container --build-target ci --verbose --no-progress --ignore-suppressions --no-build
         fi
 
     - name: Validate No Plugin Errors (Python Container)
@@ -179,7 +185,14 @@ runs:
           echo "SUCCESS: No plugin execution errors found"
         fi
 
-    # PowerShell scan
+    # PowerShell scan — build image first (must succeed), then scan
+    - name: Build ASH container image (PowerShell)
+      if: inputs.method == 'powershell'
+      shell: bash
+      run: |
+        echo "Building ASH container image on ${{ inputs.os }} (${{ inputs.platform }})"
+        ash image build --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
+
     - name: Validate ASH using PowerShell
       if: inputs.method == 'powershell'
       shell: pwsh
@@ -191,9 +204,9 @@ runs:
         . ./utils/ash_helpers.ps1
         Get-Help Invoke-ASH -Full
         if ("${{ inputs.config-file }}" -eq "community") {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions -ConfigFile ".ash/.ash_community_plugins.yaml"
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions -NoBuild -ConfigFile ".ash/.ash_community_plugins.yaml"
         } else {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions -NoBuild
         }
 
     - name: Validate No Plugin Errors (PowerShell)
@@ -222,7 +235,16 @@ runs:
           exit 1
         }
 
-    # Bash scan
+    # Bash scan — build image first (must succeed), then scan
+    - name: Build ASH container image (Bash)
+      if: inputs.method == 'bash'
+      shell: bash
+      run: |
+        echo "Building ASH container image on ${{ inputs.os }} (${{ inputs.platform }})"
+        chmod +x ./ash
+        ash --version
+        ash image build --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
+
     - name: Validate ASH using Bash
       if: inputs.method == 'bash'
       continue-on-error: true
@@ -231,13 +253,10 @@ runs:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
         echo "Testing ASH using Bash on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
-        chmod +x ./ash
-        ash --version
-        ash --help
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ./ash --build-target ci --verbose --ignore-suppressions --config .ash/.ash_community_plugins.yaml
+          ./ash --build-target ci --verbose --ignore-suppressions --no-build --config .ash/.ash_community_plugins.yaml
         else
-          ./ash --build-target ci --verbose --ignore-suppressions
+          ./ash --build-target ci --verbose --ignore-suppressions --no-build
         fi
 
     - name: Validate No Plugin Errors (Bash)
