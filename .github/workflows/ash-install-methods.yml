@@ -20,17 +20,18 @@ permissions:
 
 jobs:
   pip-install:
-    name: pip install (${{ matrix.os }})
+    name: pip install (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install via pip
         run: pip install .
       - name: Verify installation
@@ -39,17 +40,18 @@ jobs:
           ash --help
 
   pipx-install:
-    name: pipx install (${{ matrix.os }})
+    name: pipx install (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        python-version: ["3.10", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install pipx
         run: pip install pipx
       - name: Install via pipx
@@ -60,44 +62,63 @@ jobs:
           ash --help
 
   uvx-install:
-    name: uvx install
-    runs-on: ubuntu-latest
+    name: uvx install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: Install uv
+      - name: Install uv (Unix)
+        if: runner.os != 'Windows'
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install uv (Windows)
+        if: runner.os == 'Windows'
+        run: irm https://astral.sh/uv/install.ps1 | iex
+        shell: pwsh
       - name: Install via uvx
         run: uvx --from . ash --version
+        shell: bash
 
   homebrew-formula:
-    name: Homebrew formula (syntax)
-    runs-on: macos-14
+    name: Homebrew formula (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-14, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Validate formula syntax
         run: ruby -c Formula/ash.rb
 
   pre-commit-hook:
-    name: pre-commit hook
-    runs-on: ubuntu-latest
+    name: pre-commit hook (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install pre-commit
         run: pip install pre-commit
       - name: Validate hooks manifest
         run: pre-commit validate-manifest .pre-commit-hooks.yaml
 
   container-podman:
-    name: Container (Podman, ${{ matrix.os }})
+    name: Container Podman (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -105,10 +126,8 @@ jobs:
           python-version: "3.12"
       - name: Install Podman (macOS)
         if: runner.os == 'macOS'
-        run: brew install podman
-      - name: Initialize Podman machine (macOS)
-        if: runner.os == 'macOS'
         run: |
+          brew install podman
           podman machine init
           podman machine start
         continue-on-error: true
@@ -121,13 +140,13 @@ jobs:
         continue-on-error: true
 
   container-finch:
-    name: Container (Finch, ${{ matrix.os }})
+    name: Container Finch (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-latest, ubuntu-latest]
+        os: [macos-latest, macos-14, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -156,17 +175,18 @@ jobs:
         continue-on-error: true
 
   mcp-server:
-    name: MCP server (${{ matrix.os }})
+    name: MCP server (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        python-version: ["3.10", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install ASH
         run: pip install .
       - name: Verify MCP command
