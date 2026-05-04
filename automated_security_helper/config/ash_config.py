@@ -740,6 +740,41 @@ class AshConfig(BaseModel):
         return found
 
 
+def add_suppression_to_config(
+    config_path: Path, suppression: AshSuppression
+) -> None:
+    """Append a suppression to the suppressions list in an .ash.yaml config file.
+
+    If the file does not exist it is created with a minimal structure.
+    Existing content is preserved.
+    """
+    if config_path.exists():
+        with open(config_path, mode="r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    else:
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    global_settings = data.setdefault("global_settings", {})
+    if not isinstance(global_settings, dict):
+        global_settings = {}
+        data["global_settings"] = global_settings
+
+    suppressions_list = global_settings.setdefault("suppressions", [])
+    if not isinstance(suppressions_list, list):
+        suppressions_list = []
+        global_settings["suppressions"] = suppressions_list
+
+    entry = suppression.model_dump(exclude_none=True)
+    suppressions_list.append(entry)
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, mode="w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+
+
 BuildConfig.model_rebuild()
 ConverterConfigSegment.model_rebuild()
 ScannerConfigSegment.model_rebuild()
