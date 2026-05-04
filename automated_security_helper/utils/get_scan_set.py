@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+import subprocess
 import sys
 from typing import List, Optional
 from igittigitt import IgnoreParser
@@ -162,6 +163,50 @@ def get_files_not_matching_spec(
                 included.append(inc_full)
     included = sorted(set(included))
     return included
+
+
+def get_changed_files(base_ref: str = "origin/main") -> Optional[List[Path]]:
+    """Return files changed between *base_ref* and HEAD using ``git diff``.
+
+    Falls back to ``None`` (meaning "scan everything") when:
+    * ``git`` is not available on ``PATH``, or
+    * *base_ref* does not exist in the local repository.
+
+    Args:
+        base_ref: The git ref to diff against.  Defaults to ``origin/main``.
+
+    Returns:
+        A list of :class:`~pathlib.Path` objects relative to the repo root,
+        or ``None`` if the diff could not be computed.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # git not installed or command hung — fall back to full scan.
+        ASH_LOGGER.warning(
+            "git not available or timed out; falling back to full scan"
+        )
+        return None
+
+    if result.returncode != 0:
+        ASH_LOGGER.warning(
+            "git diff against %s failed (rc=%d); falling back to full scan",
+            base_ref,
+            result.returncode,
+        )
+        return None
+
+    paths: List[Path] = []
+    for line in result.stdout.strip().splitlines():
+        line = line.strip()
+        if line:
+            paths.append(Path(line))
+    return paths
 
 
 def parse_args() -> argparse.Namespace:

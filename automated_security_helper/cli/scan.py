@@ -212,6 +212,22 @@ def run_ash_scan_cli_command(
             help="Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings.",
         ),
     ] = False,
+    changed_files_only: Annotated[
+        bool,
+        typer.Option(
+            "--changed-files-only",
+            help="Limit the scan to files changed between the base branch and HEAD. Useful in CI to scan only PR changes. Falls back to a full scan when git is unavailable.",
+            envvar="ASH_CHANGED_FILES_ONLY",
+        ),
+    ] = False,
+    base_ref: Annotated[
+        str,
+        typer.Option(
+            "--base-ref",
+            help="Git ref to diff against when --changed-files-only is set.",
+            envvar="ASH_BASE_REF",
+        ),
+    ] = "origin/main",
     ### CONTAINER-RELATED OPTIONS
     build: Annotated[
         bool,
@@ -404,6 +420,8 @@ def run_ash_scan_cli_command(
         fail_on_findings=fail_on_findings,
         ignore_suppressions=ignore_suppressions,
         min_severity=min_severity,
+        changed_files_only=changed_files_only,
+        base_ref=base_ref,
         mode=mode or RunMode.local,
         show_summary=show_summary,
         simple=simple
