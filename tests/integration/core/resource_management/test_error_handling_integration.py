@@ -19,7 +19,7 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.core.resource_management.scan_registry import (
-    ScanStatus,
+    MCScanStatus,
     get_scan_registry,
 )
 from automated_security_helper.core.resource_management.scan_management import (
@@ -217,7 +217,7 @@ class TestErrorHandlingIntegration:
         )
 
         # Mark the scan as running
-        registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Create scanners directory
         scanners_dir = output_directory / "scanners"
@@ -263,7 +263,7 @@ class TestErrorHandlingIntegration:
         )
 
         # Mark the scan as running
-        registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Create aggregated results file with missing required fields
         with open(output_directory / "ash_aggregated_results.json", "w") as f:

@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
-from automated_security_helper.core.enums import RunMode, Phases
+from automated_security_helper.core.enums import RunMode, ExecutionPhase
 from automated_security_helper.interactions.run_ash_scan import (
     run_ash_scan,
     format_duration,
@@ -194,7 +194,7 @@ def test_run_ash_scan_with_custom_phases(mock_logger, mock_orchestrator, ash_tem
             source_dir=str(source_dir),
             output_dir=str(output_dir),
             mode=RunMode.local,
-            phases=[Phases.convert, Phases.report],
+            phases=[ExecutionPhase.CONVERT, ExecutionPhase.REPORT],
             inspect=True,
         )
 

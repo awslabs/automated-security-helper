@@ -18,7 +18,7 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.core.resource_management.scan_registry import (
-    ScanStatus,
+    MCScanStatus,
     ScanRegistryEntry,
     ScanRegistry,
     get_scan_registry,
@@ -42,7 +42,7 @@ class TestScanRegistryEntry:
         assert entry.start_time is not None
         assert isinstance(entry.start_time, datetime)
         assert entry.end_time is None
-        assert entry.status == ScanStatus.PENDING
+        assert entry.status == MCScanStatus.PENDING
         assert entry.severity_threshold == "MEDIUM"
         assert entry.config_path is None
         assert entry.process_id is None
@@ -97,7 +97,7 @@ class TestScanRegistryEntry:
 
         entry.mark_running(process_id=12345)
 
-        assert entry.status == ScanStatus.RUNNING
+        assert entry.status == MCScanStatus.RUNNING
         assert entry.process_id == 12345
 
     def test_mark_completed(self):
@@ -110,7 +110,7 @@ class TestScanRegistryEntry:
 
         entry.mark_completed()
 
-        assert entry.status == ScanStatus.COMPLETED
+        assert entry.status == MCScanStatus.COMPLETED
         assert entry.end_time is not None
         assert isinstance(entry.end_time, datetime)
 
@@ -124,7 +124,7 @@ class TestScanRegistryEntry:
 
         entry.mark_failed("Test error message")
 
-        assert entry.status == ScanStatus.FAILED
+        assert entry.status == MCScanStatus.FAILED
         assert entry.end_time is not None
         assert isinstance(entry.end_time, datetime)
         assert entry.error_message == "Test error message"
@@ -139,7 +139,7 @@ class TestScanRegistryEntry:
 
         entry.mark_cancelled()
 
-        assert entry.status == ScanStatus.CANCELLED
+        assert entry.status == MCScanStatus.CANCELLED
         assert entry.end_time is not None
         assert isinstance(entry.end_time, datetime)
 
@@ -256,7 +256,7 @@ class TestScanRegistry:
         assert entry.output_directory == "/test/output"
         assert entry.severity_threshold == "HIGH"
         assert entry.config_path == "/test/config.yaml"
-        assert entry.status == ScanStatus.PENDING
+        assert entry.status == MCScanStatus.PENDING
 
     def test_register_scan_with_custom_id(
         self,
@@ -444,31 +444,31 @@ class TestScanRegistry:
         )
 
         # Update status to running
-        result = registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+        result = registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
         assert result is True
-        assert registry._registry[scan_id].status == ScanStatus.RUNNING
+        assert registry._registry[scan_id].status == MCScanStatus.RUNNING
 
         # Update status to completed
-        result = registry.update_scan_status(scan_id, ScanStatus.COMPLETED)
+        result = registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
         assert result is True
-        assert registry._registry[scan_id].status == ScanStatus.COMPLETED
+        assert registry._registry[scan_id].status == MCScanStatus.COMPLETED
 
         # Update status to failed with error message
-        result = registry.update_scan_status(scan_id, ScanStatus.FAILED, "Test error")
+        result = registry.update_scan_status(scan_id, MCScanStatus.FAILED, "Test error")
         assert result is True
-        assert registry._registry[scan_id].status == ScanStatus.FAILED
+        assert registry._registry[scan_id].status == MCScanStatus.FAILED
         assert registry._registry[scan_id].error_message == "Test error"
 
         # Update status to cancelled
-        result = registry.update_scan_status(scan_id, ScanStatus.CANCELLED)
+        result = registry.update_scan_status(scan_id, MCScanStatus.CANCELLED)
         assert result is True
-        assert registry._registry[scan_id].status == ScanStatus.CANCELLED
+        assert registry._registry[scan_id].status == MCScanStatus.CANCELLED
 
     def test_update_scan_status_not_found(self):
         """Test updating scan status when scan doesn't exist."""
         registry = ScanRegistry()
 
-        result = registry.update_scan_status("non_existent_id", ScanStatus.RUNNING)
+        result = registry.update_scan_status("non_existent_id", MCScanStatus.RUNNING)
 
         assert result is False
 
@@ -578,7 +578,7 @@ class TestScanRegistry:
         result = registry.cancel_scan(scan_id)
 
         assert result is True
-        assert registry._registry[scan_id].status == ScanStatus.CANCELLED
+        assert registry._registry[scan_id].status == MCScanStatus.CANCELLED
         mock_kill.assert_called_once_with(12345, signal.SIGTERM)
 
     def test_cancel_scan_not_found(self):
@@ -639,7 +639,7 @@ class TestScanRegistry:
         result = registry.cancel_scan(scan_id)
 
         assert result is True
-        assert registry._registry[scan_id].status == ScanStatus.CANCELLED
+        assert registry._registry[scan_id].status == MCScanStatus.CANCELLED
 
     @mock.patch("os.kill")
     def test_cancel_scan_permission_error(

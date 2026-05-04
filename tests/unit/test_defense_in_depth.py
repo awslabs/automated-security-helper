@@ -98,7 +98,7 @@ class TestCancelScanNoPID:
         the scan_id and mention that no termination signal can be sent."""
         from automated_security_helper.core.resource_management.scan_registry import (
             ScanRegistry,
-            ScanStatus,
+            MCScanStatus,
         )
 
         dir_path = str(tmp_path / "src")
@@ -113,7 +113,7 @@ class TestCancelScanNoPID:
             severity_threshold="MEDIUM",
         )
         # Mark running without a PID (simulates thread-pool scan)
-        registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         with patch.object(registry, "_logger") as mock_logger:
             result = registry.cancel_scan(scan_id)
@@ -130,7 +130,7 @@ class TestCancelScanNoPID:
         import asyncio
         from automated_security_helper.core.resource_management.scan_registry import (
             ScanRegistry,
-            ScanStatus,
+            MCScanStatus,
         )
         from automated_security_helper.core.resource_management.scan_management import (
             cancel_scan,
@@ -148,7 +148,7 @@ class TestCancelScanNoPID:
             output_directory=out_path,
             severity_threshold="MEDIUM",
         )
-        fresh_registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+        fresh_registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         async def _do_cancel():
             return await cancel_scan(scan_id)
