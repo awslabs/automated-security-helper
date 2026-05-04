@@ -375,10 +375,14 @@ pre-commit run ash-simple-scan --all-files
 ASH v3 produces several output files in the `.ash/ash_output/` directory:
 
 - `ash_aggregated_results.json`: Complete machine-readable results including validation checkpoints
+- `reports/ash.flat.json`: Flattened JSON array of findings for scripts and dashboards
+- `reports/ash.sarif`: SARIF 2.1.0 report for IDE and CI/CD integration
 - `reports/ash.summary.txt`: Human-readable text summary
 - `reports/ash.summary.md`: Markdown summary for GitHub PRs and other platforms
 - `reports/ash.html`: Interactive HTML report
 - `reports/ash.csv`: CSV report for filtering and sorting findings
+
+ASH also supports CycloneDX, SPDX, OCSF, GitLab SAST, JUnit XML, and YAML output. Enable any combination of reporters in your `.ash/ash.yaml` configuration. For the complete schema reference, consumption examples, and format details, see [Output Formats](https://awslabs.github.io/automated-security-helper/docs/output-formats/).
 
 The `ash_aggregated_results.json` file includes comprehensive validation information that tracks scanner registration, enablement, execution, and result inclusion throughout the scan process. The Scanner Validation System can also generate detailed validation reports that provide comprehensive analysis of scanner states, validation checkpoints, dependency issues, and actionable recommendations for troubleshooting scan issues.
 
