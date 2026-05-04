@@ -102,7 +102,7 @@ class TestSarifSuppressions:
         # Check that the first finding is suppressed
         assert result.runs[0].results[0].suppressions is not None
         assert len(result.runs[0].results[0].suppressions) == 1
-        assert result.runs[0].results[0].suppressions[0].kind == "external"
+        assert result.runs[0].results[0].suppressions[0].kind == "inSource"
         assert (
             "Test suppression"
             in result.runs[0].results[0].suppressions[0].justification
@@ -197,7 +197,7 @@ class TestSarifSuppressions:
         # Check that the first finding is suppressed
         assert result.runs[0].results[0].suppressions is not None
         assert len(result.runs[0].results[0].suppressions) == 1
-        assert result.runs[0].results[0].suppressions[0].kind == "external"
+        assert result.runs[0].results[0].suppressions[0].kind == "inSource"
         assert (
             "Test suppression"
             in result.runs[0].results[0].suppressions[0].justification
@@ -367,7 +367,7 @@ class TestSarifSuppressions:
         # Check that the remaining finding (first one) is suppressed
         assert result.runs[0].results[0].suppressions is not None
         assert len(result.runs[0].results[0].suppressions) == 1
-        assert result.runs[0].results[0].suppressions[0].kind == "external"
+        assert result.runs[0].results[0].suppressions[0].kind == "inSource"
         assert (
             "Test suppression"
             in result.runs[0].results[0].suppressions[0].justification
