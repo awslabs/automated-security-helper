@@ -82,7 +82,7 @@ runs:
       run: |
         echo "Building ASH container image on ${{ inputs.os }} (${{ inputs.platform }})"
         ash --version
-        ash image build --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
+        ash build-image --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
 
     - name: Validate ASH using Python + Container
       if: inputs.method == 'python-container'
@@ -191,7 +191,7 @@ runs:
       shell: bash
       run: |
         echo "Building ASH container image on ${{ inputs.os }} (${{ inputs.platform }})"
-        ash image build --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
+        ash build-image --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
 
     - name: Validate ASH using PowerShell
       if: inputs.method == 'powershell'
@@ -243,7 +243,7 @@ runs:
         echo "Building ASH container image on ${{ inputs.os }} (${{ inputs.platform }})"
         chmod +x ./ash
         ash --version
-        ash image build --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
+        ash build-image --build-target ci --force --ash-revision-to-install LOCAL 2>&1 | tail -20
 
     - name: Validate ASH using Bash
       if: inputs.method == 'bash'
