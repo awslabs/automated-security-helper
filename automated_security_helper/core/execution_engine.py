@@ -21,7 +21,6 @@ from automated_security_helper.core.progress import (
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.discovery import discover_plugins
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.plugins.interfaces import IConverter, IReporter, IScanner
 
 # Define valid execution phases
 from automated_security_helper.config.ash_config import (
@@ -29,7 +28,7 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
-from automated_security_helper.core.metrics_alignment import (
+from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -256,9 +255,9 @@ class ScanExecutionEngine:
 
         # Get all scanner plugins
         self.plugins = {
-            "converter": ash_plugin_manager.plugin_modules(IConverter),
-            "scanner": ash_plugin_manager.plugin_modules(IScanner),
-            "reporter": ash_plugin_manager.plugin_modules(IReporter),
+            "converter": ash_plugin_manager.plugin_modules("converter"),
+            "scanner": ash_plugin_manager.plugin_modules("scanner"),
+            "reporter": ash_plugin_manager.plugin_modules("reporter"),
         }
         for k, v in self.plugins.items():
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
@@ -442,7 +441,7 @@ class ScanExecutionEngine:
                     case "convert":
                         # Create and execute the Convert phase
                         convert_phase = ConvertPhase(
-                            plugins=ash_plugin_manager.plugin_modules(IConverter),
+                            plugins=self.plugins["converter"],
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
@@ -455,7 +454,7 @@ class ScanExecutionEngine:
                     case "scan":
                         # Create and execute the Scan phase
                         scan_phase = ScanPhase(
-                            plugins=ash_plugin_manager.plugin_modules(IScanner),
+                            plugins=self.plugins["scanner"],
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
@@ -476,7 +475,7 @@ class ScanExecutionEngine:
                     case "report":
                         # Create and execute the Report phase
                         report_phase = ReportPhase(
-                            plugins=ash_plugin_manager.plugin_modules(IReporter),
+                            plugins=self.plugins["reporter"],
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._results,

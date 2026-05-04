@@ -1,8 +1,8 @@
 """Regression tests for metrics bug fixes.
 
 PR#274 Bug #54: Typo "errorn" in metrics_table.py (from low)
-PR#274 Bug #69: error log on success in metrics_alignment (from low)
-PR#274 Bug #21: print() calls in metrics_alignment.py (from low)
+PR#274 Bug #69: error log on success in unified_metrics (from low)
+PR#274 Bug #21: print() calls in unified_metrics.py (from low)
 """
 
 import inspect
@@ -26,7 +26,7 @@ class TestErrornTypo:
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #69 -- error log on success in metrics_alignment
+# PR#274 Bug #69 -- error log on success in unified_metrics
 # ---------------------------------------------------------------------------
 class TestMetricsAlignmentSuccessNotLoggedAsError:
     """On the SUCCESS branch of verify_metrics_alignment, the logger should not
@@ -35,9 +35,9 @@ class TestMetricsAlignmentSuccessNotLoggedAsError:
     def test_success_branch_no_error_log(self):
         """When all metrics align, no ERROR-level log should be emitted for the
         per-metric success messages."""
-        from automated_security_helper.core import metrics_alignment
+        from automated_security_helper.core import unified_metrics
 
-        source = inspect.getsource(metrics_alignment.verify_metrics_alignment)
+        source = inspect.getsource(unified_metrics.verify_metrics_alignment)
         # In the else branch (alignment passed), we should see info/debug, not error
         # Find the "alignment passed" line and check its log level
         lines = source.splitlines()
@@ -50,15 +50,15 @@ class TestMetricsAlignmentSuccessNotLoggedAsError:
 
 
 # ---------------------------------------------------------------------------
-# PR#274 Bug #21 -- print() calls in metrics_alignment.py
+# PR#274 Bug #21 -- print() calls in unified_metrics.py
 # ---------------------------------------------------------------------------
 class TestMetricsAlignmentNoPrintCalls:
     """verify_metrics_alignment should not use print() -- only logger calls."""
 
     def test_no_print_in_verify_function(self):
-        from automated_security_helper.core import metrics_alignment
+        from automated_security_helper.core import unified_metrics
 
-        source = inspect.getsource(metrics_alignment.verify_metrics_alignment)
+        source = inspect.getsource(unified_metrics.verify_metrics_alignment)
         # Count bare print() calls (not inside comments or strings referring to "print")
         lines = source.splitlines()
         for i, line in enumerate(lines):

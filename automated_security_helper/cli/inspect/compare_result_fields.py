@@ -1,11 +1,7 @@
-from automated_security_helper.cli.inspect.categorize_field_importance import (
-    categorize_field_importance,
-)
 from automated_security_helper.utils.meta_analysis import EXPECTED_TRANSFORMATIONS
-from automated_security_helper.utils.meta_analysis.extract_field_paths import (
+from automated_security_helper.utils.meta_analysis.field_mapping import (
+    categorize_field_importance,
     extract_field_paths,
-)
-from automated_security_helper.utils.meta_analysis.get_value_from_path import (
     get_value_from_path,
 )
 
