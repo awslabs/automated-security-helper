@@ -133,6 +133,27 @@ global_settings:
       line_end: 322
       reason: "Test validates path traversal protection - checking /tmp/evil.py does NOT exist"
     - rule_id: B108
+      path: tests/unit/core/test_orchestrator_regression.py
+      reason: "Test intentionally uses temp paths to verify cleanup guard"
+    - rule_id: B110
+      path: tests/unit/core/test_base_plugins_regression.py
+      reason: "Test verifies exception propagation behavior"
+    - rule_id: B110
+      path: tests/unit/config/test_ash_config_regression.py
+      reason: "Test verifies yaml loader isolation with exception handling"
+    - rule_id: B110
+      path: tests/unit/test_environ_mutation_fix.py
+      reason: "Test catches expected exceptions to verify env restoration"
+    - rule_id: B404
+      path: tests/unit/utils/test_subprocess_utils_regression.py
+      reason: "Test file for subprocess_utils must import subprocess"
+    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
+      path: automated_security_helper/plugin_modules/ash_builtin/__init__.py
+      reason: "Lazy plugin loading uses hardcoded module paths, not user input"
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: "tests/unit/utils/test_secret_masking*.py"
+      reason: "Intentional test fixtures for secret masking regression tests"
+    - rule_id: B108
       path: tests/unit/converters/test_converters.py
       line_start: 352
       line_end: 356
