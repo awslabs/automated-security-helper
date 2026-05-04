@@ -39,13 +39,7 @@ class InspectPhase(EnginePhase):
                 analyze_sarif_fields,
             )
 
-            # Use the context to provide all necessary parameters
-            # sarif_dir = self.plugin_context.output_dir.joinpath("scanners")
             output_dir = self.plugin_context.output_dir.joinpath("analysis")
-            # aggregated_sarif = self.plugin_context.output_dir.joinpath(
-            #     "reports"
-            # ).joinpath("ash.sarif")
-            # flat_reports_dir = self.plugin_context.output_dir.joinpath("reports")
 
             # Create the output directory if it doesn't exist
             output_dir.mkdir(parents=True, exist_ok=True)

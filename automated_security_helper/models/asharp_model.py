@@ -279,6 +279,7 @@ class AshAggregatedResults(BaseModel):
     ]
 
     @field_validator("ash_config")
+    @classmethod
     def validate_ash_config(cls, v: Any):
         from automated_security_helper.config.ash_config import AshConfig
 
@@ -404,21 +405,10 @@ class AshAggregatedResults(BaseModel):
                     line_start = None
                     line_end = None
                     code_snippet = None
-                    # region: Region | None = None
-                    # contextRegion: Region | None = None
 
                     if result.locations and len(result.locations) > 0:
                         location = result.locations[0]
                         if location.physicalLocation:
-                            # try:
-                            #     region = location.physicalLocation.root.region
-                            #     contextRegion = (
-                            #         location.physicalLocation.root.contextRegion
-                            #     )
-                            # except Exception as exc:
-                            #     ASH_LOGGER.debug(
-                            #         f"Hit error parsing region/contextRegion: {exc}"
-                            #     )
                             if (
                                 hasattr(location.physicalLocation, "root")
                                 and location.physicalLocation.root

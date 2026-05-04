@@ -3,6 +3,7 @@
 
 """Core models for security findings."""
 
+import warnings
 from typing import List, Annotated
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from datetime import datetime, date
@@ -68,6 +69,7 @@ class AshSuppression(IgnorePathWithReason):
     ] = None
 
     @field_validator("line_end")
+    @classmethod
     def validate_line_range(cls, v, values):
         """Validate that line_end is greater than or equal to line_start if both are provided."""
         if (
@@ -81,6 +83,7 @@ class AshSuppression(IgnorePathWithReason):
         return v
 
     @field_validator("expiration")
+    @classmethod
     def validate_expiration_date(cls, v):
         """Validate that expiration date is in the correct format and is a valid date."""
         if v is not None:
@@ -94,6 +97,9 @@ class AshSuppression(IgnorePathWithReason):
             # Check if the date is in the future (outside the try so the
             # semantic error is not rewrapped as a format error).
             if expiration_date < date.today():
-                raise ValueError("expiration date must be in the future")
+                warnings.warn(
+                    f"Suppression expiration date {v} is in the past and will be ignored"
+                )
+                return None
             return v
         return v
