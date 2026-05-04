@@ -19,7 +19,6 @@ jobs:
   unit-test:
     name: Unit Test Python
     runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.python-version == '3.14-dev' }}
     permissions:
       contents: read
       pull-requests: write
@@ -93,12 +92,6 @@ jobs:
             runner: macos-14
             python-version: "3.13"
             arch: arm64
-
-          # Python 3.14 (beta, allow-failure)
-          - os: Ubuntu
-            runner: ubuntu-latest
-            python-version: "3.14-dev"
-            arch: x86_64
 
           # Windows
           - os: Windows
