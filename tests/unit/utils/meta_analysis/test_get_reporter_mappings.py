@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.get_reporter_mappings import (
+from automated_security_helper.utils.meta_analysis.reporting import (
     get_reporter_mappings,
 )
 

@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.validate_sarif_aggregation import (
+from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     validate_sarif_aggregation,
 )
 
