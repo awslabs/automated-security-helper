@@ -205,6 +205,13 @@ def run_ash_scan_cli_command(
             help="Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). 'critical' and 'high' are equivalent because SARIF does not distinguish them. Findings below this threshold are still reported but don't affect the exit code.",
         ),
     ] = "low",
+    compact_report: Annotated[
+        bool,
+        typer.Option(
+            "--compact-report",
+            help="Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings.",
+        ),
+    ] = False,
     ### CONTAINER-RELATED OPTIONS
     build: Annotated[
         bool,
@@ -353,6 +360,10 @@ def run_ash_scan_cli_command(
             "TRUE",
         ]
     )
+
+    # Translate --compact-report into the markdown reporter config override
+    if compact_report:
+        config_overrides.append("reporters.markdown.options.compact=true")
 
     # Parse comma-separated output formats
     parsed_output_formats = []
