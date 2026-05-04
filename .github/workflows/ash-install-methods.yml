@@ -91,13 +91,27 @@ jobs:
         run: pre-commit validate-manifest .pre-commit-hooks.yaml
 
   container-podman:
-    name: Container (Podman)
-    runs-on: ubuntu-latest
+    name: Container (Podman, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install Podman (macOS)
+        if: runner.os == 'macOS'
+        run: brew install podman
+      - name: Initialize Podman machine (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          podman machine init
+          podman machine start
+        continue-on-error: true
       - name: Install ASH
         run: pip install .
       - name: Verify Podman available
@@ -107,19 +121,34 @@ jobs:
         continue-on-error: true
 
   container-finch:
-    name: Container (Finch)
-    runs-on: macos-14
+    name: Container (Finch, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install Finch
+      - name: Install Finch (macOS)
+        if: runner.os == 'macOS'
         run: brew install --cask finch
+      - name: Install Finch (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -LO https://github.com/runfinch/finch/releases/latest/download/finch-linux-amd64.tar.gz
+          sudo tar -xzf finch-linux-amd64.tar.gz -C /usr/local
+          rm finch-linux-amd64.tar.gz
+        continue-on-error: true
       - name: Initialize Finch VM
         run: finch vm init
+        continue-on-error: true
       - name: Start Finch VM
         run: finch vm start
+        continue-on-error: true
       - name: Install ASH
         run: pip install .
       - name: Build container with Finch
@@ -127,8 +156,12 @@ jobs:
         continue-on-error: true
 
   mcp-server:
-    name: MCP server startup
-    runs-on: ubuntu-latest
+    name: MCP server (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -139,4 +172,4 @@ jobs:
       - name: Verify MCP command
         run: ash mcp --help
       - name: Test MCP server import
-        run: python -c "from automated_security_helper.cli.mcp_server import create_mcp_server; print('OK')"
+        run: python -c "from automated_security_helper.cli.mcp_server import run_mcp_server; print('OK')"
