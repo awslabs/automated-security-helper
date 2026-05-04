@@ -150,6 +150,17 @@
                 "include_summary_metrics": true
               }
             },
+            "gitlab-cyclonedx": {
+              "enabled": true,
+              "extension": "gl-dependency-scanning-report.cdx.json",
+              "name": "gitlab-cyclonedx",
+              "options": {
+                "category": "production",
+                "input_file_path_override": null,
+                "language_override": null,
+                "package_manager_override": null
+              }
+            },
             "gitlab-sast": {
               "enabled": true,
               "extension": "gl-sast-report.json",
@@ -1497,6 +1508,91 @@
       "title": "FlatJSONReporterConfigOptions",
       "type": "object"
     },
+    "GitLabCycloneDXReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "gl-dependency-scanning-report.cdx.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "gitlab-cyclonedx",
+          "default": "gitlab-cyclonedx",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/GitLabCycloneDXReporterConfigOptions",
+          "default": {
+            "category": "production",
+            "input_file_path_override": null,
+            "language_override": null,
+            "package_manager_override": null
+          }
+        }
+      },
+      "title": "GitLabCycloneDXReporterConfig",
+      "type": "object"
+    },
+    "GitLabCycloneDXReporterConfigOptions": {
+      "additionalProperties": true,
+      "description": "Options for the gitlab-cyclonedx reporter.",
+      "properties": {
+        "category": {
+          "default": "production",
+          "description": "Default dependency category injected as gitlab:dependency_scanning:category. Typically 'production' or 'development'.",
+          "title": "Category",
+          "type": "string"
+        },
+        "input_file_path_override": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If set, overrides the auto-detected input file path for ALL components. Useful when Syft reports absolute container paths that don't match the repo layout.",
+          "title": "Input File Path Override"
+        },
+        "language_override": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If set, overrides the auto-detected language name for ALL components.",
+          "title": "Language Override"
+        },
+        "package_manager_override": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If set, overrides the auto-detected package manager name for ALL components. Useful for single-ecosystem repos.",
+          "title": "Package Manager Override"
+        }
+      },
+      "title": "GitLabCycloneDXReporterConfigOptions",
+      "type": "object"
+    },
     "GitLabSASTReporterConfig": {
       "additionalProperties": true,
       "properties": {
@@ -2330,6 +2426,21 @@
             }
           },
           "description": "Configure the options for the Flat JSON reporter"
+        },
+        "gitlab-cyclonedx": {
+          "$ref": "#/$defs/GitLabCycloneDXReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "gl-dependency-scanning-report.cdx.json",
+            "name": "gitlab-cyclonedx",
+            "options": {
+              "category": "production",
+              "input_file_path_override": null,
+              "language_override": null,
+              "package_manager_override": null
+            }
+          },
+          "description": "Configure the options for the GitLab CycloneDX dependency scanning reporter"
         },
         "gitlab-sast": {
           "$ref": "#/$defs/GitLabSASTReporterConfig",
