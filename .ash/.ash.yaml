@@ -72,6 +72,9 @@ global_settings:
       rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
       reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars
       expiration: "2026-06-01"
+    - path: .github/actions/run-scan-test/action.yml
+      rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
+      reason: "False positive — inputs.* interpolations in composite actions are author-defined values, not attacker-controlled github.event context"
     - path: tests/**/*.py
       rule_id: B101
       reason: Assert usage expected with Pytest
