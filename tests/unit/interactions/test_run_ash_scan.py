@@ -167,9 +167,13 @@ def test_run_ash_scan_with_actionable_findings(
     mock_orchestrator = MagicMock()
     mock_orchestrator_class.return_value = mock_orchestrator
 
-    # Create results with actionable findings
     mock_results = MagicMock()
-    mock_results.metadata.summary_stats.actionable = 5  # 5 actionable findings
+    mock_results.metadata.summary_stats.actionable = 5
+    mock_result_obj = MagicMock()
+    mock_result_obj.level = "error"
+    mock_run = MagicMock()
+    mock_run.results = [mock_result_obj]
+    mock_results.sarif.runs = [mock_run]
     mock_orchestrator.execute_scan.return_value = mock_results
 
     # Mock get_unified_scanner_metrics to return metrics with actionable findings

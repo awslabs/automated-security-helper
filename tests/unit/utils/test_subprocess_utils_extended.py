@@ -7,6 +7,7 @@ import pytest
 
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
+    clear_find_executable_cache,
     run_command,
     run_command_with_output_handling,
     run_command_get_output,
@@ -22,6 +23,7 @@ from automated_security_helper.utils.subprocess_utils import (
 @patch("shutil.which")
 @patch("pathlib.Path.exists")
 def test_find_executable_found_in_path(mock_exists, mock_which):
+    clear_find_executable_cache()
     """Test finding an executable in PATH."""
     mock_which.return_value = "/usr/bin/test_cmd"
     mock_exists.return_value = False
@@ -36,6 +38,7 @@ def test_find_executable_found_in_path(mock_exists, mock_which):
 @patch("pathlib.Path.exists")
 def test_find_executable_found_in_ash_bin(mock_exists, mock_which):
     """Test finding an executable in ASH_BIN_PATH."""
+    clear_find_executable_cache()
     mock_which.return_value = None
     mock_exists.return_value = True
 
@@ -50,6 +53,7 @@ def test_find_executable_found_in_ash_bin(mock_exists, mock_which):
 @patch("pathlib.Path.exists")
 def test_find_executable_not_found(mock_exists, mock_which):
     """Test when executable is not found."""
+    clear_find_executable_cache()
     mock_which.return_value = None
     mock_exists.return_value = False
 

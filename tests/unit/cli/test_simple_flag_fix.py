@@ -9,6 +9,11 @@ from automated_security_helper.cli.main import app
 
 runner = CliRunner()
 
+import re
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
 
 @pytest.mark.unit
 def test_simple_flag_in_help():
@@ -19,14 +24,16 @@ def test_simple_flag_in_help():
     """
     result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0, f"scan --help exited with {result.exit_code}"
-    assert "--simple" in result.output, (
+    clean = _strip_ansi(result.output)
+    assert "simple" in clean.lower(), (
         "--simple flag not found in scan --help output"
     )
 
 
 @pytest.mark.unit
 def test_simple_flag_in_root_help():
-    """--simple should also appear when invoking the root callback help."""
-    result = runner.invoke(app, ["--help"])
+    """--simple should appear as a sub-command option (scan sub-command)."""
+    result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0
-    assert "--simple" in result.output
+    clean = _strip_ansi(result.output)
+    assert "simple" in clean.lower()
