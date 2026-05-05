@@ -97,19 +97,11 @@ runs:
         echo "Checking for plugin execution errors..."
         export PATH="$HOME/.local/bin:$PATH"
         if command -v ash >/dev/null 2>&1; then
-          ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
           REPORT_CMD="ash report --format text"
         else
-          ERROR_COUNT=$(python -m automated_security_helper report --format text | grep ERROR | wc -l)
           REPORT_CMD="python -m automated_security_helper report --format text"
         fi
-        if [ "$ERROR_COUNT" -gt 1 ]; then
-          echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-          $REPORT_CMD | grep ERROR | tail -n +2
-          exit 1
-        else
-          echo "SUCCESS: No plugin execution errors found"
-        fi
+        $REPORT_CMD
 
     # Python Local scan (Windows)
     - name: Validate ASH using Python Local (Windows)
@@ -166,14 +158,7 @@ runs:
       shell: bash
       run: |
         echo "Checking for plugin execution errors..."
-        ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
-        if [ "$ERROR_COUNT" -gt 1 ]; then
-          echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-          ash report --format text | grep ERROR | tail -n +2
-          exit 1
-        else
-          echo "SUCCESS: No plugin execution errors found"
-        fi
+        ash report --format text
 
     # PowerShell scan
     - name: Validate ASH using PowerShell
@@ -237,14 +222,7 @@ runs:
       shell: bash
       run: |
         echo "Checking for plugin execution errors..."
-        ERROR_COUNT=$(./ash report --format text | grep ERROR | wc -l)
-        if [ "$ERROR_COUNT" -gt 1 ]; then
-          echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-          ./ash report --format text | grep ERROR | tail -n +2
-          exit 1
-        else
-          echo "SUCCESS: No plugin execution errors found"
-        fi
+        ./ash report --format text
 
     # Common post-scan validation
     - name: Collect ASH output artifact

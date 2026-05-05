@@ -184,7 +184,7 @@ jobs:
         run: podman --version
       - name: "podman: build container"
         if: matrix.method == 'podman'
-        run: ash build-image --oci-runner podman --force 2>&1 | tail -10
+        run: ash build-image --oci-runner podman --force
         continue-on-error: true
 
       # === finch ===
@@ -201,7 +201,7 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
           sudo apt-get update -q
           ARCH=$(dpkg --print-architecture)
-          DEB_URL=$(gh api repos/runfinch/finch/releases/latest --jq ".assets[] | select(.name | endswith(\"_${ARCH}.deb\")) | .browser_download_url" | head -1)
+          DEB_URL=$(gh api repos/runfinch/finch/releases/latest --jq "[.assets[] | select(.name | endswith(\"_${ARCH}.deb\")) | .browser_download_url] | first")
           curl -fsSL -o /tmp/finch.deb "$DEB_URL"
           sudo apt-get install -y --no-install-recommends /tmp/finch.deb
           rm /tmp/finch.deb
@@ -218,7 +218,7 @@ jobs:
         run: pip install .
       - name: "finch: build container"
         if: matrix.method == 'finch'
-        run: ash build-image --oci-runner finch --force 2>&1 | tail -10
+        run: ash build-image --oci-runner finch --force
         continue-on-error: true
 
       # === mcp ===
