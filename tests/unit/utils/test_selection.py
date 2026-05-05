@@ -7,7 +7,7 @@ various criteria such as test markers, file paths, and related code changes.
 import os
 import re
 import sys
-import subprocess
+import subprocess  # nosec B404 — test validates tool selection via subprocess
 from typing import List, Optional
 
 
@@ -22,7 +22,7 @@ def get_changed_files(base_branch: str = "main") -> List[str]:
     """
     try:
         # Get the list of changed files
-        result = subprocess.run(
+        result = subprocess.run( # nosec B603 B607 — test validates tool selection
             ["git", "diff", "--name-only", base_branch],
             capture_output=True,
             text=True,
@@ -98,7 +98,7 @@ def get_tests_by_marker(marker: str) -> List[str]:
     """
     try:
         # Run pytest to collect tests with the specified marker
-        result = subprocess.run(
+        result = subprocess.run( # nosec B603 B607 — test validates tool selection
             ["pytest", "--collect-only", "-m", marker, "--quiet"],
             capture_output=True,
             text=True,
@@ -131,7 +131,7 @@ def get_tests_by_keyword(keyword: str) -> List[str]:
     """
     try:
         # Run pytest to collect tests with the specified keyword
-        result = subprocess.run(
+        result = subprocess.run( # nosec B603 B607 — test validates tool selection
             ["pytest", "--collect-only", "-k", keyword, "--quiet"],
             capture_output=True,
             text=True,
@@ -164,7 +164,7 @@ def get_slow_tests(threshold_seconds: float = 1.0) -> List[str]:
     """
     try:
         # Run pytest to collect test durations
-        result = subprocess.run(
+        result = subprocess.run( # nosec B603 B607 — test validates tool selection
             ["pytest", "--collect-only", "--durations=0"],
             capture_output=True,
             text=True,
@@ -296,7 +296,7 @@ def run_selected_tests(
         args.extend(additional_args)
 
     # Run pytest with the specified arguments
-    result = subprocess.run(args)
+    result = subprocess.run(args) # nosec B603 B607 — test validates tool selection
 
     return result.returncode
 

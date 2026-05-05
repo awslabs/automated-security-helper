@@ -3,7 +3,7 @@
 
 """Module containing the JupyterConverter implementation."""
 
-import subprocess
+import subprocess  # nosec B404 — required for fallback when uv tool unavailable
 from pathlib import Path
 from typing import Annotated, List, Literal, Optional
 
@@ -143,7 +143,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
 
         # Fallback to checking if jupyter command is available via direct execution
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 — list args, validated jupyter executable
                 ["jupyter", "nbconvert", "--version"],
                 capture_output=True,
                 text=True,
@@ -317,7 +317,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                         ASH_LOGGER.warning(
                             f"UV tool execution failed for {ipynb_file}, trying direct execution"
                         )
-                        result = subprocess.run(
+                        result = subprocess.run(  # nosec B603 — list args from validated nbconvert command
                             cmd, capture_output=True, text=True, timeout=60
                         )
                         if result.returncode != 0:
@@ -325,7 +325,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                                 result.returncode, cmd, result.stdout, result.stderr
                             )
                 else:
-                    result = subprocess.run(
+                    result = subprocess.run(  # nosec B603 — list args from validated nbconvert command
                         cmd, capture_output=True, text=True, timeout=60
                     )
                     if result.returncode != 0:

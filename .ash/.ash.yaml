@@ -9,6 +9,7 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    # === SECRET-* rules (detect-secrets doesn't support inline nosec) ===
     - path: tests/integration/cli/test_mcp_file_tracking_integration.py
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive.
@@ -24,12 +25,6 @@ global_settings:
     - path: pyproject.toml
       rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       reason: This is the project configuration. Findings of this type are false positives.
-    - path: automated_security_helper/utils/subprocess_utils.py
-      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen1
-      reason: This package requires Python3.10 or greater.
-    - path: automated_security_helper/utils/subprocess_utils.py
-      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen2
-      reason: This package requires Python3.10 or greater.
     - path: tests/unit/plugin_modules/ash_aws_plugins/test_cloudwatch_logs_reporter*
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive, dummy test data and not an actual secret.
@@ -38,26 +33,6 @@ global_settings:
       line_start: 501
       line_end: 501
       reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
-      rule_id: B404
-      line_start: 9
-      line_end: 9
-      reason: Subprocess module required — ferret-scan is an external CLI tool invoked via subprocess with list args (no shell=True).
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
-      rule_id: B603
-      line_start: 410
-      line_end: 435
-      reason: Subprocess calls use list args (no shell=True) with validated inputs. ferret-scan binary path comes from shutil.which().
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py
-      rule_id: B607
-      line_start: 410
-      line_end: 435
-      reason: Partial executable path resolved via shutil.which() in validate_plugin_dependencies(). Standard ASH scanner pattern.
-    - path: scripts/generate_test_docx.py
-      rule_id: B311
-      line_start: 1
-      line_end: 203
-      reason: Standard random is intentional — generates synthetic test data with random.seed(42) for reproducibility, not used for security/crypto.
     - path: tests/unit/plugin_modules/ash_ferret_plugins/conftest.py
       rule_id: SECRET-SECRET-KEYWORD
       line_start: 146
@@ -68,39 +43,12 @@ global_settings:
       line_start: 175
       line_end: 177
       reason: False positive — runtime-generated synthetic credit card numbers from seeded random for test data.
-    - path: .github/workflows/run-ash-security-scan.yml
-      rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
-      reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars
-      expiration: "2026-06-01"
-    - path: .github/actions/run-scan-test/action.yml
-      rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
-      reason: "False positive — inputs.* interpolations in composite actions are author-defined values, not attacker-controlled github.event context"
-    - path: tests/**/*.py
-      rule_id: B101
-      reason: Assert usage expected with Pytest
-    - path: tests/utils/*.py
-      rule_id: B311
-      reason: Test facilities and tooling used to generate randomness during testing.
-    - path: tests/unit/utils/*.py
-      rule_id: B108
-      reason: Temp file path as string, not actual temp dir usage.
-    - path: tests/**/*.py
-      rule_id: B404
-      reason: Subprocess module used across test suite due to the nature of ASH itself being a tool orchestrator. These instances are in test suites and not in the code used at runtime.
-    - path: tests/**/*.py
-      rule_id: B603
-      reason: Subprocess module used across test suite due to the nature of ASH itself being a tool orchestrator. These instances are in test suites and not in the code used at runtime.
-    - path: tests/**/*.py
-      rule_id: B607
-      reason: Mocking and other test mechanisms. These instances are in test suites and not in the code used at runtime.
     - path: docs/content/docs/plugins/aws/index.md
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive, not an actual secret
     - path: docs/content/docs/plugins/development-guide.md
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive, not an actual secret
-    - path: docs/content/docs/testing/examples/*
-      reason: Documentation with test code examples focused on brevity.
     - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
       path: ".ash/ash_output*/*.*"
       reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
@@ -110,11 +58,6 @@ global_settings:
     - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
       path: ".ash/ash_output*/scanners/*.json"
       reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
-    - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
-      path: automated_security_helper/cli/main.py
-      line_start: 75
-      line_end: 75
-      reason: "False positive - ASH requires Python 3.10+ (pyproject.toml), importlib.resources is available in Python 3.7+"
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/secret_masking.py
       reason: "False positive - module processes secret-related strings, keyword matches are inherent"
@@ -127,30 +70,32 @@ global_settings:
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_defense_in_depth.py
       reason: "False positive - test data contains hex strings for tarfile extraction validation"
-    - rule_id: B108
-      path: tests/unit/converters/test_converters.py
-      reason: "Test validates path traversal protection - checking /tmp/evil.py does NOT exist"
-    - rule_id: B108
-      path: tests/unit/core/test_orchestrator_regression.py
-      reason: "Test intentionally uses temp paths to verify cleanup guard"
-    - rule_id: B110
-      path: tests/unit/core/test_base_plugins_regression.py
-      reason: "Test verifies exception propagation behavior"
-    - rule_id: B110
-      path: tests/unit/config/test_ash_config_regression.py
-      reason: "Test verifies yaml loader isolation with exception handling"
-    - rule_id: B110
-      path: tests/unit/test_environ_mutation_fix.py
-      reason: "Test catches expected exceptions to verify env restoration"
-    - rule_id: B404
-      path: tests/unit/utils/test_subprocess_utils_regression.py
-      reason: "Test file for subprocess_utils must import subprocess"
-    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
-      path: automated_security_helper/plugin_modules/ash_builtin/__init__.py
-      reason: "Lazy plugin loading uses hardcoded module paths, not user input"
     - rule_id: SECRET-SECRET-KEYWORD
       path: "tests/unit/utils/test_secret_masking*.py"
       reason: "Intentional test fixtures for secret masking regression tests"
+    # === Non-bandit rules (semgrep/opengrep — no inline suppression mechanism) ===
+    - path: automated_security_helper/utils/subprocess_utils.py
+      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen1
+      reason: This package requires Python3.10 or greater.
+    - path: automated_security_helper/utils/subprocess_utils.py
+      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen2
+      reason: This package requires Python3.10 or greater.
+    - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
+      path: automated_security_helper/cli/main.py
+      line_start: 75
+      line_end: 75
+      reason: "False positive - ASH requires Python 3.10+ (pyproject.toml), importlib.resources is available in Python 3.7+"
+    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
+      path: automated_security_helper/plugin_modules/ash_builtin/__init__.py
+      reason: "Lazy plugin loading uses hardcoded module paths, not user input"
+    # === GitHub Actions rules (YAML — no inline suppression) ===
+    - path: .github/workflows/run-ash-security-scan.yml
+      rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
+      reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars
+      expiration: "2026-06-01"
+    - path: .github/actions/run-scan-test/action.yml
+      rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
+      reason: "False positive — inputs.* interpolations in composite actions are author-defined values, not attacker-controlled github.event context"
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

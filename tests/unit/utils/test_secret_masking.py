@@ -25,7 +25,7 @@ class TestSecretMasking:
 
     def test_mask_secret_value_long(self):
         """Test masking of long secrets."""
-        long_secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        long_secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # nosec B105 — test fixture with dummy AWS key
         masked = _mask_secret_value(long_secret)
         assert masked.startswith("wJ")
         assert masked.endswith("Y")

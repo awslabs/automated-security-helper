@@ -6,7 +6,7 @@
 import json
 import logging
 import re
-import subprocess
+import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked via subprocess
 from pathlib import Path
 from typing import Annotated, Any, List, Literal, Optional, Tuple
 
@@ -424,7 +424,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             if not ferret_binary:
                 return None
 
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 — list args, executable from shutil.which()
                 [ferret_binary, "--version"],
                 capture_output=True,
                 text=True,

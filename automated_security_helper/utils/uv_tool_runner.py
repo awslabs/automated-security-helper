@@ -1,6 +1,6 @@
 """UV tool runner utility for managing UV-based tool execution and installation."""
 
-import subprocess
+import subprocess  # nosec B404 — uv_tool_runner is the subprocess orchestrator for tool execution
 import threading
 import time
 from dataclasses import dataclass
@@ -51,7 +51,7 @@ class UVToolRunner:
             return self._uv_available_cache
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 — list args, validated uv executable path
                 [self.uv_executable, "--version"],
                 capture_output=True,
                 text=True,
@@ -72,7 +72,7 @@ class UVToolRunner:
             raise UVToolRunnerError("UV is not available")
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 — list args, validated uv executable path
                 [self.uv_executable, "tool", "list"],
                 capture_output=True,
                 text=True,
@@ -124,7 +124,7 @@ class UVToolRunner:
                 )
 
             command.extend([tool_name, "--version"])
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 — list args, validated uv executable path
                 command,
                 capture_output=True,
                 text=True,
@@ -138,7 +138,7 @@ class UVToolRunner:
                 version_line = result.stdout.strip().split("\n")[0]
                 return version_line.strip()
 
-        except Exception:
+        except Exception:  # nosec B110 — version check failure is non-critical
             pass
 
         return None
@@ -252,7 +252,7 @@ class UVToolRunner:
             progress_thread.start()
 
         try:
-            subprocess.run(
+            subprocess.run(  # nosec B603 — list args, validated uv executable path
                 cmd,
                 capture_output=True,
                 text=True,
@@ -420,7 +420,7 @@ class UVToolRunner:
 
         # Fallback to original subprocess.run for backward compatibility
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 — list args, validated uv executable path
                 command,
                 cwd=cwd,
                 capture_output=capture_output,
@@ -493,7 +493,7 @@ class UVToolRunner:
     def get_cache_info(self) -> Dict[str, Any]:
         """Get UV cache information for optimization purposes."""
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 — list args, validated uv executable path
                 [self.uv_executable, "cache", "dir"],
                 capture_output=True,
                 text=True,
@@ -534,7 +534,7 @@ class UVToolRunner:
     def clean_cache(self) -> bool:
         """Clean UV cache to free up space."""
         try:
-            subprocess.run(
+            subprocess.run(  # nosec B603 — list args, validated uv executable path
                 [self.uv_executable, "cache", "clean"],
                 capture_output=True,
                 text=True,

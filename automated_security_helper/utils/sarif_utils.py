@@ -68,7 +68,7 @@ def get_finding_id(
         for item in [rule_id, file, start_line, end_line]
         if item is not None
     )
-    rd = random.Random()
+    rd = random.Random()  # nosec B311 — seeded PRNG for deterministic finding IDs, not security
     rd.seed(seed)
     return str(uuid.UUID(int=rd.getrandbits(128), version=4))
 

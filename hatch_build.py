@@ -57,7 +57,7 @@ class CustomBuildHook(BuildHookInterface):
             # Ensure we have some revision file even if there's an error
             try:
                 ASH_INSTALLED_REVISION_PATH.write_text("build-error")
-            except Exception:
+            except Exception:  # nosec B110 — build must continue even if revision file write fails
                 pass
             print("Continuing build despite asset staging error")
 
