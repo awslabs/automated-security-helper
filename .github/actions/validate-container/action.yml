@@ -17,11 +17,10 @@ runs:
     - name: "podman: install (macOS)"
       if: inputs.runtime == 'podman' && runner.os == 'macOS'
       shell: bash
-      continue-on-error: true
       run: |
         brew install podman
-        podman machine init
-        podman machine start
+        podman machine init || true
+        podman machine start || true
     - name: "podman: verify"
       if: inputs.runtime == 'podman'
       shell: bash
@@ -29,7 +28,6 @@ runs:
     - name: "podman: build container"
       if: inputs.runtime == 'podman'
       shell: bash
-      continue-on-error: true
       run: ash image build --oci-runner podman --force 2>&1 | tail -10
 
     # === finch ===
@@ -40,23 +38,25 @@ runs:
     - name: "finch: install (Linux)"
       if: inputs.runtime == 'finch' && runner.os == 'Linux'
       shell: bash
-      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
-        curl -LO https://github.com/runfinch/finch/releases/latest/download/finch-linux-amd64.tar.gz
-        sudo tar -xzf finch-linux-amd64.tar.gz -C /usr/local
-        rm finch-linux-amd64.tar.gz
-    - name: "finch: init VM"
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+        sudo apt-get update -q
+        ARCH=$(dpkg --print-architecture)
+        DEB_URL=$(gh api repos/runfinch/finch/releases/latest --jq ".assets[] | select(.name | endswith(\"_${ARCH}.deb\")) | .browser_download_url" | head -1)
+        curl -fsSL -o /tmp/finch.deb "$DEB_URL"
+        sudo apt-get install -y --no-install-recommends /tmp/finch.deb
+        rm /tmp/finch.deb
+    - name: "finch: init and start VM"
       if: inputs.runtime == 'finch'
       shell: bash
-      continue-on-error: true
-      run: finch vm init
-    - name: "finch: start VM"
-      if: inputs.runtime == 'finch'
-      shell: bash
-      continue-on-error: true
-      run: finch vm start
+      run: |
+        finch vm init || true
+        finch vm start || true
     - name: "finch: build container"
       if: inputs.runtime == 'finch'
       shell: bash
-      continue-on-error: true
       run: ash image build --oci-runner finch --force 2>&1 | tail -10
