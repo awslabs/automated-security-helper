@@ -212,8 +212,10 @@ password = "changeme"
 const key = process.env.KEY; # ash-ignore: SEC-KEY env var is safe
 ```
 
-Inline suppressions use `Kind1.inSource` in the SARIF output, making
-them distinguishable from config-file suppressions (`Kind1.external`).
+Both inline and config-file suppressions use `Kind1.inSource` in the SARIF
+output. They are distinguishable by their justification prefix: config
+suppressions start with `"(ASH)"` while inline suppressions start with
+`"(ASH inline)"`.
 
 ### Temporarily Ignoring Suppressions
 

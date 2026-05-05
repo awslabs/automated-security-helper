@@ -604,7 +604,9 @@ def apply_suppressions_to_sarif(
                             continue
 
                         # Resolve the file path for reading the source
-                        file_path = Path(uri)
+                        # uri is relative (sanitize_sarif_paths already ran),
+                        # so resolve against the scan's source directory.
+                        file_path = plugin_context.source_dir / uri
                         file_key = str(file_path)
                         if file_key not in _inline_suppression_cache:
                             _inline_suppression_cache[file_key] = (
