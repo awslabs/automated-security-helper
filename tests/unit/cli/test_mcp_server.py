@@ -701,7 +701,7 @@ class TestGetScanResults:
                 new_callable=AsyncMock,
                 return_value=sample_full_results,
             ) as mock_get,
-            patch("pathlib.Path.cwd", return_value=Path("/myproject")),
+            patch("pathlib.Path.cwd", return_value=Path.cwd()),
         ):
             await get_scan_results(ctx=mock_ctx, output_dir=".ash/ash_output")
 
