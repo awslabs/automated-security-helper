@@ -1,6 +1,6 @@
 """Extended tests for utils/uv_tool_runner.py — covers run_tool, get_tool_installation_info, caching, and validation."""
 
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
@@ -36,7 +36,7 @@ class TestRunTool:
                 stdout="output",
                 stderr="",
             )
-            result = runner.run_tool("bandit", args=["-r", "src/"], cwd=Path("/tmp"))
+            result = runner.run_tool("bandit", args=["-r", "src/"], cwd=Path("/tmp"))  # nosec B108
             assert result.returncode == 0
             assert result.stdout == "output"
 

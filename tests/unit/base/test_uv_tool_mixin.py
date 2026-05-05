@@ -133,7 +133,7 @@ class TestTryUvToolExecution:
 
             result = plugin._try_uv_tool_execution(
                 command=["bandit", "-r", "src/"],
-                working_dir=Path("/tmp/work"),
+                working_dir=Path("/tmp/work"),  # nosec B108
             )
 
             assert result is not None
@@ -152,7 +152,7 @@ class TestTryUvToolExecution:
 
             result = plugin._try_uv_tool_execution(
                 command=["bandit", "-r", "src/"],
-                working_dir=Path("/tmp/work"),
+                working_dir=Path("/tmp/work"),  # nosec B108
             )
             assert result is None
 
@@ -171,7 +171,7 @@ class TestTryUvToolExecution:
 
             result = plugin._try_uv_tool_execution(
                 command=["bandit", "-r", "src/"],
-                working_dir=Path("/tmp/work"),
+                working_dir=Path("/tmp/work"),  # nosec B108
             )
             assert result is None
 
@@ -184,7 +184,7 @@ class TestTryUvToolExecution:
         ):
             result = plugin._try_uv_tool_execution(
                 command=["bandit", "-r", "src/"],
-                working_dir=Path("/tmp/work"),
+                working_dir=Path("/tmp/work"),  # nosec B108
             )
             assert result is None
 
@@ -201,7 +201,7 @@ class TestTryUvToolExecution:
 
             result = plugin._try_uv_tool_execution(
                 command=["bandit", "-r", "src/"],
-                working_dir=Path("/tmp/work"),
+                working_dir=Path("/tmp/work"),  # nosec B108
             )
             assert result is None
 
@@ -223,7 +223,7 @@ class TestTryUvToolExecution:
             env = {"MY_VAR": "value"}
             plugin._try_uv_tool_execution(
                 command=["bandit"],
-                working_dir=Path("/tmp"),
+                working_dir=Path("/tmp"),  # nosec B108
                 env=env,
             )
 

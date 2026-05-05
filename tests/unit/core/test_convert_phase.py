@@ -107,7 +107,7 @@ class TestConvertPhaseExecution:
         mock_instance.config.name = "jupyter"
         mock_instance.is_python_only.return_value = True
         mock_instance.validate_plugin_dependencies.return_value = True
-        mock_instance.convert.return_value = [Path("/tmp/converted.py")]
+        mock_instance.convert.return_value = [Path("/tmp/converted.py")]  # nosec B108
         mock_cls.return_value = mock_instance
 
         phase = ConvertPhase(

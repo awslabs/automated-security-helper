@@ -1,6 +1,6 @@
 """Tests for utils/uv_tool_runner.py — covers UVToolRunner class methods."""
 
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
