@@ -182,19 +182,7 @@ jobs:
         if: matrix.method == 'finch' && runner.os == 'Linux'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          sudo apt-get remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-          sudo apt-get autoremove -y
-          sudo rm -rf /root/.docker /home/runner/.docker
-          ARCH=$(dpkg --print-architecture)
-          curl -fsSL https://artifact.runfinch.com/deb/GPG_KEY.pub | sudo gpg --dearmor -o /usr/share/keyrings/runfinch-finch-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/runfinch-finch-archive-keyring.gpg arch=${ARCH}] https://artifact.runfinch.com/deb noble main" | sudo tee /etc/apt/sources.list.d/runfinch-finch.list
-          sudo apt-get update -q
-          sudo apt-get install -y runfinch-finch
-          sudo systemctl start containerd
-          sudo systemctl start finch-buildkit
-          sudo systemctl start finch
-          sudo finch --version
+        run: sudo bash scripts/setup-finch-linux.sh
       - name: "finch: init VM"
         if: matrix.method == 'finch' && runner.os == 'macOS'
         run: finch vm init
@@ -206,7 +194,7 @@ jobs:
         run: pip install .
       - name: "finch: build container"
         if: matrix.method == 'finch'
-        run: sudo -E ash build-image --oci-runner finch --force
+        run: ash build-image --oci-runner finch --force
 
       # === mcp ===
       - name: "mcp: install ASH"

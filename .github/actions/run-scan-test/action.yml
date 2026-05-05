@@ -88,12 +88,10 @@ runs:
       run: |
         echo "Testing ASH using Python (Container) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
         ash --version
-        SUDO=""
-        if [ "${OCI_RUNNER}" = "finch" ]; then SUDO="sudo -E"; fi
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ${SUDO} ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL --config .ash/.ash_community_plugins.yaml
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL --config .ash/.ash_community_plugins.yaml
         else
-          ${SUDO} ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL
         fi
 
     - name: Validate No Plugin Errors (Python Container)
@@ -218,12 +216,11 @@ runs:
       run: |
         echo "Testing ASH using Bash on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
         chmod +x ./ash
-        SUDO=""
-        if [ "${OCI_RUNNER}" = "finch" ]; then SUDO="sudo -E"; fi
+        chmod +x ./ash
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ${SUDO} ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml
+          ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml
         else
-          ${SUDO} ./ash --build-target ci --verbose
+          ./ash --build-target ci --verbose
         fi
 
     - name: Validate No Plugin Errors (Bash)
