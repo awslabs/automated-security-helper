@@ -32,14 +32,6 @@ systemctl start containerd
 systemctl start finch-buildkit
 systemctl start finch
 
-echo "=== Creating sudo wrapper for non-root ASH invocation ==="
-mv /usr/bin/finch /usr/bin/finch-real
-cat > /usr/bin/finch << 'WRAPPER'
-#!/bin/sh
-exec sudo /usr/bin/finch-real "$@"
-WRAPPER
-chmod +x /usr/bin/finch
-
 echo "=== Verifying Finch installation ==="
 finch --version
 

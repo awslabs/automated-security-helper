@@ -127,6 +127,11 @@ fi
 
 # Resolve the OCI_RUNNER
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
+# OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER for cargo)
+# Example: OCI_RUNNER_WRAPPER=sudo makes all finch/docker calls use sudo
+if [[ -n "${OCI_RUNNER_WRAPPER:-}" ]]; then
+    RESOLVED_OCI_RUNNER="${OCI_RUNNER_WRAPPER} ${RESOLVED_OCI_RUNNER}"
+fi
 
 # If we couldn't resolve an OCI_RUNNER, exit
 if [[ "${RESOLVED_OCI_RUNNER}" == "" ]]; then
@@ -182,10 +187,10 @@ else
         SOURCE_READONLY=",readonly"
       fi
       # Capture terminal size if tput is available so the container experience can be improved
-      if command -v tput >/dev/null 2>&1; then
+      if command -v tput >/dev/null 2>&1 && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -e COLUMNS=$(tput cols) -e LINES=$(tput lines)"
       fi
-      if [[ "${COLOR_OUTPUT}" = "true" ]]; then
+      if [[ "${COLOR_OUTPUT}" = "true" ]] && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
       fi
       echo "Running ASH scan using built image..."

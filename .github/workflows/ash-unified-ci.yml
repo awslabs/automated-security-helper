@@ -123,6 +123,7 @@ jobs:
       - uses: ./.github/actions/run-scan-test
         env:
           OCI_RUNNER: ${{ matrix.oci-runner }}
+          OCI_RUNNER_WRAPPER: ${{ matrix.oci-runner == 'finch' && 'sudo' || '' }}
         with:
           method: ${{ matrix.method }}
           os: ${{ matrix.os }}
