@@ -4,7 +4,7 @@ This module provides factory classes and utilities for creating test objects
 and generating test data for use in tests.
 """
 
-import random
+import random  # nosec B311 — test data generation, not security
 import string
 import uuid
 from typing import Dict, Any, List, Optional, Union, TypeVar, Generic, Type
@@ -131,7 +131,7 @@ class RandomDataGenerator:
         Returns:
             Random string
         """
-        return "".join(random.choice(string.ascii_letters) for _ in range(length))
+        return "".join(random.choice(string.ascii_letters) for _ in range(length)) # nosec B311
 
     @staticmethod
     def random_email() -> str:
@@ -164,7 +164,7 @@ class RandomDataGenerator:
         Returns:
             Random integer
         """
-        return random.randint(min_val, max_val)
+        return random.randint(min_val, max_val) # nosec B311
 
     @staticmethod
     def random_float(min_val: float = 0.0, max_val: float = 1.0) -> float:
@@ -177,7 +177,7 @@ class RandomDataGenerator:
         Returns:
             Random float
         """
-        return random.uniform(min_val, max_val)
+        return random.uniform(min_val, max_val) # nosec B311
 
     @staticmethod
     def random_bool() -> bool:
@@ -186,7 +186,7 @@ class RandomDataGenerator:
         Returns:
             Random boolean
         """
-        return random.choice([True, False])
+        return random.choice([True, False]) # nosec B311
 
     @staticmethod
     def random_list(generator_func, size: int = 5, **kwargs) -> List[Any]:
@@ -235,7 +235,7 @@ class RandomDataGenerator:
             end_date = datetime.now()
 
         time_delta = end_date - start_date
-        random_days = random.randint(0, time_delta.days)
+        random_days = random.randint(0, time_delta.days) # nosec B311
         return start_date + timedelta(days=random_days)
 
 
@@ -505,7 +505,7 @@ class VulnerabilityFactory:
             "name": name
             or f"Test Vulnerability {RandomDataGenerator.random_string(4)}",
             "severity": severity
-            or random.choice(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
+            or random.choice(["LOW", "MEDIUM", "HIGH", "CRITICAL"]), # nosec B311
             "description": description
             or f"Test vulnerability description {RandomDataGenerator.random_string(20)}",
             "location": {
@@ -560,7 +560,7 @@ class ScanResultFactory:
         result = {
             "scanner": scanner_name
             or f"test_scanner_{RandomDataGenerator.random_string(4)}",
-            "status": status or random.choice(["SUCCESS", "FAILURE", "ERROR"]),
+            "status": status or random.choice(["SUCCESS", "FAILURE", "ERROR"]), # nosec B311
             "timestamp": datetime.now().isoformat(),
             "vulnerabilities": vulnerabilities
             or VulnerabilityFactory.create_vulnerabilities(

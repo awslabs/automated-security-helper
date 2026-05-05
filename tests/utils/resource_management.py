@@ -13,7 +13,7 @@ from typing import Dict, Any, List, Optional, Union, Callable
 from contextlib import contextmanager
 import time
 import threading
-import subprocess
+import subprocess  # nosec B404 — test resource management for subprocesses
 
 
 class ResourceManager:
@@ -129,7 +129,7 @@ class ResourceManager:
         Returns:
             The started process
         """
-        process = subprocess.Popen(command, **kwargs)
+        process = subprocess.Popen(command, **kwargs)  # nosec B603 — test manages external processes
         return self.register_process(process)
 
     def register_cleanup_function(self, func: Callable[[], None]) -> None:
@@ -170,7 +170,7 @@ class ResourceManager:
             try:
                 if path.exists():
                     shutil.rmtree(path)
-            except Exception:
+            except Exception:  # nosec B110 — cleanup must not raise during teardown
                 pass
         self._temp_dirs = []
 
@@ -180,7 +180,7 @@ class ResourceManager:
             try:
                 if path.exists():
                     path.unlink()
-            except Exception:
+            except Exception:  # nosec B110 — cleanup must not raise during teardown
                 pass
         self._temp_files = []
 
@@ -194,7 +194,7 @@ class ResourceManager:
                         process.wait(timeout=1)
                     except subprocess.TimeoutExpired:
                         process.kill()
-            except Exception:
+            except Exception:  # nosec B110 — cleanup must not raise during teardown
                 pass
         self._processes = []
 
@@ -203,7 +203,7 @@ class ResourceManager:
         for func in self._cleanup_functions:
             try:
                 func()
-            except Exception:
+            except Exception:  # nosec B110 — cleanup must not raise during teardown
                 pass
         self._cleanup_functions = []
 
@@ -238,7 +238,7 @@ def temp_directory() -> Path:
         try:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
-        except Exception:
+        except Exception:  # nosec B110 — cleanup must not raise during teardown
             pass
 
 
@@ -271,7 +271,7 @@ def temp_file(
         try:
             if temp_file_path.exists():
                 temp_file_path.unlink()
-        except Exception:
+        except Exception:  # nosec B110 — cleanup must not raise during teardown
             pass
 
 
@@ -301,7 +301,7 @@ def managed_process(command: List[str], **kwargs) -> subprocess.Popen:
                     process.wait(timeout=1)
                 except subprocess.TimeoutExpired:
                     process.kill()
-        except Exception:
+        except Exception:  # nosec B110 — cleanup must not raise during teardown
             pass
 
 
@@ -367,7 +367,7 @@ class ServiceManager:
                         process.wait(timeout=1)
                     except subprocess.TimeoutExpired:
                         process.kill()
-            except Exception:
+            except Exception:  # nosec B110 — cleanup must not raise during teardown
                 pass
             self.services.pop(name, None)
 
@@ -514,7 +514,7 @@ class ResourcePool:
                 if hasattr(resource, "close"):
                     try:
                         resource.close()
-                    except Exception:
+                    except Exception:  # nosec B110 — cleanup must not raise during teardown
                         pass
             self.resources = []
             self.available = set()

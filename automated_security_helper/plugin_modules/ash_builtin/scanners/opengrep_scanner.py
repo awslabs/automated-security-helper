@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 import platform
-import subprocess
+import subprocess  # nosec B404 — required for version detection of opengrep binary
 from typing import Annotated, List, Literal
 
 from pydantic import Field, model_validator
@@ -218,7 +218,7 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             Tuple of (major, minor, patch) version numbers, or None if unable to determine
         """
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 — list args, executable from find_executable()
                 [self.command, "--version"],
                 capture_output=True,
                 text=True,

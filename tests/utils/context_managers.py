@@ -268,7 +268,7 @@ def mock_subprocess_run(
         ...     # Code that calls subprocess.run
         ...     pass
     """
-    import subprocess
+    import subprocess  # nosec B404 — test context manager for subprocess
 
     # Convert single return code to list
     if isinstance(return_codes, int):

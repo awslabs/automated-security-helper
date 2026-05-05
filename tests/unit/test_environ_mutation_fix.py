@@ -176,7 +176,7 @@ def test_cdk_nag_wrapper_restores_os_environ():
             fake_template = Path("/nonexistent/template.yaml")
             try:
                 cdk_nag_wrapper.run_cdk_nag_against_cfn_template(fake_template)
-            except Exception:
+            except Exception:  # nosec B110 — test catches expected exception to verify env restoration
                 # We injected the failure. We only care about env state.
                 pass
 

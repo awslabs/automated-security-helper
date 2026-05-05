@@ -379,7 +379,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         try:
             if result.ruleId:
                 rule_id = result.ruleId
-        except Exception:
+        except Exception:  # nosec B110 — graceful fallback when ruleId attribute missing
             pass
 
         ASH_LOGGER.debug(f"Creating VulnerabilityFinding for {rule_id}")

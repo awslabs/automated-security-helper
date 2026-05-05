@@ -317,7 +317,7 @@ class TestArchiveConverterPathTraversal:
         assert (extracted_dir / "safe.py").exists()
 
         # The malicious file should NOT exist at the traversal path
-        assert not Path("/tmp/evil.py").exists()
+        assert not Path("/tmp/evil.py").exists()  # nosec B108 — validates traversal protection
 
     def test_convert_zip_with_traversal_does_not_write_outside(
         self, temp_dir, test_plugin_context, monkeypatch
@@ -351,7 +351,7 @@ class TestArchiveConverterPathTraversal:
         assert (extracted_dir / "safe.py").exists()
 
         # The malicious file should NOT exist at the traversal path
-        assert not Path("/tmp/evil.py").exists()
+        assert not Path("/tmp/evil.py").exists()  # nosec B108 — validates traversal protection
 
     def test_inspect_members_without_target_path_backward_compat(
         self, temp_dir, converter

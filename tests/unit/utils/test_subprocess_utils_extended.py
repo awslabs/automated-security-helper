@@ -1,6 +1,6 @@
 """Extended tests for subprocess_utils.py to increase coverage."""
 
-import subprocess
+import subprocess  # nosec B404 — test exercises subprocess_utils module
 from unittest.mock import patch, MagicMock
 
 import pytest

@@ -5,7 +5,7 @@ enforcing coverage thresholds, and identifying areas that need more tests.
 """
 
 import json
-import subprocess
+import subprocess  # nosec B404 — test utility runs coverage tools
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
@@ -36,7 +36,7 @@ def generate_coverage_report(format: str = "html") -> str:
         output_path = "terminal output"
 
     # Run the command
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True)  # nosec B603 — test runs coverage tool
 
     return output_path
 
@@ -51,7 +51,7 @@ def check_coverage_threshold(threshold: float = 80.0) -> bool:
         True if the coverage meets the threshold, False otherwise
     """
     # Run pytest with coverage and get the output
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 — test runs coverage tool
         ["pytest", "--cov=automated_security_helper", "--cov-report=term"],
         capture_output=True,
         text=True,
@@ -227,7 +227,7 @@ def generate_coverage_badge(
         Path to the generated badge
     """
     # Run pytest with coverage and get the output
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 — test runs coverage tool
         ["pytest", "--cov=automated_security_helper", "--cov-report=term"],
         capture_output=True,
         text=True,
