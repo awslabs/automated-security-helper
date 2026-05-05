@@ -101,6 +101,23 @@ class OfflineTestStack(cdk.Stack):
             description="Allow outbound within VPC only",
         )
 
+        # SSM endpoints -- required for Session Manager in isolated VPC
+        for svc in ["ssm", "ssmmessages", "ec2messages"]:
+            vpc.add_interface_endpoint(
+                f"{svc}-endpoint",
+                service=ec2.InterfaceVpcEndpointAwsService(svc),
+                security_groups=[sg],
+                subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+            )
+
+        # CloudWatch Logs endpoint -- required for CodeBuild log streaming
+        vpc.add_interface_endpoint(
+            "logs-endpoint",
+            service=ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
+            security_groups=[sg],
+            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+        )
+
         # ------------------------------------------------------------------
         # IAM role for the EC2 instance
         # ------------------------------------------------------------------
