@@ -187,7 +187,7 @@ jobs:
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
           sudo apt-get update -q
-          sudo apt-get install -y containerd.io runc
+          sudo apt-get install -y containerd.io
           ARCH=$(dpkg --print-architecture)
           DEB_URL=$(gh api repos/runfinch/finch/releases/latest --jq "[.assets[] | select(.name | endswith(\"_${ARCH}.deb\")) | .browser_download_url] | first")
           curl -fsSL -o /tmp/finch.deb "$DEB_URL"
