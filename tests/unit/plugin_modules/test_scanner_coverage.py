@@ -142,7 +142,8 @@ class TestSemgrepScannerCoverage:
 
         (scanner_context.source_dir / "app.py").write_text("import os")
         scanner = SemgrepScanner(context=scanner_context)
-        result = scanner.validate_plugin_dependencies()
+        with patch("automated_security_helper.base.scanner_plugin.find_executable", return_value="/usr/bin/semgrep"):
+            result = scanner.validate_plugin_dependencies()
         assert result is True
 
 
