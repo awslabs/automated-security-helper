@@ -28,10 +28,7 @@ runs:
     - name: "podman: build image"
       if: inputs.runtime == 'podman'
       shell: bash
-      run: |
-        podman build --target ci --tag automated-security-helper:ci \
-          --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
-          --file Dockerfile .
+      run: ash build-image --oci-runner podman --force
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -44,6 +41,11 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+        sudo apt-get update -q
+        sudo apt-get install -y containerd.io runc
         ARCH=$(dpkg --print-architecture)
         DEB_URL=$(gh api repos/runfinch/finch/releases/latest --jq "[.assets[] | select(.name | endswith(\"_${ARCH}.deb\")) | .browser_download_url] | first")
         curl -fsSL -o /tmp/finch.deb "$DEB_URL"
@@ -59,7 +61,4 @@ runs:
     - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
-      run: |
-        finch build --target ci --tag automated-security-helper:ci \
-          --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
-          --file Dockerfile .
+      run: ash build-image --oci-runner finch --force
