@@ -41,15 +41,26 @@ Any additional arguments passed will be forwarded to ASH inside the container im
 app.command(name="report")(report_command)
 
 
-# Register MCP command using a function to avoid circular imports
-def register_mcp_command():
+@app.command(name="mcp", help="Start the ASH MCP server (Model Context Protocol)")
+def _mcp_wrapper(
+    ctx: typer.Context,
+    log_level: str = typer.Option("INFO", help="Log level"),
+    verbose: bool = typer.Option(False, help="Verbose output"),
+    debug: bool = typer.Option(False, help="Debug output"),
+    color: bool = typer.Option(True, help="Enable color output"),
+    quiet: bool = typer.Option(False, help="Quiet output"),
+):
+    """Lazy wrapper that imports and delegates to the real MCP command."""
     from automated_security_helper.cli.mcp import mcp_command
 
-    app.command(name="mcp")(mcp_command)
-
-
-# Register MCP command
-register_mcp_command()
+    mcp_command(
+        ctx=ctx,
+        log_level=log_level,
+        verbose=verbose,
+        debug=debug,
+        color=color,
+        quiet=quiet,
+    )
 
 
 @app.command(name="get-genai-guide")

@@ -145,7 +145,7 @@ jobs:
           FAIL_ON_FINDINGS_PARAM: ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}}
           VERBOSE: ${{ inputs.verbose }}
         run: |-
-          uvx --from ${ASH_UVX_SOURCE} ash \
+          uvx --reinstall --from ${ASH_UVX_SOURCE} ash \
             --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose}
 
       - name: Show ASH Summary Report
@@ -154,7 +154,7 @@ jobs:
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
         run: |-
-          uvx --from ${ASH_UVX_SOURCE} ash \
+          uvx --reinstall --from ${ASH_UVX_SOURCE} ash \
             --output-dir "${ASH_OUTPUT_DIR}" report
 
       - name: Update step summary
@@ -181,9 +181,25 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      - name: Verify checks write permission
+        if: inputs.collect-junit-xml-report && (success() || failure())
+        id: check-perms
+        run: |
+          # Attempt a minimal GitHub API call that requires checks:write
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/check-runs?per_page=1")
+          if [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "404" ]; then
+            echo "::warning::JUnit report publishing requires 'checks: write' permission. Add 'permissions: checks: write' to your workflow."
+            echo "has_permission=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_permission=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish JUnit Test Report
         uses: mikepenz/action-junit-report@v6
-        if: inputs.collect-junit-xml-report && (success() || failure())
+        if: inputs.collect-junit-xml-report && (success() || failure()) && steps.check-perms.outputs.has_permission == 'true'
         continue-on-error: true
         with:
           report_paths: "**/ash.junit.xml"
@@ -195,7 +211,7 @@ jobs:
       - name: Upload ASH SARIF file
         uses: github/codeql-action/upload-sarif@v4
         if: inputs.collect-sarif-report && (success() || failure())
-        continue-on-error: false
+        continue-on-error: true
         with:
           sarif_file: ${{ inputs.output-dir }}/reports/ash.sarif
           wait-for-processing: true

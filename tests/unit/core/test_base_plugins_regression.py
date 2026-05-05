@@ -99,7 +99,7 @@ class TestAreValuesEquivalent:
 
     def test_list_multiset_different(self):
         """[1,1,2] != [1,2,2] -- different multiplicities."""
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
@@ -107,7 +107,7 @@ class TestAreValuesEquivalent:
 
     def test_list_multiset_same(self):
         """[1,1,2] == [1,1,2] even if order differs."""
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
@@ -115,21 +115,21 @@ class TestAreValuesEquivalent:
 
     def test_dict_values_matter(self):
         """{"a": 1} != {"a": 2} -- values must be compared."""
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
         assert are_values_equivalent({"a": 1}, {"a": 2}) is False
 
     def test_dict_equal_values(self):
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
         assert are_values_equivalent({"a": 1, "b": 2}, {"b": 2, "a": 1}) is True
 
     def test_dict_nested_values(self):
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
@@ -144,23 +144,23 @@ class TestAreValuesEquivalent:
 class TestExpirationValidatorPreservesMessage:
     """'expiration must be in the future' must not be rewrapped as format error."""
 
-    def test_past_date_gives_future_error(self):
-        """A past date should say 'must be in the future', not 'Invalid format'."""
+    def test_past_date_warns_and_clears(self):
+        """A past date should warn and set expiration to None, not raise."""
+        import warnings
         from automated_security_helper.models.core import AshSuppression
 
         yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-        with pytest.raises(Exception) as exc_info:
-            AshSuppression(
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            s = AshSuppression(
+                path="test.py",
                 rule_id="R1",
                 reason="test",
-                justification="test",
                 expiration=yesterday,
             )
-        # The error should mention "future", not "Invalid format"
-        error_str = str(exc_info.value)
-        assert "future" in error_str.lower(), (
-            f"Expected 'future' in error message, got: {error_str}"
-        )
+        assert s.expiration is None
+        assert len(w) >= 1
+        assert "past" in str(w[0].message).lower()
 
     def test_bad_format_gives_format_error(self):
         """A truly malformed date should give the format error."""

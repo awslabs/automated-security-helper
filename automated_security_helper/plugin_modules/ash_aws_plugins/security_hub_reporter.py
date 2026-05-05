@@ -123,6 +123,11 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
     def report(self, model: "AshAggregatedResults") -> str:
         """Send findings to AWS Security Hub and return ASFF JSON."""
         # TODO: Implement full ASFF conversion and Security Hub integration
+        ASH_LOGGER.warning(
+            "SecurityHubReporter.report() is a stub -- full ASFF conversion and "
+            "Security Hub import are not yet implemented. The returned JSON is a "
+            "placeholder and findings have NOT been sent to Security Hub."
+        )
         findings_count = 0
         if model.sarif and model.sarif.runs:
             for run in model.sarif.runs:

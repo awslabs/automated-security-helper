@@ -33,23 +33,6 @@ def build_ash_image_cli_command(
             envvar="OCI_RUNNER",
         ),
     ] = None,
-    # preserve_report: Annotated[
-    #     bool,
-    #     typer.Option(
-    #         "--preserve-report",
-    #         "-p",
-    #         help="Add timestamp to the final report file to avoid overwriting it after multiple executions",
-    #     ),
-    # ] = False,
-    # extension: Annotated[
-    #     Optional[str],
-    #     typer.Option(
-    #         "--ext",
-    #         "--extension",
-    #         "-e",
-    #         help="Force a file extension to scan. Defaults to identify files automatically",
-    #     ),
-    # ] = None,
     build_target: Annotated[
         BuildTarget,
         typer.Option(

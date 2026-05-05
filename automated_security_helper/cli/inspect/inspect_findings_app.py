@@ -69,43 +69,15 @@ class FindingDetailScreen(Screen):
 """
             if self.finding.get("suppressed"):
                 md_text += f"\n\n## Suppression\n\n**This finding is suppressed.** Suppression justification:\n\n> {self.finding.get('suppression_reason', 'Not specified')}"
-            # yield Static(f"# {self.finding['rule_id']}", classes="title")
-            # yield Static(
-            #     f"**Severity:** {self.finding['severity']}",
-            #     classes=f"severity-{self.finding['severity']}",
-            # )
-            # yield Static(f"**Scanner:** {self.finding['scanner']}")
-            # yield Static(f"**File:** {self.finding['file']}")
-            # yield Static(f"**Line:** {self.finding['line']}")
-
-            # yield Static("## Message")
-            # yield Static(self.finding["message"])
-
-            # yield Static("## Code")
-
             # Check if TextArea is available in this version of Textual
             try:
                 if self.finding.get("code_snippet"):
-                    # Debug output to see what's in the code snippet
-                    # yield Static(
-                    #     f"Debug - Code snippet length: {len(self.finding.get('code_snippet', ''))}"
-                    # )
-
                     md_text += f"""\n\n## Code
 
 ```{file_ext}
 {self.finding.get("code_snippet")}
 ```
 """
-                    # # Use TextArea if available
-                    # code_area = TextArea.code_editor(
-                    #     self.finding.get("code_snippet", "# No code snippet available"),
-                    #     language="python",
-                    #     read_only=True,
-                    # )
-                    # yield code_area
-                # else:
-                #     yield Static("No code snippet available", classes="notice")
             except (ImportError, TypeError, AttributeError) as e:
                 # Fallback to Static widget if TextArea is not available
                 if self.finding.get("code_snippet"):
@@ -115,12 +87,6 @@ class FindingDetailScreen(Screen):
 {self.finding.get("code_snippet")}
 ```
 """
-                    # yield Static(
-                    #     self.finding.get("code_snippet", "No code snippet available"),
-                    #     classes="code",
-                    # )
-                # else:
-                #     yield Static("No code snippet available", classes="notice")
 
                 # Show error for debugging
                 yield Static(f"TextArea widget error: {str(e)}", classes="error")
@@ -898,18 +864,6 @@ def findings_command(
         "ash_aggregated_results.json",
         help="Name of the report file to analyze. Defaults to 'ash_aggregated_results.json'.",
     ),
-    # config: str = typer.Option(
-    #     None,
-    #     "--config",
-    #     "-c",
-    #     help="The path to the configuration file",
-    #     envvar="ASH_CONFIG",
-    # ),
-    # config_overrides: List[str] = typer.Option(
-    #     [],
-    #     "--config-overrides",
-    #     help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2')",
-    # ),
 ):
     """Interactively explore security findings."""
     # Try to load the model from the output directory

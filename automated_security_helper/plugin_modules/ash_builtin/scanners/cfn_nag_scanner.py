@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Annotated, List, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
@@ -12,6 +12,7 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -32,7 +33,6 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
-from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 class CfnNagScannerConfigOptions(ScannerOptionsBase):
@@ -56,7 +56,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         if self.config is None:
             self.config = CfnNagScannerConfig()
         self.command = "cfn_nag_scan"
-        self.tool_type = "IAC"
+        self.tool_type = ScannerToolType.IAC
         self.rule_directory = ASH_ASSETS_DIR.joinpath("appsec_cfn_rules")
         extra_args = [
             ToolExtraArg(
@@ -87,70 +87,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         )
 
         super().model_post_init(context)
-
-    @model_validator(mode="after")
-    def setup_custom_install_commands(self) -> "CfnNagScanner":
-        """Set up custom installation commands for CFN Nag."""
-        # Get version and linux_type from config
-        # Linux
-        if "linux" not in self.custom_install_commands:
-            self.custom_install_commands["linux"] = {}
-        self.custom_install_commands["linux"]["amd64"] = []
-        self.custom_install_commands["linux"]["arm64"] = []
-        # macOS
-        if "darwin" not in self.custom_install_commands:
-            self.custom_install_commands["darwin"] = {}
-        self.custom_install_commands["darwin"]["amd64"] = []
-        self.custom_install_commands["darwin"]["arm64"] = []
-        # Windows
-        if "windows" not in self.custom_install_commands:
-            self.custom_install_commands["windows"] = {}
-        self.custom_install_commands["windows"]["amd64"] = []
-
-        return self
-
-    def validate_plugin_dependencies(self) -> bool:
-        """Validate the scanner configuration and requirements.
-
-        Returns:
-            True if validation passes, False otherwise
-
-        Raises:
-            ScannerError: If validation fails
-        """
-        found = find_executable(self.command)
-        return found is not None
-
-    def _has_install_commands(self) -> bool:
-        """Check if scanner has non-empty custom install commands."""
-        import platform
-        import struct
-
-        system = platform.system().lower()
-        arch = "amd64" if struct.calcsize("P") * 8 == 64 else "arm64"
-
-        if system in self.custom_install_commands:
-            if arch in self.custom_install_commands[system]:
-                return len(self.custom_install_commands[system][arch]) > 0
-        return False
-        # try:
-        #     tool_version = self._run_subprocess(
-        #         command=[self.command, "--version"],
-        #         results_dir=self.context.output_dir,
-        #         stdout_preference="return",
-        #         stderr_preference="return",
-        #     )
-        #     if isinstance(tool_version, dict):
-        #         self.tool_version = tool_version.get("stdout", "").strip()
-        #     else:
-        #         self.tool_version = None
-
-        #     return self.tool_version is not None
-        # except Exception as e:
-        #     self._scanner_log(
-        #         f"Error validating {self.config.name} scanner: {e}", level=logging.ERROR
-        #     )
-        #     return False
 
     def _process_config_options(self):
         # Add any additional config option parsing here, if necessary
@@ -210,8 +146,8 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -219,23 +155,20 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             )
             return sarif_report
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -314,14 +247,14 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     self._plugin_log(
                         f"Not a CloudFormation file: {cfn_file}. Exception: {e}",
                         target_type=target_type,
-                        level=5,
+                        level=logging.TRACE,
                     )
                     continue
                 if cfn_model is None:
                     self._plugin_log(
                         f"Not a CloudFormation file: {cfn_file}",
                         target_type=target_type,
-                        level=5,
+                        level=logging.TRACE,
                     )
                     continue
                 normalized_filename = get_normalized_filename(str_to_normalize=cfn_file)
@@ -337,8 +270,16 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     stderr_preference="both",
                 )
                 try:
+                    stdout = proc_resp.get("stdout", "")
+                    if not stdout or not stdout.strip():
+                        ASH_LOGGER.debug(
+                            f"CFN Nag returned no stdout for {cfn_file} "
+                            f"(exit code {proc_resp.get('returncode', '?')})"
+                        )
+                        failed_files.append((cfn_file, "empty stdout"))
+                        continue
                     file_sarif = SarifReport.model_validate_json(
-                        json_data=proc_resp["stdout"]
+                        json_data=stdout
                     )
                     if sarif_report is None and file_sarif is not None:
                         sarif_report = file_sarif

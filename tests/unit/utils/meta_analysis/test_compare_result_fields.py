@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.compare_result_fields import (
+from automated_security_helper.utils.meta_analysis.field_mapping import (
     compare_result_fields,
 )
 

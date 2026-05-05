@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.categorize_field_importance import (
+from automated_security_helper.utils.meta_analysis.field_mapping import (
     categorize_field_importance,
 )
 

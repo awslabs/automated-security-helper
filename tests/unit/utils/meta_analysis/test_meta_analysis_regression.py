@@ -16,7 +16,7 @@ class TestBug145ValidationResultsKeyError:
     """validate_sarif_aggregation must not crash when severity keys are missing."""
 
     def test_missing_fields_uses_safe_key_access(self):
-        from automated_security_helper.utils.meta_analysis.validate_sarif_aggregation import (
+        from automated_security_helper.utils.meta_analysis.sarif_analysis import (
             validate_sarif_aggregation,
         )
 
@@ -32,7 +32,7 @@ class TestBug145ValidationResultsKeyError:
         assert "missing_fields" in result
 
     def test_match_statistics_has_expected_keys(self):
-        from automated_security_helper.utils.meta_analysis.validate_sarif_aggregation import (
+        from automated_security_helper.utils.meta_analysis.sarif_analysis import (
             validate_sarif_aggregation,
         )
 
@@ -65,28 +65,28 @@ class TestBug149NoneStringEquivalence:
     """None and the string 'None' must NOT be considered equivalent."""
 
     def test_none_vs_string_none_not_equivalent(self):
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
         assert are_values_equivalent(None, "None") is False
 
     def test_none_vs_none_is_equivalent(self):
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
         assert are_values_equivalent(None, None) is True
 
     def test_string_none_vs_string_none_is_equivalent(self):
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
         assert are_values_equivalent("None", "None") is True
 
     def test_zero_vs_string_zero_not_equivalent(self):
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
@@ -94,7 +94,7 @@ class TestBug149NoneStringEquivalence:
         assert are_values_equivalent(0, "0") is False
 
     def test_false_vs_string_false_not_equivalent(self):
-        from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             are_values_equivalent,
         )
 
@@ -109,7 +109,7 @@ class TestBug150NormalizePathLeafOnly:
     """normalize_path must preserve enough path info to distinguish files."""
 
     def test_two_different_py_files_not_equal(self):
-        from automated_security_helper.utils.meta_analysis.normalize_path import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             normalize_path,
         )
 
@@ -118,7 +118,7 @@ class TestBug150NormalizePathLeafOnly:
         assert p1 != p2, "Different .py files must not normalize to the same value"
 
     def test_nested_paths_preserved(self):
-        from automated_security_helper.utils.meta_analysis.normalize_path import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             normalize_path,
         )
 
@@ -130,7 +130,7 @@ class TestBug150NormalizePathLeafOnly:
         assert "src" in normalized or "utils" in normalized or "helper" in normalized
 
     def test_full_relative_path_normalized(self):
-        from automated_security_helper.utils.meta_analysis.normalize_path import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             normalize_path,
         )
 
@@ -147,7 +147,7 @@ class TestBug151ExtractFieldPathsHardcoded:
     """extract_field_paths must work for real SARIF objects, not just test fixtures."""
 
     def test_extracts_from_sarif_result_dict(self):
-        from automated_security_helper.utils.meta_analysis.extract_field_paths import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             extract_field_paths,
         )
 
@@ -175,7 +175,7 @@ class TestBug151ExtractFieldPathsHardcoded:
         assert len(all_path_keys) > 0
 
     def test_extracts_nested_keys(self):
-        from automated_security_helper.utils.meta_analysis.extract_field_paths import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             extract_field_paths,
         )
 
@@ -187,7 +187,7 @@ class TestBug151ExtractFieldPathsHardcoded:
         assert len(paths) > 0
 
     def test_handles_empty_dict(self):
-        from automated_security_helper.utils.meta_analysis.extract_field_paths import (
+        from automated_security_helper.utils.meta_analysis.field_mapping import (
             extract_field_paths,
         )
 
@@ -261,7 +261,7 @@ class TestBug153FindMatchingResultMessageOnly:
     """find_matching_result must require locations_match for confident matches."""
 
     def test_message_match_without_location_match_returns_none(self):
-        from automated_security_helper.utils.meta_analysis.find_matching_result import (
+        from automated_security_helper.utils.meta_analysis.sarif_analysis import (
             find_matching_result,
         )
 
@@ -299,7 +299,7 @@ class TestBug153FindMatchingResultMessageOnly:
         assert result is None
 
     def test_location_match_returns_result(self):
-        from automated_security_helper.utils.meta_analysis.find_matching_result import (
+        from automated_security_helper.utils.meta_analysis.sarif_analysis import (
             find_matching_result,
         )
 

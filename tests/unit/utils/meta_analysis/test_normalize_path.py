@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.normalize_path import normalize_path
+from automated_security_helper.utils.meta_analysis.field_mapping import normalize_path
 
 
 def test_normalize_path_simple():

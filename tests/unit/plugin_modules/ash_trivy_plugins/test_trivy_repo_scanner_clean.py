@@ -12,6 +12,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfig,
     TrivyRepoScannerConfigOptions,
 )
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 
 
@@ -63,7 +64,7 @@ class TestTrivyRepoScannerConfig:
         assert isinstance(scanner.config, TrivyRepoScannerConfig)
         assert scanner.command == "trivy"
         assert scanner.subcommands == ["repository"]
-        assert scanner.tool_type == "SAST"
+        assert scanner.tool_type == ScannerToolType.SAST
 
     def test_scanner_initialization_with_custom_config(
         self, mock_plugin_context, custom_trivy_config

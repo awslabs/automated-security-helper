@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock, mock_open
 
 import pytest
 
-from automated_security_helper.core.enums import RunMode, Phases
+from automated_security_helper.core.enums import RunMode, ExecutionPhase
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
 
@@ -141,7 +141,7 @@ def test_run_ash_scan_with_custom_phases(mock_orchestrator_class, mock_get_logge
                 mode=RunMode.local,
                 source_dir="/test/source",
                 output_dir="/test/output",
-                phases=[Phases.convert, Phases.report],  # Only convert and report
+                phases=[ExecutionPhase.CONVERT, ExecutionPhase.REPORT],  # Only convert and report
             )
 
     # Verify orchestrator was created
@@ -167,9 +167,13 @@ def test_run_ash_scan_with_actionable_findings(
     mock_orchestrator = MagicMock()
     mock_orchestrator_class.return_value = mock_orchestrator
 
-    # Create results with actionable findings
     mock_results = MagicMock()
-    mock_results.metadata.summary_stats.actionable = 5  # 5 actionable findings
+    mock_results.metadata.summary_stats.actionable = 5
+    mock_result_obj = MagicMock()
+    mock_result_obj.level = "error"
+    mock_run = MagicMock()
+    mock_run.results = [mock_result_obj]
+    mock_results.sarif.runs = [mock_run]
     mock_orchestrator.execute_scan.return_value = mock_results
 
     # Mock get_unified_scanner_metrics to return metrics with actionable findings

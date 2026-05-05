@@ -18,7 +18,7 @@ from typing import Dict, Optional, Any
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
-    ScanStatus,
+    MCScanStatus,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
     get_scan_results_with_error_handling,
@@ -213,7 +213,7 @@ async def _run_scan_async(
 
     try:
         # Mark the scan as running
-        registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Log the scan start
         _logger.info(
@@ -238,20 +238,20 @@ async def _run_scan_async(
             )
 
             # Update scan status based on result
-            registry.update_scan_status(scan_id, ScanStatus.COMPLETED)
+            registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
             _logger.info(f"Scan {scan_id} completed successfully")
 
         except Exception as e:
             # Handle scan execution errors
             error_message = f"Error executing scan: {str(e)}"
-            registry.update_scan_status(scan_id, ScanStatus.FAILED, error_message)
+            registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
             _logger.error(f"Scan {scan_id} failed: {error_message}")
             return
 
     except Exception as e:
         # Handle unexpected errors
         error_message = f"Unexpected error running scan: {str(e)}"
-        registry.update_scan_status(scan_id, ScanStatus.FAILED, error_message)
+        registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
         _logger.error(error_message, exc_info=True)
 
 

@@ -18,7 +18,7 @@ from datetime import datetime
 import pytest
 
 from automated_security_helper.core.resource_management.scan_registry import (
-    ScanStatus,
+    MCScanStatus,
     get_scan_registry,
 )
 from automated_security_helper.core.resource_management.scan_management import (
@@ -187,7 +187,7 @@ class TestConcurrentScansIntegration:
             scan_ids.append(scan_id)
 
             # Mark as running
-            registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+            registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Start background tasks to create mock scan results with different parameters
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -281,7 +281,7 @@ class TestConcurrentScansIntegration:
             scan_ids.append(scan_id)
 
             # Mark as running
-            registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+            registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Start background tasks to create mock scan results
         with ThreadPoolExecutor(max_workers=3) as executor:
@@ -319,7 +319,7 @@ class TestConcurrentScansIntegration:
 
         # Second scan should be cancelled
         entry1 = registry.get_scan(scan_ids[1])
-        assert entry1.status == ScanStatus.CANCELLED
+        assert entry1.status == MCScanStatus.CANCELLED
 
         # Third scan should be completed
         progress2 = await check_scan_progress(scan_ids[2])
@@ -352,8 +352,8 @@ class TestConcurrentScansIntegration:
         )
 
         # Mark both as running
-        registry.update_scan_status(scan_id1, ScanStatus.RUNNING)
-        registry.update_scan_status(scan_id2, ScanStatus.RUNNING)
+        registry.update_scan_status(scan_id1, MCScanStatus.RUNNING)
+        registry.update_scan_status(scan_id2, MCScanStatus.RUNNING)
 
         # Create results for first scan
         scanners_dir1 = output_directories[0] / "scanners"
@@ -457,11 +457,11 @@ class TestConcurrentScansIntegration:
                 output_directory=str(output_directories[index]),
                 severity_threshold="MEDIUM",
             )
-            registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+            registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
             await asyncio.sleep(
                 0.1
             )  # Small delay to increase chance of race conditions
-            registry.update_scan_status(scan_id, ScanStatus.COMPLETED)
+            registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
             return scan_id
 
         # Run multiple concurrent registry operations
@@ -474,7 +474,7 @@ class TestConcurrentScansIntegration:
             assert entry is not None
             assert entry.directory_path == str(test_directories[i])
             assert entry.output_directory == str(output_directories[i])
-            assert entry.status == ScanStatus.COMPLETED
+            assert entry.status == MCScanStatus.COMPLETED
 
         # Clean up
         for scan_id in scan_ids:
@@ -499,7 +499,7 @@ class TestConcurrentScansIntegration:
             scan_ids.append(scan_id)
 
             # Mark as running
-            registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+            registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
             # Create mock results
             mock_scan_process(output_directories[i], 0.1, 1, 1, False)

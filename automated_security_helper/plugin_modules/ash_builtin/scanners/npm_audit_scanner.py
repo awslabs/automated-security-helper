@@ -2,13 +2,13 @@
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Annotated, Dict, List, Literal, Any
 
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -17,6 +17,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     MultiformatMessageString,
@@ -45,8 +46,9 @@ class NpmAuditScannerConfigOptions(ScannerOptionsBase):
         bool,
         Field(
             description="Run in offline mode, using locally cached data",
+            default_factory=is_offline_mode,
         ),
-    ] = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]
+    ]
 
 
 class NpmAuditScannerConfig(ScannerPluginConfigBase):
@@ -65,7 +67,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         if self.config is None:
             self.config = NpmAuditScannerConfig()
         self.command = "npm"
-        self.tool_type = "SCA"
+        self.tool_type = ScannerToolType.SCA
         self.args = ToolArgs(
             format_arg="--output",
             format_arg_value="json",
@@ -178,10 +180,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 if not isinstance(via_items, list):
                     via_items = [via_items]
 
+                has_dict_via = False
                 for via in via_items:
                     # Skip if it's just a string reference to another package
                     if isinstance(via, str):
                         continue
+
+                    has_dict_via = True
 
                     # Extract vulnerability details
                     vuln_id = (
@@ -246,6 +251,69 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 severity=severity,
                                 cwe=via.get("cwe", []),
                                 cvss=via.get("cvss", {}),
+                                fix_available=vuln_info.get("fixAvailable", False),
+                            ),
+                        )
+                        results.append(result)
+
+                # Handle transitive-only vulnerabilities: all via entries
+                # are strings referencing other packages, so no Result was
+                # created above.  Build a minimal result from vuln_info.
+                if not has_dict_via and via_items:
+                    vuln_id = f"npm-audit-transitive-{pkg_name}"
+                    via_refs = ", ".join(
+                        v for v in via_items if isinstance(v, str)
+                    )
+                    title = f"Transitive vulnerability in {pkg_name} (via {via_refs})"
+                    description = title
+
+                    if vuln_id not in rules_dict:
+                        rule = ReportingDescriptor(
+                            id=vuln_id,
+                            name=vuln_id,
+                            shortDescription=MultiformatMessageString(text=title),
+                            fullDescription=MultiformatMessageString(text=description),
+                            properties=PropertyBag(
+                                tags=[
+                                    "security",
+                                    "npm-audit",
+                                    severity,
+                                    f"tool_name::{self.config.name}",
+                                    f"tool_type::{self.tool_type or 'UNKNOWN'}",
+                                ],
+                                security_severity=0,
+                            ),
+                        )
+                        rules_dict[vuln_id] = rule
+
+                    package_locations = []
+                    for node_path in vuln_info.get("nodes", []):
+                        rel_path = str(node_path).replace("node_modules/", "")
+                        package_locations.append(rel_path)
+
+                    for pkg_location in package_locations:
+                        result = Result(
+                            ruleId=vuln_id,
+                            level=level,
+                            message=Message(
+                                text=f"{title} {vuln_info.get('range', '*')}"
+                            ),
+                            locations=[
+                                Location(
+                                    physicalLocation=PhysicalLocation(
+                                        artifactLocation=ArtifactLocation(
+                                            uri=f"node_modules/{pkg_location}/package.json"
+                                        ),
+                                        region=Region(startLine=1, startColumn=1),
+                                    )
+                                )
+                            ],
+                            properties=PropertyBag(
+                                package_name=pkg_name,
+                                installed_version=vuln_info.get("range", "*"),
+                                vulnerable_versions=vuln_info.get("range", "*"),
+                                recommendation=f"Update {pkg_name} to a non-vulnerable version",
+                                severity=severity,
                                 fix_available=vuln_info.get("fixAvailable", False),
                             ),
                         )
@@ -338,8 +406,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -347,23 +415,20 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             )
             return sarif_report
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -390,13 +455,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             for f in orig_scannable:
                 pf = Path(f)
                 if pf.name == "package.json":
-                    # if (
-                    #     pf.name in [
-                    #         "package-lock.json",
-                    #         "yarn.lock",
-                    #         "pnpm-lock.yaml",
-                    #     ]
-                    # ):
                     scannable.append(pf.as_posix())
             joined_files = "\n- ".join(scannable)
             self._plugin_log(f"Found {len(scannable)} package locks:\n- {joined_files}")
@@ -441,6 +499,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         else:
                             binary = "npm"
 
+                        # Check that the binary is installed before
+                        # attempting to run it (#180).  npm is already
+                        # validated in validate_plugin_dependencies, but
+                        # yarn and pnpm may not be present.
+                        if binary != "npm" and find_executable(binary) is None:
+                            ASH_LOGGER.warning(
+                                f"{binary} is not installed -- skipping "
+                                f"audit for {lock_file}. Install {binary} "
+                                "to scan this lock file."
+                            )
+                            continue
+
                         cmd = [binary, "audit", "--json"]
 
                         # Add offline mode if enabled
@@ -463,11 +533,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     "npm audit offline mode validation failed, but continuing with scan"
                                 )
 
+                        # Run from the lock file's parent directory so
+                        # that pnpm (and yarn) can locate their lock
+                        # files (#99).
                         result = self._run_subprocess(
                             command=cmd,
                             results_dir=target_results_dir,
                             stdout_preference="both",
                             stderr_preference="both",
+                            cwd=package_dir,
                         )
                         ASH_LOGGER.info(result)
 

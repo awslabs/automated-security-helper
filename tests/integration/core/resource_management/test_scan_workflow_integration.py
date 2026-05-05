@@ -21,7 +21,7 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.core.resource_management.scan_registry import (
-    ScanStatus,
+    MCScanStatus,
     get_scan_registry,
 )
 from automated_security_helper.core.resource_management.scan_management import (
@@ -178,13 +178,13 @@ class TestScanWorkflowIntegration:
         # Verify the scan was registered
         assert scan_id is not None
         assert registry.get_scan(scan_id) is not None
-        assert registry.get_scan(scan_id).status == ScanStatus.PENDING
+        assert registry.get_scan(scan_id).status == MCScanStatus.PENDING
 
         # Mark the scan as running
-        registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Verify the scan is running
-        assert registry.get_scan(scan_id).status == ScanStatus.RUNNING
+        assert registry.get_scan(scan_id).status == MCScanStatus.RUNNING
 
         # Start a background task to create mock scan results
         with ThreadPoolExecutor() as executor:
@@ -270,7 +270,7 @@ class TestScanWorkflowIntegration:
         # Check scan status after cancellation
         entry = registry.get_scan(scan_id)
         assert entry is not None
-        assert entry.status == ScanStatus.CANCELLED
+        assert entry.status == MCScanStatus.CANCELLED
 
         # Clean up the scan
         await cleanup_scan_resources(scan_id, remove_output=True)
@@ -381,7 +381,7 @@ class TestScanWorkflowIntegration:
             scan_ids.append(scan_id)
 
             # Mark as running
-            registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+            registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Start background tasks to create mock scan results
         with ThreadPoolExecutor(max_workers=3) as executor:
@@ -440,7 +440,7 @@ class TestScanWorkflowIntegration:
         )
 
         # Mark the scan as running
-        registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Create mock scan results with errors
         mock_scan_process(output_directory, 0.2, 2, True)
@@ -480,7 +480,7 @@ class TestScanWorkflowIntegration:
         )
 
         # Mark the scan as running
-        registry.update_scan_status(scan_id, ScanStatus.RUNNING)
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Create scanners directory
         scanners_dir = output_directory / "scanners"

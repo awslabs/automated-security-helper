@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.are_values_equivalent import (
+from automated_security_helper.utils.meta_analysis.field_mapping import (
     are_values_equivalent,
 )
 

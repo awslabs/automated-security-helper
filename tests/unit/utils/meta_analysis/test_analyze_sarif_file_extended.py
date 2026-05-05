@@ -4,7 +4,7 @@ import tempfile
 import os
 from pathlib import Path
 from unittest.mock import patch
-from automated_security_helper.utils.meta_analysis.analyze_sarif_file import (
+from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     analyze_sarif_file,
 )
 
@@ -41,7 +41,7 @@ def invalid_sarif_file():
 
 
 @patch(
-    "automated_security_helper.utils.meta_analysis.analyze_sarif_file.SCANNER_NAME_MAP",
+    "automated_security_helper.utils.meta_analysis.sarif_analysis.SCANNER_NAME_MAP",
     {},
 )
 def test_analyze_sarif_file_with_provided_scanner():
@@ -60,7 +60,7 @@ def test_analyze_sarif_file_with_provided_scanner():
     try:
         # Mock the function to return our expected values
         with patch(
-            "automated_security_helper.utils.meta_analysis.analyze_sarif_file.analyze_sarif_file",
+            "automated_security_helper.utils.meta_analysis.sarif_analysis.analyze_sarif_file",
             return_value=({}, "CustomScanner"),
         ):
             field_paths, scanner_name = analyze_sarif_file(
@@ -75,7 +75,7 @@ def test_analyze_sarif_file_with_provided_scanner():
 
 
 @patch(
-    "automated_security_helper.utils.meta_analysis.analyze_sarif_file.SCANNER_NAME_MAP",
+    "automated_security_helper.utils.meta_analysis.sarif_analysis.SCANNER_NAME_MAP",
     {},
 )
 def test_analyze_sarif_file_infer_from_filename(sample_sarif_file_no_scanner):
@@ -95,7 +95,7 @@ def test_analyze_sarif_file_infer_from_filename(sample_sarif_file_no_scanner):
 
 
 @patch(
-    "automated_security_helper.utils.meta_analysis.analyze_sarif_file.SCANNER_NAME_MAP",
+    "automated_security_helper.utils.meta_analysis.sarif_analysis.SCANNER_NAME_MAP",
     {},
 )
 def test_analyze_sarif_file_error_handling():
@@ -110,7 +110,7 @@ def test_analyze_sarif_file_error_handling():
     try:
         # Mock the function to return our expected values
         with patch(
-            "automated_security_helper.utils.meta_analysis.analyze_sarif_file.analyze_sarif_file",
+            "automated_security_helper.utils.meta_analysis.sarif_analysis.analyze_sarif_file",
             return_value=({}, "error"),
         ):
             field_paths, scanner_name = analyze_sarif_file(file_path)

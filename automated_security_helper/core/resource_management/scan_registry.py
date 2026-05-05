@@ -29,7 +29,7 @@ from automated_security_helper.core.resource_management.scan_tracking import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class ScanStatus(Enum):
+class MCScanStatus(Enum):
     """Status of a scan."""
 
     PENDING = "pending"
@@ -65,7 +65,7 @@ class ScanRegistryEntry:
         self.output_directory = output_directory
         self.start_time = datetime.now()
         self.end_time: Optional[datetime] = None
-        self.status = ScanStatus.PENDING
+        self.status = MCScanStatus.PENDING
         self.severity_threshold = severity_threshold
         self.config_path = config_path
         self.process_id: Optional[int] = None
@@ -100,12 +100,12 @@ class ScanRegistryEntry:
         Args:
             process_id: Optional process ID of the scan process
         """
-        self.status = ScanStatus.RUNNING
+        self.status = MCScanStatus.RUNNING
         self.process_id = process_id
 
     def mark_completed(self) -> None:
         """Mark the scan as completed."""
-        self.status = ScanStatus.COMPLETED
+        self.status = MCScanStatus.COMPLETED
         self.end_time = datetime.now()
 
     def mark_failed(self, error_message: str) -> None:
@@ -115,13 +115,13 @@ class ScanRegistryEntry:
         Args:
             error_message: Error message explaining the failure
         """
-        self.status = ScanStatus.FAILED
+        self.status = MCScanStatus.FAILED
         self.end_time = datetime.now()
         self.error_message = error_message
 
     def mark_cancelled(self) -> None:
         """Mark the scan as cancelled."""
-        self.status = ScanStatus.CANCELLED
+        self.status = MCScanStatus.CANCELLED
         self.end_time = datetime.now()
 
     def add_warning(self, warning: str) -> None:
@@ -140,7 +140,7 @@ class ScanRegistryEntry:
         Returns:
             True if the scan is pending or running, False otherwise
         """
-        return self.status in [ScanStatus.PENDING, ScanStatus.RUNNING]
+        return self.status in [MCScanStatus.PENDING, MCScanStatus.RUNNING]
 
 
 class ScanRegistry:
@@ -307,7 +307,7 @@ class ScanRegistry:
             return None
 
     def update_scan_status(
-        self, scan_id: str, status: ScanStatus, error_message: Optional[str] = None
+        self, scan_id: str, status: MCScanStatus, error_message: Optional[str] = None
     ) -> bool:
         """
         Update the status of a scan.
@@ -325,13 +325,13 @@ class ScanRegistry:
             if entry is None:
                 return False
 
-            if status == ScanStatus.RUNNING:
+            if status == MCScanStatus.RUNNING:
                 entry.mark_running()
-            elif status == ScanStatus.COMPLETED:
+            elif status == MCScanStatus.COMPLETED:
                 entry.mark_completed()
-            elif status == ScanStatus.FAILED:
+            elif status == MCScanStatus.FAILED:
                 entry.mark_failed(error_message or "Unknown error")
-            elif status == ScanStatus.CANCELLED:
+            elif status == MCScanStatus.CANCELLED:
                 entry.mark_cancelled()
 
             self._logger.info(f"Updated scan {scan_id} status to {status.value}")
@@ -498,7 +498,7 @@ class ScanRegistry:
             Dictionary mapping status values to counts
         """
         with self._registry_lock:
-            counts = {status.value: 0 for status in ScanStatus}
+            counts = {status.value: 0 for status in MCScanStatus}
             for entry in self._registry.values():
                 counts[entry.status.value] += 1
             return counts
@@ -556,7 +556,7 @@ class ScanRegistry:
             try:
                 # Check if scan has completed based on file existence
                 is_complete = check_scan_completion(output_dir)
-                if is_complete and entry.status != ScanStatus.COMPLETED:
+                if is_complete and entry.status != MCScanStatus.COMPLETED:
                     # Update scan status to completed
                     entry.mark_completed()
 
@@ -565,7 +565,7 @@ class ScanRegistry:
 
                 # If scan is marked as completed in the registry, ensure it's also completed in the progress object
                 if (
-                    entry.status == ScanStatus.COMPLETED
+                    entry.status == MCScanStatus.COMPLETED
                     and scan_progress.status != "completed"
                 ):
                     scan_progress.mark_completed()
@@ -585,7 +585,7 @@ class ScanRegistry:
                     "config_path": entry.config_path,
                     "warnings": entry.warnings,
                     "error_message": entry.error_message,
-                    "is_complete": entry.status == ScanStatus.COMPLETED
+                    "is_complete": entry.status == MCScanStatus.COMPLETED
                     or scan_progress.is_complete,
                     "completed_scanners": scan_progress.completed_scanners,
                     "total_scanners": scan_progress.total_scanners,

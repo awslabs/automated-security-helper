@@ -301,12 +301,24 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         section += "</table>"
         return section
 
+    @staticmethod
+    def _is_suppressed(result: Result) -> bool:
+        """Return True if the result carries a non-empty suppressions list."""
+        return bool(result.suppressions)
+
     def _group_results_by_severity(
         self, results: List[Result]
     ) -> Dict[str, List[Result]]:
-        """Group results by their severity level."""
-        severity_groups = {}
+        """Group results by their severity level.
+
+        Suppressed findings are separated into their own "SUPPRESSED" bucket
+        so they don't inflate the active severity counts.
+        """
+        severity_groups: Dict[str, List[Result]] = {}
         for result in results:
+            if self._is_suppressed(result):
+                severity_groups.setdefault("SUPPRESSED", []).append(result)
+                continue
             result_level = (
                 result.level.value
                 if result.level and hasattr(result.level, "value")
@@ -331,15 +343,24 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         return rule_groups
 
     def _format_severity_summary(self, findings_by_severity: dict) -> str:
-        """Format the severity summary section."""
+        """Format the severity summary section.
+
+        Suppressed findings are listed separately from active severities so
+        they don't distort the actionable count.
+        """
+        active = {k: v for k, v in findings_by_severity.items() if k != "SUPPRESSED"}
+        suppressed = findings_by_severity.get("SUPPRESSED", [])
+
         summary = "<h3>Findings by Severity</h3>"
         summary += (
             "<p>Statistics are calculated from the final aggregated SARIF report:</p>"
         )
         summary += "<ul>"
-        for severity, findings in findings_by_severity.items():
+        for severity, findings in active.items():
             severity_class = f"severity-{severity.lower()}"
             summary += f'<li class="{severity_class}"><strong>{severity}</strong>: {len(findings)} finding(s)</li>'
+        if suppressed:
+            summary += f'<li style="color:#6c757d"><strong>SUPPRESSED</strong>: {len(suppressed)} finding(s)</li>'
         summary += "</ul>"
         return summary
 
@@ -352,7 +373,16 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         return summary
 
     def _format_findings_table(self, findings: List[Result]) -> str:
-        """Format the findings table."""
+        """Format the findings table.
+
+        Active findings are shown first.  Suppressed findings are placed in a
+        separate section so they don't crowd the actionable list.  Each
+        suppressed row includes the justification when available.
+        """
+        active = [f for f in findings if not self._is_suppressed(f)]
+        suppressed = [f for f in findings if self._is_suppressed(f)]
+
+        # --- active findings table ---
         table = """
         <table>
             <tr>
@@ -363,14 +393,14 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             </tr>
         """
 
-        if not findings:
+        if not active:
             table += """
             <tr>
-                <td colspan="4">No findings to display</td>
+                <td colspan="4">No active findings to display</td>
             </tr>
             """
 
-        for finding in findings:
+        for finding in active:
             finding_level = (
                 finding.level.value
                 if finding.level and hasattr(finding.level, "value")
@@ -380,19 +410,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 f"severity-{finding_level.lower() if finding.level else 'none'}"
             )
 
-            # Get location information
-            location_str = "N/A"
-
-            if finding.locations and finding.locations[0].physicalLocation:
-                phys_loc = finding.locations[0].physicalLocation
-                if (
-                    phys_loc.root.artifactLocation
-                    and phys_loc.root.artifactLocation.uri
-                ):
-                    location = phys_loc.root.artifactLocation.uri
-                    if phys_loc.root.region:
-                        location += f":{phys_loc.root.region.startLine or 'N/A'}"
-                    location_str = location
+            location_str = self._location_str(finding)
 
             table += f"""
             <tr>
@@ -404,7 +422,69 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             """
 
         table += "</table>"
+
+        # --- suppressed findings table ---
+        if suppressed:
+            table += f"""
+            <h3>Suppressed Findings ({len(suppressed)})</h3>
+            <p>These findings have been explicitly suppressed and do not affect the scanner result.</p>
+            <table>
+                <tr>
+                    <th>Severity</th>
+                    <th>Rule</th>
+                    <th>Message</th>
+                    <th>Location</th>
+                    <th>Status</th>
+                    <th>Reason</th>
+                </tr>
+            """
+            for finding in suppressed:
+                finding_level = (
+                    finding.level.value
+                    if finding.level and hasattr(finding.level, "value")
+                    else str(finding.level)
+                )
+                severity_class = (
+                    f"severity-{finding_level.lower() if finding.level else 'none'}"
+                )
+                location_str = self._location_str(finding)
+                reason = ""
+                if finding.suppressions:
+                    reasons = [
+                        s.justification
+                        for s in finding.suppressions
+                        if s.justification
+                    ]
+                    reason = "; ".join(reasons) if reasons else ""
+
+                table += f"""
+                <tr>
+                    <td class="{severity_class}">{html.escape(finding_level.upper() if finding.level else "NONE")}</td>
+                    <td>{html.escape(finding.ruleId or "N/A")}</td>
+                    <td>{html.escape((finding.message.root.text if finding.message else None) or "N/A")}</td>
+                    <td>{html.escape(location_str)}</td>
+                    <td style="color:#6c757d">Suppressed</td>
+                    <td>{html.escape(reason)}</td>
+                </tr>
+                """
+            table += "</table>"
+
         return table
+
+    @staticmethod
+    def _location_str(finding: Result) -> str:
+        """Extract a human-readable location string from a Result."""
+        if finding.locations and finding.locations[0].physicalLocation:
+            phys_loc = finding.locations[0].physicalLocation
+            if (
+                phys_loc.root.artifactLocation
+                and phys_loc.root.artifactLocation.uri
+            ):
+                location = phys_loc.root.artifactLocation.uri
+                if phys_loc.root.region:
+                    location += f":{phys_loc.root.region.startLine or 'N/A'}"
+                return location
+        return "N/A"
 
     def _format_metadata(self, metadata) -> str:
         """Format the metadata section."""

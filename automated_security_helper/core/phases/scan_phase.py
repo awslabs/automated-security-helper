@@ -90,11 +90,25 @@ class ScanPhase(EnginePhase):
         self._scan_results = {}
         self._global_ignore_paths = global_ignore_paths or []
         self._max_workers = max_workers
-        work_dir_contents = [
-            *self.plugin_context.work_dir.glob("*.*"),
-            *self.plugin_context.work_dir.glob("**/*.*"),
+        self._include_work_dir = any(self.plugin_context.work_dir.rglob("*.*"))
+
+        # Compute the source file list once so scanners don't each re-glob
+        source_files = [
+            str(p)
+            for p in self.plugin_context.source_dir.rglob("*")
+            if p.is_file()
         ]
-        self._include_work_dir = len(work_dir_contents) > 0
+        if self._include_work_dir:
+            source_files.extend(
+                str(p)
+                for p in self.plugin_context.work_dir.rglob("*")
+                if p.is_file()
+            )
+        # Store on the context so individual scanners can access it
+        self.plugin_context.cached_source_files = source_files
+        ASH_LOGGER.debug(
+            f"Cached {len(source_files)} source files for scanner use"
+        )
 
         # Debug logging for scanner filtering parameters
         ASH_LOGGER.debug(f"Enabled scanners parameter: {enabled_scanners}")
@@ -607,12 +621,6 @@ class ScanPhase(EnginePhase):
         temp_model = AshAggregatedResults()
         temp_model.sarif = sarif_report
 
-        # Use the centralized calculator to extract counts for a generic scanner
-        # suppressed, critical, high, medium, low, info = (
-        #     ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
-        #         temp_model, "generic"
-        #     )
-        # )
         sev_count = get_severity_metrics_from_sarif(
             sarif_report=sarif_report, plugin_context=self.plugin_context
         )
@@ -1020,9 +1028,6 @@ class ScanPhase(EnginePhase):
                         completed=100,
                         description=f"[green]({scanner_name}) Completed scan",
                     )
-
-                    # Log completion
-                    # ASH_LOGGER.info(f"Completed scanner: {scanner_name}")
 
                     # Remove from remaining scanners and notify about completion
                     if scanner_name in remaining_scanners:

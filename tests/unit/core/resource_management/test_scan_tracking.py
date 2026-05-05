@@ -14,7 +14,7 @@ from datetime import datetime
 import pytest
 
 from automated_security_helper.core.resource_management.scan_tracking import (
-    ScannerStatus,
+    MCScannerStatus,
     ScannerProgress,
     ScanProgress,
 )
@@ -29,7 +29,7 @@ class TestScannerProgress:
 
         assert progress.scanner_name == "test_scanner"
         assert progress.target_type == "source"
-        assert progress.status == ScannerStatus.PENDING
+        assert progress.status == MCScannerStatus.PENDING
         assert progress.duration is None
         assert progress.finding_count == 0
         assert progress.severity_counts == {
@@ -48,7 +48,7 @@ class TestScannerProgress:
         progress = ScannerProgress("test_scanner", "source")
         progress.mark_running()
 
-        assert progress.status == ScannerStatus.RUNNING
+        assert progress.status == MCScannerStatus.RUNNING
         assert progress.start_time is not None
         assert isinstance(progress.start_time, datetime)
 
@@ -58,7 +58,7 @@ class TestScannerProgress:
         progress.mark_running()
         progress.mark_completed()
 
-        assert progress.status == ScannerStatus.COMPLETED
+        assert progress.status == MCScannerStatus.COMPLETED
         assert progress.end_time is not None
         assert isinstance(progress.end_time, datetime)
         assert progress.duration is not None
@@ -70,7 +70,7 @@ class TestScannerProgress:
         progress.mark_running()
         progress.mark_failed()
 
-        assert progress.status == ScannerStatus.FAILED
+        assert progress.status == MCScannerStatus.FAILED
         assert progress.end_time is not None
         assert isinstance(progress.end_time, datetime)
         assert progress.duration is not None
@@ -81,7 +81,7 @@ class TestScannerProgress:
         progress = ScannerProgress("test_scanner", "source")
         progress.mark_skipped()
 
-        assert progress.status == ScannerStatus.SKIPPED
+        assert progress.status == MCScannerStatus.SKIPPED
 
     def test_to_dict(self):
         """Test converting to dictionary."""
@@ -227,12 +227,12 @@ class TestScanProgress:
 
         # Add completed scanner
         scanner2 = ScannerProgress("scanner2", "source")
-        scanner2.status = ScannerStatus.COMPLETED
+        scanner2.status = MCScannerStatus.COMPLETED
         scan_progress.add_scanner_progress(scanner2)
 
         # Add failed scanner
         scanner3 = ScannerProgress("scanner3", "source")
-        scanner3.status = ScannerStatus.FAILED
+        scanner3.status = MCScannerStatus.FAILED
         scan_progress.add_scanner_progress(scanner3)
 
         assert scan_progress.completed_scanners == 1

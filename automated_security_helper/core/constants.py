@@ -181,3 +181,8 @@ SCANNER_TYPES = Literal[
     "CUSTOM",
 ]
 VALID_SEVERITY_VALUES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"})
+
+
+def is_offline_mode() -> bool:
+    """Check if ASH is running in offline mode via ASH_OFFLINE env var."""
+    return str(os.environ.get("ASH_OFFLINE", "NO")).upper() in ["YES", "TRUE", "1"]

@@ -25,7 +25,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 _logger = ASH_LOGGER
 
 
-class ScannerStatus(Enum):
+class MCScannerStatus(Enum):
     """Status of an individual scanner."""
 
     PENDING = "pending"
@@ -47,7 +47,7 @@ class ScannerProgress:
         self,
         scanner_name: str,
         target_type: str,
-        status: ScannerStatus = ScannerStatus.PENDING,
+        status: MCScannerStatus = MCScannerStatus.PENDING,
         duration: Optional[float] = None,
         finding_count: int = 0,
         severity_counts: Optional[Dict[str, int]] = None,
@@ -87,12 +87,12 @@ class ScannerProgress:
 
     def mark_running(self) -> None:
         """Mark the scanner as running and record the start time."""
-        self.status = ScannerStatus.RUNNING
+        self.status = MCScannerStatus.RUNNING
         self.start_time = datetime.now()
 
     def mark_completed(self) -> None:
         """Mark the scanner as completed and calculate duration."""
-        self.status = ScannerStatus.COMPLETED
+        self.status = MCScannerStatus.COMPLETED
         self.end_time = datetime.now()
         if self.start_time:
             duration = (self.end_time - self.start_time).total_seconds()
@@ -101,7 +101,7 @@ class ScannerProgress:
 
     def mark_failed(self) -> None:
         """Mark the scanner as failed and calculate duration."""
-        self.status = ScannerStatus.FAILED
+        self.status = MCScannerStatus.FAILED
         self.end_time = datetime.now()
         if self.start_time:
             duration = (self.end_time - self.start_time).total_seconds()
@@ -110,7 +110,7 @@ class ScannerProgress:
 
     def mark_skipped(self) -> None:
         """Mark the scanner as skipped."""
-        self.status = ScannerStatus.SKIPPED
+        self.status = MCScannerStatus.SKIPPED
 
     def update_findings(self, findings: List[Dict[str, Any]]) -> None:
         """
@@ -245,7 +245,7 @@ class ScanProgress:
         count = 0
         for scanner_dict in self.scanners.values():
             for scanner_progress in scanner_dict.values():
-                if scanner_progress.status == ScannerStatus.COMPLETED:
+                if scanner_progress.status == MCScannerStatus.COMPLETED:
                     count += 1
         return count
 
@@ -621,7 +621,7 @@ def create_scan_progress_from_files(
                     source_progress = ScannerProgress(
                         scanner_name=scanner_name,
                         target_type="source",
-                        status=ScannerStatus.COMPLETED,
+                        status=MCScannerStatus.COMPLETED,
                         finding_count=scanner_info.get("finding_count", 0),
                     )
 
@@ -660,7 +660,7 @@ def create_scan_progress_from_files(
                     scanner_progress = ScannerProgress(
                         scanner_name=scanner_name,
                         target_type=target_type,
-                        status=ScannerStatus.COMPLETED,
+                        status=MCScannerStatus.COMPLETED,
                         finding_count=len(findings),
                     )
                     scanner_progress.update_findings(findings)
@@ -1116,19 +1116,6 @@ def get_scan_results_with_error_handling(
     )
 
     try:
-        # # Validate scan ID
-        # error = validate_scan_id(scan_id)
-        # if error:
-        #     return create_error_response(
-        #         error=error,
-        #         operation="get_scan_results",
-        #         suggestions=[
-        #             "Check that the scan ID is correct",
-        #             "Verify that the scan exists in the registry",
-        #             "Ensure the scan ID format is valid",
-        #         ],
-        #     )
-
         # Validate output directory
         error = validate_directory_path(output_dir)
         if error:

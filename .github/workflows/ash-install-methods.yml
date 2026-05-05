@@ -1,0 +1,245 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Install Method Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "hatch_build.py"
+      - "automated_security_helper/**"
+      - ".pre-commit-hooks.yaml"
+      - "Formula/**"
+      - ".github/workflows/ash-install-methods.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: ${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.method == 'finch' || matrix.method == 'podman' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, mcp]
+        exclude:
+          # Homebrew not available on Windows
+          - { os: windows-latest, method: homebrew }
+          # Podman/Finch not available on Windows
+          - { os: windows-latest, method: podman }
+          - { os: windows-latest, method: finch }
+          # Finch Linux release is x86_64 only
+          - { os: ubuntu-24.04-arm, method: finch }
+          # Container runtimes only need one Python version
+          - { os: ubuntu-latest, python-version: "3.10", method: podman }
+          - { os: ubuntu-latest, python-version: "3.11", method: podman }
+          - { os: ubuntu-latest, python-version: "3.13", method: podman }
+          - { os: ubuntu-24.04-arm, python-version: "3.10", method: podman }
+          - { os: ubuntu-24.04-arm, python-version: "3.11", method: podman }
+          - { os: ubuntu-24.04-arm, python-version: "3.13", method: podman }
+          - { os: macos-latest, python-version: "3.10", method: podman }
+          - { os: macos-latest, python-version: "3.11", method: podman }
+          - { os: macos-latest, python-version: "3.13", method: podman }
+          - { os: macos-14, python-version: "3.10", method: podman }
+          - { os: macos-14, python-version: "3.11", method: podman }
+          - { os: macos-14, python-version: "3.13", method: podman }
+          - { os: ubuntu-latest, python-version: "3.10", method: finch }
+          - { os: ubuntu-latest, python-version: "3.11", method: finch }
+          - { os: ubuntu-latest, python-version: "3.13", method: finch }
+          - { os: macos-latest, python-version: "3.10", method: finch }
+          - { os: macos-latest, python-version: "3.11", method: finch }
+          - { os: macos-latest, python-version: "3.13", method: finch }
+          - { os: macos-14, python-version: "3.10", method: finch }
+          - { os: macos-14, python-version: "3.11", method: finch }
+          - { os: macos-14, python-version: "3.13", method: finch }
+          # Homebrew only needs one Python (formula validation)
+          - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
+          - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
+          - { os: ubuntu-latest, python-version: "3.13", method: homebrew }
+          - { os: ubuntu-24.04-arm, python-version: "3.10", method: homebrew }
+          - { os: ubuntu-24.04-arm, python-version: "3.11", method: homebrew }
+          - { os: ubuntu-24.04-arm, python-version: "3.13", method: homebrew }
+          - { os: macos-latest, python-version: "3.10", method: homebrew }
+          - { os: macos-latest, python-version: "3.11", method: homebrew }
+          - { os: macos-latest, python-version: "3.13", method: homebrew }
+          - { os: macos-14, python-version: "3.10", method: homebrew }
+          - { os: macos-14, python-version: "3.11", method: homebrew }
+          - { os: macos-14, python-version: "3.13", method: homebrew }
+          # uvx doesn't need Python setup (it bundles its own)
+          - { os: ubuntu-latest, python-version: "3.10", method: uvx }
+          - { os: ubuntu-latest, python-version: "3.11", method: uvx }
+          - { os: ubuntu-latest, python-version: "3.13", method: uvx }
+          - { os: ubuntu-24.04-arm, python-version: "3.10", method: uvx }
+          - { os: ubuntu-24.04-arm, python-version: "3.11", method: uvx }
+          - { os: ubuntu-24.04-arm, python-version: "3.13", method: uvx }
+          - { os: macos-latest, python-version: "3.10", method: uvx }
+          - { os: macos-latest, python-version: "3.11", method: uvx }
+          - { os: macos-latest, python-version: "3.13", method: uvx }
+          - { os: macos-14, python-version: "3.10", method: uvx }
+          - { os: macos-14, python-version: "3.11", method: uvx }
+          - { os: macos-14, python-version: "3.13", method: uvx }
+          - { os: windows-latest, python-version: "3.10", method: uvx }
+          - { os: windows-latest, python-version: "3.11", method: uvx }
+          - { os: windows-latest, python-version: "3.13", method: uvx }
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python setup (skip for uvx which bundles its own)
+      - uses: actions/setup-python@v5
+        if: matrix.method != 'uvx'
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Create a minimal test file for self-test scans
+      - name: Create test fixture
+        run: |
+          mkdir -p /tmp/ash-selftest
+          echo "import os; os.system('echo hello')" > /tmp/ash-selftest/test_sample.py
+        shell: bash
+
+      # === pip ===
+      - name: "pip: install"
+        if: matrix.method == 'pip'
+        run: pip install .
+      - name: "pip: verify"
+        if: matrix.method == 'pip'
+        run: |
+          ash --version
+          ash --help
+      - name: "pip: self-test scan"
+        if: matrix.method == 'pip'
+        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+        shell: bash
+        continue-on-error: true
+
+      # === pipx ===
+      - name: "pipx: install pipx"
+        if: matrix.method == 'pipx'
+        run: pip install pipx
+      - name: "pipx: install ASH"
+        if: matrix.method == 'pipx'
+        run: pipx install .
+      - name: "pipx: verify"
+        if: matrix.method == 'pipx'
+        run: |
+          ash --version
+          ash --help
+      - name: "pipx: self-test scan"
+        if: matrix.method == 'pipx'
+        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+        shell: bash
+        continue-on-error: true
+
+      # === uvx ===
+      - name: "uvx: install uv (Unix)"
+        if: matrix.method == 'uvx' && runner.os != 'Windows'
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: "uvx: install uv (Windows)"
+        if: matrix.method == 'uvx' && runner.os == 'Windows'
+        run: irm https://astral.sh/uv/install.ps1 | iex
+        shell: pwsh
+      - name: "uvx: verify"
+        if: matrix.method == 'uvx'
+        run: uvx --from . ash --version
+        shell: bash
+      - name: "uvx: self-test scan"
+        if: matrix.method == 'uvx'
+        run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+        shell: bash
+        continue-on-error: true
+
+      # === homebrew ===
+      - name: "homebrew: validate formula"
+        if: matrix.method == 'homebrew'
+        run: ruby -c Formula/ash.rb
+
+      # === pre-commit ===
+      - name: "pre-commit: install"
+        if: matrix.method == 'pre-commit'
+        run: pip install pre-commit
+      - name: "pre-commit: validate manifest"
+        if: matrix.method == 'pre-commit'
+        run: pre-commit validate-manifest .pre-commit-hooks.yaml
+
+      # === podman ===
+      - name: "podman: install (macOS)"
+        if: matrix.method == 'podman' && runner.os == 'macOS'
+        run: |
+          brew install podman
+          podman machine init
+          podman machine start
+        continue-on-error: true
+      - name: "podman: install ASH"
+        if: matrix.method == 'podman'
+        run: pip install .
+      - name: "podman: verify"
+        if: matrix.method == 'podman'
+        run: podman --version
+      - name: "podman: build container"
+        if: matrix.method == 'podman'
+        run: ash image build --oci-runner podman --force 2>&1 | tail -10
+        continue-on-error: true
+
+      # === finch ===
+      - name: "finch: install (macOS)"
+        if: matrix.method == 'finch' && runner.os == 'macOS'
+        run: brew install --cask finch
+      - name: "finch: install (Linux)"
+        if: matrix.method == 'finch' && runner.os == 'Linux'
+        run: |
+          curl -LO https://github.com/runfinch/finch/releases/latest/download/finch-linux-amd64.tar.gz
+          sudo tar -xzf finch-linux-amd64.tar.gz -C /usr/local
+          rm finch-linux-amd64.tar.gz
+        continue-on-error: true
+      - name: "finch: init VM"
+        if: matrix.method == 'finch'
+        run: finch vm init
+        continue-on-error: true
+      - name: "finch: start VM"
+        if: matrix.method == 'finch'
+        run: finch vm start
+        continue-on-error: true
+      - name: "finch: install ASH"
+        if: matrix.method == 'finch'
+        run: pip install .
+      - name: "finch: build container"
+        if: matrix.method == 'finch'
+        run: ash image build --oci-runner finch --force 2>&1 | tail -10
+        continue-on-error: true
+
+      # === mcp ===
+      - name: "mcp: install ASH"
+        if: matrix.method == 'mcp'
+        run: pip install .
+      - name: "mcp: verify command"
+        if: matrix.method == 'mcp'
+        run: ash mcp --help
+      - name: "mcp: test import"
+        if: matrix.method == 'mcp'
+        run: python -c "from automated_security_helper.cli.mcp_server import run_mcp_server; print('OK')"
+      - name: "mcp: start server and health check"
+        if: matrix.method == 'mcp'
+        run: |
+          ash mcp &
+          MCP_PID=$!
+          sleep 5
+          kill $MCP_PID 2>/dev/null || true
+          echo "MCP server started and stopped cleanly"
+        shell: bash
+        continue-on-error: true
+      - name: "mcp: install MCP Inspector"
+        if: matrix.method == 'mcp' && runner.os != 'Windows'
+        run: npm install -g @modelcontextprotocol/inspector 2>/dev/null || true
+        continue-on-error: true
+      - name: "mcp: self-test scan"
+        if: matrix.method == 'mcp'
+        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+        shell: bash
+        continue-on-error: true

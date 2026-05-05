@@ -11,6 +11,18 @@ from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+_find_executable_cache: dict[str, str | None] = {}
+
+
+def clear_find_executable_cache() -> None:
+    """Clear the find_executable lookup cache.
+
+    Call this after installing a new tool so subsequent lookups can
+    discover the newly available binary.
+    """
+    _find_executable_cache.clear()
+
+
 def find_executable(command: str) -> Optional[str]:
     """Find the full path to an executable.
 
@@ -20,6 +32,9 @@ def find_executable(command: str) -> Optional[str]:
     Returns:
         The full path to the executable, or None if not found
     """
+    if command in _find_executable_cache:
+        return _find_executable_cache[command]
+
     commands = list(
         set(
             [
@@ -32,6 +47,7 @@ def find_executable(command: str) -> Optional[str]:
         try:
             found = shutil.which(cmd)
             if found:
+                _find_executable_cache[command] = found
                 return found
             possibles = [
                 item
@@ -48,10 +64,13 @@ def find_executable(command: str) -> Optional[str]:
             for poss in possibles:
                 ASH_LOGGER.debug(f"Checking for executable: {poss}")
                 if poss.exists():
-                    return poss.as_posix()
+                    result = poss.as_posix()
+                    _find_executable_cache[command] = result
+                    return result
         except Exception as e:
             ASH_LOGGER.error(e)
 
+    _find_executable_cache[command] = None
     return None
 
 

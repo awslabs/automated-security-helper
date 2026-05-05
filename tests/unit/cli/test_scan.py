@@ -6,7 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
-from automated_security_helper.core.enums import RunMode, Phases
+from automated_security_helper.core.enums import RunMode, ExecutionPhase
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ def test_run_ash_scan_cli_command_with_custom_phases(mock_run_ash_scan, cli_runn
         mock_context,
         source_dir="./source",
         output_dir="./output",
-        phases=[Phases.convert, Phases.report],
+        phases=[ExecutionPhase.CONVERT, ExecutionPhase.REPORT],
     )
 
     # Verify run_ash_scan was called with expected parameters
@@ -88,7 +88,7 @@ def test_run_ash_scan_cli_command_with_custom_phases(mock_run_ash_scan, cli_runn
     args, kwargs = mock_run_ash_scan.call_args
     assert kwargs["source_dir"] == "./source"
     assert kwargs["output_dir"] == "./output"
-    assert kwargs["phases"] == [Phases.convert, Phases.report]
+    assert kwargs["phases"] == [ExecutionPhase.CONVERT, ExecutionPhase.REPORT]
 
 
 @patch("automated_security_helper.cli.scan.run_ash_scan")

@@ -144,20 +144,15 @@ class LiveProgressDisplay:
         if self.show_progress and (self.live is None):
             try:
                 # Use auto_refresh=True and vertical_overflow="visible" to allow the panel to adjust its height
-                print("Setting Live setup", file=sys.stderr)
-
-                # Create a simpler layout for testing
                 self.live = Live(
                     self.layout,
                     console=self.console,
                     refresh_per_second=4,
                     auto_refresh=True,
                     vertical_overflow="visible",
-                    screen=False,  # Try without screen mode
+                    screen=False,
                 )
-                print("Entering Live setup", file=sys.stderr)
                 self.live.__enter__()
-                print("Entered Live setup", file=sys.stderr)
             except Exception as e:
                 print(f"ERROR initializing live display: {str(e)}", file=sys.stderr)
                 import traceback

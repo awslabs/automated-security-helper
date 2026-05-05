@@ -65,8 +65,11 @@ class AshPluginLibrary(BaseModel):
 
 
 class AshPluginManager(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     plugin_library: Annotated[AshPluginLibrary, Field()] = AshPluginLibrary()
     context: Any = None
+    _resolved_plugins: dict = {}
 
     def set_context(self, context: "PluginContext"):
         """Set the plugin context for this plugin manager.
@@ -186,7 +189,7 @@ class AshPluginManager(BaseModel):
 
     def plugin_modules(
         self,
-        plugin_type: type | Literal["converter", "scanner", "reporter"],
+        plugin_type: Literal["converter", "scanner", "reporter"],
         filter_callback: Callable = lambda x: True,
         *args,
         **kwargs,
@@ -201,16 +204,21 @@ class AshPluginManager(BaseModel):
             List of plugin class implementations (not registration objects)
         """
         import importlib
-        from automated_security_helper.plugins.interfaces import (
-            IConverter,
-            IReporter,
-            IScanner,
-        )
+
+        # Normalize plugin_type to a string key
+        cache_key = plugin_type if isinstance(plugin_type, str) else None
+        if cache_key is None:
+            ASH_LOGGER.warning(f"Unknown plugin type: {plugin_type}")
+            return []
+
+        if cache_key in self._resolved_plugins:
+            cached = self._resolved_plugins[cache_key]
+            return self.filter_plugin_modules(cached, filter_callback, *args, **kwargs)
 
         plugins = []
 
         # Get all registered plugins (internal and external)
-        if plugin_type == IConverter or plugin_type == "converter":
+        if plugin_type == "converter":
             # Add registered converters
             for name, registration in self.plugin_library.converters.items():
                 if registration.enabled:
@@ -234,7 +242,7 @@ class AshPluginManager(BaseModel):
                             f"Failed to import plugin module {registration.plugin_module_path}: {e}"
                         )
 
-        elif plugin_type == IScanner or plugin_type == "scanner":
+        elif plugin_type == "scanner":
             # Add registered scanners
             for name, registration in self.plugin_library.scanners.items():
                 if registration.enabled:
@@ -258,7 +266,7 @@ class AshPluginManager(BaseModel):
                             f"Failed to import plugin module {registration.plugin_module_path}: {e}"
                         )
 
-        elif plugin_type == IReporter or plugin_type == "reporter":
+        elif plugin_type == "reporter":
             # Add registered reporters
             for name, registration in self.plugin_library.reporters.items():
                 if registration.enabled:
@@ -285,6 +293,10 @@ class AshPluginManager(BaseModel):
             # If we get here, we don't know what to do with this plugin type
             ASH_LOGGER.warning(f"Unknown plugin type: {plugin_type}")
             return []
+
+        # Cache the unfiltered result so repeat calls skip the import work
+        if cache_key:
+            self._resolved_plugins[cache_key] = plugins
 
         # Apply filter callback
         return self.filter_plugin_modules(plugins, filter_callback, *args, **kwargs)

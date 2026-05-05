@@ -26,9 +26,9 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.core.enums import (
     AshLogLevel,
     BuildTarget,
+    ExecutionPhase,
+    ExecutionStrategy,
     ExportFormat,
-    Phases,
-    Strategy,
 )
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import (
@@ -264,13 +264,13 @@ def run_ash_container(
     config: str | None = None,
     config_overrides: List[str] | None = None,
     offline: bool = False,
-    strategy: Strategy = Strategy.parallel.value,
+    strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL.value,
     scanners: List[str] | None = None,
     exclude_scanners: List[str] | None = None,
     progress: bool = True,
     output_formats: List[ExportFormat] | None = None,
     cleanup: bool = False,
-    phases: List[Phases] | None = None,
+    phases: List[ExecutionPhase] | None = None,
     inspect: bool = False,
     existing_results: str | None = None,
     python_based_plugins_only: bool = False,
@@ -333,7 +333,7 @@ def run_ash_container(
     if output_formats is None:
         output_formats = []
     if phases is None:
-        phases = [Phases.convert, Phases.scan, Phases.report]
+        phases = [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
     if custom_build_arg is None:
         custom_build_arg = []
     if ash_plugin_modules is None:

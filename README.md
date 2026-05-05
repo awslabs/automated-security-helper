@@ -1,7 +1,8 @@
 # ASH - Automated Security Helper
 
-[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml)
-[![ASH - Matrix Unit Tests](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml)
+[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan.yml)
+[![ASH - Unified CI](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-unified-ci.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-unified-ci.yml)
+[![ASH - Install Methods](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-install-methods.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-install-methods.yml)
 
 ## Table of Contents
 - [Table of Contents](#table-of-contents)
@@ -91,7 +92,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1"
 ```
 
 ```powershell
@@ -99,15 +100,22 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1 $args }
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.4.0` to stay up to date automatically. Pin a specific version (e.g., `@v3.4.0`) when you need reproducible builds.
+> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.4.1` to stay up to date automatically. Pin a specific version (e.g., `@v3.4.1`) when you need reproducible builds.
 
 ### Other Installation Methods
 
 <details>
 <summary>Click to expand other installation options</summary>
+
+#### Using Homebrew (macOS/Linux)
+
+```bash
+brew tap awslabs/automated-security-helper https://github.com/awslabs/automated-security-helper.git
+brew install ash
+```
 
 #### Using `pipx`
 
@@ -122,13 +130,13 @@ ash --help
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.1
 cd automated-security-helper
 pip install .
 ```

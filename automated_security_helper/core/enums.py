@@ -25,23 +25,6 @@ class ScannerStatus(str, Enum):
     SKIPPED = "SKIPPED"
 
 
-class ReportFormat(str, Enum):
-    """Supported report formats."""
-
-    aggregated = "aggregated"
-    asff = "asff"
-    csv = "csv"
-    cyclonedx = "cyclonedx"
-    html = "html"
-    json = "flat-json"
-    junitxml = "junitxml"
-    markdown = "markdown"
-    ocsf = "ocsf"
-    sarif = "sarif"
-    spdx = "spdx"
-    text = "text"
-    yaml = "yaml"
-
 
 class AshLogLevel(str, Enum):
     QUIET = "QUIET"
@@ -92,21 +75,6 @@ class BuildTarget(str, Enum):
     CI = "ci"
 
 
-class OutputFormat(str, Enum):
-    TEXT = "text"
-    JSON = "json"
-
-
-class Phases(str, Enum):
-    convert = "convert"
-    scan = "scan"
-    report = "report"
-    inspect = "inspect"
-
-
-class Strategy(str, Enum):
-    parallel = "parallel"
-    sequential = "sequential"
 
 
 class RunMode(str, Enum):
@@ -118,6 +86,7 @@ class RunMode(str, Enum):
 class ExportFormat(str, Enum):
     """Supported export formats."""
 
+    AGGREGATED = "aggregated"
     TEXT = "text"
     FLAT_JSON = "flat-json"
     YAML = "yaml"

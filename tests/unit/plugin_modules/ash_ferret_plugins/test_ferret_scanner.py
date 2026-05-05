@@ -60,7 +60,7 @@ class TestFerretScannerConfig:
         assert scanner.config is not None
         assert isinstance(scanner.config, FerretScannerConfig)
         assert scanner.command == "ferret-scan"
-        assert scanner.tool_type == "Secrets"
+        assert scanner.tool_type == "SECRETS"
 
     def test_scanner_initialization_with_custom_config(
         self, mock_plugin_context, custom_ferret_config

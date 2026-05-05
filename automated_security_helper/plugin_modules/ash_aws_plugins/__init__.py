@@ -15,20 +15,9 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import
 )
 
 
-# Make plugins discoverable
-# ASH_CONVERTERS = []
-# ASH_SCANNERS = []
 ASH_REPORTERS = [
     SecurityHubReporter,
     CloudWatchLogsReporter,
     BedrockSummaryReporter,
     S3Reporter,
 ]
-
-# __all__ = [
-#     "ASH_CONVERTERS",
-#     "ASH_SCANNERS",
-#     "ASH_REPORTERS",
-#     "SecurityHubReporter",
-#     "CloudWatchLogsReporter",
-# ]

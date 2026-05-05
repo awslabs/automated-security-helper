@@ -8,8 +8,6 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from automated_security_helper.utils.offline_mode_validator import (
-    validate_semgrep_offline_mode,
-    validate_opengrep_offline_mode,
     validate_grype_offline_mode,
     validate_npm_audit_offline_mode,
     OfflineModeValidator,
@@ -17,138 +15,120 @@ from automated_security_helper.utils.offline_mode_validator import (
 
 
 class TestValidateSemgrepOfflineMode:
-    """Tests for validate_semgrep_offline_mode function."""
+    """Tests for Semgrep offline validation via OfflineModeValidator.validate_cache_directory."""
 
-    def test_missing_cache_dir_env_var(self):
-        """Test validation fails when SEMGREP_RULES_CACHE_DIR is not set."""
-        with patch.dict(os.environ, {}, clear=True):
-            is_valid, messages = validate_semgrep_offline_mode()
-
-            assert not is_valid
-            assert len(messages) == 1
-            assert "SEMGREP_RULES_CACHE_DIR environment variable not set" in messages[0]
+    def test_missing_cache_dir(self):
+        """Test validation fails when cache directory is empty string."""
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            "", [".yaml", ".yml"], "Semgrep"
+        )
+        assert not is_valid
+        assert len(messages) == 1
+        assert "Semgrep cache directory not specified" in messages[0]
 
     def test_cache_dir_does_not_exist(self, tmp_path):
         """Test validation fails when cache directory doesn't exist."""
         non_existent_dir = str(tmp_path / "non_existent")
-
-        with patch.dict(os.environ, {"SEMGREP_RULES_CACHE_DIR": non_existent_dir}):
-            is_valid, messages = validate_semgrep_offline_mode()
-
-            assert not is_valid
-            assert len(messages) == 1
-            assert f"Cache directory does not exist: {non_existent_dir}" in messages[0]
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            non_existent_dir, [".yaml", ".yml"], "Semgrep"
+        )
+        assert not is_valid
+        assert len(messages) == 1
+        assert f"Cache directory does not exist: {non_existent_dir}" in messages[0]
 
     def test_no_rule_files_in_cache(self, tmp_path):
         """Test validation fails when no rule files are found."""
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
-
-        # Create some non-rule files
         (cache_dir / "readme.txt").write_text("not a rule file")
-        (cache_dir / "config.json").write_text("{}")
 
-        with patch.dict(os.environ, {"SEMGREP_RULES_CACHE_DIR": str(cache_dir)}):
-            is_valid, messages = validate_semgrep_offline_mode()
-
-            assert not is_valid
-            assert len(messages) == 1
-            assert f"No rule files found in cache directory: {cache_dir}" in messages[0]
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            str(cache_dir), [".yaml", ".yml"], "Semgrep"
+        )
+        assert not is_valid
+        assert len(messages) == 1
+        assert "No cache files found with extensions" in messages[0]
 
     def test_successful_validation_with_yaml_files(self, tmp_path):
         """Test successful validation with YAML rule files."""
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
-
-        # Create rule files
         (cache_dir / "rule1.yaml").write_text("rules: []")
         (cache_dir / "rule2.yml").write_text("rules: []")
-
-        # Create subdirectory with more rules
         subdir = cache_dir / "subdir"
         subdir.mkdir()
         (subdir / "rule3.yaml").write_text("rules: []")
 
-        with patch.dict(os.environ, {"SEMGREP_RULES_CACHE_DIR": str(cache_dir)}):
-            is_valid, messages = validate_semgrep_offline_mode()
-
-            assert is_valid
-            assert len(messages) == 1
-            assert "Found 3 rule files in cache directory" in messages[0]
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            str(cache_dir), [".yaml", ".yml"], "Semgrep"
+        )
+        assert is_valid
+        assert len(messages) == 1
+        assert "Found 3 cache files" in messages[0]
 
     def test_mixed_files_in_cache(self, tmp_path):
         """Test validation succeeds when rule files exist alongside other files."""
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
-
-        # Create rule files
         (cache_dir / "rule1.yaml").write_text("rules: []")
         (cache_dir / "rule2.yml").write_text("rules: []")
-
-        # Create non-rule files (should be ignored)
         (cache_dir / "readme.txt").write_text("documentation")
-        (cache_dir / "config.json").write_text("{}")
 
-        with patch.dict(os.environ, {"SEMGREP_RULES_CACHE_DIR": str(cache_dir)}):
-            is_valid, messages = validate_semgrep_offline_mode()
-
-            assert is_valid
-            assert len(messages) == 1
-            assert "Found 2 rule files in cache directory" in messages[0]
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            str(cache_dir), [".yaml", ".yml"], "Semgrep"
+        )
+        assert is_valid
+        assert len(messages) == 1
+        assert "Found 2 cache files" in messages[0]
 
 
 class TestValidateOpengrepOfflineMode:
-    """Tests for validate_opengrep_offline_mode function."""
+    """Tests for Opengrep offline validation via OfflineModeValidator.validate_cache_directory."""
 
-    def test_missing_cache_dir_env_var(self):
-        """Test validation fails when OPENGREP_RULES_CACHE_DIR is not set."""
-        with patch.dict(os.environ, {}, clear=True):
-            is_valid, messages = validate_opengrep_offline_mode()
-
-            assert not is_valid
-            assert len(messages) == 1
-            assert (
-                "OPENGREP_RULES_CACHE_DIR environment variable not set" in messages[0]
-            )
+    def test_missing_cache_dir(self):
+        """Test validation fails when cache directory is empty string."""
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            "", [".yaml", ".yml"], "Opengrep"
+        )
+        assert not is_valid
+        assert len(messages) == 1
+        assert "Opengrep cache directory not specified" in messages[0]
 
     def test_cache_dir_does_not_exist(self, tmp_path):
         """Test validation fails when cache directory doesn't exist."""
         non_existent_dir = str(tmp_path / "non_existent")
-
-        with patch.dict(os.environ, {"OPENGREP_RULES_CACHE_DIR": non_existent_dir}):
-            is_valid, messages = validate_opengrep_offline_mode()
-
-            assert not is_valid
-            assert len(messages) == 1
-            assert f"Cache directory does not exist: {non_existent_dir}" in messages[0]
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            non_existent_dir, [".yaml", ".yml"], "Opengrep"
+        )
+        assert not is_valid
+        assert len(messages) == 1
+        assert f"Cache directory does not exist: {non_existent_dir}" in messages[0]
 
     def test_no_rule_files_in_cache(self, tmp_path):
         """Test validation fails when no rule files are found."""
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
 
-        with patch.dict(os.environ, {"OPENGREP_RULES_CACHE_DIR": str(cache_dir)}):
-            is_valid, messages = validate_opengrep_offline_mode()
-
-            assert not is_valid
-            assert len(messages) == 1
-            assert f"No rule files found in cache directory: {cache_dir}" in messages[0]
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            str(cache_dir), [".yaml", ".yml"], "Opengrep"
+        )
+        assert not is_valid
+        assert len(messages) == 1
+        assert "No cache files found with extensions" in messages[0]
 
     def test_successful_validation_with_rule_files(self, tmp_path):
         """Test successful validation with rule files."""
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
-
-        # Create rule files
         (cache_dir / "rule1.yaml").write_text("rules: []")
         (cache_dir / "rule2.yml").write_text("rules: []")
 
-        with patch.dict(os.environ, {"OPENGREP_RULES_CACHE_DIR": str(cache_dir)}):
-            is_valid, messages = validate_opengrep_offline_mode()
-
-            assert is_valid
-            assert len(messages) == 1
-            assert "Found 2 rule files in cache directory" in messages[0]
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            str(cache_dir), [".yaml", ".yml"], "Opengrep"
+        )
+        assert is_valid
+        assert len(messages) == 1
+        assert "Found 2 cache files" in messages[0]
 
 
 class TestValidateGrypeOfflineMode:
@@ -396,11 +376,9 @@ class TestIntegrationScenarios:
 
     def test_complete_semgrep_offline_setup(self, tmp_path):
         """Test a complete Semgrep offline setup scenario."""
-        # Create a realistic cache structure
         cache_dir = tmp_path / "semgrep_cache"
         cache_dir.mkdir()
 
-        # Create rule directories and files like Semgrep would
         (cache_dir / "p" / "ci").mkdir(parents=True)
         (cache_dir / "p" / "ci" / "python.yaml").write_text("rules: []")
         (cache_dir / "p" / "ci" / "javascript.yaml").write_text("rules: []")
@@ -408,12 +386,12 @@ class TestIntegrationScenarios:
         (cache_dir / "p" / "security-audit").mkdir(parents=True)
         (cache_dir / "p" / "security-audit" / "audit.yml").write_text("rules: []")
 
-        with patch.dict(os.environ, {"SEMGREP_RULES_CACHE_DIR": str(cache_dir)}):
-            is_valid, messages = validate_semgrep_offline_mode()
-
-            assert is_valid
-            assert len(messages) == 1
-            assert "Found 3 rule files in cache directory" in messages[0]
+        is_valid, messages = OfflineModeValidator.validate_cache_directory(
+            str(cache_dir), [".yaml", ".yml"], "Semgrep"
+        )
+        assert is_valid
+        assert len(messages) == 1
+        assert "Found 3 cache files" in messages[0]
 
     def test_complete_grype_offline_setup(self, tmp_path):
         """Test a complete Grype offline setup scenario."""

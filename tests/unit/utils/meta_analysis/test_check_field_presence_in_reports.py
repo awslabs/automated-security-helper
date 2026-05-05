@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.check_field_presence_in_reports import (
+from automated_security_helper.utils.meta_analysis.reporting import (
     check_field_presence_in_reports,
 )
 

@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.find_matching_result import (
+from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     find_matching_result,
 )
 

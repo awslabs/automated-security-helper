@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.should_include_field import (
+from automated_security_helper.utils.meta_analysis.field_mapping import (
     should_include_field,
 )
 

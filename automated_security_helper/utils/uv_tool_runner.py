@@ -187,10 +187,11 @@ class UVToolRunner:
 
         # Check if tool executable exists but is broken (e.g., broken symlink)
         # This can happen if UV tool was uninstalled but symlinks remain
-        import shutil
         import logging
 
-        tool_path = shutil.which(tool_name)
+        from automated_security_helper.utils.subprocess_utils import find_executable
+
+        tool_path = find_executable(tool_name)
         if tool_path and not os.path.exists(tool_path):
             # Broken symlink detected - remove it so UV can recreate
             try:
@@ -200,12 +201,9 @@ class UVToolRunner:
                 logging.warning(f"Failed to remove broken symlink for {tool_name}: {e}")
 
         # Check for offline mode
-        is_offline = str(os.environ.get("ASH_OFFLINE", "NO")).upper() in [
-            "YES",
-            "TRUE",
-            "1",
-        ]
-        if is_offline:
+        from automated_security_helper.core.constants import is_offline_mode
+
+        if is_offline_mode():
             # In offline mode, skip installation attempts and rely on pre-installed tools
             return False
 
@@ -345,7 +343,9 @@ class UVToolRunner:
         # Set up environment for offline mode if needed. If the caller
         # passed an explicit env, start from it; otherwise start from
         # os.environ when we need to set offline flags.
-        if os.environ.get("ASH_OFFLINE", "NO").upper() in ["YES", "TRUE", "1"]:
+        from automated_security_helper.core.constants import is_offline_mode
+
+        if is_offline_mode():
             env = dict(env) if env is not None else os.environ.copy()
             env["UV_OFFLINE"] = "1"
             command.append("--offline")
@@ -447,9 +447,11 @@ class UVToolRunner:
         )
 
         # Simple pre-installed check
-        import shutil
+        from automated_security_helper.utils.subprocess_utils import (
+            find_executable as _find_exec,
+        )
 
-        pre_installed_path = shutil.which(tool_name)
+        pre_installed_path = _find_exec(tool_name)
         is_pre_installed = pre_installed_path is not None
 
         if is_uv_installed:

@@ -28,11 +28,10 @@ class TestOrchestratorCleanupNoneWorkDir:
         with pytest.raises(TypeError):
             shutil.rmtree(None)
 
-    def test_cleanup_with_nonexistent_work_dir(self):
+    def test_cleanup_with_nonexistent_work_dir(self, tmp_path):
         """A path that doesn't exist should also be guarded."""
-        work_dir = Path("/tmp/nonexistent_ash_work_dir_xyz_test")
+        work_dir = tmp_path / "nonexistent_ash_work_dir_xyz_test"
         if work_dir.exists():
             shutil.rmtree(work_dir)
-        # Guard should prevent rmtree on nonexistent path
         if work_dir and Path(work_dir).exists():
             shutil.rmtree(work_dir)

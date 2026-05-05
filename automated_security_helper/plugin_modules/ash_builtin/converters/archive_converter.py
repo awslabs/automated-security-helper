@@ -213,12 +213,17 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         safe_members = self.inspect_members(
                             tar_ref.getmembers(), target_path=target_path
                         )
-                        extract_kwargs = {"path": target_path, "members": safe_members}
-                        # Defense-in-depth: use filter='data' on Python 3.12+ to
-                        # restrict tar member attributes beyond our own inspect_members checks
                         if sys.version_info >= (3, 12):
-                            extract_kwargs["filter"] = "data"
-                        tar_ref.extractall(**extract_kwargs)
+                            tar_ref.extractall(  # nosec B202
+                                path=target_path,
+                                members=safe_members,
+                                filter="data",
+                            )
+                        else:
+                            tar_ref.extractall(  # nosec B202
+                                path=target_path,
+                                members=safe_members,
+                            )
                 else:
                     ASH_LOGGER.debug(
                         f"Skipping unsupported archive format: {archive_file}"

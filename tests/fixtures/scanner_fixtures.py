@@ -108,7 +108,7 @@ def unsafe_function():
 @pytest.fixture
 def semgrep_scanner_context(ash_temp_path):
     """Create a context for testing the Semgrep scanner."""
-    from automated_security_helper.config.scanner_types import SemgrepScannerConfig
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import SemgrepScannerConfig
 
     source_dir = ash_temp_path / "source"
     source_dir.mkdir()

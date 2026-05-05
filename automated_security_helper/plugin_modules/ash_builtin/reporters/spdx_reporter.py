@@ -11,6 +11,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class SPDXReporterConfigOptions(ReporterOptionsBase):
@@ -36,4 +37,9 @@ class SpdxReporter(ReporterPluginBase[SPDXReporterConfig]):
     def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model in SPDX."""
         # TODO - Replace with SPDX adapter
+        ASH_LOGGER.warning(
+            "SpdxReporter.report() is a stub -- proper SPDX document generation is "
+            "not yet implemented. The returned YAML is a raw model dump, not a valid "
+            "SPDX document."
+        )
         return yaml.dump(model.model_dump(by_alias=True), indent=2)

@@ -4,7 +4,7 @@ import json
 from unittest.mock import patch, mock_open
 
 
-from automated_security_helper.utils.meta_analysis.analyze_sarif_file import (
+from automated_security_helper.utils.meta_analysis.sarif_analysis import (
     analyze_sarif_file,
 )
 

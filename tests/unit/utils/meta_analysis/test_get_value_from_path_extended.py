@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.get_value_from_path import (
+from automated_security_helper.utils.meta_analysis.field_mapping import (
     get_value_from_path,
 )
 

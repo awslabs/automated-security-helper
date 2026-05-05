@@ -17,11 +17,12 @@ from rich import print
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
     ASH_WORK_DIR_NAME,
+    is_offline_mode,
 )
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget
-from automated_security_helper.core.enums import Phases
+from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.core.enums import Strategy
+from automated_security_helper.core.enums import ExecutionStrategy
 from automated_security_helper.core.enums import RunMode
 from automated_security_helper.interactions.run_ash_container import (
     run_ash_container,
@@ -53,13 +54,13 @@ def run_ash_scan(
     config: str | None = None,
     config_overrides: List[str] | None = None,
     offline: bool = False,
-    strategy: Strategy = Strategy.parallel.value,
+    strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL.value,
     scanners: List[str] | None = None,
     exclude_scanners: List[str] | None = None,
     progress: bool = True,
     output_formats: List[ExportFormat] | None = None,
     cleanup: bool = False,
-    phases: List[Phases] | None = None,
+    phases: List[ExecutionPhase] | None = None,
     inspect: bool = False,
     existing_results: str | None = None,
     python_based_plugins_only: bool = False,
@@ -70,6 +71,7 @@ def run_ash_scan(
     color: bool = True,
     fail_on_findings: bool | None = None,
     ignore_suppressions: bool = False,
+    min_severity: str = "low",
     mode: RunMode = RunMode.local,
     show_summary: bool = True,
     log_level: AshLogLevel = AshLogLevel.INFO,
@@ -107,7 +109,7 @@ def run_ash_scan(
     if output_formats is None:
         output_formats = []
     if phases is None:
-        phases = [Phases.convert, Phases.scan, Phases.report]
+        phases = [ExecutionPhase.CONVERT, ExecutionPhase.SCAN, ExecutionPhase.REPORT]
     if custom_build_arg is None:
         custom_build_arg = []
     if ash_plugin_modules is None:
@@ -120,7 +122,6 @@ def run_ash_scan(
     output_dir = Path(output_dir).absolute()
 
     # These are lazy-loaded to prevent slow CLI load-in, which impacts tab-completion
-    from automated_security_helper.core.enums import ExecutionStrategy
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
     from automated_security_helper.utils.log import get_logger
 
@@ -266,6 +267,10 @@ def run_ash_scan(
         # Local mode - use the orchestrator directly
         starting_dir = Path.cwd()
         os.chdir(source_dir)
+        _offline_was_set = False
+        if offline:
+            os.environ["ASH_OFFLINE"] = "YES"
+            _offline_was_set = True
         try:
             # Create orchestrator instance
             source_dir = Path(source_dir)
@@ -348,7 +353,7 @@ def run_ash_scan(
                 debug=debug,
                 strategy=(
                     ExecutionStrategy.PARALLEL
-                    if strategy == Strategy.parallel
+                    if strategy == ExecutionStrategy.PARALLEL
                     else ExecutionStrategy.SEQUENTIAL
                 ),
                 no_cleanup=not cleanup,
@@ -366,8 +371,7 @@ def run_ash_scan(
                 offline=(
                     offline
                     if offline is not None
-                    else os.environ.get("ASH_OFFLINE", "NO").upper()
-                    in ["YES", "1", "TRUE"]
+                    else is_offline_mode()
                 ),
                 existing_results_path=(
                     Path(existing_results) if existing_results else None
@@ -380,13 +384,13 @@ def run_ash_scan(
             # Determine which phases to run. Process them in required order to build the
             # final ordered list of execution.
             phases_to_run = []
-            if Phases.convert in phases:
+            if ExecutionPhase.CONVERT in phases:
                 phases_to_run.append("convert")
-            if Phases.scan in phases:
+            if ExecutionPhase.SCAN in phases:
                 phases_to_run.append("scan")
-            if Phases.report in phases:
+            if ExecutionPhase.REPORT in phases:
                 phases_to_run.append("report")
-            if Phases.inspect in phases or inspect:
+            if ExecutionPhase.INSPECT in phases or inspect:
                 phases_to_run.append("inspect")
 
             # Default to all phases if none specified
@@ -436,8 +440,9 @@ def run_ash_scan(
             )
             sys.exit(1)
         finally:
-            # Return to the starting directory
             os.chdir(starting_dir)
+            if _offline_was_set:
+                os.environ.pop("ASH_OFFLINE", None)
 
     # Check if we should fail on findings
     final_fail_on_findings = (
@@ -457,6 +462,35 @@ def run_ash_scan(
     actionable_findings = 0
     for item in scanner_metrics:
         actionable_findings += item.actionable
+
+    # Apply --min-severity filtering: if no finding meets the threshold,
+    # treat actionable_findings as 0 for exit-code purposes.  Findings are
+    # still present in all reports for transparency.
+    _SEVERITY_RANK = {"critical": 3, "high": 3, "medium": 2, "low": 1, "none": 0}
+    _SARIF_LEVEL_TO_SEVERITY = {"error": "high", "warning": "medium", "note": "low"}
+    min_sev_rank = _SEVERITY_RANK.get(min_severity.lower(), 1)
+    if min_sev_rank > 0 and actionable_findings > 0 and results is not None:
+        has_qualifying = False
+        try:
+            sarif = getattr(results, "sarif", None)
+            if sarif is None or not getattr(sarif, "runs", None):
+                has_qualifying = True
+            for run in getattr(sarif, "runs", []) if not has_qualifying else []:
+                for result in getattr(run, "results", []):
+                    level = getattr(result, "level", "note")
+                    if isinstance(level, str):
+                        level = level.lower()
+                    mapped = _SARIF_LEVEL_TO_SEVERITY.get(level, "low")
+                    if _SEVERITY_RANK.get(mapped, 1) >= min_sev_rank:
+                        has_qualifying = True
+                        break
+                if has_qualifying:
+                    break
+        except Exception:
+            # If we can't inspect the model, don't suppress the exit code
+            has_qualifying = True
+        if not has_qualifying:
+            actionable_findings = 0
     # Only display the final metrics and guidance if show_summary is True
     if show_summary:
         # Calculate scan duration

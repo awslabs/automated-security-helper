@@ -10,6 +10,7 @@ from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 from pydantic import Field
 from typing import Annotated, Any, Generic, List, Literal, Optional, TypeVar
@@ -103,6 +104,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             f"Scanner {self.config.name} initialized with source_dir={self.context.source_dir}, output_dir={self.context.output_dir}"
         )
         return super().model_post_init(context)
+
+    def validate_plugin_dependencies(self) -> bool:
+        """Check whether the scanner's command is available on PATH.
+
+        Subclasses with more complex requirements (UV tool management,
+        version checks, non-standard binaries) should override this.
+        """
+        found = find_executable(self.command)
+        return found is not None
 
     def _process_config_options(self) -> None:
         """By default, returns False to indicate that the scanner did not perform any

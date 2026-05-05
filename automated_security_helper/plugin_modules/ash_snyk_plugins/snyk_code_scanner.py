@@ -17,6 +17,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -53,7 +54,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             self.config = SnykCodeScannerConfig()
         self.command = "snyk"
         self.subcommands = ["code", "test"]
-        self.tool_type = "SAST"
+        self.tool_type = ScannerToolType.SAST
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,
@@ -180,8 +181,8 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             self._plugin_log(
                 message,
                 target_type=target_type,
-                level=20,
-                append_to_stream="stderr",  # This will add the message to self.errors
+                level=logging.INFO,
+                append_to_stream="stderr",
             )
             self._post_scan(
                 target=target,
@@ -189,23 +190,20 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             )
             return True
 
-        try:
-            validated = self._pre_scan(
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(
                 target=target,
                 target_type=target_type,
-                config=config,
             )
-            if not validated:
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-                return False
-        except ScannerError as exc:
-            raise exc
+            return False
+
 
         if not self.dependencies_satisfied:
-            # Logging of this has been done in the central self._pre_scan() method.
             self._post_scan(
                 target=target,
                 target_type=target_type,
@@ -224,18 +222,13 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",
                 target_type=target_type,
-                level=15,
+                level=logging.VERBOSE,
             )
 
             # No environment modifications are currently needed for Snyk Code.
             self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
-            )
-
-            self._post_scan(
-                target=target,
-                target_type=target_type,
             )
 
             # Handle errors executing the scanner. For Snyk, non-zero response indicate the scanner was not

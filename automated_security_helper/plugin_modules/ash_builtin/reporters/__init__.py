@@ -49,7 +49,6 @@ __all__ = [
     "CycloneDXReporter",
     "GitLabSASTReporter",
     "HtmlReporter",
-    "FlatJSONReporter",
     "FlatJsonReporter",
     "JunitXmlReporter",
     "MarkdownReporter",

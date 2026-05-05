@@ -1,4 +1,4 @@
-from automated_security_helper.utils.meta_analysis.generate_jq_query import (
+from automated_security_helper.utils.meta_analysis.reporting import (
     generate_jq_query,
 )
 
