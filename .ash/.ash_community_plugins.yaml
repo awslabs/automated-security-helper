@@ -114,6 +114,48 @@ global_settings:
     - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
       path: ".ash/ash_output*/scanners/*.json"
       reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
+    - rule_id: "yaml.github-actions.security.run-shell-injection.run-shell-injection"
+      path: ".github/actions/run-scan-test/action.yml"
+      reason: "False positive — inputs.* in composite actions are author-defined, not attacker-controlled"
+    - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
+      path: "automated_security_helper/cli/main.py"
+      reason: "False positive - ASH requires Python 3.10+"
+    - rule_id: "SECRET-SECRET-KEYWORD"
+      path: "automated_security_helper/utils/secret_masking.py"
+      reason: "False positive - module processes secret-related strings"
+    - rule_id: "SECRET-SECRET-KEYWORD"
+      path: "tests/unit/utils/test_secret_masking.py"
+      reason: "False positive - test fixtures for secret masking"
+    - rule_id: "SECRET-SECRET-KEYWORD"
+      path: "tests/unit/utils/test_secret_masking*.py"
+      reason: "False positive - test fixtures for secret masking"
+    - rule_id: "SECRET-BASE64-HIGH-ENTROPY-STRING"
+      path: "tests/unit/utils/test_secret_masking.py"
+      reason: "False positive - test fixtures for secret masking"
+    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
+      path: "tests/unit/test_defense_in_depth.py"
+      reason: "False positive - test hex strings for tarfile validation"
+    - rule_id: "B108"
+      path: "tests/unit/converters/test_converters.py"
+      reason: "Test validates path traversal protection"
+    - rule_id: "B108"
+      path: "tests/unit/core/test_orchestrator_regression.py"
+      reason: "Test uses temp paths to verify cleanup guard"
+    - rule_id: "B110"
+      path: "tests/unit/core/test_base_plugins_regression.py"
+      reason: "Test verifies exception propagation"
+    - rule_id: "B110"
+      path: "tests/unit/config/test_ash_config_regression.py"
+      reason: "Test verifies yaml loader isolation"
+    - rule_id: "B110"
+      path: "tests/unit/test_environ_mutation_fix.py"
+      reason: "Test catches expected exceptions"
+    - rule_id: "B404"
+      path: "tests/unit/utils/test_subprocess_utils_regression.py"
+      reason: "Test file must import subprocess"
+    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
+      path: "automated_security_helper/plugin_modules/ash_builtin/__init__.py"
+      reason: "Lazy plugin loading uses hardcoded module paths"
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
@@ -172,7 +214,7 @@ reporters:
     enabled: false
 scanners:
   bandit:
-    enabled: false
+    enabled: true
     options:
       confidence_level: all
       ignore_nosec: false
