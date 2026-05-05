@@ -184,13 +184,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ARCH=$(dpkg --print-architecture)
-          DEB_URL=$(gh api repos/runfinch/finch/releases/latest --jq "[.assets[] | select(.name | endswith(\"_${ARCH}.deb\")) | .browser_download_url] | first")
-          curl -fsSL -o /tmp/finch.deb "$DEB_URL"
-          sudo dpkg -i --force-depends --force-overwrite /tmp/finch.deb
-          rm /tmp/finch.deb
-          sudo mkdir -p /var/lib/finch/nerdctl /etc/finch
-          sudo chmod 777 /var/lib/finch/nerdctl /etc/finch
-          containerd-rootless-setuptool.sh install
+          curl -fsSL https://artifact.runfinch.com/deb/GPG_KEY.pub | sudo gpg --dearmor -o /usr/share/keyrings/runfinch-finch-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/runfinch-finch-archive-keyring.gpg arch=${ARCH}] https://artifact.runfinch.com/deb noble main" | sudo tee /etc/apt/sources.list.d/runfinch-finch.list
+          sudo apt-get update -q
+          sudo apt-get install -y runfinch-finch
+          sudo systemctl start containerd
+          sudo systemctl start finch-buildkit
+          sudo systemctl start finch
+          sudo finch --version
       - name: "finch: init VM"
         if: matrix.method == 'finch' && runner.os == 'macOS'
         run: finch vm init
@@ -202,7 +203,7 @@ jobs:
         run: pip install .
       - name: "finch: build container"
         if: matrix.method == 'finch'
-        run: ash build-image --oci-runner finch --force
+        run: sudo -E ash build-image --oci-runner finch --force
 
       # === mcp ===
       - name: "mcp: install ASH"
