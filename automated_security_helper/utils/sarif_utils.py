@@ -415,6 +415,8 @@ def apply_suppressions_to_sarif(
     _work_dir_resolved = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME).resolve()
     _uri_resolve_cache: dict[str, Path] = {}
     _source_dir_prefix = str(plugin_context.source_dir.resolve()).replace("\\", "/") + "/"
+    # On Windows, SARIF URIs may have a leading "/" before the drive letter (e.g., /D:/path)
+    _source_dir_prefix_with_slash = "/" + _source_dir_prefix
 
     for run in sarif_report.runs:
         if not run.results:
@@ -437,6 +439,8 @@ def apply_suppressions_to_sarif(
                             uri_normalized = uri.replace("\\", "/")
                             if uri_normalized.startswith(_source_dir_prefix):
                                 uri = uri_normalized[len(_source_dir_prefix):]
+                            elif uri_normalized.startswith(_source_dir_prefix_with_slash):
+                                uri = uri_normalized[len(_source_dir_prefix_with_slash):]
                         if uri:
                             if uri not in _uri_resolve_cache:
                                 _uri_resolve_cache[uri] = Path(uri).resolve()
@@ -481,6 +485,8 @@ def apply_suppressions_to_sarif(
                             uri_normalized = uri.replace("\\", "/")
                             if uri_normalized.startswith(_source_dir_prefix):
                                 uri = uri_normalized[len(_source_dir_prefix):]
+                            elif uri_normalized.startswith(_source_dir_prefix_with_slash):
+                                uri = uri_normalized[len(_source_dir_prefix_with_slash):]
                         line_start = None
                         line_end = None
                         if (
