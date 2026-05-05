@@ -84,6 +84,27 @@ global_settings:
     - path: tests/unit/utils/*.py
       rule_id: B108
       reason: Temp file path as string, not actual temp dir usage.
+    - path: tests/**/*.py
+      rule_id: B108
+      reason: "Test fixtures use hardcoded temp paths for validation"
+    - path: tests/**/*.py
+      rule_id: B110
+      reason: "Tests use try/except/pass for expected exception handling"
+    - path: tests/**/*.py
+      rule_id: B311
+      reason: "Test factories use seeded random for reproducible test data"
+    - path: tests/**/*.py
+      rule_id: B105
+      reason: "Test fixtures contain intentional dummy credentials"
+    - path: scripts/*.py
+      rule_id: B404
+      reason: "Build scripts invoke subprocesses for integration tasks"
+    - path: scripts/*.py
+      rule_id: B603
+      reason: "Build scripts use list-form subprocess calls"
+    - path: hatch_build.py
+      rule_id: B110
+      reason: "Build hook uses try/except/pass for optional git operations"
     - rule_id: B110
       path: automated_security_helper/**/*.py
       reason: "try/except/pass used for graceful degradation in tool orchestrator — failures handled via return values"
