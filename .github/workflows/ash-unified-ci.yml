@@ -61,36 +61,50 @@ jobs:
   # Uses Python 3.12 exclusively.
   # ---------------------------------------------------------------------------
   scan-validation:
-    name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.config-file == 'community' && ' - Community Plugins' || '' }}"
+    name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.oci-runner && matrix.oci-runner != 'docker' && format(' [{0}]', matrix.oci-runner) || '' }}${{ matrix.config-file == 'community' && ' - Community Plugins' || '' }}"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux x86 -- all methods, default config
-          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default }
-          - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default }
-          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default }
-          - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: default }
+          # Linux x86 -- Docker
+          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default, oci-runner: docker }
+          - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default, oci-runner: docker }
+          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: docker }
+          - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: default, oci-runner: "" }
+          # Linux x86 -- Podman
+          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default, oci-runner: podman }
+          - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default, oci-runner: podman }
+          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: podman }
+          # Linux x86 -- Finch
+          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default, oci-runner: finch }
+          - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default, oci-runner: finch }
+          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: finch }
 
-          # Linux ARM -- all methods, default config
-          - { os: ubuntu-24.04-arm, method: bash, platform: linux/aarch64, config-file: default }
-          - { os: ubuntu-24.04-arm, method: powershell, platform: linux/aarch64, config-file: default }
-          - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default }
-          - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: default }
+          # Linux ARM -- Docker
+          - { os: ubuntu-24.04-arm, method: bash, platform: linux/aarch64, config-file: default, oci-runner: docker }
+          - { os: ubuntu-24.04-arm, method: powershell, platform: linux/aarch64, config-file: default, oci-runner: docker }
+          - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default, oci-runner: docker }
+          - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: default, oci-runner: "" }
+          # Linux ARM -- Podman
+          - { os: ubuntu-24.04-arm, method: bash, platform: linux/aarch64, config-file: default, oci-runner: podman }
+          - { os: ubuntu-24.04-arm, method: powershell, platform: linux/aarch64, config-file: default, oci-runner: podman }
+          - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default, oci-runner: podman }
+          # Linux ARM -- Finch (x86_64 only, skip ARM)
+          # - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default, oci-runner: finch }
 
           # macOS x86 -- python-local only (Docker disabled on hosted macOS)
-          - { os: macos-latest, method: python-local, platform: darwin/amd64, config-file: default }
+          - { os: macos-latest, method: python-local, platform: darwin/amd64, config-file: default, oci-runner: "" }
 
           # Windows -- python-local only (Docker disabled on hosted Windows)
-          - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: default }
+          - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: default, oci-runner: "" }
 
           # Community plugins -- python-local on all platforms
-          - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: community }
-          - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: community }
-          - { os: macos-latest, method: python-local, platform: darwin/amd64, config-file: community }
-          - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: community }
+          - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: community, oci-runner: "" }
+          - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: community, oci-runner: "" }
+          - { os: macos-latest, method: python-local, platform: darwin/amd64, config-file: community, oci-runner: "" }
+          - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: community, oci-runner: "" }
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -98,7 +112,29 @@ jobs:
         with:
           python-version: "3.12"
           install-ash: "true"
+      - name: Install Podman
+        if: matrix.oci-runner == 'podman'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y --no-install-recommends podman
+          podman --version
+      - name: Install Finch
+        if: matrix.oci-runner == 'finch'
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            curl -LO https://github.com/runfinch/finch/releases/latest/download/finch-linux-amd64.tar.gz
+            sudo tar -xzf finch-linux-amd64.tar.gz -C /usr/local
+            rm finch-linux-amd64.tar.gz
+          else
+            echo "Finch not available for $ARCH"
+            exit 1
+          fi
+          finch vm init || true
+          finch vm start || true
+          finch --version
       - uses: ./.github/actions/run-scan-test
+        env:
+          OCI_RUNNER: ${{ matrix.oci-runner }}
         with:
           method: ${{ matrix.method }}
           os: ${{ matrix.os }}
