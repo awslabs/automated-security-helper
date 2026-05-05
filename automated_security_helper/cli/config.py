@@ -400,6 +400,294 @@ def validate_plugin_dependencies(
         sys.exit(1)
 
 
+@config_app.command()
+def lint(
+    config: Annotated[
+        str,
+        typer.Option(
+            "--config",
+            "-c",
+            help="The path to the configuration file to lint. By default, ASH looks for config files in .ash/.ash.yaml",
+            envvar="ASH_CONFIG",
+        ),
+    ] = ".ash/.ash.yaml",
+    output_dir: Annotated[
+        str,
+        typer.Option(
+            "--output-dir",
+            "-o",
+            help="Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output",
+        ),
+    ] = None,
+    fix: Annotated[
+        bool,
+        typer.Option(
+            "--fix",
+            help="Auto-fix fixable issues (internal fields, missing line_end, expired suppressions)",
+        ),
+    ] = False,
+    fix_unused: Annotated[
+        bool,
+        typer.Option(
+            "--fix-unused",
+            help="Remove unused suppressions based on the last scan's unused suppressions report",
+        ),
+    ] = False,
+    non_interactive: Annotated[
+        bool,
+        typer.Option(
+            "--non-interactive",
+            "--yes",
+            "-y",
+            help="Accept all changes without prompting. Useful for pre-commit hooks and CI/CD",
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+    ] = False,
+    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+):
+    """Lint an ASH configuration file for issues and optionally auto-fix them.
+
+    This command performs all validation checks plus additional lint checks:
+    - Internal-only fields in scanners/reporters/converters
+    - Invalid or unknown top-level sections
+    - Duplicate field definitions
+    - Suppressions with line_start but missing line_end
+    - Expired suppressions
+    - Unused suppressions (from last scan report)
+
+    Use --fix to auto-fix common issues (removes internal fields, sets missing
+    line_end, removes expired suppressions).
+
+    Use --fix-unused to remove suppressions that are no longer matching any
+    findings (based on the unused suppressions report from the last scan).
+
+    Use --non-interactive (or --yes/-y) to skip confirmation prompts. This is
+    useful for pre-commit hooks or CI/CD pipelines.
+
+    Examples:
+        # Lint the default config
+        ash config lint
+
+        # Lint and auto-fix issues
+        ash config lint --fix
+
+        # Lint, fix, and remove unused suppressions
+        ash config lint --fix --fix-unused
+
+        # Non-interactive mode for pre-commit
+        ash config lint --fix --fix-unused --non-interactive
+
+        # Lint a specific config file
+        ash config lint --config path/to/config.yaml
+    """
+    from automated_security_helper.config.config_linter import (
+        ConfigLinter,
+        LintSeverity,
+    )
+
+    # Setup logging
+    get_logger(
+        name="ash.cli.config.lint",
+        level=logging.DEBUG
+        if debug
+        else (logging.INFO if verbose else logging.WARNING),
+        show_progress=False,
+        use_color=color,
+    )
+
+    config_path = Path(config)
+    output_dir_path = Path(output_dir) if output_dir else None
+
+    if not config_path.exists():
+        typer.secho(f"❌ Config file not found: {config_path}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+    typer.secho(f"Linting configuration file: {config_path}", fg=typer.colors.BLUE)
+
+    # Run lint checks
+    lint_result = ConfigLinter.lint(
+        config_path=config_path,
+        output_dir=output_dir_path,
+        check_unused=fix_unused,  # Only check unused when explicitly requested
+    )
+
+    # Display issues
+    if not lint_result.issues:
+        typer.secho(
+            "✅ Configuration is clean! No issues found.", fg=typer.colors.GREEN
+        )
+        return
+
+    # Print all issues
+    typer.secho(
+        f"\nFound {len(lint_result.issues)} issue(s):",
+        fg=typer.colors.YELLOW,
+    )
+    for issue in lint_result.issues:
+        fg = {
+            LintSeverity.ERROR: typer.colors.RED,
+            LintSeverity.WARNING: typer.colors.YELLOW,
+            LintSeverity.INFO: typer.colors.CYAN,
+        }[issue.severity]
+        typer.secho(f"  {issue}", fg=fg)
+
+    typer.echo("")
+
+    # Summary
+    if lint_result.error_count:
+        typer.secho(f"  Errors: {lint_result.error_count}", fg=typer.colors.RED)
+    if lint_result.warning_count:
+        typer.secho(f"  Warnings: {lint_result.warning_count}", fg=typer.colors.YELLOW)
+    if lint_result.info_count:
+        typer.secho(f"  Info: {lint_result.info_count}", fg=typer.colors.CYAN)
+
+    fixable_count = len(lint_result.fixable_issues)
+    if fixable_count and not fix and not fix_unused:
+        typer.secho(
+            f"\n💡 {fixable_count} issue(s) can be auto-fixed. Run with --fix to apply fixes.",
+            fg=typer.colors.YELLOW,
+        )
+
+    # Apply fixes if requested
+    if fix:
+        _apply_fixes(config_path, lint_result, non_interactive, color)
+
+    # Apply unused suppression removal if requested
+    if fix_unused:
+        _apply_unused_fixes(config_path, output_dir_path, non_interactive, color)
+
+    # Exit with error code if there are unfixed errors
+    if not fix and not fix_unused and lint_result.has_errors:
+        raise typer.Exit(1)
+
+
+def _apply_fixes(
+    config_path: Path,
+    lint_result,
+    non_interactive: bool,
+    color: bool,
+) -> None:
+    """Apply auto-fixes to the config file."""
+    from automated_security_helper.config.config_linter import (
+        ConfigLinter,
+        LintCategory,
+    )
+
+    fixable = [
+        i
+        for i in lint_result.fixable_issues
+        if i.category != LintCategory.SUPPRESSION_UNUSED
+    ]
+
+    if not fixable:
+        typer.secho(
+            "No fixable issues found (excluding unused suppressions).",
+            fg=typer.colors.GREEN,
+        )
+        return
+
+    typer.secho(f"\n🔧 Fixing {len(fixable)} issue(s):", fg=typer.colors.BLUE)
+    for issue in fixable:
+        typer.secho(f"  • {issue.fix_description}", fg=typer.colors.CYAN)
+
+    if not non_interactive:
+        confirm = typer.confirm("\nApply these fixes?")
+        if not confirm:
+            typer.secho("Aborted.", fg=typer.colors.YELLOW)
+            raise typer.Exit(0)
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config_path, fixable)
+
+    if fixed_issues:
+        config_path.write_text(fixed_content, encoding="utf-8")
+        typer.secho(
+            f"\n✅ Fixed {len(fixed_issues)} issue(s) in {config_path}",
+            fg=typer.colors.GREEN,
+        )
+    else:
+        typer.secho("No issues were fixed.", fg=typer.colors.YELLOW)
+
+
+def _apply_unused_fixes(
+    config_path: Path,
+    output_dir,
+    non_interactive: bool,
+    color: bool,
+) -> None:
+    """Remove unused suppressions from the config file."""
+    from automated_security_helper.config.config_linter import ConfigLinter
+
+    # Check report age first
+    report_info = ConfigLinter.get_unused_report_age(config_path, output_dir)
+
+    if report_info is None:
+        typer.secho(
+            "⚠️  No unused suppressions report found. Run a scan first to generate the report.",
+            fg=typer.colors.YELLOW,
+        )
+        return
+
+    report_path, report_timestamp, age_seconds = report_info
+
+    # Warn if report is too old
+    if age_seconds > ConfigLinter.MAX_REPORT_AGE_SECONDS:
+        age_hours = age_seconds / 3600
+        typer.secho(
+            f"\n⚠️  WARNING: The unused suppressions report is {age_hours:.1f} hours old "
+            f"(generated at {report_timestamp.strftime('%Y-%m-%d %H:%M:%S')}).",
+            fg=typer.colors.YELLOW,
+        )
+        typer.secho(
+            "   Results may not reflect the current state of your codebase.",
+            fg=typer.colors.YELLOW,
+        )
+        typer.secho(
+            "   Consider running a fresh scan: ash scan",
+            fg=typer.colors.YELLOW,
+        )
+
+        if not non_interactive:
+            confirm = typer.confirm(
+                "\nProceed with removing unused suppressions based on this old report?"
+            )
+            if not confirm:
+                typer.secho("Aborted.", fg=typer.colors.YELLOW)
+                raise typer.Exit(0)
+
+    # Perform the fix
+    fixed_content, fixed_issues, _ = ConfigLinter.fix_unused_suppressions(
+        config_path, output_dir
+    )
+
+    if not fixed_issues:
+        typer.secho("✅ No unused suppressions to remove.", fg=typer.colors.GREEN)
+        return
+
+    typer.secho(
+        f"\n🗑️  Removing {len(fixed_issues)} unused suppression(s):",
+        fg=typer.colors.BLUE,
+    )
+    for issue in fixed_issues:
+        typer.secho(f"  • {issue.message}", fg=typer.colors.CYAN)
+
+    if not non_interactive:
+        confirm = typer.confirm("\nRemove these unused suppressions?")
+        if not confirm:
+            typer.secho("Aborted.", fg=typer.colors.YELLOW)
+            raise typer.Exit(0)
+
+    config_path.write_text(fixed_content, encoding="utf-8")
+    typer.secho(
+        f"\n✅ Removed {len(fixed_issues)} unused suppression(s) from {config_path}",
+        fg=typer.colors.GREEN,
+    )
+
+
 if __name__ == "__main__":
     config_app()
 
