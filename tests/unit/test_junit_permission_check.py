@@ -85,12 +85,12 @@ class TestJunitPermissionPreCheck:
         assert "check-perms" in condition
         assert "has_permission" in condition
 
-    def test_junit_step_has_continue_on_error(self, workflow):
+    def test_junit_step_no_continue_on_error(self, workflow):
         steps = _get_steps(workflow)
         step = next(
             s for s in steps if s.get("name") == "Publish JUnit Test Report"
         )
-        assert step.get("continue-on-error") is True
+        assert step.get("continue-on-error") is None
 
 
 # ------------------------------------------------------------------ #

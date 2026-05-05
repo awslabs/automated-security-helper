@@ -28,9 +28,14 @@ runs:
         ash mcp &
         MCP_PID=$!
         sleep 5
-        kill $MCP_PID
-        wait $MCP_PID
-        echo "MCP server started and stopped cleanly"
+        if kill -0 $MCP_PID 2>/dev/null; then
+          kill $MCP_PID
+          wait $MCP_PID || :
+          echo "MCP server started and stopped cleanly"
+        else
+          echo "ERROR: MCP server exited prematurely"
+          exit 1
+        fi
 
     - name: "mcp: install MCP Inspector"
       if: runner.os != 'Windows'

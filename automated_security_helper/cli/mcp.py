@@ -142,7 +142,7 @@ def mcp_command(
     log_level_value = validate_log_options(verbose, debug, log_level)
 
     # Log the command execution
-    _logger.info(f"Starting MCP server with log level: {log_level_value.name}")
+    _logger.info(f"Starting MCP server with log level: {log_level_value}")
 
     # Initialize and start the MCP server with comprehensive error handling
     try:
