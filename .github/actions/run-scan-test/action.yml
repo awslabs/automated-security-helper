@@ -255,7 +255,7 @@ runs:
       shell: bash
       run: |
         echo "Validating GitLab SAST report schema compliance..."
-        GITLAB_REPORTS=$(find .ash/ash_output -name "*.gl-sast-report.json" 2>/dev/null || true)
+        GITLAB_REPORTS=$(find .ash/ash_output -name "*.gl-sast-report.json")
         if [ -z "$GITLAB_REPORTS" ]; then
           echo "No GitLab SAST reports found to validate"
           exit 0

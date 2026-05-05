@@ -19,8 +19,8 @@ runs:
       shell: bash
       run: |
         brew install podman
-        podman machine init || true
-        podman machine start || true
+        podman machine init
+        podman machine start
     - name: "podman: verify"
       if: inputs.runtime == 'podman'
       shell: bash
@@ -44,7 +44,7 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        sudo apt-get remove -y containerd runc || true
+        sudo apt-get remove -y containerd runc
         sudo install -m 0755 -d /etc/apt/keyrings
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
@@ -58,8 +58,8 @@ runs:
       if: inputs.runtime == 'finch'
       shell: bash
       run: |
-        finch vm init || true
-        finch vm start || true
+        finch vm init
+        finch vm start
     - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash

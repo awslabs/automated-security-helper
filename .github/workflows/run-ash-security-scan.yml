@@ -167,14 +167,12 @@ jobs:
       - name: Post ASH MarkdownReporter output as PR comment
         uses: mshick/add-pr-comment@v3
         if: inputs.post-pr-comment && github.repository_owner == inputs.repository-owner && (success() || failure())
-        continue-on-error: true
         with:
           message-path: ${{ inputs.output-dir }}/reports/ash.summary.md
 
       - name: Collect ASH output artifact
         uses: actions/upload-artifact@v7
         if: success() || failure()
-        continue-on-error: true
         with:
           name: ash_output
           path: ${{ inputs.output-dir }}
@@ -200,7 +198,6 @@ jobs:
       - name: Publish JUnit Test Report
         uses: mikepenz/action-junit-report@v6
         if: inputs.collect-junit-xml-report && (success() || failure()) && steps.check-perms.outputs.has_permission == 'true'
-        continue-on-error: true
         with:
           report_paths: "**/ash.junit.xml"
           include_passed: true
@@ -211,7 +208,6 @@ jobs:
       - name: Upload ASH SARIF file
         uses: github/codeql-action/upload-sarif@v4
         if: inputs.collect-sarif-report && (success() || failure())
-        continue-on-error: true
         with:
           sarif_file: ${{ inputs.output-dir }}/reports/ash.sarif
           wait-for-processing: true
