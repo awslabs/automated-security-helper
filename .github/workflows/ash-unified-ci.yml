@@ -127,6 +127,7 @@ jobs:
           rm /tmp/finch.deb
           sudo mkdir -p /var/lib/finch/nerdctl /etc/finch
           sudo chmod 777 /var/lib/finch/nerdctl /etc/finch
+          containerd-rootless-setuptool.sh install
           finch --version
         env:
           GH_TOKEN: ${{ github.token }}
