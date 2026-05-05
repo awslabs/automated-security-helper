@@ -21,7 +21,7 @@ ASH produces scan results in multiple formats. Every scan writes an internal agg
 
 ## Generating reports
 
-By default, ASH generates SARIF, HTML, Markdown, Text, JUnit XML, and CSV reports. To request a specific set of formats, use the `reporters` section in your configuration file:
+By default, ASH generates flat-json, SARIF, CycloneDX, OCSF, GitLab SAST, JUnit XML, CSV, HTML, Markdown, and Text reports. SPDX and YAML are available but disabled by default. To request a specific set of formats, use the `reporters` section in your configuration file:
 
 ```yaml
 # .ash/ash.yaml
@@ -55,9 +55,9 @@ The top-level structure contains four sections:
 }
 ```
 
-**`metadata`** -- report-level information (report ID, timestamp, project name, tool version, summary statistics).
+**`metadata`** -- report-level information (project name, scan time, report time, tool version, time delta).
 
-**`scanner_metrics`** -- per-scanner breakdown of finding counts by severity, duration, and pass/fail status.
+**`scanner_metrics`** -- a list of per-scanner objects with finding counts by severity and pass/fail status.
 
 **`top_hotspots`** -- the files with the most findings, ranked by count.
 
@@ -97,39 +97,28 @@ Each object in the `findings` array has these fields:
 ```json
 {
   "metadata": {
-    "report_id": "ASH-20250501120000",
-    "generated_at": "2025-05-01T12:00:00+00:00",
-    "project_name": "my-service",
+    "project": "my-service",
+    "scan_time": "2025-05-01 - 12:00 (UTC)",
+    "report_time": "2025-05-01 12:00:05 UTC",
     "tool_version": "3.4.0",
-    "summary_stats": {
+    "time_delta": "0:00:05"
+  },
+  "scanner_metrics": [
+    {
+      "scanner_name": "bandit",
+      "suppressed": 2,
       "critical": 0,
-      "high": 3,
-      "medium": 12,
-      "low": 45,
-      "info": 2,
-      "suppressed": 5,
-      "total": 62,
-      "actionable": 15,
-      "passed": 4,
-      "failed": 2
+      "high": 1,
+      "medium": 0,
+      "low": 17,
+      "info": 0,
+      "total": 18,
+      "actionable": 3,
+      "status": "FAILED"
     }
-  },
-  "scanner_metrics": {
-    "bandit": {
-      "status": "FAILED",
-      "finding_count": 18,
-      "actionable_finding_count": 3,
-      "severity_counts": {
-        "high": 1,
-        "medium": 0,
-        "low": 17,
-        "suppressed": 2
-      },
-      "duration": 4.2
-    }
-  },
+  ],
   "top_hotspots": [
-    { "file": "src/auth/handler.py", "count": 7 }
+    { "location": "src/auth/handler.py", "count": 7 }
   ],
   "findings": [
     {
@@ -174,9 +163,13 @@ from pathlib import Path
 
 report = json.loads(Path(".ash/ash_output/reports/ash.flat.json").read_text())
 
-# Summary
-stats = report["metadata"]["summary_stats"]
-print(f"Total findings: {stats['total']}, Actionable: {stats['actionable']}")
+# Metadata
+metadata = report["metadata"]
+print(f"Project: {metadata['project']}, Tool: {metadata['tool_version']}")
+
+# Scanner results
+for scanner in report["scanner_metrics"]:
+    print(f"{scanner['scanner_name']}: {scanner['status']} ({scanner['actionable']} actionable)")
 
 # Filter to actionable HIGH findings
 high_findings = [
@@ -224,13 +217,15 @@ reporters:
 
 ## SPDX
 
-[SPDX](https://spdx.dev/) (Software Package Data Exchange) is a Linux Foundation standard focused on license compliance and software composition. ASH's SPDX reporter produces JSON documents conforming to the SPDX 2.3 specification.
+[SPDX](https://spdx.dev/) (Software Package Data Exchange) is a Linux Foundation standard focused on license compliance and software composition.
+
+> **Note:** The SPDX reporter is currently a stub and is disabled by default. It does not yet produce valid SPDX 2.3 JSON -- the output is a raw YAML model dump. A proper SPDX document generator is planned for a future release.
 
 **Configuration:**
 ```yaml
 reporters:
   spdx:
-    enabled: true
+    enabled: true  # disabled by default
 ```
 
 **Output file:** `reports/ash.spdx.json`
@@ -303,9 +298,6 @@ Comma-separated values output for importing findings into spreadsheets or data p
 reporters:
   csv:
     enabled: true
-    options:
-      include_suppressed: false
-      delimiter: ","
 ```
 
 **Output file:** `reports/ash.csv`
