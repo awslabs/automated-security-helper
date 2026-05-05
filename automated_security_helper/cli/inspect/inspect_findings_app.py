@@ -97,20 +97,19 @@ class SuppressDialog(ModalScreen[bool]):
             expiration_input = self.query_one("#expiration_input", Input)
             expiration = expiration_input.value.strip() or None
 
-            suppression = AshSuppression(
-                rule_id=self.finding.get("rule_id"),
-                path=self.finding.get("file") or "*",
-                reason=reason,
-                expiration=expiration,
-                line_start=int(self.finding["line"]) if self.finding.get("line") else None,
-                line_end=int(self.finding["line"]) if self.finding.get("line") else None,
-            )
-
             try:
+                suppression = AshSuppression(
+                    rule_id=self.finding.get("rule_id"),
+                    path=self.finding.get("file") or "*",
+                    reason=reason,
+                    expiration=expiration,
+                    line_start=int(self.finding["line"]) if self.finding.get("line") else None,
+                    line_end=int(self.finding["line"]) if self.finding.get("line") else None,
+                )
                 add_suppression_to_config(self.config_path, suppression)
                 self.dismiss(True)
             except Exception as exc:
-                ASH_LOGGER.error(f"Failed to write suppression: {exc}")
+                ASH_LOGGER.error(f"Failed to create or write suppression: {exc}")
                 self.dismiss(False)
 
     def action_cancel(self) -> None:
@@ -519,6 +518,12 @@ class FindingsExplorerApp(App):
         if result:
             status_bar = self.query_one("#status_bar", Static)
             status_bar.update("Suppression saved to .ash.yaml")
+
+            table = self.query_one("#findings_table", DataTable)
+            idx = table.cursor_row
+            if idx is not None and idx < len(self.filtered_findings):
+                self.filtered_findings[idx]["suppressed"] = True
+                self._populate_table()
 
     def action_previous_finding(self) -> None:
         """Select the previous finding in the table."""
