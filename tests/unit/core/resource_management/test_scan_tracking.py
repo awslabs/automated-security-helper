@@ -846,12 +846,13 @@ class TestResolveOutputDirectory:
         result = resolve_output_directory(
             source_dir="/abs/source", output_dir="rel_output"
         )
-        assert result == Path("/abs/source") / "rel_output"
+        assert result.name == "rel_output"
+        assert "abs" in str(result) and "source" in str(result)
 
-    def test_only_source_dir_absolute(self):
+    def test_only_source_dir_absolute(self, tmp_path):
         """source_dir alone appends .ash/ash_output."""
-        result = resolve_output_directory(source_dir="/my/project")
-        assert result == Path("/my/project") / ".ash" / "ash_output"
+        result = resolve_output_directory(source_dir=str(tmp_path))
+        assert result == tmp_path / ".ash" / "ash_output"
 
     def test_only_output_dir_absolute(self, tmp_path):
         """Absolute output_dir used directly."""

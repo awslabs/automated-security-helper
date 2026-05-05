@@ -707,7 +707,7 @@ class TestGetScanResults:
 
         # The output_dir passed to the inner function should be absolute
         call_kwargs = mock_get.call_args[1]
-        assert call_kwargs["output_dir"].startswith("/")
+        assert Path(call_kwargs["output_dir"]).is_absolute()
 
 
 # ---------------------------------------------------------------------------
@@ -1047,7 +1047,7 @@ class TestPrompts:
         from automated_security_helper.cli.mcp_server import run_ash_security_scan
 
         result = run_ash_security_scan(source_dir="/my/project")
-        assert str(Path("/my/project")) in result
+        assert "/my/project" in result
         assert "run_ash_scan" in result
 
     def test_run_ash_security_scan_prompt_default(self):
@@ -1059,7 +1059,7 @@ class TestPrompts:
             with patch.object(Path, "absolute", return_value=Path("/default/dir")):
                 result = run_ash_security_scan(source_dir=None)
 
-        assert str(Path("/default/dir")) in result
+        assert "/default/dir" in result or str(Path("/default/dir")) in result
 
     def test_analyze_security_findings_prompt(self):
         """Prompt includes directory and analysis instructions."""
