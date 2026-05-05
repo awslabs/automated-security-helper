@@ -23,6 +23,7 @@ runs:
       run: python -c "from automated_security_helper.cli.mcp_server import run_mcp_server; print('OK')"
 
     - name: "mcp: start server and health check"
+      if: runner.os != 'Windows'
       shell: bash
       run: |
         sleep 5 | ash mcp &

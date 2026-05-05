@@ -54,8 +54,8 @@ runs:
         curl -fsSL -o /tmp/finch.deb "$DEB_URL"
         sudo apt-get install -y --no-install-recommends /tmp/finch.deb
         rm /tmp/finch.deb
-    - name: "finch: init and start VM"
-      if: inputs.runtime == 'finch'
+    - name: "finch: init and start VM (macOS only)"
+      if: inputs.runtime == 'finch' && runner.os == 'macOS'
       shell: bash
       run: |
         finch vm init

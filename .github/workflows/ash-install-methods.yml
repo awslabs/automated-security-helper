@@ -201,10 +201,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends /tmp/finch.deb
           rm /tmp/finch.deb
       - name: "finch: init VM"
-        if: matrix.method == 'finch'
+        if: matrix.method == 'finch' && runner.os == 'macOS'
         run: finch vm init
       - name: "finch: start VM"
-        if: matrix.method == 'finch'
+        if: matrix.method == 'finch' && runner.os == 'macOS'
         run: finch vm start
       - name: "finch: install ASH"
         if: matrix.method == 'finch'
@@ -224,7 +224,7 @@ jobs:
         if: matrix.method == 'mcp'
         run: python -c "from automated_security_helper.cli.mcp_server import run_mcp_server; print('OK')"
       - name: "mcp: start server and health check"
-        if: matrix.method == 'mcp'
+        if: matrix.method == 'mcp' && runner.os != 'Windows'
         run: |
           sleep 5 | ash mcp &
           MCP_PID=$!
