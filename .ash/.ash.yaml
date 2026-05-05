@@ -129,8 +129,6 @@ global_settings:
       reason: "False positive - test data contains hex strings for tarfile extraction validation"
     - rule_id: B108
       path: tests/unit/converters/test_converters.py
-      line_start: 318
-      line_end: 322
       reason: "Test validates path traversal protection - checking /tmp/evil.py does NOT exist"
     - rule_id: B108
       path: tests/unit/core/test_orchestrator_regression.py
@@ -153,11 +151,6 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: "tests/unit/utils/test_secret_masking*.py"
       reason: "Intentional test fixtures for secret masking regression tests"
-    - rule_id: B108
-      path: tests/unit/converters/test_converters.py
-      line_start: 352
-      line_end: 356
-      reason: "Test validates path traversal protection - checking /tmp/evil.py does NOT exist"
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

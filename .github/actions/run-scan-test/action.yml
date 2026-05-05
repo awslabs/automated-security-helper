@@ -186,9 +186,9 @@ runs:
         . ./utils/ash_helpers.ps1
         Get-Help Invoke-ASH -Full
         if ("${{ inputs.config-file }}" -eq "community") {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions -ConfigFile ".ash/.ash_community_plugins.yaml"
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -ConfigFile ".ash/.ash_community_plugins.yaml"
         } else {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -IgnoreSuppressions
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker
         }
 
     - name: Validate No Plugin Errors (PowerShell)
