@@ -122,9 +122,9 @@ jobs:
         run: |
           ARCH=$(dpkg --print-architecture)
           DEB_URL=$(gh api repos/runfinch/finch/releases/latest --jq ".assets[] | select(.name | endswith(\"_${ARCH}.deb\")) | .browser_download_url" | head -1)
-          curl -fsSL -o finch.deb "$DEB_URL"
-          sudo dpkg -i finch.deb
-          rm finch.deb
+          curl -fsSL -o /tmp/finch.deb "$DEB_URL"
+          sudo apt-get install -y --no-install-recommends /tmp/finch.deb
+          rm /tmp/finch.deb
           finch vm init || true
           finch vm start || true
           finch --version
