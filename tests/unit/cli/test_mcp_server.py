@@ -39,9 +39,9 @@ def mock_ctx():
 def mock_scan_registry_entry():
     """Create a mock ScanRegistryEntry."""
     entry = MagicMock()
-    entry.output_directory = "/tmp/test-project/.ash/ash_output"
+    entry.output_directory = "/tmp/test-project/.ash/ash_output"  # nosec B108
     entry.scan_id = "test-scan-123"
-    entry.directory_path = "/tmp/test-project"
+    entry.directory_path = "/tmp/test-project"  # nosec B108
     entry.status = "running"
     return entry
 
@@ -207,14 +207,14 @@ class TestRunAshScan:
                 return_value=mock_result,
             ),
             patch("automated_security_helper.cli.mcp_server.asyncio.create_task") as mock_task,
-            patch("pathlib.Path.cwd", return_value=Path("/tmp/project")),
+            patch("pathlib.Path.cwd", return_value=Path("/tmp/project")),  # nosec B108
         ):
             mock_task.return_value = MagicMock()
             mock_task.return_value.add_done_callback = MagicMock()
 
             result = await run_ash_scan(
                 ctx=mock_ctx,
-                source_dir="/tmp/project",
+                source_dir="/tmp/project",  # nosec B108
                 severity_threshold="HIGH",
             )
 
@@ -248,7 +248,7 @@ class TestRunAshScan:
         assert result["success"] is True
         # The scan should have been called with the cwd path
         call_kwargs = mock_scan.call_args[1]
-        assert "/home/user/myrepo" in call_kwargs["directory_path"]
+        assert str(Path("/home/user/myrepo")) in call_kwargs["directory_path"]
 
     @pytest.mark.asyncio
     async def test_scan_resolves_relative_path(self, mock_ctx):
@@ -273,7 +273,7 @@ class TestRunAshScan:
 
         assert result["success"] is True
         call_kwargs = mock_scan.call_args[1]
-        assert call_kwargs["directory_path"] == "/workspace/subdir"
+        assert Path(call_kwargs["directory_path"]) == Path("/workspace/subdir")
 
     @pytest.mark.asyncio
     async def test_scan_start_failure(self, mock_ctx):
@@ -288,9 +288,9 @@ class TestRunAshScan:
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ),
-            patch("pathlib.Path.cwd", return_value=Path("/tmp")),
+            patch("pathlib.Path.cwd", return_value=Path("/tmp")),  # nosec B108
         ):
-            result = await run_ash_scan(ctx=mock_ctx, source_dir="/tmp")
+            result = await run_ash_scan(ctx=mock_ctx, source_dir="/tmp")  # nosec B108
 
         assert result["success"] is False
         assert "Permission denied" in result["error"]
@@ -308,9 +308,9 @@ class TestRunAshScan:
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("Connection refused"),
             ),
-            patch("pathlib.Path.cwd", return_value=Path("/tmp")),
+            patch("pathlib.Path.cwd", return_value=Path("/tmp")),  # nosec B108
         ):
-            result = await run_ash_scan(ctx=mock_ctx, source_dir="/tmp")
+            result = await run_ash_scan(ctx=mock_ctx, source_dir="/tmp")  # nosec B108
 
         assert result["success"] is False
         assert "Connection refused" in result["error"]
@@ -1047,7 +1047,7 @@ class TestPrompts:
         from automated_security_helper.cli.mcp_server import run_ash_security_scan
 
         result = run_ash_security_scan(source_dir="/my/project")
-        assert "/my/project" in result
+        assert str(Path("/my/project")) in result
         assert "run_ash_scan" in result
 
     def test_run_ash_security_scan_prompt_default(self):
@@ -1059,7 +1059,7 @@ class TestPrompts:
             with patch.object(Path, "absolute", return_value=Path("/default/dir")):
                 result = run_ash_security_scan(source_dir=None)
 
-        assert "/default/dir" in result
+        assert str(Path("/default/dir")) in result
 
     def test_analyze_security_findings_prompt(self):
         """Prompt includes directory and analysis instructions."""
