@@ -1,5 +1,5 @@
 name: "Validate Container Runtime"
-description: "Build ASH container with podman or finch"
+description: "Validate that ASH container image can be built with podman or finch"
 
 inputs:
   runtime:
@@ -25,10 +25,13 @@ runs:
       if: inputs.runtime == 'podman'
       shell: bash
       run: podman --version
-    - name: "podman: build container"
+    - name: "podman: build image"
       if: inputs.runtime == 'podman'
       shell: bash
-      run: ash build-image --oci-runner podman --force
+      run: |
+        podman build --target ci --tag automated-security-helper:ci \
+          --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
+          --file Dockerfile .
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -41,6 +44,7 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
+        sudo apt-get remove -y containerd runc || true
         sudo install -m 0755 -d /etc/apt/keyrings
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
@@ -56,7 +60,10 @@ runs:
       run: |
         finch vm init || true
         finch vm start || true
-    - name: "finch: build container"
+    - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
-      run: ash build-image --oci-runner finch --force
+      run: |
+        finch build --target ci --tag automated-security-helper:ci \
+          --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
+          --file Dockerfile .
