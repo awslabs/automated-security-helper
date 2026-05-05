@@ -143,6 +143,7 @@ jobs:
           platform: ${{ matrix.platform }}
           config-file: ${{ matrix.config-file }}
           snyk-token: ${{ secrets.SNYK_TOKEN }}
+          oci-runner: ${{ matrix.oci-runner }}
 
   # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)

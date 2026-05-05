@@ -19,12 +19,16 @@ inputs:
     description: "Snyk token for community plugin validation"
     required: false
     default: ""
+  oci-runner:
+    description: "OCI container runtime: docker, podman, or finch"
+    required: false
+    default: "docker"
 
 runs:
   using: "composite"
   steps:
     - name: Set up Docker Buildx on Linux
-      if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local' && env.OCI_RUNNER != 'finch'
+      if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local' && inputs.oci-runner != 'finch'
       uses: docker/setup-buildx-action@v4
 
     - name: Create output directory
