@@ -28,7 +28,7 @@ runs:
     - name: "podman: build container"
       if: inputs.runtime == 'podman'
       shell: bash
-      run: ash image build --oci-runner podman --force 2>&1 | tail -10
+      run: ash build-image --oci-runner podman --force 2>&1 | tail -10
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -59,4 +59,4 @@ runs:
     - name: "finch: build container"
       if: inputs.runtime == 'finch'
       shell: bash
-      run: ash image build --oci-runner finch --force 2>&1 | tail -10
+      run: ash build-image --oci-runner finch --force 2>&1 | tail -10

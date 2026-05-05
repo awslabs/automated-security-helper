@@ -184,7 +184,7 @@ jobs:
         run: podman --version
       - name: "podman: build container"
         if: matrix.method == 'podman'
-        run: ash image build --oci-runner podman --force 2>&1 | tail -10
+        run: ash build-image --oci-runner podman --force 2>&1 | tail -10
         continue-on-error: true
 
       # === finch ===
@@ -218,7 +218,7 @@ jobs:
         run: pip install .
       - name: "finch: build container"
         if: matrix.method == 'finch'
-        run: ash image build --oci-runner finch --force 2>&1 | tail -10
+        run: ash build-image --oci-runner finch --force 2>&1 | tail -10
         continue-on-error: true
 
       # === mcp ===
