@@ -120,18 +120,16 @@ jobs:
       - name: Install Finch
         if: matrix.oci-runner == 'finch'
         run: |
-          ARCH=$(uname -m)
-          if [ "$ARCH" = "x86_64" ]; then
-            curl -LO https://github.com/runfinch/finch/releases/latest/download/finch-linux-amd64.tar.gz
-            sudo tar -xzf finch-linux-amd64.tar.gz -C /usr/local
-            rm finch-linux-amd64.tar.gz
-          else
-            echo "Finch not available for $ARCH"
-            exit 1
-          fi
+          ARCH=$(dpkg --print-architecture)
+          DEB_URL=$(gh api repos/runfinch/finch/releases/latest --jq ".assets[] | select(.name | endswith(\"_${ARCH}.deb\")) | .browser_download_url" | head -1)
+          curl -fsSL -o finch.deb "$DEB_URL"
+          sudo dpkg -i finch.deb
+          rm finch.deb
           finch vm init || true
           finch vm start || true
           finch --version
+        env:
+          GH_TOKEN: ${{ github.token }}
       - uses: ./.github/actions/run-scan-test
         env:
           OCI_RUNNER: ${{ matrix.oci-runner }}
