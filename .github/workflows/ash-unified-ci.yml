@@ -120,7 +120,7 @@ jobs:
       - name: Install Finch
         if: matrix.oci-runner == 'finch'
         run: |
-          sudo apt-get remove -y containerd runc
+          sudo apt-get remove -y docker-ce docker-ce-cli containerd.io runc docker-buildx-plugin docker-compose-plugin 2>/dev/null; sudo apt-get autoremove -y
           sudo install -m 0755 -d /etc/apt/keyrings
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list

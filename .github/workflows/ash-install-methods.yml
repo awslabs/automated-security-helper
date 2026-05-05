@@ -190,7 +190,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sudo apt-get remove -y containerd runc
+          sudo apt-get remove -y docker-ce docker-ce-cli containerd.io runc docker-buildx-plugin docker-compose-plugin 2>/dev/null; sudo apt-get autoremove -y
           sudo install -m 0755 -d /etc/apt/keyrings
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
@@ -226,9 +226,9 @@ jobs:
       - name: "mcp: start server and health check"
         if: matrix.method == 'mcp'
         run: |
-          ash mcp &
+          sleep 5 | ash mcp &
           MCP_PID=$!
-          sleep 5
+          sleep 2
           if kill -0 $MCP_PID 2>/dev/null; then
             kill $MCP_PID
             wait $MCP_PID || :

@@ -25,9 +25,9 @@ runs:
     - name: "mcp: start server and health check"
       shell: bash
       run: |
-        ash mcp &
+        sleep 5 | ash mcp &
         MCP_PID=$!
-        sleep 5
+        sleep 2
         if kill -0 $MCP_PID 2>/dev/null; then
           kill $MCP_PID
           wait $MCP_PID || :
