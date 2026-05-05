@@ -53,7 +53,6 @@ def config_with_internal_fields(tmp_path):
     config_data = {
         "project_name": "test-project",
         "build": {"some": "value"},
-        "mcp-resource-management": {"enabled": True},
         "scanners": {
             "bandit": {
                 "enabled": True,
@@ -223,11 +222,96 @@ class TestConfigLinterUnit:
         invalid_section_issues = [
             i for i in result.issues if i.category == LintCategory.INVALID_SECTION
         ]
-        assert len(invalid_section_issues) == 2
+        assert len(invalid_section_issues) == 1
         paths = {i.path for i in invalid_section_issues}
         assert "build" in paths
-        assert "mcp-resource-management" in paths
         assert all(i.fixable for i in invalid_section_issues)
+
+    def test_lint_detects_mcp_resource_management(self, tmp_path):
+        """mcp-resource-management is a valid user-configurable field."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        # Users can configure MCP resource management in their configs
+        config_content = """project_name: my-project
+mcp-resource-management:
+  max_concurrent_scans: 5
+  scan_timeout_seconds: 3600
+  memory_warning_threshold_mb: 2048
+scanners:
+  bandit:
+    enabled: true
+"""
+        config_path.write_text(config_content)
+
+        result = ConfigLinter.lint(config_path)
+
+        # mcp-resource-management should NOT be flagged as invalid
+        mcp_issues = [
+            i
+            for i in result.issues
+            if "mcp-resource-management" in (i.path or "")
+            or "mcp-resource-management" in i.message
+        ]
+        assert len(mcp_issues) == 0
+        assert not result.has_errors
+
+    def test_lint_detects_mcp_underscore_variant(self, tmp_path):
+        """Should detect mcp_resource_management (underscore) as unknown field."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        # The underscore variant is NOT the correct YAML key (alias is hyphenated)
+        config_content = """project_name: my-project
+mcp_resource_management:
+  max_concurrent_scans: 5
+scanners:
+  bandit:
+    enabled: true
+"""
+        config_path.write_text(config_content)
+
+        result = ConfigLinter.lint(config_path)
+
+        unknown_issues = [
+            i
+            for i in result.issues
+            if i.category == LintCategory.UNKNOWN_FIELD
+            and "mcp_resource_management" in i.path
+        ]
+        assert len(unknown_issues) == 1
+        assert "Unknown top-level field" in unknown_issues[0].message
+
+    def test_fix_removes_build_but_keeps_mcp(self, tmp_path):
+        """--fix should remove 'build' but keep 'mcp-resource-management'."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_content = """project_name: my-project
+build:
+  some: value
+mcp-resource-management:
+  max_concurrent_scans: 5
+  scan_timeout_seconds: 3600
+global_settings:
+  severity_threshold: MEDIUM
+scanners:
+  bandit:
+    enabled: true
+"""
+        config_path.write_text(config_content)
+
+        fixed_content, fixed_issues = ConfigLinter.fix(config_path)
+
+        # Parse the fixed content
+        yaml_content = "\n".join(
+            line for line in fixed_content.split("\n") if not line.startswith("#")
+        )
+        fixed_data = yaml.safe_load(yaml_content)
+
+        # build should be removed (internal-only)
+        assert "build" not in fixed_data
+        # mcp-resource-management should be preserved (valid user config)
+        assert "mcp-resource-management" in fixed_data
+        assert fixed_data["mcp-resource-management"]["max_concurrent_scans"] == 5
+        assert fixed_data["project_name"] == "my-project"
 
     def test_lint_detects_missing_line_end(self, config_with_suppression_issues):
         """Should detect suppressions with line_start but no line_end."""
