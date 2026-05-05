@@ -84,6 +84,21 @@ global_settings:
     - path: tests/unit/utils/*.py
       rule_id: B108
       reason: Temp file path as string, not actual temp dir usage.
+    - rule_id: B110
+      path: automated_security_helper/**/*.py
+      reason: "try/except/pass used for graceful degradation in tool orchestrator — failures handled via return values"
+    - rule_id: B311
+      path: automated_security_helper/**/*.py
+      reason: "Standard random used for non-security purposes (request IDs, jitter, test data)"
+    - rule_id: B404
+      path: automated_security_helper/**/*.py
+      reason: "Subprocess module required — ASH is a tool orchestrator that invokes external scanners via subprocess with list args (no shell=True)"
+    - rule_id: B603
+      path: automated_security_helper/**/*.py
+      reason: "Subprocess calls use list args (no shell=True) with validated inputs from find_executable/shutil.which"
+    - rule_id: B607
+      path: automated_security_helper/**/*.py
+      reason: "Executable paths resolved via shutil.which() or find_executable() — not user-controlled partial paths"
     - path: tests/**/*.py
       rule_id: B404
       reason: Subprocess module used across test suite due to the nature of ASH itself being a tool orchestrator. These instances are in test suites and not in the code used at runtime.
