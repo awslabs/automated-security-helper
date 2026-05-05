@@ -33,6 +33,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter
 from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter import (
     CycloneDXReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter import (
+    GitLabCycloneDXReporterConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
     GitLabSASTReporterConfig,
 )
@@ -205,6 +208,13 @@ class ReporterConfigSegment(BaseModel):
         CycloneDXReporterConfig,
         Field(description="Configure the options for the CycloneDX reporter"),
     ] = CycloneDXReporterConfig()
+    gitlab_cyclonedx: Annotated[
+        GitLabCycloneDXReporterConfig,
+        Field(
+            description="Configure the options for the GitLab CycloneDX dependency scanning reporter",
+            alias="gitlab-cyclonedx",
+        ),
+    ] = GitLabCycloneDXReporterConfig()
     # Do the same for html, json, junitxml, ocsf, sarif, spdx, text, and yaml
     html: Annotated[
         HTMLReporterConfig,
