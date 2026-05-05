@@ -805,7 +805,7 @@ class TestFindingsCommand:
 
         mock_model_cls.load_model.return_value = None
 
-        findings_command(output_dir=Path("/tmp"), report_file="report.json")
+        findings_command(output_dir=Path("/tmp"), report_file="report.json")  # nosec B108
         mock_echo.assert_called_once()
         assert "No model" in mock_echo.call_args[0][0]
 
@@ -818,7 +818,7 @@ class TestFindingsCommand:
         mock_model_cls.load_model.return_value = MagicMock()
         mock_extract.return_value = []
 
-        findings_command(output_dir=Path("/tmp"), report_file="report.json")
+        findings_command(output_dir=Path("/tmp"), report_file="report.json")  # nosec B108
         mock_echo.assert_called_once()
         assert "No findings" in mock_echo.call_args[0][0]
 

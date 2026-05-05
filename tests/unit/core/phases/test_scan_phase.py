@@ -304,7 +304,7 @@ class TestErrorHandling:
         results = scan_phase._safe_execute_scanner(
             scanner_name="exploder",
             scanner_plugin=scanner_plugin,
-            scan_targets=[{"path": Path("/tmp"), "type": "source"}],
+            scan_targets=[{"path": Path("/tmp"), "type": "source"}],  # nosec B108
         )
 
         assert len(results) == 1
@@ -316,8 +316,8 @@ class TestErrorHandling:
     ):
         """In sequential mode, one scanner failing does not stop subsequent scanners."""
         scan_phase._scanner_tasks = [
-            ("failing_scanner", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
-            ("passing_scanner", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
+            ("failing_scanner", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
+            ("passing_scanner", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
 
         call_order = []
@@ -366,8 +366,8 @@ class TestProgressTracking:
     ):
         """Each scanner gets its own progress task in sequential mode."""
         scan_phase._scanner_tasks = [
-            ("scanner_a", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
-            ("scanner_b", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
+            ("scanner_a", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
+            ("scanner_b", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
         scan_phase._safe_execute_scanner = MagicMock(
             return_value=[ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)]
@@ -415,7 +415,7 @@ class TestExecuteScanner:
 
         scan_phase._global_ignore_paths = []
         scan_phase._completed_scanners = []
-        scan_phase.plugin_context.output_dir = Path("/tmp/out")
+        scan_phase.plugin_context.output_dir = Path("/tmp/out")  # nosec B108
 
         results = scan_phase._execute_scanner(
             scanner_name="trivy",
@@ -526,7 +526,7 @@ class TestParallelExecution:
     ):
         """With only one scanner task, parallel delegates to sequential."""
         scan_phase._scanner_tasks = [
-            ("solo", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
+            ("solo", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
         scan_phase._max_workers = 4
         scan_phase._execute_scanners_sequential = MagicMock(return_value=mock_aggregated_results)
@@ -542,9 +542,9 @@ class TestParallelExecution:
     ):
         """Multiple scanners are submitted to thread pool."""
         scan_phase._scanner_tasks = [
-            ("scanner_1", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
-            ("scanner_2", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
-            ("scanner_3", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
+            ("scanner_1", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
+            ("scanner_2", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
+            ("scanner_3", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
         scan_phase._max_workers = 2
 
@@ -585,8 +585,8 @@ class TestParallelExecution:
     ):
         """Exceptions from futures are caught and create failure containers."""
         scan_phase._scanner_tasks = [
-            ("crash_scan", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
-            ("good_scan", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
+            ("crash_scan", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
+            ("good_scan", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
         scan_phase._max_workers = 2
         scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
@@ -772,7 +772,7 @@ class TestSequentialExecution:
     ):
         """When _safe_execute_scanner returns None, a failure container is created."""
         scan_phase._scanner_tasks = [
-            ("none_scanner", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
+            ("none_scanner", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
         scan_phase._safe_execute_scanner = MagicMock(return_value=None)
         scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
@@ -791,9 +791,9 @@ class TestSequentialExecution:
     ):
         """completed counter advances regardless of success/failure."""
         scan_phase._scanner_tasks = [
-            ("s1", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
-            ("s2", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
-            ("s3", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),
+            ("s1", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
+            ("s2", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
+            ("s3", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
 
         call_order = []
