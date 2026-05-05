@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for get_changed_files() in automated_security_helper.utils.get_scan_set."""
+"""Tests for get_changed_files() and _filter_results_to_changed_files()."""
 
 import subprocess
 from pathlib import Path
@@ -10,6 +10,21 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from automated_security_helper.utils.get_scan_set import get_changed_files
+from automated_security_helper.interactions.run_ash_scan import _filter_results_to_changed_files
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactLocation,
+    Location,
+    Message1,
+    PhysicalLocation,
+    PhysicalLocation2,
+    Region,
+    Result,
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
+)
 
 
 class TestGetChangedFiles:
@@ -81,3 +96,117 @@ class TestGetChangedFiles:
             result = get_changed_files()
 
         assert result == [Path("a.py"), Path("b.py")]
+
+
+def _make_result(uri: str) -> Result:
+    """Helper: build a minimal SARIF Result pointing at *uri*."""
+    return Result(
+        message=Message1(text="test finding"),
+        locations=[
+            Location(
+                physicalLocation=PhysicalLocation(
+                    root=PhysicalLocation2(
+                        artifactLocation=ArtifactLocation(uri=uri),
+                        region=Region(startLine=1),
+                    )
+                )
+            )
+        ],
+    )
+
+
+def _make_results_with_sarif(result_list: list[Result]) -> AshAggregatedResults:
+    """Helper: build an AshAggregatedResults with one run containing *result_list*."""
+    sarif = SarifReport(
+        version="2.1.0",
+        runs=[
+            Run(
+                tool=Tool(driver=ToolComponent(name="test-tool")),
+                results=result_list,
+            )
+        ],
+    )
+    results = AshAggregatedResults()
+    results.sarif = sarif
+    return results
+
+
+class TestFilterResultsToChangedFiles:
+    """Unit tests for _filter_results_to_changed_files."""
+
+    def test_keeps_results_matching_changed_files(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "src" / "app.py").resolve()}
+
+        results = _make_results_with_sarif([
+            _make_result("src/app.py"),
+            _make_result("src/other.py"),
+        ])
+
+        filtered = _filter_results_to_changed_files(results, changed, source_dir)
+        run_results = filtered.sarif.runs[0].results
+        assert len(run_results) == 1
+        uri = run_results[0].locations[0].physicalLocation.root.artifactLocation.uri
+        assert uri == "src/app.py"
+
+    def test_strips_file_uri_prefix(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "lib" / "helper.js").resolve()}
+
+        # Scanners sometimes emit file://relative/path (non-standard but real)
+        results = _make_results_with_sarif([
+            _make_result("file://lib/helper.js"),
+        ])
+
+        filtered = _filter_results_to_changed_files(results, changed, source_dir)
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_strips_file_triple_slash_prefix(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        # file:///absolute/path -> after strip file:// we get /absolute/path
+        # For this to match, the changed set must use the same absolute path.
+        abs_path = (source_dir / "src" / "main.py").resolve()
+        changed = {abs_path}
+
+        # file:// + absolute path on disk: file:///Users/.../src/main.py
+        uri = "file://" + str(abs_path)
+        results = _make_results_with_sarif([_make_result(uri)])
+
+        filtered = _filter_results_to_changed_files(results, changed, source_dir)
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_empty_changed_set_removes_all(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+
+        results = _make_results_with_sarif([
+            _make_result("src/app.py"),
+            _make_result("src/other.py"),
+        ])
+
+        filtered = _filter_results_to_changed_files(results, set(), source_dir)
+        assert filtered.sarif.runs[0].results == []
+
+    def test_result_without_locations_is_kept(self, tmp_path):
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "x.py").resolve()}
+
+        no_loc_result = Result(message=Message1(text="no location"), locations=[])
+        results = _make_results_with_sarif([no_loc_result])
+
+        filtered = _filter_results_to_changed_files(results, changed, source_dir)
+        assert len(filtered.sarif.runs[0].results) == 1
+
+    def test_returns_results_unchanged_when_sarif_is_none(self):
+        results = AshAggregatedResults()
+        results.sarif = None
+        out = _filter_results_to_changed_files(results, set(), Path("/tmp"))
+        assert out is results
+
+    def test_none_results_returns_none(self):
+        out = _filter_results_to_changed_files(None, set(), Path("/tmp"))
+        assert out is None

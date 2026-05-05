@@ -55,37 +55,34 @@ def _filter_results_to_changed_files(
 ) -> "AshAggregatedResults":
     """Remove SARIF results whose primary location is not in *changed_files*.
 
-    Operates on the Pydantic model in-place and returns it for convenience.
+    Operates on the aggregated SARIF report in-place and returns results for
+    convenience.  If *changed_files* is empty, all findings are removed (no
+    files changed means zero relevant findings).
     """
-    for scanner_result in getattr(results, "scanner_results", []) or []:
-        sarif = getattr(scanner_result, "sarif_report", None)
-        if sarif is None:
+    if not results or not results.sarif or not results.sarif.runs:
+        return results
+    for run in results.sarif.runs:
+        if not run.results:
             continue
-        for run in getattr(sarif, "runs", []) or []:
-            original = getattr(run, "results", []) or []
-            filtered = []
-            for result in original:
-                locations = getattr(result, "locations", []) or []
-                keep = False
-                for loc in locations:
-                    phys = getattr(loc, "physical_location", None)
-                    if phys is None:
-                        continue
-                    artifact = getattr(phys, "artifact_location", None)
-                    if artifact is None:
-                        continue
-                    uri = getattr(artifact, "uri", None)
-                    if uri is None:
-                        continue
-                    # Resolve the URI against source_dir so we can compare
-                    # against the absolute changed-file set.
-                    resolved = Path(source_dir).joinpath(uri).resolve()
-                    if resolved in changed_files:
-                        keep = True
-                        break
-                if keep:
-                    filtered.append(result)
-            run.results = filtered
+        filtered = []
+        for result in run.results:
+            if not result.locations:
+                filtered.append(result)
+                continue
+            loc = result.locations[0]
+            if not loc.physicalLocation or not loc.physicalLocation.root.artifactLocation:
+                filtered.append(result)
+                continue
+            uri = loc.physicalLocation.root.artifactLocation.uri or ""
+            # Strip file:// prefix variants emitted by some scanners.
+            if uri.startswith("file://"):
+                uri = uri[7:]
+                if uri.startswith("///"):
+                    uri = uri[2:]
+            resolved = Path(source_dir).joinpath(uri).resolve()
+            if resolved in changed_files:
+                filtered.append(result)
+        run.results = filtered
     return results
 
 
@@ -213,6 +210,9 @@ def run_ash_scan(
     results = None
     # If mode is container, run the container version
     if mode == RunMode.container:
+        if changed_files_only:
+            logger.warning("--changed-files-only is not supported in container mode; performing full scan")
+
         # Pass the current context to run_ash_container
         new_args = []
 
