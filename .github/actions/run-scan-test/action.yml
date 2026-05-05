@@ -24,7 +24,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Docker Buildx on Linux
-      if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local'
+      if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local' && env.OCI_RUNNER != 'finch'
       uses: docker/setup-buildx-action@v4
 
     - name: Create output directory
