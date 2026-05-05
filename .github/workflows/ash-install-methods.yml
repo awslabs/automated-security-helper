@@ -193,11 +193,18 @@ jobs:
         run: brew install --cask finch
       - name: "finch: install (Linux)"
         if: matrix.method == 'finch' && runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -LO https://github.com/runfinch/finch/releases/latest/download/finch-linux-amd64.tar.gz
-          sudo tar -xzf finch-linux-amd64.tar.gz -C /usr/local
-          rm finch-linux-amd64.tar.gz
-        continue-on-error: true
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+          sudo apt-get update -q
+          ARCH=$(dpkg --print-architecture)
+          DEB_URL=$(gh api repos/runfinch/finch/releases/latest --jq ".assets[] | select(.name | endswith(\"_${ARCH}.deb\")) | .browser_download_url" | head -1)
+          curl -fsSL -o /tmp/finch.deb "$DEB_URL"
+          sudo apt-get install -y --no-install-recommends /tmp/finch.deb
+          rm /tmp/finch.deb
       - name: "finch: init VM"
         if: matrix.method == 'finch'
         run: finch vm init

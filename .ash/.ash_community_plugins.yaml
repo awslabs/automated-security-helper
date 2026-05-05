@@ -156,6 +156,42 @@ global_settings:
     - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
       path: "automated_security_helper/plugin_modules/ash_builtin/__init__.py"
       reason: "Lazy plugin loading uses hardcoded module paths"
+    - rule_id: B110
+      path: automated_security_helper/**/*.py
+      reason: "try/except/pass for graceful degradation in tool orchestrator"
+    - rule_id: B311
+      path: automated_security_helper/**/*.py
+      reason: "Standard random for non-security purposes"
+    - rule_id: B404
+      path: automated_security_helper/**/*.py
+      reason: "Subprocess module required — tool orchestrator pattern"
+    - rule_id: B603
+      path: automated_security_helper/**/*.py
+      reason: "Subprocess calls use list args with validated executables"
+    - rule_id: B607
+      path: automated_security_helper/**/*.py
+      reason: "Executable paths from find_executable/shutil.which"
+    - rule_id: B108
+      path: tests/**/*.py
+      reason: "Test fixtures use hardcoded temp paths"
+    - rule_id: B110
+      path: tests/**/*.py
+      reason: "Tests use try/except/pass for expected exceptions"
+    - rule_id: B311
+      path: tests/**/*.py
+      reason: "Test factories use seeded random"
+    - rule_id: B105
+      path: tests/**/*.py
+      reason: "Test fixtures with dummy credentials"
+    - rule_id: B110
+      path: hatch_build.py
+      reason: "Build hook graceful degradation"
+    - rule_id: B404
+      path: scripts/*.py
+      reason: "Build scripts invoke subprocesses"
+    - rule_id: B603
+      path: scripts/*.py
+      reason: "Build scripts use list-form subprocess"
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
