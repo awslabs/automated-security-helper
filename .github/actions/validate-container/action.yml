@@ -46,6 +46,8 @@ runs:
         curl -fsSL -o /tmp/finch.deb "$DEB_URL"
         sudo dpkg -i --force-depends --force-overwrite /tmp/finch.deb
         rm /tmp/finch.deb
+        sudo mkdir -p /var/lib/finch/nerdctl /etc/finch
+        sudo chmod 777 /var/lib/finch/nerdctl /etc/finch
     - name: "finch: init and start VM (macOS only)"
       if: inputs.runtime == 'finch' && runner.os == 'macOS'
       shell: bash
