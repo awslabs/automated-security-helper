@@ -43,21 +43,14 @@ jobs:
           - { os: ubuntu-24.04-arm, python-version: "3.10", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: podman }
-          - { os: macos-latest, python-version: "3.10", method: podman }
-          - { os: macos-latest, python-version: "3.11", method: podman }
-          - { os: macos-latest, python-version: "3.13", method: podman }
-          - { os: macos-14, python-version: "3.10", method: podman }
-          - { os: macos-14, python-version: "3.11", method: podman }
-          - { os: macos-14, python-version: "3.13", method: podman }
+          # Podman/Finch not on macOS (no nested virtualization on hosted runners)
+          - { os: macos-latest, method: podman }
+          - { os: macos-14, method: podman }
           - { os: ubuntu-latest, python-version: "3.10", method: finch }
           - { os: ubuntu-latest, python-version: "3.11", method: finch }
           - { os: ubuntu-latest, python-version: "3.13", method: finch }
-          - { os: macos-latest, python-version: "3.10", method: finch }
-          - { os: macos-latest, python-version: "3.11", method: finch }
-          - { os: macos-latest, python-version: "3.13", method: finch }
-          - { os: macos-14, python-version: "3.10", method: finch }
-          - { os: macos-14, python-version: "3.11", method: finch }
-          - { os: macos-14, python-version: "3.13", method: finch }
+          - { os: macos-latest, method: finch }
+          - { os: macos-14, method: finch }
           # Homebrew only needs one Python (formula validation)
           - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
