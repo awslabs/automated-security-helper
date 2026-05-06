@@ -16,10 +16,9 @@ ARG ASH_REPO_CLONE_URL="https://github.com/awslabs/automated-security-helper.git
 ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 ENV ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
 
-# Retry wrapper for network-dependent installs (3 attempts, exponential backoff)
-COPY with-retry.sh /usr/local/bin/with-retry
-
 # Install UV
+COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
+RUN chmod +x /usr/local/bin/with-retry
 RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 ENV PATH="/root/.local/bin:$PATH"
 
@@ -47,7 +46,6 @@ RUN uv build
 # Second stage: Core ASH image
 FROM ${BASE_IMAGE} AS core
 SHELL ["/bin/bash", "-c"]
-COPY with-retry.sh /usr/local/bin/with-retry
 ENV SHELL="bash"
 ARG BUILD_DATE_EPOCH="-1"
 ARG OFFLINE="NO"
@@ -70,6 +68,8 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 #
 # General / shared component installation
 #
+COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
+RUN chmod +x /usr/local/bin/with-retry
 WORKDIR /deps
 
 #
@@ -102,7 +102,7 @@ RUN set -uex; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
     mkdir -p /etc/apt/keyrings; \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    with-retry 'curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key' \
     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
     NODE_MAJOR=20; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
@@ -134,13 +134,13 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 #
 ARG CFN_NAG_VERSION="0.8.10"
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    with-retry "gem install cfn-nag -v ${CFN_NAG_VERSION}"
+    with-retry 'gem install cfn-nag -v ${CFN_NAG_VERSION}'
 
 #
 # JavaScript:
 #
 ARG NPM_VERSION="11.12.1"
-RUN with-retry "npm install -g npm@${NPM_VERSION}"
+RUN with-retry 'npm install -g npm@${NPM_VERSION}'
 RUN with-retry 'curl -o- -L https://yarnpkg.com/install.sh | bash'
 RUN with-retry 'curl -fsSL https://get.pnpm.io/install.sh | sh -'
 
@@ -154,21 +154,21 @@ RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 ARG SYFT_VERSION="v1.42.4"
-RUN with-retry "curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}"
+RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}'
 RUN syft --version
 
 ARG GRYPE_VERSION="v0.111.0"
-RUN with-retry "curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${GRYPE_VERSION}"
+RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${GRYPE_VERSION}'
 RUN grype --version
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
-    grype db update && \
+    with-retry 'grype db update' && \
     mkdir -p ${SEMGREP_RULES_CACHE_DIR} && \
-    for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
+    for i in $OFFLINE_SEMGREP_RULESETS; do with-retry "curl \"https://semgrep.dev/c/${i}\" -o \"${SEMGREP_RULES_CACHE_DIR}/$(basename \"${i}\").yml\""; done \
     fi
 
 ARG TRIVY_VERSION="v0.69.3"
-RUN with-retry "curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | sh -s -- -b /usr/local/bin ${TRIVY_VERSION}"
+RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | sh -s -- -b /usr/local/bin ${TRIVY_VERSION}'
 RUN trivy --version
 
 #
