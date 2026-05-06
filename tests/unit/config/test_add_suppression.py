@@ -42,14 +42,17 @@ class TestAddSuppressionToConfig:
 
     def test_appends_to_existing_suppressions(self, tmp_path: Path):
         config_path = tmp_path / ".ash.yaml"
-        initial = {
-            "global_settings": {
-                "suppressions": [
-                    {"rule_id": "OLD-001", "path": "old.py", "reason": "legacy"}
-                ]
-            }
-        }
-        config_path.write_text(yaml.safe_dump(initial))
+        initial = (
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - rule_id: OLD-001\n"
+            "      path: old.py\n"
+            "      reason: legacy\n"
+            "reporters:\n"
+            "  text:\n"
+            "    enabled: true\n"
+        )
+        config_path.write_text(initial)
 
         suppression = AshSuppression(
             rule_id="NEW-002",
@@ -66,11 +69,19 @@ class TestAddSuppressionToConfig:
 
     def test_preserves_unrelated_config_keys(self, tmp_path: Path):
         config_path = tmp_path / ".ash.yaml"
-        initial = {
-            "project_name": "my-project",
-            "global_settings": {"severity_threshold": "HIGH"},
-        }
-        config_path.write_text(yaml.safe_dump(initial))
+        initial = (
+            "project_name: my-project\n"
+            "global_settings:\n"
+            "  severity_threshold: HIGH\n"
+            "  suppressions:\n"
+            "    - rule_id: placeholder\n"
+            "      path: placeholder.py\n"
+            "      reason: placeholder\n"
+            "reporters:\n"
+            "  text:\n"
+            "    enabled: true\n"
+        )
+        config_path.write_text(initial)
 
         suppression = AshSuppression(
             rule_id="R-1",
@@ -82,7 +93,7 @@ class TestAddSuppressionToConfig:
         data = yaml.safe_load(config_path.read_text())
         assert data["project_name"] == "my-project"
         assert data["global_settings"]["severity_threshold"] == "HIGH"
-        assert len(data["global_settings"]["suppressions"]) == 1
+        assert len(data["global_settings"]["suppressions"]) == 2
 
     def test_includes_optional_fields(self, tmp_path: Path):
         config_path = tmp_path / ".ash.yaml"
@@ -122,7 +133,7 @@ class TestAddSuppressionToConfig:
 
     def test_handles_empty_existing_file(self, tmp_path: Path):
         config_path = tmp_path / ".ash.yaml"
-        config_path.write_text("")
+        config_path.write_text("")  # Empty file triggers the "create" path
 
         suppression = AshSuppression(
             rule_id="E-1",

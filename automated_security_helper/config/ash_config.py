@@ -737,8 +737,8 @@ def add_suppression_to_config(
     """
     suppression_dict = suppression.model_dump(exclude_none=True)
 
-    if not config_path.exists():
-        # No existing file -- create minimal structure with yaml.safe_dump
+    if not config_path.exists() or not config_path.read_text(encoding="utf-8").strip():
+        # No existing file or empty file -- create minimal structure with yaml.safe_dump
         config_path.parent.mkdir(parents=True, exist_ok=True)
         data: dict = {"global_settings": {"suppressions": [suppression_dict]}}
         with open(config_path, mode="w", encoding="utf-8") as f:

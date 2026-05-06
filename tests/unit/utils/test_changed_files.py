@@ -204,9 +204,9 @@ class TestFilterResultsToChangedFiles:
     def test_returns_results_unchanged_when_sarif_is_none(self):
         results = AshAggregatedResults()
         results.sarif = None
-        out = _filter_results_to_changed_files(results, set(), Path("/tmp"))
+        out = _filter_results_to_changed_files(results, set(), Path("/tmp"))  # nosec B108
         assert out is results
 
     def test_none_results_returns_none(self):
-        out = _filter_results_to_changed_files(None, set(), Path("/tmp"))
+        out = _filter_results_to_changed_files(None, set(), Path("/tmp"))  # nosec B108
         assert out is None
