@@ -129,19 +129,16 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 
 
 #
-# cfn-nag
+# cfn-nag (via Gemfile)
 #
-ARG CFN_NAG_VERSION="0.8.10"
+COPY Gemfile /deps/Gemfile
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    with-retry 'gem install cfn-nag -v ${CFN_NAG_VERSION}'
+    cd /deps && with-retry 'bundle install --jobs=4'
 
 #
-# JavaScript:
+# JavaScript: corepack manages npm/yarn/pnpm versions via package.json engines
 #
-ARG NPM_VERSION="11.12.1"
-RUN with-retry 'npm install -g npm@${NPM_VERSION}'
-RUN with-retry 'curl -o- -L https://yarnpkg.com/install.sh | bash'
-RUN with-retry 'curl -fsSL https://get.pnpm.io/install.sh | sh -'
+RUN corepack enable && corepack prepare yarn@stable --activate && corepack prepare pnpm@latest --activate
 
 
 #

@@ -19,6 +19,24 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Validate generated files are in sync
+  # ---------------------------------------------------------------------------
+  validate-generated:
+    name: "Validate generated files"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v6
+      - name: Check requirements.txt is up to date
+        run: |
+          uv export --format requirements-txt --no-hashes --no-dev --no-editable 2>/dev/null | grep -v "^\.$" > requirements.txt.check
+          if ! diff -q requirements.txt requirements.txt.check >/dev/null 2>&1; then
+            echo "::error::requirements.txt is out of date. Run 'uv export --format requirements-txt --no-hashes --no-dev --no-editable | grep -v \"^\\.\\$\" > requirements.txt' and commit."
+            diff requirements.txt requirements.txt.check || true
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
   # Unit tests: all OS x all Python versions (matches ash-repo-unit-tests.yml)
   # ---------------------------------------------------------------------------
   unit-test:

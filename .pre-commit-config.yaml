@@ -3,6 +3,12 @@
 repos:
   - repo: local
     hooks:
+      - id: export-requirements
+        name: Export requirements.txt via uv
+        entry: bash -c 'uv export --format requirements-txt --no-hashes --no-dev --no-editable 2>/dev/null | grep -v "^\.$" > requirements.txt && git add requirements.txt'
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
       - id: generate-schemas
         name: Generate ASH JSON schemas
         entry: uv run python -m automated_security_helper.schemas.generate_schemas
