@@ -130,7 +130,7 @@ jobs:
       # === uvx ===
       - name: "uvx: install uv (Unix)"
         if: matrix.method == 'uvx' && runner.os != 'Windows'
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+        run: bash automated_security_helper/assets/with-retry.sh "curl -LsSf https://astral.sh/uv/install.sh | sh"
       - name: "uvx: install uv (Windows)"
         if: matrix.method == 'uvx' && runner.os == 'Windows'
         run: irm https://astral.sh/uv/install.ps1 | iex
