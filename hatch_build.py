@@ -44,12 +44,6 @@ class CustomBuildHook(BuildHookInterface):
                         "No Dockerfile available - this may be expected for wheel-only builds"
                     )
 
-            # Copy Gemfile into the assets directory (needed for container builds)
-            gemfile_path = ASH_REPO_ROOT.joinpath("Gemfile")
-            gemfile_copy_path = ASH_ASSETS_PATH.joinpath("Gemfile")
-            if gemfile_path.exists():
-                gemfile_copy_path.write_text(gemfile_path.read_text())
-                print(f"Successfully copied Gemfile to {gemfile_copy_path}")
 
             # Handle Git commit SHA
             commit_sha = self._get_commit_sha()

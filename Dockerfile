@@ -131,7 +131,7 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 #
 # cfn-nag (via Gemfile)
 #
-COPY Gemfile /deps/Gemfile
+COPY automated_security_helper/assets/Gemfile /deps/Gemfile
 RUN echo "gem: --no-document" >> /etc/gemrc && \
     cd /deps && with-retry 'bundle install --jobs=4'
 

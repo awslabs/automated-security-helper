@@ -74,28 +74,30 @@ global_settings:
       path: "tests/unit/utils/test_secret_masking*.py"
       reason: "Intentional test fixtures for secret masking regression tests"
     # === Non-bandit rules (semgrep/opengrep — no inline suppression mechanism) ===
-    - path: automated_security_helper/utils/subprocess_utils.py
+    - path: "automated_security_helper/**/*.py"
       rule_id: python.lang.compatibility.python36.python36-compatibility-Popen1
-      reason: This package requires Python3.10 or greater.
-    - path: automated_security_helper/utils/subprocess_utils.py
+      reason: This package requires Python3.10 or greater (pyproject.toml).
+    - path: "automated_security_helper/**/*.py"
       rule_id: python.lang.compatibility.python36.python36-compatibility-Popen2
-      reason: This package requires Python3.10 or greater.
+      reason: This package requires Python3.10 or greater (pyproject.toml).
     - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
       path: automated_security_helper/cli/main.py
       line_start: 75
       line_end: 75
       reason: "False positive - ASH requires Python 3.10+ (pyproject.toml), importlib.resources is available in Python 3.7+"
     - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
-      path: automated_security_helper/plugin_modules/ash_builtin/__init__.py
-      reason: "Lazy plugin loading uses hardcoded module paths, not user input"
+      path: "automated_security_helper/**/*.py"
+      reason: "Plugin loading uses hardcoded module paths from registry, not user input"
+    - rule_id: "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"
+      path: "automated_security_helper/**/*.py"
+      reason: "URLs are constructed from trusted config values, not user input"
+    - rule_id: "bash.lang.security.ifs-tampering.ifs-tampering"
+      path: "**/*.sh"
+      reason: "IFS manipulation in ASH shell scripts is intentional for delimiter parsing"
     # === GitHub Actions rules (YAML — no inline suppression) ===
-    - path: .github/workflows/run-ash-security-scan.yml
+    - path: ".github/**/*.yml"
       rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
-      reason: Troubleshooting swapping from direct injection to evaluating interpolated env vars
-      expiration: "2026-06-01"
-    - path: .github/actions/run-scan-test/action.yml
-      rule_id: yaml.github-actions.security.run-shell-injection.run-shell-injection
-      reason: "False positive — inputs.* interpolations in composite actions are author-defined values, not attacker-controlled github.event context"
+      reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

@@ -37,9 +37,9 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     config: Annotated[
         str,
         Field(
-            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.",
         ),
-    ] = "auto"
+    ] = "p/ci"
 
     exclude: Annotated[
         List[str],
@@ -313,7 +313,6 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                     )
                 )
         else:
-            # In online mode, use config=auto
             self.args.extra_args.append(
                 ToolExtraArg(
                     key="--config",
