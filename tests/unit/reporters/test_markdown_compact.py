@@ -182,6 +182,23 @@ class TestMarkdownCompactMode:
         assert "## Summary" in output
         assert "### Scanner Results" in output
 
+    @patch(
+        "automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter.get_unified_scanner_metrics"
+    )
+    def test_compact_all_scanners_filtered_produces_valid_output(
+        self, mock_metrics, model_with_scanners, test_plugin_context
+    ):
+        """When all scanners are SKIPPED or zero-finding in compact mode, output is still valid markdown."""
+        mock_metrics.return_value = [
+            _make_scanner_metric("bandit", "SKIPPED"),
+            _make_scanner_metric("checkov", "PASSED", total=0),
+        ]
+
+        output = self._render(model_with_scanners, test_plugin_context, compact=True)
+        assert "### Scanner Results" in output
+        assert "bandit" not in output
+        assert "checkov" not in output
+
     def test_compact_option_defaults_to_false(self):
         """The compact option defaults to False."""
         opts = MarkdownReporterConfigOptions()
