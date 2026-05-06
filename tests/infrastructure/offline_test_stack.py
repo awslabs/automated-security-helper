@@ -118,6 +118,20 @@ class OfflineTestStack(cdk.Stack):
             subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
         )
 
+        # ECR endpoints -- required for container image pulls in isolated VPC
+        vpc.add_interface_endpoint(
+            "ecr-api-endpoint",
+            service=ec2.InterfaceVpcEndpointAwsService.ECR,
+            security_groups=[sg],
+            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+        )
+        vpc.add_interface_endpoint(
+            "ecr-dkr-endpoint",
+            service=ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER,
+            security_groups=[sg],
+            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+        )
+
         # ------------------------------------------------------------------
         # IAM role for the EC2 instance
         # ------------------------------------------------------------------
