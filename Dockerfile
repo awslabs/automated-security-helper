@@ -17,7 +17,9 @@ ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 ENV ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
 
 # Install UV
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
+RUN chmod +x /usr/local/bin/with-retry
+RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /src
@@ -66,6 +68,8 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 #
 # General / shared component installation
 #
+COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
+RUN chmod +x /usr/local/bin/with-retry
 WORKDIR /deps
 
 #
@@ -108,14 +112,14 @@ RUN set -uex; \
 #
 # Install UV in the core stage
 #
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 ENV PATH="/root/.local/bin:$PATH"
 
 #
 # Python (no-op other than updating pip --- Python deps managed via Poetry @ pyproject.toml)
 #
-RUN curl -sSf https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py
-RUN python3 -m pip install --no-cache-dir --upgrade pip
+RUN with-retry 'curl -sSf https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py'
+RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 
 # #
 # # Git (git-secrets)
@@ -130,15 +134,15 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip
 #
 ARG CFN_NAG_VERSION="0.8.10"
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    gem install cfn-nag -v ${CFN_NAG_VERSION}
+    with-retry 'gem install cfn-nag -v ${CFN_NAG_VERSION}'
 
 #
 # JavaScript:
 #
 ARG NPM_VERSION="11.12.1"
-RUN npm install -g npm@${NPM_VERSION}
-RUN curl -o- -L https://yarnpkg.com/install.sh | bash
-RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
+RUN with-retry 'npm install -g npm@${NPM_VERSION}'
+RUN with-retry 'curl -o- -L https://yarnpkg.com/install.sh | bash'
+RUN with-retry 'curl -fsSL https://get.pnpm.io/install.sh | sh -'
 
 
 #
@@ -150,24 +154,21 @@ RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 ARG SYFT_VERSION="v1.42.4"
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | \
-    sh -s -- -b /usr/local/bin ${SYFT_VERSION}
+RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}'
 RUN syft --version
 
 ARG GRYPE_VERSION="v0.111.0"
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | \
-    sh -s -- -b /usr/local/bin ${GRYPE_VERSION}
+RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${GRYPE_VERSION}'
 RUN grype --version
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
-    grype db update && \
+    with-retry 'grype db update' && \
     mkdir -p ${SEMGREP_RULES_CACHE_DIR} && \
-    for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
+    for i in $OFFLINE_SEMGREP_RULESETS; do with-retry "curl \"https://semgrep.dev/c/${i}\" -o \"${SEMGREP_RULES_CACHE_DIR}/$(basename \"${i}\").yml\""; done \
     fi
 
 ARG TRIVY_VERSION="v0.69.3"
-RUN curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | \
-    sh -s -- -b /usr/local/bin ${TRIVY_VERSION}
+RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | sh -s -- -b /usr/local/bin ${TRIVY_VERSION}'
 RUN trivy --version
 
 #
