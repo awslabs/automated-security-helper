@@ -250,7 +250,11 @@ def resolve_config(
                 ASH_LOGGER.warning("Using default configuration due to file load error")
                 # Apply overrides to default config if provided
                 if config_overrides and config:
-                    return apply_config_overrides(config, config_overrides)
+                    config = apply_config_overrides(config, config_overrides)
+                config._resolution_warnings.append(
+                    f"Failed to load configuration file: {str(e)}. "
+                    "Using default configuration — suppressions and custom settings are NOT active."
+                )
                 return config  # Return default config on file error
             else:
                 raise e
@@ -263,7 +267,12 @@ def resolve_config(
                 )
                 # Apply overrides to default config if provided
                 if config_overrides and config:
-                    return apply_config_overrides(config, config_overrides)
+                    config = apply_config_overrides(config, config_overrides)
+                config._resolution_warnings.append(
+                    f"Configuration validation failed: {str(e)}. "
+                    "Using default configuration — suppressions and custom settings are NOT active. "
+                    "Run 'ash config lint' to identify and fix issues."
+                )
                 return config  # Return default config on validation error
             else:
                 raise e

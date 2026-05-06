@@ -430,7 +430,7 @@ def lint(
         bool,
         typer.Option(
             "--fix-unused",
-            help="Remove unused suppressions based on the last scan's unused suppressions report",
+            help="Comment out unused suppressions based on the last scan's unused suppressions report",
         ),
     ] = False,
     non_interactive: Annotated[
@@ -619,7 +619,7 @@ def _apply_unused_fixes(
     non_interactive: bool,
     color: bool,
 ) -> None:
-    """Remove unused suppressions from the config file."""
+    """Comment out unused suppressions in the config file."""
     from automated_security_helper.config.config_linter import ConfigLinter
 
     # Check report age first
@@ -653,7 +653,7 @@ def _apply_unused_fixes(
 
         if not non_interactive:
             confirm = typer.confirm(
-                "\nProceed with removing unused suppressions based on this old report?"
+                "\nProceed with commenting out unused suppressions based on this old report?"
             )
             if not confirm:
                 typer.secho("Aborted.", fg=typer.colors.YELLOW)
@@ -665,25 +665,25 @@ def _apply_unused_fixes(
     )
 
     if not fixed_issues:
-        typer.secho("✅ No unused suppressions to remove.", fg=typer.colors.GREEN)
+        typer.secho("✅ No unused suppressions to comment out.", fg=typer.colors.GREEN)
         return
 
     typer.secho(
-        f"\n🗑️  Removing {len(fixed_issues)} unused suppression(s):",
+        f"\n💬 Commenting out {len(fixed_issues)} unused suppression(s):",
         fg=typer.colors.BLUE,
     )
     for issue in fixed_issues:
         typer.secho(f"  • {issue.message}", fg=typer.colors.CYAN)
 
     if not non_interactive:
-        confirm = typer.confirm("\nRemove these unused suppressions?")
+        confirm = typer.confirm("\nComment out these unused suppressions?")
         if not confirm:
             typer.secho("Aborted.", fg=typer.colors.YELLOW)
             raise typer.Exit(0)
 
     config_path.write_text(fixed_content, encoding="utf-8")
     typer.secho(
-        f"\n✅ Removed {len(fixed_issues)} unused suppression(s) from {config_path}",
+        f"\n✅ Commented out {len(fixed_issues)} unused suppression(s) in {config_path}",
         fg=typer.colors.GREEN,
     )
 

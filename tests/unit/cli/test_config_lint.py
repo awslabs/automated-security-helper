@@ -468,7 +468,7 @@ scanners:
         assert suppressions[1]["path"] == "src/d.py"
 
     def test_fix_unused_suppressions(self, config_with_unused_suppressions):
-        """Should remove unused suppressions based on the report."""
+        """Should comment out unused suppressions based on the report."""
         fixed_content, fixed_issues, timestamp = ConfigLinter.fix_unused_suppressions(
             config_with_unused_suppressions
         )
@@ -476,13 +476,30 @@ scanners:
         assert len(fixed_issues) == 2
         assert timestamp is not None
 
-        yaml_content = "\n".join(
-            line for line in fixed_content.split("\n") if not line.startswith("#")
-        )
-        fixed_data = yaml.safe_load(yaml_content)
+        # Verify the unused suppressions are commented out, not removed
+        assert "# [ash-lint" in fixed_content
+        assert "unused suppression" in fixed_content
 
-        suppressions = fixed_data["global_settings"]["suppressions"]
-        # Only the "still_needed" suppression should remain
+        # The commented-out suppressions should still be in the file as comments
+        assert (
+            "# - path: src/app.py" in fixed_content
+            or "# - path: 'src/app.py'" in fixed_content
+        )
+        assert (
+            "# - path: src/old_file.py" in fixed_content
+            or "# - path: 'src/old_file.py'" in fixed_content
+        )
+
+        # The "still_needed" suppression should remain active (not commented)
+        # Parse only non-commented lines to verify
+        active_yaml = "\n".join(
+            line
+            for line in fixed_content.split("\n")
+            if not line.strip().startswith("#")
+        )
+        active_data = yaml.safe_load(active_yaml)
+
+        suppressions = active_data["global_settings"]["suppressions"]
         assert len(suppressions) == 1
         assert suppressions[0]["path"] == "src/still_needed.py"
 
@@ -639,10 +656,10 @@ class TestConfigLintCLI:
         first_supp = next(s for s in suppressions if s["path"] == "src/app.py")
         assert first_supp["line_end"] == 42
 
-    def test_lint_fix_unused_removes_suppressions(
+    def test_lint_fix_unused_comments_out_suppressions(
         self, cli_runner, config_with_unused_suppressions
     ):
-        """--fix-unused should remove unused suppressions."""
+        """--fix-unused should comment out unused suppressions, not remove them."""
         result = cli_runner.invoke(
             config_app,
             [
@@ -655,10 +672,19 @@ class TestConfigLintCLI:
         )
         assert result.exit_code == 0
 
-        with open(config_with_unused_suppressions) as f:
-            fixed_data = yaml.safe_load(f)
+        raw_content = config_with_unused_suppressions.read_text()
 
-        suppressions = fixed_data["global_settings"]["suppressions"]
+        # Verify suppressions are commented out with a note
+        assert "# [ash-lint" in raw_content
+        assert "unused suppression" in raw_content
+
+        # Parse only active (non-commented) YAML to verify
+        active_yaml = "\n".join(
+            line for line in raw_content.split("\n") if not line.strip().startswith("#")
+        )
+        active_data = yaml.safe_load(active_yaml)
+
+        suppressions = active_data["global_settings"]["suppressions"]
         assert len(suppressions) == 1
         assert suppressions[0]["path"] == "src/still_needed.py"
 

@@ -229,14 +229,19 @@ class ConfigLinter:
         config_path: Path,
         output_dir: Optional[Path] = None,
     ) -> Tuple[str, List[LintIssue], Optional[datetime]]:
-        """Remove unused suppressions from the config based on the unused suppressions report.
+        """Comment out unused suppressions in the config based on the unused suppressions report.
+
+        Instead of removing unused suppressions entirely, this method comments them out
+        with a note including the date and reason. This is safer because a suppression
+        that appears unused in local mode might be needed in CI where different scanners
+        are available.
 
         Args:
             config_path: Path to the configuration file
             output_dir: Path to the ASH output directory
 
         Returns:
-            Tuple of (fixed_content, list_of_removed_suppressions, report_timestamp)
+            Tuple of (fixed_content, list_of_commented_suppressions, report_timestamp)
         """
         config_data = cls._load_config(config_path)
         raw_content = config_path.read_text(encoding="utf-8")
@@ -255,44 +260,151 @@ class ConfigLinter:
         if not unused_suppressions:
             return raw_content, [], report_timestamp
 
-        # Remove unused suppressions from config
-        fixed_issues: List[LintIssue] = []
-        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
-
         # Build a set of unused suppression identifiers for matching
         unused_ids = set()
         for unused in unused_suppressions:
             unused_id = cls._make_suppression_id(unused)
             unused_ids.add(unused_id)
 
-        # Filter out unused suppressions
-        remaining_suppressions = []
+        # Work with the raw YAML lines to comment out unused suppressions
+        fixed_issues: List[LintIssue] = []
+        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
+
+        # Identify which suppression indices are unused
+        unused_indices = set()
         for i, suppression in enumerate(suppressions):
             supp_id = cls._make_suppression_id(suppression)
             if supp_id in unused_ids:
+                unused_indices.add(i)
                 fixed_issues.append(
                     LintIssue(
                         severity=LintSeverity.INFO,
                         category=LintCategory.SUPPRESSION_UNUSED,
-                        message=f"Removed unused suppression: path='{suppression.get('path', '')}', rule_id='{suppression.get('rule_id', '*')}'",
+                        message=f"Commented out unused suppression: path='{suppression.get('path', '')}', rule_id='{suppression.get('rule_id', '*')}'",
                         path=f"global_settings.suppressions[{i}]",
                         fixable=True,
-                        fix_description="Remove unused suppression",
+                        fix_description="Comment out unused suppression",
                     )
                 )
-            else:
-                remaining_suppressions.append(suppression)
 
-        # Update the config data
-        if "global_settings" in config_data:
-            config_data["global_settings"]["suppressions"] = remaining_suppressions
+        if not unused_indices:
+            return raw_content, [], report_timestamp
 
-        # Generate the fixed content
-        fixed_content = cls._generate_config_content(
-            config_path, raw_content, config_data
+        # Comment out the unused suppressions in the raw YAML
+        today = datetime.now().strftime("%Y-%m-%d")
+        fixed_content = cls._comment_out_suppressions(
+            raw_content, suppressions, unused_indices, today
         )
 
         return fixed_content, fixed_issues, report_timestamp
+
+    @classmethod
+    def _comment_out_suppressions(
+        cls,
+        raw_content: str,
+        suppressions: List[Dict[str, Any]],
+        unused_indices: set,
+        date_str: str,
+    ) -> str:
+        """Comment out specific suppressions in the raw YAML content.
+
+        Finds each suppression block in the YAML and comments it out with a note.
+        """
+        lines = raw_content.split("\n")
+        result_lines = []
+
+        # Find the suppressions list in the YAML by locating suppression entries
+        # Each suppression starts with "- path:" at the appropriate indentation
+        in_suppressions_section = False
+        current_suppression_idx = -1
+        suppression_indent = None
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.lstrip()
+
+            # Detect entry into the suppressions section
+            if stripped.startswith("suppressions:") and not stripped.startswith("#"):
+                in_suppressions_section = True
+                current_suppression_idx = -1
+                suppression_indent = None
+                result_lines.append(line)
+                i += 1
+                continue
+
+            # If we're in the suppressions section, look for list items
+            if in_suppressions_section:
+                # Detect end of suppressions section (less or equal indentation, non-empty, non-comment)
+                if stripped and not stripped.startswith("#"):
+                    line_indent = len(line) - len(line.lstrip())
+                    if suppression_indent is not None and line_indent <= (
+                        suppression_indent - 2
+                    ):
+                        # We've left the suppressions section
+                        in_suppressions_section = False
+                        result_lines.append(line)
+                        i += 1
+                        continue
+
+                # Detect a new suppression entry (starts with "- ")
+                if stripped.startswith("- ") and not stripped.startswith("#"):
+                    current_suppression_idx += 1
+                    if suppression_indent is None:
+                        suppression_indent = len(line) - len(line.lstrip())
+
+                    if current_suppression_idx in unused_indices:
+                        # Comment out this entire suppression block
+                        comment_note = f"{' ' * suppression_indent}# [ash-lint {date_str}] Commented out: unused suppression (not matched in last scan)"
+                        result_lines.append(comment_note)
+
+                        # Comment out the first line of the suppression
+                        result_lines.append(f"{' ' * suppression_indent}# {stripped}")
+                        i += 1
+
+                        # Comment out continuation lines (indented more than the "- " line)
+                        while i < len(lines):
+                            next_line = lines[i]
+                            next_stripped = next_line.lstrip()
+                            next_indent = len(next_line) - len(next_line.lstrip())
+
+                            # Stop if we hit another list item at same level, a blank line
+                            # followed by non-continuation, or less indentation
+                            if next_stripped == "":
+                                result_lines.append(next_line)
+                                i += 1
+                                continue
+                            if (
+                                next_stripped.startswith("- ")
+                                and next_indent <= suppression_indent
+                            ):
+                                break
+                            if (
+                                next_indent <= suppression_indent
+                                and not next_stripped.startswith("#")
+                            ):
+                                break
+
+                            # Comment out this continuation line
+                            result_lines.append(
+                                f"{' ' * suppression_indent}# {next_stripped}"
+                            )
+                            i += 1
+                        continue
+                    else:
+                        result_lines.append(line)
+                        i += 1
+                        continue
+                else:
+                    result_lines.append(line)
+                    i += 1
+                    continue
+            else:
+                result_lines.append(line)
+                i += 1
+                continue
+
+        return "\n".join(result_lines)
 
     @classmethod
     def get_unused_report_age(

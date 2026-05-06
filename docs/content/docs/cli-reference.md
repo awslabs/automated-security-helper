@@ -140,6 +140,7 @@ ash config [subcommand] [options]
 | `get`      | Display current configuration                                    |
 | `update`   | Update configuration values                                      |
 | `validate` | Validate configuration file against JSON schema and check syntax |
+| `lint`     | Lint configuration for issues and optionally auto-fix them       |
 
 ### Config Options
 
@@ -150,6 +151,10 @@ ash config [subcommand] [options]
 | `--set`              | Set configuration values (with `update`)        |                  |                      |
 | `--dry-run`          | Preview changes without writing (with `update`) | `False`          |                      |
 | `--force`            | Overwrite existing config file (with `init`)    | `False`          |                      |
+| `--fix`              | Auto-fix common issues (with `lint`)            | `False`          |                      |
+| `--fix-unused`       | Comment out unused suppressions (with `lint`)   | `False`          |                      |
+| `--non-interactive`  | Skip confirmation prompts (with `lint`)         | `False`          |                      |
+| `--output-dir`, `-o` | Path to ASH output directory (with `lint`)      | `.ash/ash_output`|                      |
 | `--debug`, `-d`      | Enable debug logging                            | `False`          | `ASH_DEBUG`          |
 | `--verbose`, `-v`    | Enable verbose logging                          | `False`          | `ASH_VERBOSE`        |
 | `--no-color`         | Disable colored output                          | `False`          | `ASH_NO_COLOR`       |
@@ -183,6 +188,21 @@ ash config validate --config /path/to/config.yaml
 
 # Validate with verbose output showing all checks
 ash config validate --verbose
+
+# Lint configuration for issues
+ash config lint
+
+# Lint and auto-fix common issues
+ash config lint --fix
+
+# Lint, fix, and comment out unused suppressions
+ash config lint --fix --fix-unused
+
+# Non-interactive mode (for pre-commit hooks and CI/CD)
+ash config lint --fix --fix-unused --non-interactive
+
+# Lint a specific config file
+ash config lint --config path/to/config.yaml
 ```
 
 ### Config Validate Details
@@ -233,6 +253,66 @@ Please fix these errors and try again.
 - Verify configuration after manual edits
 - CI/CD pipeline checks to ensure valid configuration
 - Pre-deployment validation in automated workflows
+
+### Config Lint Details
+
+The `ash config lint` command performs all validation checks plus additional lint checks that can identify and auto-fix common configuration issues:
+
+**Lint Checks:**
+- **All validation checks**: Same checks as `ash config validate`
+- **Internal fields**: Detects internal-only fields leaked from older `ash config init` versions (e.g., `name`, `extension`, `tool_version` in scanner configs)
+- **Invalid sections**: Detects internal top-level sections like `build` that shouldn't be in user configs
+- **Missing line_end**: Detects suppressions with `line_start` but no `line_end`
+- **Expired suppressions**: Detects suppressions past their expiration date
+- **Unused suppressions**: Detects suppressions not matching any findings (requires `--fix-unused`)
+
+**Auto-fix Behavior (`--fix`):**
+- Removes internal-only fields from scanner/reporter/converter configs
+- Removes invalid top-level sections (e.g., `build`)
+- Sets `line_end` equal to `line_start` when missing
+- Removes expired suppressions
+
+**Unused Suppression Handling (`--fix-unused`):**
+- Comments out unused suppressions instead of removing them
+- Adds a dated note explaining why they were commented out
+- Preserves suppressions for easy re-activation if needed
+- This is intentionally conservative: a suppression unused locally may still be needed in CI/CD where different scanners are available
+
+**Non-interactive Mode (`--non-interactive` / `--yes` / `-y`):**
+- Skips all confirmation prompts
+- Useful for pre-commit hooks and CI/CD pipelines
+- Warns (but proceeds) when the unused suppressions report is older than 1 hour
+
+**Exit Codes:**
+- `0`: No errors found (warnings and info are acceptable)
+- `1`: Configuration has errors that need attention
+
+**Example Output:**
+
+```bash
+$ ash config lint
+Linting configuration file: .ash/.ash.yaml
+
+Found 3 issue(s):
+  ❌ Scanner 'bandit' contains internal-only field 'name' [auto-fixable]
+  ⚠️  Suppression has 'line_start' (42) but missing 'line_end' [auto-fixable]
+  ⚠️  Suppression has expired (expiration: 2024-01-01) [auto-fixable]
+
+  Errors: 1
+  Warnings: 2
+
+💡 3 issue(s) can be auto-fixed. Run with --fix to apply fixes.
+
+$ ash config lint --fix --non-interactive
+Linting configuration file: .ash/.ash.yaml
+
+🔧 Fixing 3 issue(s):
+  • Remove internal field 'name' from scanner 'bandit'
+  • Set line_end = 42 (same as line_start)
+  • Remove expired suppression
+
+✅ Fixed 3 issue(s) in .ash/.ash.yaml
+```
 
 ## Plugin Command
 
