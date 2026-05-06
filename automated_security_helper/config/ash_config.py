@@ -727,6 +727,64 @@ class AshConfig(BaseModel):
         return found
 
 
+def add_suppression_to_config(
+    config_path: Path, suppression: AshSuppression
+) -> None:
+    """Append a suppression to the suppressions list in an .ash.yaml config file.
+
+    If the file does not exist it is created with a minimal structure.
+    Existing content is preserved including YAML comments.
+    """
+    suppression_dict = suppression.model_dump(exclude_none=True)
+
+    if not config_path.exists():
+        # No existing file -- create minimal structure with yaml.safe_dump
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        data: dict = {"global_settings": {"suppressions": [suppression_dict]}}
+        with open(config_path, mode="w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+        return
+
+    content = config_path.read_text(encoding="utf-8")
+
+    # Find the suppressions list indentation and append preserving formatting
+    match = re.search(r'^(\s+)- (path|rule_id):', content, re.MULTILINE)
+    if match:
+        indent = match.group(1)
+    else:
+        indent = "    "
+
+    # Build the new entry
+    entry_lines = [f"{indent}- rule_id: {suppression_dict['rule_id']}"]
+    if 'path' in suppression_dict:
+        entry_lines.append(f"{indent}  path: {suppression_dict['path']}")
+    if 'reason' in suppression_dict:
+        entry_lines.append(f"{indent}  reason: \"{suppression_dict['reason']}\"")
+    if 'line_start' in suppression_dict:
+        entry_lines.append(f"{indent}  line_start: {suppression_dict['line_start']}")
+    if 'line_end' in suppression_dict:
+        entry_lines.append(f"{indent}  line_end: {suppression_dict['line_end']}")
+
+    new_entry = "\n".join(entry_lines)
+
+    # Insert before the first non-suppression section after suppressions
+    # Find "ignore_paths:" or "reporters:" which follows suppressions
+    suppressions_pos = content.find('suppressions:')
+    for marker in ['ignore_paths:', 'reporters:', 'scanners:']:
+        marker_pos = content.find(marker)
+        if marker_pos > suppressions_pos > -1:
+            content = content[:marker_pos] + new_entry + "\n" + content[marker_pos:]
+            break
+    else:
+        raise ValueError(
+            f"Cannot determine insertion point for suppression in {config_path}. "
+            "Ensure the config has an 'ignore_paths:', 'reporters:', or 'scanners:' "
+            "section after 'suppressions:'."
+        )
+
+    config_path.write_text(content, encoding="utf-8")
+
+
 BuildConfig.model_rebuild()
 ConverterConfigSegment.model_rebuild()
 ScannerConfigSegment.model_rebuild()

@@ -8,8 +8,7 @@ from automated_security_helper.plugins.events import AshEventType
 
 def _load_module(module_path: str):
     """Import a module by its dotted path and return it."""
-    # nosec
-    return importlib.import_module(module_path)  # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
+    return importlib.import_module(module_path)  # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import  # nosec  # noqa: S102
 
 
 def _load_builtin_plugins():

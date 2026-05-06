@@ -4,12 +4,38 @@
 """Utility functions for matching findings against suppression rules."""
 
 import fnmatch
+import re
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.log import ASH_LOGGER
+
+# Regex patterns for inline suppression comments.
+# Supported formats:
+#   # ash-ignore: RULE-ID [reason]
+#   # ash-ignore-next-line: RULE-ID [reason]
+# The leading ``#`` can be preceded by any amount of whitespace (to handle
+# indented code) and is followed by a single space before the directive.
+_INLINE_PATTERN = re.compile(
+    r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+)
+_NEXT_LINE_PATTERN = re.compile(
+    r"#\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+)
+
+
+@dataclass(frozen=True)
+class InlineSuppression:
+    """A suppression directive parsed from an inline source comment."""
+
+    line_number: int
+    """The source line that the suppression applies to."""
+    rule_id: str
+    reason: str
 
 
 def matches_suppression(
@@ -299,3 +325,79 @@ def check_for_expiring_suppressions(
                 )
 
     return expiring_suppressions
+
+
+def find_inline_suppressions(file_path: Path) -> List[InlineSuppression]:
+    """Scan a source file for inline suppression comments.
+
+    Recognised directives:
+
+    * ``# ash-ignore: <rule-id> [reason]``  --  suppresses the finding on
+      the *same* line as the comment.
+    * ``# ash-ignore-next-line: <rule-id> [reason]``  --  suppresses the
+      finding on the *next* line.
+
+    Args:
+        file_path: Path to the source file to scan.
+
+    Returns:
+        List of ``InlineSuppression`` instances, one per directive found.
+    """
+    suppressions: List[InlineSuppression] = []
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    except (OSError, UnicodeDecodeError) as exc:
+        ASH_LOGGER.debug(f"Could not read {file_path} for inline suppressions: {exc}")
+        return suppressions
+
+    for line_num_0, line in enumerate(text.splitlines()):
+        line_num = line_num_0 + 1  # 1-based
+
+        # Skip if the # is inside a string literal (state machine approach)
+        hash_pos = line.find('#')
+        if hash_pos >= 0:
+            # Detect if hash is inside a string using a simple state machine
+            in_string = False
+            string_char = None
+            i = 0
+            while i < hash_pos:
+                c = line[i]
+                if not in_string:
+                    if c in ('"', "'"):
+                        in_string = True
+                        string_char = c
+                else:
+                    if c == '\\':
+                        i += 1  # skip escaped char
+                    elif c == string_char:
+                        in_string = False
+                i += 1
+            if in_string:
+                continue  # hash is inside a string literal
+
+        match = _INLINE_PATTERN.search(line)
+        if match:
+            rule_id = match.group(1)
+            reason = (match.group(2) or "").strip()
+            suppressions.append(
+                InlineSuppression(
+                    line_number=line_num,
+                    rule_id=rule_id,
+                    reason=reason or "Inline suppression",
+                )
+            )
+            continue
+
+        match = _NEXT_LINE_PATTERN.search(line)
+        if match:
+            rule_id = match.group(1)
+            reason = (match.group(2) or "").strip()
+            suppressions.append(
+                InlineSuppression(
+                    line_number=line_num + 1,
+                    rule_id=rule_id,
+                    reason=reason or "Inline suppression (next-line)",
+                )
+            )
+
+    return suppressions

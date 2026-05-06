@@ -32,6 +32,7 @@ class MarkdownReporterConfigOptions(ReporterOptionsBase):
     use_collapsible_details: bool = (
         True  # Use HTML details/summary tags for detailed findings
     )
+    compact: bool = False  # When True, produce a shorter report suitable for PR comments
 
 
 class MarkdownReporterConfig(ReporterPluginConfigBase):
@@ -61,6 +62,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
         # Build the markdown report
         md_parts = []
 
+        # Ensure config is resolved
+        if isinstance(self.config, dict):
+            self.config = MarkdownReporterConfig.model_validate(self.config)
+
+        compact = self.config.options.compact
+
         # Add report header
         metadata = emitter.get_metadata()
         md_parts.append("# ASH Security Scan Report\n")
@@ -81,77 +88,79 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             md_parts.append(f"- **Time since scan**: {delta_str}")
         md_parts.append("")
 
-        # Add metadata section
-        md_parts.append("## Scan Metadata\n")
-        md_parts.append(f"- **Project**: {metadata['project']}")
-        md_parts.append(f"- **Scan executed**: {metadata['scan_time']}")
-        md_parts.append(f"- **ASH version**: {metadata['tool_version']}")
-        md_parts.append("")
+        # Add metadata section (skip in compact mode)
+        if not compact:
+            md_parts.append("## Scan Metadata\n")
+            md_parts.append(f"- **Project**: {metadata['project']}")
+            md_parts.append(f"- **Scan executed**: {metadata['scan_time']}")
+            md_parts.append(f"- **ASH version**: {metadata['tool_version']}")
+            md_parts.append("")
 
         # Add summary section if enabled
-        if isinstance(self.config, dict):
-            self.config = MarkdownReporterConfig.model_validate(self.config)
         if self.config.options.include_summary:
             md_parts.append("## Summary\n")
 
             # Generate scanner results table
             md_parts.append("### Scanner Results\n")
-            md_parts.append(
-                "The table below shows findings by scanner, with status based on severity thresholds and dependencies:\n"
-            )
-            md_parts.append("- **Severity levels**:")
-            md_parts.append(
-                "  - **Suppressed (S)**: Findings that have been explicitly suppressed and don't affect scanner status"
-            )
-            md_parts.append(
-                "  - **Critical (C)**: Highest severity findings that require immediate attention"
-            )
-            md_parts.append(
-                "  - **High (H)**: Serious findings that should be addressed soon"
-            )
-            md_parts.append("  - **Medium (M)**: Moderate risk findings")
-            md_parts.append("  - **Low (L)**: Lower risk findings")
-            md_parts.append(
-                "  - **Info (I)**: Informational findings with minimal risk"
-            )
-            md_parts.append(
-                "- **Duration (Time)**: Time taken by the scanner to complete its execution"
-            )
-            md_parts.append(
-                "- **Actionable**: Number of findings at or above the threshold severity level that require attention"
-            )
-            md_parts.append("- **Result**:")
-            md_parts.append("  - **PASSED** = No findings at or above threshold")
-            md_parts.append("  - **FAILED** = Findings at or above threshold")
-            md_parts.append("  - **MISSING** = Required dependencies not available")
-            md_parts.append("  - **SKIPPED** = Scanner explicitly disabled")
-            md_parts.append("  - **ERROR** = Scanner execution error")
-            md_parts.append(
-                "- **Threshold**: The minimum severity level that will cause a scanner to fail"
-            )
-            md_parts.append("  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL")
-            md_parts.append(
-                "  - Source: Values in parentheses indicate where the threshold is set:"
-            )
-            md_parts.append(
-                "    - `global` (global_settings section in the ASH_CONFIG used)"
-            )
-            md_parts.append(
-                "    - `config` (scanner config section in the ASH_CONFIG used)"
-            )
-            md_parts.append(
-                "    - `scanner` (default configuration in the plugin, if explicitly set)"
-            )
-            md_parts.append("- **Statistics calculation**:")
-            md_parts.append(
-                "  - All statistics are calculated from the final aggregated SARIF report"
-            )
-            md_parts.append(
-                "  - Suppressed findings are counted separately and do not contribute to actionable findings"
-            )
-            md_parts.append(
-                "  - Scanner status is determined by comparing actionable findings to the threshold\n"
-            )
+
+            # In compact mode, skip the verbose legend
+            if not compact:
+                md_parts.append(
+                    "The table below shows findings by scanner, with status based on severity thresholds and dependencies:\n"
+                )
+                md_parts.append("- **Severity levels**:")
+                md_parts.append(
+                    "  - **Suppressed (S)**: Findings that have been explicitly suppressed and don't affect scanner status"
+                )
+                md_parts.append(
+                    "  - **Critical (C)**: Highest severity findings that require immediate attention"
+                )
+                md_parts.append(
+                    "  - **High (H)**: Serious findings that should be addressed soon"
+                )
+                md_parts.append("  - **Medium (M)**: Moderate risk findings")
+                md_parts.append("  - **Low (L)**: Lower risk findings")
+                md_parts.append(
+                    "  - **Info (I)**: Informational findings with minimal risk"
+                )
+                md_parts.append(
+                    "- **Duration (Time)**: Time taken by the scanner to complete its execution"
+                )
+                md_parts.append(
+                    "- **Actionable**: Number of findings at or above the threshold severity level that require attention"
+                )
+                md_parts.append("- **Result**:")
+                md_parts.append("  - **PASSED** = No findings at or above threshold")
+                md_parts.append("  - **FAILED** = Findings at or above threshold")
+                md_parts.append("  - **MISSING** = Required dependencies not available")
+                md_parts.append("  - **SKIPPED** = Scanner explicitly disabled")
+                md_parts.append("  - **ERROR** = Scanner execution error")
+                md_parts.append(
+                    "- **Threshold**: The minimum severity level that will cause a scanner to fail"
+                )
+                md_parts.append("  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL")
+                md_parts.append(
+                    "  - Source: Values in parentheses indicate where the threshold is set:"
+                )
+                md_parts.append(
+                    "    - `global` (global_settings section in the ASH_CONFIG used)"
+                )
+                md_parts.append(
+                    "    - `config` (scanner config section in the ASH_CONFIG used)"
+                )
+                md_parts.append(
+                    "    - `scanner` (default configuration in the plugin, if explicitly set)"
+                )
+                md_parts.append("- **Statistics calculation**:")
+                md_parts.append(
+                    "  - All statistics are calculated from the final aggregated SARIF report"
+                )
+                md_parts.append(
+                    "  - Suppressed findings are counted separately and do not contribute to actionable findings"
+                )
+                md_parts.append(
+                    "  - Scanner status is determined by comparing actionable findings to the threshold\n"
+                )
 
             md_parts.append(
                 "| Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |"
@@ -163,8 +172,16 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             # Add scanner result rows
             scanner_results = emitter.get_scanner_results()
             for result in scanner_results:
-                # Determine status text and emoji based on status field
                 status = result["status"]
+
+                # Compact mode: hide SKIPPED scanners and zero-finding PASSED scanners.
+                # ERROR/MISSING scanners are always shown regardless of compact mode.
+                if compact:
+                    if status == "SKIPPED":
+                        continue
+                    if result["total"] == 0 and status == "PASSED":
+                        continue
+
                 if status == "PASSED":
                     status_text = "PASSED"
                 elif status == "FAILED":
@@ -286,11 +303,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 if use_collapsible:
                     md_parts.append("</details>")
 
-        # Add footer
-        md_parts.append("\n---\n")
-        md_parts.append(
-            f"*Report generated by [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper) at {datetime.now(timezone.utc).isoformat(timespec='seconds')}*"
-        )
+        # Add footer (skip in compact mode)
+        if not compact:
+            md_parts.append("\n---\n")
+            md_parts.append(
+                f"*Report generated by [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper) at {datetime.now(timezone.utc).isoformat(timespec='seconds')}*"
+            )
 
         # Join all parts with newlines
         return "\n".join(md_parts)

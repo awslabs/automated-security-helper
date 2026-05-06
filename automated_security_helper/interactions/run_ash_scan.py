@@ -48,6 +48,44 @@ def format_duration(seconds):
         return f"{seconds}s"
 
 
+def _filter_results_to_changed_files(
+    results: "AshAggregatedResults",
+    changed_files: set,
+    source_dir: Path,
+) -> "AshAggregatedResults":
+    """Remove SARIF results whose primary location is not in *changed_files*.
+
+    Operates on the aggregated SARIF report in-place and returns results for
+    convenience.  If *changed_files* is empty, all findings are removed (no
+    files changed means zero relevant findings).
+    """
+    if not results or not results.sarif or not results.sarif.runs:
+        return results
+    for run in results.sarif.runs:
+        if not run.results:
+            continue
+        filtered = []
+        for result in run.results:
+            if not result.locations:
+                filtered.append(result)
+                continue
+            loc = result.locations[0]
+            if not loc.physicalLocation or not loc.physicalLocation.root or not loc.physicalLocation.root.artifactLocation:
+                filtered.append(result)
+                continue
+            uri = loc.physicalLocation.root.artifactLocation.uri or ""
+            # Strip file:// prefix variants emitted by some scanners.
+            if uri.startswith("file://"):
+                uri = uri[7:]
+                if uri.startswith("///"):
+                    uri = uri[2:]
+            resolved = Path(source_dir).joinpath(uri).resolve()
+            if resolved in changed_files:
+                filtered.append(result)
+        run.results = filtered
+    return results
+
+
 def run_ash_scan(
     source_dir: str | Path | None = None,
     output_dir: str | Path | None = None,
@@ -72,6 +110,8 @@ def run_ash_scan(
     fail_on_findings: bool | None = None,
     ignore_suppressions: bool = False,
     min_severity: str = "low",
+    changed_files_only: bool = False,
+    base_ref: str = "origin/main",
     mode: RunMode = RunMode.local,
     show_summary: bool = True,
     log_level: AshLogLevel = AshLogLevel.INFO,
@@ -170,6 +210,9 @@ def run_ash_scan(
     results = None
     # If mode is container, run the container version
     if mode == RunMode.container:
+        if changed_files_only:
+            logger.warning("--changed-files-only is not supported in container mode; performing full scan")
+
         # Pass the current context to run_ash_container
         new_args = []
 
@@ -277,6 +320,46 @@ def run_ash_scan(
         if offline:
             os.environ["ASH_OFFLINE"] = "YES"
             _offline_was_set = True
+
+        # Resolve the set of changed files (if requested) before entering
+        # the orchestrator so we can restrict the scan set and later filter
+        # SARIF output.
+        _changed_file_set = None
+        if changed_files_only:
+            # Validate git root matches source_dir BEFORE resolving changed files
+            # to avoid path resolution issues when they differ.
+            _skip_changed_files = False
+            try:
+                import subprocess as _sp
+                _repo_root_result = _sp.run(
+                    ["git", "rev-parse", "--show-toplevel"],
+                    capture_output=True, text=True, timeout=5,
+                    cwd=str(source_dir)
+                )
+                if _repo_root_result.returncode == 0:
+                    _git_root = Path(_repo_root_result.stdout.strip()).resolve()
+                    if _git_root != Path(source_dir).resolve():
+                        logger.warning(
+                            f"--changed-files-only: source-dir ({source_dir}) differs from "
+                            f"git root ({_git_root}); falling back to full scan"
+                        )
+                        _skip_changed_files = True
+            except (FileNotFoundError, OSError):
+                pass
+
+            if not _skip_changed_files:
+                from automated_security_helper.utils.get_scan_set import (
+                    get_changed_files,
+                )
+
+                changed_paths = get_changed_files(base_ref=base_ref)
+                if changed_paths is not None:
+                    # Resolve to absolute paths rooted in source_dir for
+                    # consistent comparison later.
+                    _changed_file_set = {
+                        Path(source_dir).joinpath(p).resolve() for p in changed_paths
+                    }
+
         try:
             # Create orchestrator instance
             source_dir = Path(source_dir)
@@ -412,6 +495,13 @@ def run_ash_scan(
             # For simple mode, print a minimal completion message
             if simple and not quiet:
                 typer.echo("\nASH scan completed.")
+
+            # When scanning only changed files, strip findings whose
+            # primary location falls outside the changed set.
+            if _changed_file_set and results is not None:
+                results = _filter_results_to_changed_files(
+                    results, _changed_file_set, source_dir
+                )
 
             if isinstance(results, BaseModel):
                 content = results.model_dump_json(indent=2, by_alias=True)

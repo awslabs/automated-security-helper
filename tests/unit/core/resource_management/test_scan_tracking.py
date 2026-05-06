@@ -42,6 +42,523 @@ from automated_security_helper.core.resource_management.scan_tracking import (
 )
 
 
+class TestScannerProgress:
+    """Tests for the ScannerProgress class."""
+
+    def test_init_default_values(self):
+        """Test initialization with default values."""
+        progress = ScannerProgress("test_scanner", "source")
+
+        assert progress.scanner_name == "test_scanner"
+        assert progress.target_type == "source"
+        assert progress.status == MCScannerStatus.PENDING
+        assert progress.duration is None
+        assert progress.finding_count == 0
+        assert progress.severity_counts == {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
+        }
+        assert progress.start_time is None
+        assert progress.end_time is None
+
+    def test_mark_running(self):
+        """Test marking a scanner as running."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_running()
+
+        assert progress.status == MCScannerStatus.RUNNING
+        assert progress.start_time is not None
+        assert isinstance(progress.start_time, datetime)
+
+    def test_mark_completed(self):
+        """Test marking a scanner as completed."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_running()
+        progress.mark_completed()
+
+        assert progress.status == MCScannerStatus.COMPLETED
+        assert progress.end_time is not None
+        assert isinstance(progress.end_time, datetime)
+        assert progress.duration is not None
+        assert progress.duration > 0
+
+    def test_mark_failed(self):
+        """Test marking a scanner as failed."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_running()
+        progress.mark_failed()
+
+        assert progress.status == MCScannerStatus.FAILED
+        assert progress.end_time is not None
+        assert isinstance(progress.end_time, datetime)
+        assert progress.duration is not None
+        assert progress.duration > 0
+
+    def test_mark_skipped(self):
+        """Test marking a scanner as skipped."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_skipped()
+
+        assert progress.status == MCScannerStatus.SKIPPED
+
+    def test_to_dict(self):
+        """Test converting to dictionary."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_running()
+        progress.mark_completed()
+
+        result = progress.to_dict()
+
+        assert result["scanner_name"] == "test_scanner"
+        assert result["target_type"] == "source"
+        assert result["status"] == "completed"
+        assert result["duration"] is not None
+        assert result["finding_count"] == 0
+        assert "severity_counts" in result
+        assert "start_time" in result
+        assert "end_time" in result
+
+
+class TestScanProgress:
+    """Tests for the ScanProgress class."""
+
+    def test_init_default_values(self):
+        """Test initialization with default values."""
+        progress = ScanProgress("test_scan_id")
+
+        assert progress.scan_id == "test_scan_id"
+        assert progress.status == "in_progress"
+        assert progress.scanners == {}
+        assert progress.start_time is not None
+        assert isinstance(progress.start_time, datetime)
+        assert progress.end_time is None
+        assert progress.duration is None
+        assert progress.total_findings == 0
+        assert progress.severity_counts == {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
+        }
+
+    def test_add_scanner_progress(self):
+        """Test adding scanner progress."""
+        scan_progress = ScanProgress("test_scan_id")
+        scanner_progress = ScannerProgress("test_scanner", "source")
+        scanner_progress.finding_count = 5
+        scanner_progress.severity_counts = {
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 1,
+            "info": 1,
+            "suppressed": 0,
+        }
+
+        scan_progress.add_scanner_progress(scanner_progress)
+
+        assert "test_scanner" in scan_progress.scanners
+        assert "source" in scan_progress.scanners["test_scanner"]
+        assert scan_progress.scanners["test_scanner"]["source"] == scanner_progress
+        assert scan_progress.total_findings == 5
+        assert scan_progress.severity_counts == {
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 1,
+            "info": 1,
+            "suppressed": 0,
+        }
+
+    def test_update_totals(self):
+        """Test updating totals."""
+        scan_progress = ScanProgress("test_scan_id")
+
+        # Add first scanner
+        scanner1 = ScannerProgress("scanner1", "source")
+        scanner1.finding_count = 3
+        scanner1.severity_counts = {
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
+        }
+        scan_progress.add_scanner_progress(scanner1)
+
+        # Add second scanner
+        scanner2 = ScannerProgress("scanner2", "source")
+        scanner2.finding_count = 2
+        scanner2.severity_counts = {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 1,
+            "info": 1,
+            "suppressed": 0,
+        }
+        scan_progress.add_scanner_progress(scanner2)
+
+        # Verify totals
+        assert scan_progress.total_findings == 5
+        assert scan_progress.severity_counts == {
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 1,
+            "info": 1,
+            "suppressed": 0,
+        }
+
+    def test_mark_completed(self):
+        """Test marking a scan as completed."""
+        scan_progress = ScanProgress("test_scan_id")
+        scan_progress.mark_completed()
+
+        assert scan_progress.status == "completed"
+        assert scan_progress.end_time is not None
+        assert isinstance(scan_progress.end_time, datetime)
+        assert scan_progress.duration is not None
+        assert scan_progress.duration > 0
+
+    def test_mark_failed(self):
+        """Test marking a scan as failed."""
+        scan_progress = ScanProgress("test_scan_id")
+        scan_progress.mark_failed()
+
+        assert scan_progress.status == "failed"
+        assert scan_progress.end_time is not None
+        assert isinstance(scan_progress.end_time, datetime)
+        assert scan_progress.duration is not None
+        assert scan_progress.duration > 0
+
+    def test_completed_scanners(self):
+        """Test getting completed scanners count."""
+        scan_progress = ScanProgress("test_scan_id")
+
+        # Add pending scanner
+        scanner1 = ScannerProgress("scanner1", "source")
+        scan_progress.add_scanner_progress(scanner1)
+
+        # Add completed scanner
+        scanner2 = ScannerProgress("scanner2", "source")
+        scanner2.status = MCScannerStatus.COMPLETED
+        scan_progress.add_scanner_progress(scanner2)
+
+        # Add failed scanner
+        scanner3 = ScannerProgress("scanner3", "source")
+        scanner3.status = MCScannerStatus.FAILED
+        scan_progress.add_scanner_progress(scanner3)
+
+        assert scan_progress.completed_scanners == 1
+        assert scan_progress.total_scanners == 3
+
+    def test_is_complete(self):
+        """Test checking if a scan is complete."""
+        scan_progress = ScanProgress("test_scan_id")
+        assert not scan_progress.is_complete
+
+        scan_progress.status = "completed"
+        assert scan_progress.is_complete
+
+        scan_progress.status = "failed"
+        assert scan_progress.is_complete
+
+        scan_progress.status = "in_progress"
+        assert not scan_progress.is_complete
+
+    def test_to_dict(self):
+        """Test converting to dictionary."""
+        scan_progress = ScanProgress("test_scan_id")
+        scanner_progress = ScannerProgress("test_scanner", "source")
+        scanner_progress.mark_completed()
+        scan_progress.add_scanner_progress(scanner_progress)
+        scan_progress.mark_completed()
+
+        result = scan_progress.to_dict()
+
+        assert result["scan_id"] == "test_scan_id"
+        assert result["status"] == "completed"
+        assert result["is_complete"] is True
+        assert "start_time" in result
+        assert "end_time" in result
+        assert result["duration"] is not None
+        assert result["completed_scanners"] == 1
+        assert result["total_scanners"] == 1
+        assert result["total_findings"] == 0
+        assert "severity_counts" in result
+        assert "scanners" in result
+        assert "test_scanner" in result["scanners"]
+        assert "source" in result["scanners"]["test_scanner"]
+
+
+# ---------------------------------------------------------------------------
+# Test classes for ScannerProgress and ScanProgress
+# ---------------------------------------------------------------------------
+
+class TestScannerProgress:
+    """Tests for the ScannerProgress class."""
+
+    def test_init_default_values(self):
+        """Test initialization with default values."""
+        progress = ScannerProgress("test_scanner", "source")
+
+        assert progress.scanner_name == "test_scanner"
+        assert progress.target_type == "source"
+        assert progress.status == MCScannerStatus.PENDING
+        assert progress.duration is None
+        assert progress.finding_count == 0
+        assert progress.severity_counts == {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
+        }
+        assert progress.start_time is None
+        assert progress.end_time is None
+
+    def test_mark_running(self):
+        """Test marking a scanner as running."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_running()
+
+        assert progress.status == MCScannerStatus.RUNNING
+        assert progress.start_time is not None
+        assert isinstance(progress.start_time, datetime)
+
+    def test_mark_completed(self):
+        """Test marking a scanner as completed."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_running()
+        progress.mark_completed()
+
+        assert progress.status == MCScannerStatus.COMPLETED
+        assert progress.end_time is not None
+        assert isinstance(progress.end_time, datetime)
+        assert progress.duration is not None
+        assert progress.duration > 0
+
+    def test_mark_failed(self):
+        """Test marking a scanner as failed."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_running()
+        progress.mark_failed()
+
+        assert progress.status == MCScannerStatus.FAILED
+        assert progress.end_time is not None
+        assert isinstance(progress.end_time, datetime)
+        assert progress.duration is not None
+        assert progress.duration > 0
+
+    def test_mark_skipped(self):
+        """Test marking a scanner as skipped."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_skipped()
+
+        assert progress.status == MCScannerStatus.SKIPPED
+
+    def test_to_dict(self):
+        """Test converting to dictionary."""
+        progress = ScannerProgress("test_scanner", "source")
+        progress.mark_running()
+        progress.mark_completed()
+
+        result = progress.to_dict()
+
+        assert result["scanner_name"] == "test_scanner"
+        assert result["target_type"] == "source"
+        assert result["status"] == "completed"
+        assert result["duration"] is not None
+        assert result["finding_count"] == 0
+        assert "severity_counts" in result
+        assert "start_time" in result
+        assert "end_time" in result
+
+
+class TestScanProgress:
+    """Tests for the ScanProgress class."""
+
+    def test_init_default_values(self):
+        """Test initialization with default values."""
+        progress = ScanProgress("test_scan_id")
+
+        assert progress.scan_id == "test_scan_id"
+        assert progress.status == "in_progress"
+        assert progress.scanners == {}
+        assert progress.start_time is not None
+        assert isinstance(progress.start_time, datetime)
+        assert progress.end_time is None
+        assert progress.duration is None
+        assert progress.total_findings == 0
+        assert progress.severity_counts == {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
+        }
+
+    def test_add_scanner_progress(self):
+        """Test adding scanner progress."""
+        scan_progress = ScanProgress("test_scan_id")
+        scanner_progress = ScannerProgress("test_scanner", "source")
+        scanner_progress.finding_count = 5
+        scanner_progress.severity_counts = {
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 1,
+            "info": 1,
+            "suppressed": 0,
+        }
+
+        scan_progress.add_scanner_progress(scanner_progress)
+
+        assert "test_scanner" in scan_progress.scanners
+        assert "source" in scan_progress.scanners["test_scanner"]
+        assert scan_progress.scanners["test_scanner"]["source"] == scanner_progress
+        assert scan_progress.total_findings == 5
+        assert scan_progress.severity_counts == {
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 1,
+            "info": 1,
+            "suppressed": 0,
+        }
+
+    def test_update_totals(self):
+        """Test updating totals."""
+        scan_progress = ScanProgress("test_scan_id")
+
+        # Add first scanner
+        scanner1 = ScannerProgress("scanner1", "source")
+        scanner1.finding_count = 3
+        scanner1.severity_counts = {
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
+        }
+        scan_progress.add_scanner_progress(scanner1)
+
+        # Add second scanner
+        scanner2 = ScannerProgress("scanner2", "source")
+        scanner2.finding_count = 2
+        scanner2.severity_counts = {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 1,
+            "info": 1,
+            "suppressed": 0,
+        }
+        scan_progress.add_scanner_progress(scanner2)
+
+        # Verify totals
+        assert scan_progress.total_findings == 5
+        assert scan_progress.severity_counts == {
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 1,
+            "info": 1,
+            "suppressed": 0,
+        }
+
+    def test_mark_completed(self):
+        """Test marking a scan as completed."""
+        scan_progress = ScanProgress("test_scan_id")
+        scan_progress.mark_completed()
+
+        assert scan_progress.status == "completed"
+        assert scan_progress.end_time is not None
+        assert isinstance(scan_progress.end_time, datetime)
+        assert scan_progress.duration is not None
+        assert scan_progress.duration > 0
+
+    def test_mark_failed(self):
+        """Test marking a scan as failed."""
+        scan_progress = ScanProgress("test_scan_id")
+        scan_progress.mark_failed()
+
+        assert scan_progress.status == "failed"
+        assert scan_progress.end_time is not None
+        assert isinstance(scan_progress.end_time, datetime)
+        assert scan_progress.duration is not None
+        assert scan_progress.duration > 0
+
+    def test_completed_scanners(self):
+        """Test getting completed scanners count."""
+        scan_progress = ScanProgress("test_scan_id")
+
+        # Add pending scanner
+        scanner1 = ScannerProgress("scanner1", "source")
+        scan_progress.add_scanner_progress(scanner1)
+
+        # Add completed scanner
+        scanner2 = ScannerProgress("scanner2", "source")
+        scanner2.status = MCScannerStatus.COMPLETED
+        scan_progress.add_scanner_progress(scanner2)
+
+        # Add failed scanner
+        scanner3 = ScannerProgress("scanner3", "source")
+        scanner3.status = MCScannerStatus.FAILED
+        scan_progress.add_scanner_progress(scanner3)
+
+        assert scan_progress.completed_scanners == 1
+        assert scan_progress.total_scanners == 3
+
+    def test_is_complete(self):
+        """Test checking if a scan is complete."""
+        scan_progress = ScanProgress("test_scan_id")
+        assert not scan_progress.is_complete
+
+        scan_progress.status = "completed"
+        assert scan_progress.is_complete
+
+        scan_progress.status = "failed"
+        assert scan_progress.is_complete
+
+        scan_progress.status = "in_progress"
+        assert not scan_progress.is_complete
+
+    def test_to_dict(self):
+        """Test converting to dictionary."""
+        scan_progress = ScanProgress("test_scan_id")
+        scanner_progress = ScannerProgress("test_scanner", "source")
+        scanner_progress.mark_completed()
+        scan_progress.add_scanner_progress(scanner_progress)
+        scan_progress.mark_completed()
+
+        result = scan_progress.to_dict()
+
+        assert result["scan_id"] == "test_scan_id"
+        assert result["status"] == "completed"
+        assert result["is_complete"] is True
+        assert "start_time" in result
+        assert "end_time" in result
+        assert result["duration"] is not None
+        assert result["completed_scanners"] == 1
+        assert result["total_scanners"] == 1
+        assert result["total_findings"] == 0
+        assert "severity_counts" in result
+        assert "scanners" in result
+        assert "test_scanner" in result["scanners"]
+        assert "source" in result["scanners"]["test_scanner"]
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

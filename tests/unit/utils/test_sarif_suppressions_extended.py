@@ -431,3 +431,103 @@ class TestSarifSuppressions:
         assert result.runs[0].results[0].suppressions is not None
         assert len(result.runs[0].results[0].suppressions) == 1
         assert result.runs[0].results[0].suppressions[0].kind == "inSource"
+
+    def test_apply_suppressions_to_sarif_with_inline_comments_in_real_file(
+        self, test_source_dir, test_output_dir
+    ):
+        """Integration test: inline comments in a real temp file suppress matching SARIF results.
+
+        Verifies the full path from SARIF report (with relative URI) through
+        source_dir resolution to inline suppression matching.
+        """
+        # Write a source file with an inline suppression comment on line 3
+        src_subdir = test_source_dir / "app"
+        src_subdir.mkdir(parents=True, exist_ok=True)
+        source_file = src_subdir / "handler.py"
+        source_file.write_text(
+            "import os\n"
+            "def get_key():\n"
+            "    return os.environ['SECRET']  # ash-ignore: SEC-001 env var is safe in Lambda\n"
+            "    # unrelated line\n"
+        )
+
+        # The SARIF URI is relative (as produced by sanitize_sarif_paths)
+        relative_uri = "app/handler.py"
+
+        sarif_report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(
+                        driver=ToolComponent(
+                            name="SecretScanner",
+                            version="1.0.0",
+                        )
+                    ),
+                    results=[
+                        Result(
+                            ruleId="SEC-001",
+                            message=Message(text="Potential secret in env var access"),
+                            locations=[
+                                Location(
+                                    physicalLocation=PhysicalLocation2(
+                                        artifactLocation=ArtifactLocation(
+                                            uri=relative_uri
+                                        ),
+                                        region=Region(
+                                            startLine=3,
+                                            endLine=3,
+                                        ),
+                                    )
+                                )
+                            ],
+                        ),
+                        Result(
+                            ruleId="SEC-001",
+                            message=Message(text="Another finding on different line"),
+                            locations=[
+                                Location(
+                                    physicalLocation=PhysicalLocation2(
+                                        artifactLocation=ArtifactLocation(
+                                            uri=relative_uri
+                                        ),
+                                        region=Region(
+                                            startLine=1,
+                                            endLine=1,
+                                        ),
+                                    )
+                                )
+                            ],
+                        ),
+                    ],
+                )
+            ],
+        )
+
+        # No config-level suppressions -- only inline should apply
+        config = AshConfig(
+            project_name="test-inline-integration",
+            global_settings={},
+        )
+        plugin_context = PluginContext(
+            source_dir=test_source_dir,
+            output_dir=test_output_dir,
+            config=config,
+        )
+
+        result = apply_suppressions_to_sarif(sarif_report, plugin_context)
+
+        # Line 3 matches the inline comment -- should be suppressed
+        suppressed_result = result.runs[0].results[0]
+        assert suppressed_result.suppressions is not None
+        assert len(suppressed_result.suppressions) == 1
+        assert suppressed_result.suppressions[0].kind == "inSource"
+        assert "(ASH inline)" in suppressed_result.suppressions[0].justification
+        assert "env var is safe in Lambda" in suppressed_result.suppressions[0].justification
+
+        # Line 1 has no inline comment -- should NOT be suppressed
+        unsuppressed_result = result.runs[0].results[1]
+        assert (
+            unsuppressed_result.suppressions is None
+            or len(unsuppressed_result.suppressions) == 0
+        )

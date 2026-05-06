@@ -88,6 +88,16 @@ on:
         required: false
         default: false
         type: boolean
+      changed-files-only:
+        description: "Limit the scan to files changed in the PR (reduces scan time and focuses feedback)"
+        required: false
+        default: false
+        type: boolean
+      base-ref:
+        description: "Git ref to diff against when changed-files-only is true"
+        required: false
+        default: "origin/main"
+        type: string
 
 env:
   ASH_UVX_SOURCE: git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
@@ -144,9 +154,11 @@ jobs:
           ASH_ARGS: ${{ inputs.ash-args }}
           FAIL_ON_FINDINGS_PARAM: ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}}
           VERBOSE: ${{ inputs.verbose }}
+          CHANGED_FILES_ONLY: ${{ inputs.changed-files-only == true && '--changed-files-only' || '' }}
+          BASE_REF: ${{ inputs.base-ref }}
         run: |-
           uvx --reinstall --from ${ASH_UVX_SOURCE} ash \
-            --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose}
+            --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose} ${CHANGED_FILES_ONLY:+${CHANGED_FILES_ONLY} --base-ref "${BASE_REF}"}
 
       - name: Show ASH Summary Report
         if: success() || failure()

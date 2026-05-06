@@ -3,13 +3,14 @@
 
 """Regression test for #92/#94: --simple must be a discoverable CLI flag."""
 
+import re
+
 import pytest
 from typer.testing import CliRunner
 from automated_security_helper.cli.main import app
 
 runner = CliRunner()
 
-import re
 
 def _strip_ansi(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
