@@ -244,6 +244,8 @@ reporters:
     enabled: true
   text:
     enabled: true
+  gitlab-sast:
+    enabled: true
   spdx:
     enabled: false
   yaml:

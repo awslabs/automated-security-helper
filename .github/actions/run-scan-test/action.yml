@@ -23,10 +23,6 @@ inputs:
     description: "OCI container runtime: docker, podman, or finch"
     required: false
     default: "docker"
-  expect-gitlab-sast:
-    description: "Whether to expect and validate GitLab SAST report output"
-    required: false
-    default: "true"
 
 runs:
   using: "composite"
@@ -284,12 +280,8 @@ runs:
         echo "Validating GitLab SAST report schema compliance..."
         GITLAB_REPORTS=$(find .ash/ash_output -name "*.gl-sast-report.json")
         if [ -z "$GITLAB_REPORTS" ]; then
-          if [ "${{ inputs.expect-gitlab-sast }}" = "true" ]; then
-            echo "ERROR: GitLab SAST report expected but not found in .ash/ash_output"
-            exit 1
-          fi
-          echo "No GitLab SAST reports found (not expected for this config)"
-          exit 0
+          echo "ERROR: GitLab SAST report not found in .ash/ash_output"
+          exit 1
         fi
         echo "Found GitLab SAST reports to validate:"
         echo "$GITLAB_REPORTS"

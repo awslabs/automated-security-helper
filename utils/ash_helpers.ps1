@@ -247,8 +247,8 @@ function Invoke-ASH {
         $runArgs.Add("-e COLUMNS=$COLUMNS")
         $runArgs.Add("-e LINES=$LINES")
 
-        # Add color support
-        if (-not ("$AshArgs" -match '(\-\-no-color|\-c)')) {
+        # Add color support (only when running in an interactive terminal)
+        if (-not ("$AshArgs" -match '(\-\-no-color|\-c)') -and [Environment]::UserInteractive -and -not [Console]::IsOutputRedirected) {
             $runArgs.Add("-t")
         }
     }

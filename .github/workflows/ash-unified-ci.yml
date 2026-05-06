@@ -131,7 +131,6 @@ jobs:
           config-file: ${{ matrix.config-file }}
           snyk-token: ${{ secrets.SNYK_TOKEN }}
           oci-runner: ${{ matrix.oci-runner }}
-          expect-gitlab-sast: ${{ matrix.config-file == 'default' && 'true' || 'false' }}
 
   # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
