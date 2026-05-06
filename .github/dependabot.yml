@@ -1,0 +1,47 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "build"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "docker"
+    directory: "/automated_security_helper/assets"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "build"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "build"
+    labels:
+      - "dependencies"
+    groups:
+      python-deps:
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
