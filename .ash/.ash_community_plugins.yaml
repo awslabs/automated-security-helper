@@ -192,6 +192,25 @@ global_settings:
     - rule_id: B603
       path: scripts/*.py
       reason: "Build scripts use list-form subprocess"
+    # === Broad p/ci ruleset suppressions (semgrep/opengrep) ===
+    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen1"
+      path: "automated_security_helper/**/*.py"
+      reason: "This package requires Python3.10 or greater (pyproject.toml)."
+    - rule_id: "python.lang.compatibility.python36.python36-compatibility-Popen2"
+      path: "automated_security_helper/**/*.py"
+      reason: "This package requires Python3.10 or greater (pyproject.toml)."
+    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
+      path: "automated_security_helper/**/*.py"
+      reason: "Plugin loading uses hardcoded module paths from registry, not user input"
+    - rule_id: "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"
+      path: "automated_security_helper/**/*.py"
+      reason: "URLs are constructed from trusted config values, not user input"
+    - rule_id: "bash.lang.security.ifs-tampering.ifs-tampering"
+      path: "**/*.sh"
+      reason: "IFS manipulation in ASH shell scripts is intentional for delimiter parsing"
+    - rule_id: "yaml.github-actions.security.run-shell-injection.run-shell-injection"
+      path: ".github/**/*.yml"
+      reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
     # === Approved license findings (trivy license scanner) ===
     - rule_id: "*:MIT"
       reason: "MIT is an approved permissive license"
