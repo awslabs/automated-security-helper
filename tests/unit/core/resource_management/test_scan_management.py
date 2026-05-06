@@ -105,4 +105,4 @@ class TestCancelScan:
             try:
                 asyncio.run(cancel_scan("scan-1"))
             except Exception:
-                pass  # Expected in test env without full MCP setup
+                pass  # nosec B110 - expected exception in test

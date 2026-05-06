@@ -7,7 +7,7 @@ Covers: empty findings, multiple scanners, severity mapping,
 suppressed findings handling, and XML output validity.
 """
 
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405
 
 import pytest
 
