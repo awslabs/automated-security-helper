@@ -133,6 +133,7 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 #
 COPY automated_security_helper/assets/Gemfile /deps/Gemfile
 RUN echo "gem: --no-document" >> /etc/gemrc && \
+    gem install bundler && \
     cd /deps && with-retry 'bundle install --jobs=4'
 
 #
