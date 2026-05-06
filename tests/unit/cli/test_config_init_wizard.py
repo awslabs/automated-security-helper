@@ -32,20 +32,20 @@ class TestHelperFunctions:
         names = _get_scanner_names()
         assert isinstance(names, list)
         assert len(names) > 0
-        assert "bandit" in names
+        python_names = [n[0] for n in names]
+        assert "bandit" in python_names
 
     def test_get_reporter_names_returns_non_empty_list(self):
         names = _get_reporter_names()
         assert isinstance(names, list)
         assert len(names) > 0
-        assert "html" in names
+        python_names = [n[0] for n in names]
+        assert "html" in python_names
 
     def test_prompt_toggle_items_respects_defaults(self, monkeypatch):
         """When user accepts all defaults, output matches input."""
-        items = ["a", "b"]
+        items = [("a", "A"), ("b", "B")]
         current = {"a": True, "b": False}
-        # typer.confirm reads from stdin; simulate pressing Enter for each prompt
-        # which accepts the default
         responses = iter([True, False])
         monkeypatch.setattr("typer.confirm", lambda *a, **kw: next(responses))
         result = _prompt_toggle_items(items, current, "Test")
@@ -79,18 +79,18 @@ class TestWizardCommand:
         lines.append(project_name)
 
         # 2. scanner toggles
-        scanner_names = _get_scanner_names()
+        scanner_items = _get_scanner_names()
         if scanner_answers is None:
-            scanner_answers = {name: True for name in scanner_names}
-        for name in scanner_names:
-            lines.append("Y" if scanner_answers.get(name, True) else "n")
+            scanner_answers = {python_name: True for python_name, _ in scanner_items}
+        for python_name, _ in scanner_items:
+            lines.append("Y" if scanner_answers.get(python_name, True) else "n")
 
         # 3. reporter toggles
-        reporter_names = _get_reporter_names()
+        reporter_items = _get_reporter_names()
         if reporter_answers is None:
-            reporter_answers = {name: True for name in reporter_names}
-        for name in reporter_names:
-            lines.append("Y" if reporter_answers.get(name, True) else "n")
+            reporter_answers = {python_name: True for python_name, _ in reporter_items}
+        for python_name, _ in reporter_items:
+            lines.append("Y" if reporter_answers.get(python_name, True) else "n")
 
         # 4. offline mode
         lines.append("Y" if enable_offline else "n")
@@ -128,7 +128,7 @@ class TestWizardCommand:
 
     def test_wizard_disables_scanner(self, cli_runner, config_path):
         """Disabling a scanner sets its enabled field to false."""
-        scanner_answers = {name: True for name in _get_scanner_names()}
+        scanner_answers = {python_name: True for python_name, _ in _get_scanner_names()}
         scanner_answers["bandit"] = False
 
         user_input = self._build_input(scanner_answers=scanner_answers)
@@ -146,7 +146,7 @@ class TestWizardCommand:
 
     def test_wizard_disables_reporter(self, cli_runner, config_path):
         """Disabling a reporter sets its enabled field to false."""
-        reporter_answers = {name: True for name in _get_reporter_names()}
+        reporter_answers = {python_name: True for python_name, _ in _get_reporter_names()}
         reporter_answers["html"] = False
 
         user_input = self._build_input(reporter_answers=reporter_answers)

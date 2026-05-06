@@ -10,6 +10,7 @@ import yaml
 import typer
 from rich import print
 from rich.console import Console
+from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
@@ -691,42 +692,60 @@ def _apply_unused_fixes(
 
 
 
-def _get_scanner_names() -> List[str]:
-    """Return the list of built-in scanner field names from the config model."""
-    return list(ScannerConfigSegment.model_fields.keys())
+
+def _get_scanner_names() -> List[tuple]:
+    """Return (python_name, display_name) tuples for built-in scanners.
+
+    display_name uses the field's YAML alias when available, falling back
+    to replacing underscores with hyphens.
+    """
+    names = []
+    for name, field_info in ScannerConfigSegment.model_fields.items():
+        alias = field_info.alias or name.replace("_", "-")
+        names.append((name, alias))
+    return names
 
 
-def _get_reporter_names() -> List[str]:
-    """Return the list of built-in reporter field names from the config model."""
-    return list(ReporterConfigSegment.model_fields.keys())
+def _get_reporter_names() -> List[tuple]:
+    """Return (python_name, display_name) tuples for built-in reporters.
+
+    display_name uses the field's YAML alias when available, falling back
+    to replacing underscores with hyphens.
+    """
+    names = []
+    for name, field_info in ReporterConfigSegment.model_fields.items():
+        alias = field_info.alias or name.replace("_", "-")
+        names.append((name, alias))
+    return names
 
 
 def _prompt_toggle_items(
-    items: List[str],
+    items: List[tuple],
     current_enabled: Dict[str, bool],
     label: str,
 ) -> Dict[str, bool]:
     """Prompt the user to toggle each item on or off.
 
-    Returns a dict mapping item name to enabled state.
+    items is a list of (python_name, display_name) tuples.
+    Returns a dict mapping python_name to enabled state.
     """
     console = Console()
     table = Table(title=label, show_header=True, header_style="bold cyan")
     table.add_column("Name", style="white")
     table.add_column("Currently enabled", justify="center")
-    for name in items:
-        status = current_enabled.get(name, True)
-        table.add_row(name, "[green]yes[/green]" if status else "[red]no[/red]")
+    for python_name, display_name in items:
+        status = current_enabled.get(python_name, True)
+        table.add_row(display_name, "[green]yes[/green]" if status else "[red]no[/red]")
     console.print(table)
 
     result = {}
-    for name in items:
-        default = current_enabled.get(name, True)
+    for python_name, display_name in items:
+        default = current_enabled.get(python_name, True)
         answer = typer.confirm(
-            f"  Enable {name}?",
+            f"  Enable {display_name}?",
             default=default,
         )
-        result[name] = answer
+        result[python_name] = answer
     return result
 
 
@@ -797,16 +816,16 @@ def wizard(
 
     # --- 2. Scanners ---
     console.print("\n[bold]Scanner configuration[/bold]")
-    scanner_names = _get_scanner_names()
+    scanner_items = _get_scanner_names()
     current_scanner_enabled: Dict[str, bool] = {}
-    for name in scanner_names:
-        scanner_cfg = getattr(ash_config.scanners, name, None)
-        current_scanner_enabled[name] = (
+    for python_name, _ in scanner_items:
+        scanner_cfg = getattr(ash_config.scanners, python_name, None)
+        current_scanner_enabled[python_name] = (
             scanner_cfg.enabled if scanner_cfg is not None else True
         )
 
     scanner_states = _prompt_toggle_items(
-        scanner_names, current_scanner_enabled, "Scanners"
+        scanner_items, current_scanner_enabled, "Scanners"
     )
     for name, enabled in scanner_states.items():
         scanner_cfg = getattr(ash_config.scanners, name, None)
@@ -815,16 +834,16 @@ def wizard(
 
     # --- 3. Reporters (output formats) ---
     console.print("\n[bold]Output format configuration[/bold]")
-    reporter_names = _get_reporter_names()
+    reporter_items = _get_reporter_names()
     current_reporter_enabled: Dict[str, bool] = {}
-    for name in reporter_names:
-        reporter_cfg = getattr(ash_config.reporters, name, None)
-        current_reporter_enabled[name] = (
+    for python_name, _ in reporter_items:
+        reporter_cfg = getattr(ash_config.reporters, python_name, None)
+        current_reporter_enabled[python_name] = (
             reporter_cfg.enabled if reporter_cfg is not None else True
         )
 
     reporter_states = _prompt_toggle_items(
-        reporter_names, current_reporter_enabled, "Output Formats"
+        reporter_items, current_reporter_enabled, "Output Formats"
     )
     for name, enabled in reporter_states.items():
         reporter_cfg = getattr(ash_config.reporters, name, None)
