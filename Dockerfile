@@ -132,8 +132,9 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 # cfn-nag (via Gemfile)
 #
 COPY automated_security_helper/assets/Gemfile /deps/Gemfile
+ARG BUNDLER_VERSION="2.4.22"
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    gem install bundler && \
+    with-retry 'gem install bundler -v ${BUNDLER_VERSION}' && \
     cd /deps && with-retry 'bundle install --jobs=4'
 
 #
