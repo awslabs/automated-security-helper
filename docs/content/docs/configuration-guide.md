@@ -182,6 +182,11 @@ reporters:
     enabled: true
     options:
       include_help_uri: true
+
+  github-ghas:
+    enabled: true
+    options:
+      exclude_suppressed: true  # Exclude ASH-suppressed findings (default)
 ```
 
 ### Custom Plugin Modules

@@ -63,6 +63,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporte
 from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_reporter import (
     SARIFReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
+    GHASReporterConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -224,6 +227,13 @@ class ReporterConfigSegment(BaseModel):
             alias="gitlab-sast",
         ),
     ] = GitLabSASTReporterConfig()
+    github_ghas: Annotated[
+        GHASReporterConfig,
+        Field(
+            description="Configure the options for the GitHub Advanced Security (GHAS) SARIF reporter",
+            alias="github-ghas",
+        ),
+    ] = GHASReporterConfig()
     junitxml: Annotated[
         JUnitXMLReporterConfig,
         Field(description="Configure the options for the JUnit XML reporter"),

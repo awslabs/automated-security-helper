@@ -29,16 +29,22 @@ def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
             )
         else:
             resp = None
-            with open(json_schema_path, mode="w", encoding="utf-8") as f:
-                json.dump(
+            new_content = (
+                json.dumps(
                     schema,
-                    f,
                     indent=2,
                     default=str,
                     sort_keys=True,
                 )
-                # add final new line so pre-commit doesn't see changes on every run
-                f.writelines("\n")
+                + "\n"
+            )
+            # Only write if content actually changed to avoid triggering
+            # pre-commit "files were modified" on unchanged schemas
+            existing_content = ""
+            if json_schema_path.exists():
+                existing_content = json_schema_path.read_text(encoding="utf-8")
+            if new_content != existing_content:
+                json_schema_path.write_text(new_content, encoding="utf-8")
     return resp
 
 
