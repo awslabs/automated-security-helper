@@ -137,8 +137,9 @@ RUN echo "gem: --no-document" >> /etc/gemrc && \
 
 #
 # JavaScript: corepack manages npm/yarn/pnpm versions via package.json engines
+# Prepare at build time so binaries are cached for offline runtime use
 #
-RUN corepack enable && corepack prepare yarn@stable --activate && corepack prepare pnpm@latest --activate
+RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && corepack prepare pnpm@latest --activate'
 
 
 #
