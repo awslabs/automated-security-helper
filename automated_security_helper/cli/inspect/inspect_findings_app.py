@@ -110,6 +110,11 @@ class SuppressDialog(ModalScreen[bool]):
                 self.dismiss(True)
             except Exception as exc:
                 ASH_LOGGER.error(f"Failed to create or write suppression: {exc}")
+                self.app.notify(
+                    f"Failed to save suppression: {exc}",
+                    severity="error",
+                    timeout=8,
+                )
                 self.dismiss(False)
 
     def action_cancel(self) -> None:
