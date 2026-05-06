@@ -196,7 +196,7 @@ class TestDataManager:
         if hasattr(self, "_temp_dir") and self._temp_dir and hasattr(self, "base_dir"):
             try:
                 shutil.rmtree(self.base_dir, ignore_errors=True)
-            except Exception:
+            except Exception:  # nosec B110 — test verifies graceful error handling
                 pass
 
     def get_path(self, relative_path: Union[str, Path]) -> Path:

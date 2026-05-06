@@ -5,7 +5,7 @@ testing component interactions, and verifying integration points.
 """
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 — integration tests invoke ASH CLI
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union, Callable
@@ -46,7 +46,7 @@ class IntegrationTestEnvironment:
         if hasattr(self, "_temp_dir") and self._temp_dir and hasattr(self, "base_dir"):
             try:
                 shutil.rmtree(self.base_dir, ignore_errors=True)
-            except Exception:
+            except Exception:  # nosec B110 — cleanup must not raise during teardown
                 pass
 
     def create_file(
@@ -142,7 +142,7 @@ class IntegrationTestEnvironment:
         if cwd is None:
             cwd = self.project_dir
 
-        return subprocess.run(
+        return subprocess.run(  # nosec B603 — integration test invokes ASH CLI
             command,
             cwd=cwd,
             capture_output=True,

@@ -247,8 +247,8 @@ function Invoke-ASH {
         $runArgs.Add("-e COLUMNS=$COLUMNS")
         $runArgs.Add("-e LINES=$LINES")
 
-        # Add color support
-        if (-not ("$AshArgs" -match '(\-\-no-color|\-c)')) {
+        # Add color support (only when running in an interactive terminal)
+        if (-not ("$AshArgs" -match '(\-\-no-color|\-c)') -and [Environment]::UserInteractive -and -not [Console]::IsOutputRedirected) {
             $runArgs.Add("-t")
         }
     }
@@ -268,11 +268,16 @@ function Invoke-ASH {
             else {
                 Write-Verbose "Resolved OCI_RUNNER to: $RESOLVED_OCI_RUNNER"
 
+                # OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER)
+                $OCI_WRAPPER = if ($env:OCI_RUNNER_WRAPPER) { $env:OCI_RUNNER_WRAPPER } else { $null }
+
                 # Build the container if not skipped
                 if (-not $NoBuild) {
                     Write-Host "Building image $AshImageName -- this may take a few minutes during the first build..."
 
-                    $buildCmd = @(
+                    $buildCmd = @()
+                    if ($OCI_WRAPPER) { $buildCmd += $OCI_WRAPPER }
+                    $buildCmd += @(
                         $RESOLVED_OCI_RUNNER
                         'build'
                     )
@@ -313,7 +318,9 @@ function Invoke-ASH {
                 if (-not $NoRun) {
                     Write-Host "Running ASH scan using built image..."
                     $ashDebug = "$(if($PSBoundParameters.ContainsKey('Debug')){"YES"}else{"NO"})".Trim()
-                    $runCmd = @(
+                    $runCmd = @()
+                    if ($OCI_WRAPPER) { $runCmd += $OCI_WRAPPER }
+                    $runCmd += @(
                         $RESOLVED_OCI_RUNNER
                         'run'
                         '--rm'

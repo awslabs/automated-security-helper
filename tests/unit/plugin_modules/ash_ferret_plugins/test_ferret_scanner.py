@@ -1133,9 +1133,9 @@ class TestFerretPluginValidation:
         PII, hex entropy strings, glob exclude syntax, Windows paths, multiple
         --exclude args, ferret in .ash.yaml, and config override conflicts.
         """
-        import subprocess
+        import subprocess  # nosec B404 — test validates subprocess behavior
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 — test invokes ferret-scan binary
             ["python", "scripts/validate_ferret_plugin.py"],
             capture_output=True,
             text=True,

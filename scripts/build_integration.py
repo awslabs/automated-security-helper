@@ -7,7 +7,7 @@ ensuring all documentation is generated from templates before builds.
 """
 
 import sys
-import subprocess
+import subprocess  # nosec B404 — build script invokes integration tools
 from pathlib import Path
 from typing import List, Optional
 
@@ -156,7 +156,9 @@ def run_command(command: List[str], cwd: Optional[Path] = None) -> bool:
         True if command succeeded
     """
     try:
-        subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=True)
+        subprocess.run(  # nosec B603 — list args, build integration tool
+            command, cwd=cwd, capture_output=True, text=True, check=True
+        )
         return True
     except subprocess.CalledProcessError as e:
         print(f"Command failed: {' '.join(command)}")

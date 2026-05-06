@@ -5,7 +5,7 @@ PR#274 Bug #4: CalledProcessError returned as CompletedProcess from run_command
 PR#274 Bug #38: Popen orphaned on exception in run_command_stream_output
 """
 
-import subprocess
+import subprocess  # nosec B404 — test exercises subprocess_utils module
 from unittest.mock import MagicMock, patch
 
 import pytest

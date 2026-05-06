@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import datetime
 import uuid
-import random
+import random  # nosec B311 — test mock data generation, not security
 from unittest.mock import MagicMock
 
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -171,7 +171,7 @@ class SuppressionFactory:
             A Suppression object
         """
         # Set expiration date to 30 days in the future if not provided
-        if expiration is None and random.random() < 0.2:  # 20% chance to add expiration
+        if expiration is None and random.random() < 0.2:  # 20% chance to add expiration # nosec B311
             future_date = datetime.datetime.now() + datetime.timedelta(days=30)
             expiration = future_date.strftime("%Y-%m-%d")
 
@@ -212,12 +212,12 @@ class SuppressionFactory:
         suppressions = []
         for i in range(count):
             rule_id = f"{rule_prefix}{i + 1:03d}"
-            file_path = random.choice(file_paths)
+            file_path = random.choice(file_paths) # nosec B311
 
             # Randomly decide whether to include line numbers
-            if random.random() < 0.7:  # 70% chance to include line numbers
-                line_start = random.randint(1, 100)
-                line_end = line_start + random.randint(0, 10)
+            if random.random() < 0.7:  # 70% chance to include line numbers # nosec B311
+                line_start = random.randint(1, 100) # nosec B311
+                line_end = line_start + random.randint(0, 10) # nosec B311
             else:
                 line_start = None
                 line_end = None
@@ -282,7 +282,7 @@ class VulnerabilityFactory:
             # Generate a deterministic ID based on the inputs
             seed = f"{rule_id}::{file_path}::{line_start}::{line_end}"
             random.seed(seed)
-            id = str(uuid.UUID(int=random.getrandbits(128), version=4))
+            id = str(uuid.UUID(int=random.getrandbits(128), version=4)) # nosec B311
 
         if references is None:
             references = []
@@ -291,11 +291,11 @@ class VulnerabilityFactory:
             tags = []
 
         # Randomly add CVE information if not provided
-        if cve_id is None and random.random() < 0.3:  # 30% chance to add CVE
-            year = random.randint(2018, 2025)
-            number = random.randint(1000, 9999)
+        if cve_id is None and random.random() < 0.3:  # 30% chance to add CVE # nosec B311
+            year = random.randint(2018, 2025) # nosec B311
+            number = random.randint(1000, 9999) # nosec B311
             cve_id = f"CVE-{year}-{number}"
-            cvss_score = round(random.uniform(1.0, 10.0), 1)
+            cvss_score = round(random.uniform(1.0, 10.0), 1) # nosec B311
             cvss_vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
 
         return FlatVulnerability(
@@ -366,9 +366,9 @@ class VulnerabilityFactory:
         vulnerabilities = []
         for i in range(count):
             rule_id = f"MOCK-{i + 1:03d}"
-            file_path = random.choice(file_paths)
-            line_start = random.randint(1, 200)
-            line_end = line_start + random.randint(0, 10)
+            file_path = random.choice(file_paths) # nosec B311
+            line_start = random.randint(1, 200) # nosec B311
+            line_end = line_start + random.randint(0, 10) # nosec B311
 
             vulnerabilities.append(
                 VulnerabilityFactory.create(

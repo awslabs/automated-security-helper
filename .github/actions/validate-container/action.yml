@@ -1,5 +1,5 @@
 name: "Validate Container Runtime"
-description: "Build ASH container with podman or finch"
+description: "Validate that ASH container image can be built with podman or finch"
 
 inputs:
   runtime:
@@ -17,7 +17,6 @@ runs:
     - name: "podman: install (macOS)"
       if: inputs.runtime == 'podman' && runner.os == 'macOS'
       shell: bash
-      continue-on-error: true
       run: |
         brew install podman
         podman machine init
@@ -26,11 +25,10 @@ runs:
       if: inputs.runtime == 'podman'
       shell: bash
       run: podman --version
-    - name: "podman: build container"
+    - name: "podman: build image"
       if: inputs.runtime == 'podman'
       shell: bash
-      continue-on-error: true
-      run: ash image build --oci-runner podman --force 2>&1 | tail -10
+      run: ash build-image --oci-runner podman --force
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -40,23 +38,16 @@ runs:
     - name: "finch: install (Linux)"
       if: inputs.runtime == 'finch' && runner.os == 'Linux'
       shell: bash
-      continue-on-error: true
+      run: sudo bash scripts/setup-finch-linux.sh
+    - name: "finch: init and start VM (macOS only)"
+      if: inputs.runtime == 'finch' && runner.os == 'macOS'
+      shell: bash
       run: |
-        curl -LO https://github.com/runfinch/finch/releases/latest/download/finch-linux-amd64.tar.gz
-        sudo tar -xzf finch-linux-amd64.tar.gz -C /usr/local
-        rm finch-linux-amd64.tar.gz
-    - name: "finch: init VM"
+        finch vm init
+        finch vm start
+    - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
-      continue-on-error: true
-      run: finch vm init
-    - name: "finch: start VM"
-      if: inputs.runtime == 'finch'
-      shell: bash
-      continue-on-error: true
-      run: finch vm start
-    - name: "finch: build container"
-      if: inputs.runtime == 'finch'
-      shell: bash
-      continue-on-error: true
-      run: ash image build --oci-runner finch --force 2>&1 | tail -10
+      env:
+        OCI_RUNNER_WRAPPER: sudo
+      run: ash build-image --oci-runner finch --force

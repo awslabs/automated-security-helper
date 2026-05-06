@@ -91,7 +91,7 @@ def retry_with_backoff(
 
                     # Calculate delay with exponential backoff and jitter
                     delay = min(
-                        base_delay * (2**retries) + random.uniform(0, 1), max_delay
+                        base_delay * (2**retries) + random.uniform(0, 1), max_delay  # nosec B311 — jitter for retry backoff, not security
                     )
 
                     # Log the retry

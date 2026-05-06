@@ -6,7 +6,7 @@ This module demonstrates best practices for using mocks in tests.
 import json
 import pytest
 import os
-import subprocess
+import subprocess  # nosec B404 — documentation example
 import requests
 from pathlib import Path
 from unittest import mock
@@ -48,7 +48,7 @@ class ExampleScanner:
     def scan_with_external_tool(self, file_path):
         """Scan a file using an external tool."""
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 — documentation example
                 ["example-tool", "-r", str(file_path)],
                 capture_output=True,
                 text=True,

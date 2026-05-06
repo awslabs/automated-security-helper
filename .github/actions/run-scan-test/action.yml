@@ -19,12 +19,16 @@ inputs:
     description: "Snyk token for community plugin validation"
     required: false
     default: ""
+  oci-runner:
+    description: "OCI container runtime: docker, podman, or finch"
+    required: false
+    default: "docker"
 
 runs:
   using: "composite"
   steps:
     - name: Set up Docker Buildx on Linux
-      if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local'
+      if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local' && inputs.oci-runner != 'finch'
       uses: docker/setup-buildx-action@v4
 
     - name: Create output directory
@@ -97,18 +101,16 @@ runs:
         echo "Checking for plugin execution errors..."
         export PATH="$HOME/.local/bin:$PATH"
         if command -v ash >/dev/null 2>&1; then
-          ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
           REPORT_CMD="ash report --format text"
         else
-          ERROR_COUNT=$(python -m automated_security_helper report --format text | grep ERROR | wc -l)
           REPORT_CMD="python -m automated_security_helper report --format text"
         fi
+        REPORT_OUTPUT=$($REPORT_CMD)
+        echo "$REPORT_OUTPUT"
+        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" | head -1)
         if [ "$ERROR_COUNT" -gt 1 ]; then
-          echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-          $REPORT_CMD | grep ERROR | tail -n +2
+          echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
           exit 1
-        else
-          echo "SUCCESS: No plugin execution errors found"
         fi
 
     # Python Local scan (Windows)
@@ -166,13 +168,12 @@ runs:
       shell: bash
       run: |
         echo "Checking for plugin execution errors..."
-        ERROR_COUNT=$(ash report --format text | grep ERROR | wc -l)
+        REPORT_OUTPUT=$(ash report --format text)
+        echo "$REPORT_OUTPUT"
+        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" | head -1)
         if [ "$ERROR_COUNT" -gt 1 ]; then
-          echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-          ash report --format text | grep ERROR | tail -n +2
+          echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
           exit 1
-        else
-          echo "SUCCESS: No plugin execution errors found"
         fi
 
     # PowerShell scan
@@ -185,10 +186,11 @@ runs:
         Write-Host "Testing ASH using PowerShell on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
         . ./utils/ash_helpers.ps1
         Get-Help Invoke-ASH -Full
+        $runner = if ($env:OCI_RUNNER) { $env:OCI_RUNNER } else { "docker" }
         if ("${{ inputs.config-file }}" -eq "community") {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker -ConfigFile ".ash/.ash_community_plugins.yaml"
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -ConfigFile ".ash/.ash_community_plugins.yaml"
         } else {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner docker
+          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner
         }
 
     - name: Validate No Plugin Errors (PowerShell)
@@ -237,13 +239,12 @@ runs:
       shell: bash
       run: |
         echo "Checking for plugin execution errors..."
-        ERROR_COUNT=$(./ash report --format text | grep ERROR | wc -l)
+        REPORT_OUTPUT=$(./ash report --format text)
+        echo "$REPORT_OUTPUT"
+        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" | head -1)
         if [ "$ERROR_COUNT" -gt 1 ]; then
-          echo "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-          ./ash report --format text | grep ERROR | tail -n +2
+          echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
           exit 1
-        else
-          echo "SUCCESS: No plugin execution errors found"
         fi
 
     # Common post-scan validation
@@ -277,10 +278,10 @@ runs:
       shell: bash
       run: |
         echo "Validating GitLab SAST report schema compliance..."
-        GITLAB_REPORTS=$(find .ash/ash_output -name "*.gl-sast-report.json" 2>/dev/null || true)
+        GITLAB_REPORTS=$(find .ash/ash_output -name "*.gl-sast-report.json")
         if [ -z "$GITLAB_REPORTS" ]; then
-          echo "No GitLab SAST reports found to validate"
-          exit 0
+          echo "ERROR: GitLab SAST report not found in .ash/ash_output"
+          exit 1
         fi
         echo "Found GitLab SAST reports to validate:"
         echo "$GITLAB_REPORTS"

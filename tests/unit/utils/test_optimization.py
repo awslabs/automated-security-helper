@@ -7,7 +7,7 @@ test prioritization, test caching, and test result analysis.
 import json
 import time
 import hashlib
-import subprocess
+import subprocess  # nosec B404 — test validates subprocess optimization
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime
@@ -413,7 +413,7 @@ def run_tests_with_optimization(
 
     # Run the tests
     start_time = time.time()
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd)  # nosec B603 — test validates subprocess optimization
     duration = time.time() - start_time
 
     # Print summary

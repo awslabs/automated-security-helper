@@ -407,7 +407,7 @@ class FindingsExplorerApp(App):
             suppressed_select.value = (
                 "all" if self.show_suppressed else "not_suppressed"
             )
-        except Exception:
+        except Exception:  # nosec B110 — UI widget query failure is non-critical
             pass
 
         self._populate_table()

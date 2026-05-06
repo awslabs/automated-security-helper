@@ -22,7 +22,6 @@ jobs:
   validate:
     name: ${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.method == 'finch' || matrix.method == 'podman' }}
     strategy:
       fail-fast: false
       matrix:
@@ -44,21 +43,14 @@ jobs:
           - { os: ubuntu-24.04-arm, python-version: "3.10", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: podman }
-          - { os: macos-latest, python-version: "3.10", method: podman }
-          - { os: macos-latest, python-version: "3.11", method: podman }
-          - { os: macos-latest, python-version: "3.13", method: podman }
-          - { os: macos-14, python-version: "3.10", method: podman }
-          - { os: macos-14, python-version: "3.11", method: podman }
-          - { os: macos-14, python-version: "3.13", method: podman }
+          # Podman/Finch not on macOS (no nested virtualization on hosted runners)
+          - { os: macos-latest, method: podman }
+          - { os: macos-14, method: podman }
           - { os: ubuntu-latest, python-version: "3.10", method: finch }
           - { os: ubuntu-latest, python-version: "3.11", method: finch }
           - { os: ubuntu-latest, python-version: "3.13", method: finch }
-          - { os: macos-latest, python-version: "3.10", method: finch }
-          - { os: macos-latest, python-version: "3.11", method: finch }
-          - { os: macos-latest, python-version: "3.13", method: finch }
-          - { os: macos-14, python-version: "3.10", method: finch }
-          - { os: macos-14, python-version: "3.11", method: finch }
-          - { os: macos-14, python-version: "3.13", method: finch }
+          - { os: macos-latest, method: finch }
+          - { os: macos-14, method: finch }
           # Homebrew only needs one Python (formula validation)
           - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
@@ -117,7 +109,6 @@ jobs:
         if: matrix.method == 'pip'
         run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
         shell: bash
-        continue-on-error: true
 
       # === pipx ===
       - name: "pipx: install pipx"
@@ -135,12 +126,11 @@ jobs:
         if: matrix.method == 'pipx'
         run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
         shell: bash
-        continue-on-error: true
 
       # === uvx ===
       - name: "uvx: install uv (Unix)"
         if: matrix.method == 'uvx' && runner.os != 'Windows'
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+        run: bash automated_security_helper/assets/with-retry.sh "curl -LsSf https://astral.sh/uv/install.sh | sh"
       - name: "uvx: install uv (Windows)"
         if: matrix.method == 'uvx' && runner.os == 'Windows'
         run: irm https://astral.sh/uv/install.ps1 | iex
@@ -153,7 +143,6 @@ jobs:
         if: matrix.method == 'uvx'
         run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
         shell: bash
-        continue-on-error: true
 
       # === homebrew ===
       - name: "homebrew: validate formula"
@@ -175,7 +164,6 @@ jobs:
           brew install podman
           podman machine init
           podman machine start
-        continue-on-error: true
       - name: "podman: install ASH"
         if: matrix.method == 'podman'
         run: pip install .
@@ -184,8 +172,7 @@ jobs:
         run: podman --version
       - name: "podman: build container"
         if: matrix.method == 'podman'
-        run: ash image build --oci-runner podman --force 2>&1 | tail -10
-        continue-on-error: true
+        run: ash build-image --oci-runner podman --force
 
       # === finch ===
       - name: "finch: install (macOS)"
@@ -193,26 +180,23 @@ jobs:
         run: brew install --cask finch
       - name: "finch: install (Linux)"
         if: matrix.method == 'finch' && runner.os == 'Linux'
-        run: |
-          curl -LO https://github.com/runfinch/finch/releases/latest/download/finch-linux-amd64.tar.gz
-          sudo tar -xzf finch-linux-amd64.tar.gz -C /usr/local
-          rm finch-linux-amd64.tar.gz
-        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sudo bash scripts/setup-finch-linux.sh
       - name: "finch: init VM"
-        if: matrix.method == 'finch'
+        if: matrix.method == 'finch' && runner.os == 'macOS'
         run: finch vm init
-        continue-on-error: true
       - name: "finch: start VM"
-        if: matrix.method == 'finch'
+        if: matrix.method == 'finch' && runner.os == 'macOS'
         run: finch vm start
-        continue-on-error: true
       - name: "finch: install ASH"
         if: matrix.method == 'finch'
         run: pip install .
       - name: "finch: build container"
         if: matrix.method == 'finch'
-        run: ash image build --oci-runner finch --force 2>&1 | tail -10
-        continue-on-error: true
+        env:
+          OCI_RUNNER_WRAPPER: sudo
+        run: ash build-image --oci-runner finch --force
 
       # === mcp ===
       - name: "mcp: install ASH"
@@ -225,21 +209,24 @@ jobs:
         if: matrix.method == 'mcp'
         run: python -c "from automated_security_helper.cli.mcp_server import run_mcp_server; print('OK')"
       - name: "mcp: start server and health check"
-        if: matrix.method == 'mcp'
+        if: matrix.method == 'mcp' && runner.os != 'Windows'
         run: |
-          ash mcp &
+          sleep 5 | ash mcp &
           MCP_PID=$!
-          sleep 5
-          kill $MCP_PID 2>/dev/null || true
-          echo "MCP server started and stopped cleanly"
+          sleep 2
+          if kill -0 $MCP_PID; then
+            kill $MCP_PID
+            wait $MCP_PID || :
+            echo "MCP server started and stopped cleanly"
+          else
+            echo "ERROR: MCP server exited prematurely"
+            exit 1
+          fi
         shell: bash
-        continue-on-error: true
       - name: "mcp: install MCP Inspector"
         if: matrix.method == 'mcp' && runner.os != 'Windows'
-        run: npm install -g @modelcontextprotocol/inspector 2>/dev/null || true
-        continue-on-error: true
+        run: npm install -g @modelcontextprotocol/inspector
       - name: "mcp: self-test scan"
         if: matrix.method == 'mcp'
         run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
         shell: bash
-        continue-on-error: true

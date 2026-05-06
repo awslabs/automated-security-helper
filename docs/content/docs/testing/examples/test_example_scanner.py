@@ -6,7 +6,7 @@ This module demonstrates best practices for writing unit tests for scanner compo
 import json
 import pytest
 from pathlib import Path
-import subprocess
+import subprocess  # nosec B404 — documentation example
 
 
 # Import the component being tested
@@ -240,7 +240,7 @@ def test_scanner_with_subprocess_mock(mocker):
     # Define a scanner class that uses subprocess
     class SubprocessScanner:
         def scan_file(self, file_path):
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 — documentation example
                 ["example-tool", "-r", str(file_path)], capture_output=True, text=True
             )
             data = json.loads(result.stdout)

@@ -249,6 +249,12 @@ def run_ash_scan(
                         f"\n[bold blue]Container Standard Output:[/bold blue]\n{container_result.stdout}"
                     )
 
+        # When build-only (run=False), no scan results are produced
+        if not run:
+            if hasattr(container_result, "returncode") and container_result.returncode != 0:
+                sys.exit(container_result.returncode)
+            sys.exit(0)
+
         # Load the results from the output file
         output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
         if output_file.exists():

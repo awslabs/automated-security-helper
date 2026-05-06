@@ -29,7 +29,7 @@ class TestYamlSafeLoaderNotMutated:
 
         try:
             AshConfig.from_file(config_file)
-        except Exception:
+        except Exception:  # nosec B110 — test verifies yaml loader isolation
             # Config validation may fail -- that's fine; we care about the loader.
             pass
 

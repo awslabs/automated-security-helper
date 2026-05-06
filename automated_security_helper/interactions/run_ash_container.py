@@ -395,6 +395,10 @@ def run_ash_container(
 
     ASH_LOGGER.info(f"Resolved OCI_RUNNER to: {resolved_oci_runner}")
 
+    # OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER for cargo)
+    oci_wrapper = os.environ.get("OCI_RUNNER_WRAPPER", "").strip()
+    oci_command_prefix = shlex.split(oci_wrapper) if oci_wrapper else []
+
     # Get ASH root directory
     rev = get_ash_revision()
     resolved_revision = (
@@ -489,6 +493,7 @@ def run_ash_container(
 
         # Prepare build command
         build_cmd = [
+            *oci_command_prefix,
             resolved_oci_runner,
             "build",
         ]
@@ -553,6 +558,7 @@ def run_ash_container(
 
                 # Prepare build command
                 custom_build_cmd = [
+                    *oci_command_prefix,
                     resolved_oci_runner,
                     "build",
                 ]
@@ -634,6 +640,7 @@ def run_ash_container(
             ASH_LOGGER.info(f"Using default output directory: {output_dir}")
 
         run_cmd = [
+            *oci_command_prefix,
             resolved_oci_runner,
             "run",
             "--rm",
