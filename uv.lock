@@ -49,7 +49,7 @@ wheels = [
 
 [[package]]
 name = "automated-security-helper"
-version = "3.4.0"
+version = "3.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "attrs" },
@@ -61,11 +61,11 @@ dependencies = [
     { name = "docker" },
     { name = "gitdb" },
     { name = "gitpython" },
+    { name = "igittigitt" },
     { name = "importlib-metadata" },
     { name = "jsonschema" },
     { name = "junitparser" },
     { name = "mcp" },
-    { name = "pathspec" },
     { name = "pydantic", extra = ["email"] },
     { name = "pyrsistent" },
     { name = "python-multipart" },
@@ -123,11 +123,11 @@ requires-dist = [
     { name = "docker", specifier = ">=6.0.1,<8.0.0" },
     { name = "gitdb", specifier = ">=4.0.1,<5.0.0" },
     { name = "gitpython", specifier = ">=3.1.30,<4.0.0" },
+    { name = "igittigitt", specifier = ">=2.1.4,<3.0.0" },
     { name = "importlib-metadata", specifier = ">=6.0.0,<8.0.0" },
     { name = "jsonschema", specifier = ">=4.17.0,<5.0.0" },
     { name = "junitparser", specifier = ">=3.2.0,<4" },
     { name = "mcp", specifier = ">=1.23.3,<2" },
-    { name = "pathspec", specifier = ">=0.12.1,<0.13" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.11.3,<2.14" },
     { name = "pyrsistent", specifier = ">=0.18.0,<1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.22,<0.1" },
@@ -557,6 +557,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7a/1d/29d32e0fb40864b1f878c7f5a0b343ae676c6e2b271a2d55cc3a152391da/charset_normalizer-3.4.7-cp314-cp314t-win_amd64.whl", hash = "sha256:03853ed82eeebbce3c2abfdbc98c96dc205f32a79627688ac9a27370ea61a49c", size = 174168, upload-time = "2026-04-02T09:27:49.795Z" },
     { url = "https://files.pythonhosted.org/packages/de/32/d92444ad05c7a6e41fb2036749777c163baf7a0301a040cb672d6b2b1ae9/charset_normalizer-3.4.7-cp314-cp314t-win_arm64.whl", hash = "sha256:c35abb8bfff0185efac5878da64c45dafd2b37fb0383add1be155a763c1f083d", size = 153018, upload-time = "2026-04-02T09:27:51.116Z" },
     { url = "https://files.pythonhosted.org/packages/db/8f/61959034484a4a7c527811f4721e75d02d653a35afb0b6054474d8185d4c/charset_normalizer-3.4.7-py3-none-any.whl", hash = "sha256:3dce51d0f5e7951f8bb4900c257dad282f49190fdbebecd4ba99bcc41fef404d", size = 61958, upload-time = "2026-04-02T09:28:37.794Z" },
+]
+
+[[package]]
+name = "cli-exit-tools"
+version = "1.2.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "lib-detect-testenv" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c1/31/cdfa180d48d35df219dea166b6932a190c90de2a30c4c0243243abd6eba7/cli_exit_tools-1.2.7.tar.gz", hash = "sha256:e752427a4aa9db1f18370c8dc11ebef6e245cc5891ec2fa79e7169be583c2423", size = 31417, upload-time = "2024-10-02T22:59:45.138Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/04/99c10558a3f6e7b817d16bfcd56caf12ac0c0cfd5944f26b1bf5fe2f3a30/cli_exit_tools-1.2.7-py3-none-any.whl", hash = "sha256:bdfdd8b0613e49faf6f4d8695328ce815858f980ea8ab2ddb69867ca1970e551", size = 11912, upload-time = "2024-10-02T22:59:43.525Z" },
 ]
 
 [[package]]
@@ -1022,6 +1035,22 @@ wheels = [
 ]
 
 [[package]]
+name = "igittigitt"
+version = "2.1.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "cli-exit-tools" },
+    { name = "click" },
+    { name = "lib-detect-testenv" },
+    { name = "wcmatch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/a1/c43c5e9fb8308419d6bc9c0316e214fa08229d4c3a00b08bbfddd81aa8f4/igittigitt-2.1.5.tar.gz", hash = "sha256:7ef4984bbd53b7d5832ba547926eb49774f15556bb08506273362e92b978b58a", size = 47796, upload-time = "2024-10-16T09:46:21.114Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/73/13/0d67c39993c4f3ff78daae24fd3e3524e2f170e035e05f29c4e2f4eabd88/igittigitt-2.1.5-py3-none-any.whl", hash = "sha256:bf21d657b770fea35cbe3d4f2a62f6222065460c52ca897f271bd389ec1e79af", size = 17410, upload-time = "2024-10-16T09:46:19.246Z" },
+]
+
+[[package]]
 name = "importlib-metadata"
 version = "7.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1149,6 +1178,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/10/d2/ff630536151c8f5aaf03aebbc963f570dc9f2af0b3f35c11774e0c4c75af/lazydocs-0.4.8.tar.gz", hash = "sha256:8ac1fda05f03e0c5ae1d30b81eaeb785476efa161194a5e8bfa8630e14af9562", size = 23218, upload-time = "2021-07-27T08:05:43.759Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/9e/6b8b057eb511ea904a4fd6a835fee0a87ccb08edd64026e783a3ee6bb8c5/lazydocs-0.4.8-py3-none-any.whl", hash = "sha256:cebdce88c8e01ae19c63da77fc25a16abd6f7a7055930001644703643e608fed", size = 17611, upload-time = "2021-07-27T08:05:42.386Z" },
+]
+
+[[package]]
+name = "lib-detect-testenv"
+version = "3.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "rich-click" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4b/c5/d92d043d2e900ac5086314b993916cb1b4940c1de1ca98bb25abafbe00ab/lib_detect_testenv-3.0.1.tar.gz", hash = "sha256:c23d5f1c8aed4ce030d977f6848ca52544b487212063d542e1ce3ec00f52ca6a", size = 84038, upload-time = "2025-12-15T12:03:48.457Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a2/69/fcd3bd58782176dac80ad69a10976dccb5dada5b14a5279cb83380d63849/lib_detect_testenv-3.0.1-py3-none-any.whl", hash = "sha256:514bb01e730e0cb5fc5bdd9aeeed798a696348a89dfc399ff748a68f905ff9b2", size = 14821, upload-time = "2025-12-15T12:03:47.505Z" },
 ]
 
 [[package]]
@@ -2176,6 +2217,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ab/3a/0316b28d0761c6734d6bc14e770d85506c986c85ffb239e688eeaab2c2bc/rich-13.9.4.tar.gz", hash = "sha256:439594978a49a09530cff7ebc4b5c7103ef57baf48d5ea3184f21d9a2befa098", size = 223149, upload-time = "2024-11-01T16:43:57.873Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/19/71/39c7c0d87f8d4e6c020a393182060eaefeeae6c01dab6a84ec346f2567df/rich-13.9.4-py3-none-any.whl", hash = "sha256:6049d5e6ec054bf2779ab3358186963bac2ea89175919d699e378b99738c2a90", size = 242424, upload-time = "2024-11-01T16:43:55.817Z" },
+]
+
+[[package]]
+name = "rich-click"
+version = "1.9.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "rich" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/04/27/091e140ea834272188e63f8dd6faac1f5c687582b687197b3e0ec3c78ebf/rich_click-1.9.7.tar.gz", hash = "sha256:022997c1e30731995bdbc8ec2f82819340d42543237f033a003c7b1f843fc5dc", size = 74838, upload-time = "2026-01-31T04:29:27.707Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/e5/d708d262b600a352abe01c2ae360d8ff75b0af819b78e9af293191d928e6/rich_click-1.9.7-py3-none-any.whl", hash = "sha256:2f99120fca78f536e07b114d3b60333bc4bb2a0969053b1250869bcdc1b5351b", size = 71491, upload-time = "2026-01-31T04:29:26.777Z" },
 ]
 
 [[package]]

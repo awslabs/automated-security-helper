@@ -192,6 +192,23 @@ global_settings:
     - rule_id: B603
       path: scripts/*.py
       reason: "Build scripts use list-form subprocess"
+    # === Approved license findings (trivy license scanner) ===
+    - rule_id: "*:MIT"
+      reason: "MIT is an approved permissive license"
+    - rule_id: "*:Apache-2.0"
+      reason: "Apache 2.0 is an approved permissive license"
+    - rule_id: "*:BSD-2-Clause"
+      reason: "BSD 2-Clause is an approved permissive license"
+    - rule_id: "*:BSD-3-Clause"
+      reason: "BSD 3-Clause is an approved permissive license"
+    - rule_id: "*:ISC"
+      reason: "ISC is an approved permissive license"
+    - rule_id: "*:Unlicense"
+      reason: "Unlicense is an approved public domain dedication"
+    - rule_id: "*:PSF-2.0"
+      reason: "Python Software Foundation License 2.0 is an approved license"
+    - rule_id: "*:Python Software Foundation License"
+      reason: "Python Software Foundation License is an approved license"
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
@@ -315,6 +332,7 @@ scanners:
       ignore_unfixed: false
       license_full: false
       disable_telemetry: true
+      skip_dirs: ["tests/test_data"]
 converters:
   archive:
     enabled: true # Disable once #197 is fixed, not required for the test

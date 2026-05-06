@@ -134,8 +134,8 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 COPY Gemfile /deps/Gemfile
 ARG BUNDLER_VERSION="2.4.22"
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    with-retry 'gem install bundler -v ${BUNDLER_VERSION}' && \
-    cd /deps && with-retry 'bundle install --jobs=4'
+    with-retry 'gem install bundler -v ${BUNDLER_VERSION}'
+RUN with-retry 'bundle install --jobs=4'
 
 #
 # JavaScript: corepack manages npm/yarn/pnpm versions via package.json engines
