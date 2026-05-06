@@ -99,7 +99,7 @@ Each object in the `findings` array has these fields:
   "metadata": {
     "project": "my-service",
     "scan_time": "2025-05-01 - 12:00 (UTC)",
-    "report_time": "2025-05-01 12:00:05 UTC",
+    "report_time": "2025-05-01T12:00:05+00:00",
     "tool_version": "3.4.0",
     "time_delta": "0:00:05"
   },
