@@ -15,17 +15,27 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 from automated_security_helper.utils.log import ASH_LOGGER
 
 # Regex patterns for inline suppression comments.
-# Supported formats:
+# Supported formats (hash-style for Python/Ruby/YAML/Shell):
 #   # ash-ignore: RULE-ID [reason]
 #   # ash-ignore-next-line: RULE-ID [reason]
-# The leading ``#`` can be preceded by any amount of whitespace (to handle
-# indented code) and is followed by a single space before the directive.
-_INLINE_PATTERN = re.compile(
+# Supported formats (slash-style for JS/TS/Java/C#/Go):
+#   // ash-ignore: RULE-ID [reason]
+#   // ash-ignore-next-line: RULE-ID [reason]
+_HASH_INLINE_PATTERN = re.compile(
     r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
 )
-_NEXT_LINE_PATTERN = re.compile(
+_HASH_NEXT_LINE_PATTERN = re.compile(
     r"#\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
 )
+_SLASH_INLINE_PATTERN = re.compile(
+    r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+)
+_SLASH_NEXT_LINE_PATTERN = re.compile(
+    r"//\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+)
+
+_INLINE_PATTERNS = [_HASH_INLINE_PATTERN, _SLASH_INLINE_PATTERN]
+_NEXT_LINE_PATTERNS = [_HASH_NEXT_LINE_PATTERN, _SLASH_NEXT_LINE_PATTERN]
 
 
 @dataclass(frozen=True)
@@ -330,12 +340,12 @@ def check_for_expiring_suppressions(
 def find_inline_suppressions(file_path: Path) -> List[InlineSuppression]:
     """Scan a source file for inline suppression comments.
 
-    Recognised directives:
+    Recognised directives (both ``#`` and ``//`` comment styles):
 
-    * ``# ash-ignore: <rule-id> [reason]``  --  suppresses the finding on
-      the *same* line as the comment.
-    * ``# ash-ignore-next-line: <rule-id> [reason]``  --  suppresses the
-      finding on the *next* line.
+    * ``# ash-ignore: <rule-id> [reason]``  --  suppresses same line.
+    * ``# ash-ignore-next-line: <rule-id> [reason]``  --  suppresses next line.
+    * ``// ash-ignore: <rule-id> [reason]``  --  same (JS/TS/Java/C#/Go).
+    * ``// ash-ignore-next-line: <rule-id> [reason]``  --  same.
 
     Args:
         file_path: Path to the source file to scan.
@@ -353,29 +363,36 @@ def find_inline_suppressions(file_path: Path) -> List[InlineSuppression]:
     for line_num_0, line in enumerate(text.splitlines()):
         line_num = line_num_0 + 1  # 1-based
 
-        match = _INLINE_PATTERN.search(line)
-        if match:
-            rule_id = match.group(1)
-            reason = (match.group(2) or "").strip()
-            suppressions.append(
-                InlineSuppression(
-                    line_number=line_num,
-                    rule_id=rule_id,
-                    reason=reason or "Inline suppression",
+        matched = False
+        for pattern in _INLINE_PATTERNS:
+            match = pattern.search(line)
+            if match:
+                rule_id = match.group(1)
+                reason = (match.group(2) or "").strip()
+                suppressions.append(
+                    InlineSuppression(
+                        line_number=line_num,
+                        rule_id=rule_id,
+                        reason=reason or "Inline suppression",
+                    )
                 )
-            )
+                matched = True
+                break
+        if matched:
             continue
 
-        match = _NEXT_LINE_PATTERN.search(line)
-        if match:
-            rule_id = match.group(1)
-            reason = (match.group(2) or "").strip()
-            suppressions.append(
-                InlineSuppression(
-                    line_number=line_num + 1,
-                    rule_id=rule_id,
-                    reason=reason or "Inline suppression (next-line)",
+        for pattern in _NEXT_LINE_PATTERNS:
+            match = pattern.search(line)
+            if match:
+                rule_id = match.group(1)
+                reason = (match.group(2) or "").strip()
+                suppressions.append(
+                    InlineSuppression(
+                        line_number=line_num + 1,
+                        rule_id=rule_id,
+                        reason=reason or "Inline suppression (next-line)",
+                    )
                 )
-            )
+                break
 
     return suppressions

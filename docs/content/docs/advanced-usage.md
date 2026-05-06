@@ -208,8 +208,12 @@ password = "changeme"
 ```
 
 ```javascript
-// In other languages that use // comments, add a separate # comment:
-const key = process.env.KEY; # ash-ignore: SEC-KEY env var is safe
+// Languages that use // comments (JS, TS, Java, C#, Go):
+const key = process.env.KEY; // ash-ignore: SEC-KEY env var is safe
+
+// Or suppress the next line:
+// ash-ignore-next-line: SEC-KEY env var is safe
+const key = process.env.KEY;
 ```
 
 Both inline and config-file suppressions use `Kind1.inSource` in the SARIF
