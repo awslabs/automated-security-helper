@@ -179,15 +179,20 @@ def get_changed_files(base_ref: str = "origin/main") -> Optional[List[Path]]:
         A list of :class:`~pathlib.Path` objects relative to the repo root,
         or ``None`` if the diff could not be computed.
     """
+    if not re.match(r"^[a-zA-Z0-9._/~^@{}\-]+$", base_ref):
+        ASH_LOGGER.warning(
+            f"Invalid base_ref '{base_ref}'; falling back to full scan"
+        )
+        return None
+
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
+            ["git", "diff", "--name-only", f"{base_ref}...HEAD"],  # nosec B603 B607
             capture_output=True,
             text=True,
             timeout=30,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        # git not installed or command hung — fall back to full scan.
         ASH_LOGGER.warning(
             "git not available or timed out; falling back to full scan"
         )
