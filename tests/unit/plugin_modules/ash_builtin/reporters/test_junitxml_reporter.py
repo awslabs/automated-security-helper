@@ -113,7 +113,7 @@ def _get_reporter(tmp_path, config=None):
 
 def _parse_xml(xml_string: str) -> ET.Element:
     """Parse XML string and return root element."""
-    return ET.fromstring(xml_string)
+    return ET.fromstring(xml_string)  # nosec B314
 
 
 # ---------------------------------------------------------------------------
