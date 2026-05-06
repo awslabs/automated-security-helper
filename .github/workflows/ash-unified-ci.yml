@@ -7,6 +7,8 @@ on:
   pull_request:
     branches:
       - "*"
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch: {}
 
 env:
@@ -61,7 +63,7 @@ jobs:
   # Uses Python 3.12 exclusively.
   # ---------------------------------------------------------------------------
   scan-validation:
-    name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.oci-runner && matrix.oci-runner != 'docker' && format(' [{0}]', matrix.oci-runner) || '' }}${{ matrix.config-file == 'community' && ' - Community Plugins' || '' }}"
+    name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.oci-runner && matrix.oci-runner != 'docker' && format(' [{0}]', matrix.oci-runner) || '' }}${{ matrix.offline && ' [offline]' || '' }}${{ matrix.config-file == 'community' && ' - Community Plugins' || '' }}"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -100,6 +102,9 @@ jobs:
           # Windows -- python-local only (Docker disabled on hosted Windows)
           - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: default, oci-runner: "" }
 
+          # Offline mode -- validates OFFLINE=YES Docker build (grype db + semgrep rulesets cached at build time)
+          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: docker, offline: true }
+
           # Community plugins -- python-local on all platforms
           - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: community, oci-runner: "" }
           - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: community, oci-runner: "" }
@@ -131,6 +136,7 @@ jobs:
           config-file: ${{ matrix.config-file }}
           snyk-token: ${{ secrets.SNYK_TOKEN }}
           oci-runner: ${{ matrix.oci-runner }}
+          offline: ${{ matrix.offline || 'false' }}
 
   # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)

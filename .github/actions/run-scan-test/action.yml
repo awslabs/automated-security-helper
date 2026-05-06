@@ -23,6 +23,10 @@ inputs:
     description: "OCI container runtime: docker, podman, or finch"
     required: false
     default: "docker"
+  offline:
+    description: "Build and run in offline/airgapped mode"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -88,10 +92,14 @@ runs:
       run: |
         echo "Testing ASH using Python (Container) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
         ash --version
+        OFFLINE_FLAG=""
+        if [ "${{ inputs.offline }}" = "true" ]; then
+          OFFLINE_FLAG="--offline"
+        fi
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL --config .ash/.ash_community_plugins.yaml
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml
         else
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG
         fi
 
     - name: Validate No Plugin Errors (Python Container)
