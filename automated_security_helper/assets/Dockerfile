@@ -149,7 +149,8 @@ RUN with-retry 'curl -fsSL https://get.pnpm.io/install.sh | sh -'
 #
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
-RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR}
+ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
+RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 ARG SYFT_VERSION="v1.42.4"
@@ -162,10 +163,11 @@ RUN grype --version
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
     with-retry 'grype db update' && \
-    mkdir -p ${SEMGREP_RULES_CACHE_DIR} && \
+    mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
     for i in $OFFLINE_SEMGREP_RULESETS; do \
         outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
+        cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
     done \
     fi
 
