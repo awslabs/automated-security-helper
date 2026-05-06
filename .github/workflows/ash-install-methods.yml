@@ -194,6 +194,8 @@ jobs:
         run: pip install .
       - name: "finch: build container"
         if: matrix.method == 'finch'
+        env:
+          OCI_RUNNER_WRAPPER: sudo
         run: ash build-image --oci-runner finch --force
 
       # === mcp ===

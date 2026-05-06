@@ -48,4 +48,6 @@ runs:
     - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
+      env:
+        OCI_RUNNER_WRAPPER: sudo
       run: ash build-image --oci-runner finch --force
