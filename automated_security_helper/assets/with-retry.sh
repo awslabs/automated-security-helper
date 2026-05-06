@@ -1,5 +1,5 @@
 #!/bin/bash
-# Retry wrapper for network-dependent commands (3 attempts, exponential backoff)
+set -o pipefail
 max=3; delay=5; attempt=1
 while [ $attempt -le $max ]; do
   eval "$@" && exit 0

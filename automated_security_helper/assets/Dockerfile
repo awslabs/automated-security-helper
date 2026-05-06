@@ -17,7 +17,7 @@ ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 ENV ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
 
 # Install UV
-COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
+COPY with-retry.sh /usr/local/bin/with-retry
 RUN chmod +x /usr/local/bin/with-retry
 RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 ENV PATH="/root/.local/bin:$PATH"
@@ -68,7 +68,7 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 #
 # General / shared component installation
 #
-COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
+COPY with-retry.sh /usr/local/bin/with-retry
 RUN chmod +x /usr/local/bin/with-retry
 WORKDIR /deps
 
@@ -102,8 +102,7 @@ RUN set -uex; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
     mkdir -p /etc/apt/keyrings; \
-    with-retry 'curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key' \
-    | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+    with-retry 'curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg'; \
     NODE_MAJOR=20; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
@@ -164,7 +163,10 @@ RUN grype --version
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
     with-retry 'grype db update' && \
     mkdir -p ${SEMGREP_RULES_CACHE_DIR} && \
-    for i in $OFFLINE_SEMGREP_RULESETS; do with-retry "curl \"https://semgrep.dev/c/${i}\" -o \"${SEMGREP_RULES_CACHE_DIR}/$(basename \"${i}\").yml\""; done \
+    for i in $OFFLINE_SEMGREP_RULESETS; do \
+        outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
+        with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
+    done \
     fi
 
 ARG TRIVY_VERSION="v0.69.3"
