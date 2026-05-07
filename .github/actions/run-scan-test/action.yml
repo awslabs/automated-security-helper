@@ -144,13 +144,15 @@ runs:
       shell: pwsh
       run: |
         Write-Host "Checking for plugin execution errors..."
-        $ErrorOutput = ash report --format text | Select-String "ERROR"
+        $ReportText = & ash report --format text 2>&1; $null = $LASTEXITCODE
+        $ErrorOutput = $ReportText | Select-String "ERROR"
         if ($ErrorOutput -and $ErrorOutput.Count -gt 1) {
           Write-Host "ERROR: Found plugin execution errors in the scan results (excluding legend)"
           $ErrorOutput | Select-Object -Skip 1
           exit 1
         } else {
           Write-Host "SUCCESS: No plugin execution errors found"
+          exit 0
         }
 
     # Python Local scan (Unix)
