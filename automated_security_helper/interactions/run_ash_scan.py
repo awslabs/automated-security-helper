@@ -463,22 +463,11 @@ def run_ash_scan(
         )
     )
 
-    # Get the count of actionable findings. Prefer summary_stats.actionable
-    # (post-suppression, authoritative) over recomputing from unified metrics
-    # (which may reflect pre-final-suppression state in container mode).
+    # Get the count of actionable findings from unified metrics.
+    # execution_engine refreshes metrics after the final suppression pass,
+    # so these numbers reflect the post-suppression state.
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
-    actionable_findings = (
-        results.metadata.summary_stats.actionable  # nosec
-        if (
-            results is not None
-            and hasattr(results, "metadata")
-            and results.metadata is not None
-            and hasattr(results.metadata, "summary_stats")
-            and results.metadata.summary_stats is not None
-            and results.metadata.summary_stats.actionable is not None
-        )
-        else sum(item.actionable for item in scanner_metrics)
-    )
+    actionable_findings = sum(item.actionable for item in scanner_metrics)
 
     # Apply --min-severity filtering: if no finding meets the threshold,
     # treat actionable_findings as 0 for exit-code purposes.  Findings are

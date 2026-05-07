@@ -475,6 +475,13 @@ class ScanExecutionEngine:
                                 used_suppressions=getattr(self._results, 'used_suppressions', None),
                             )
 
+                        # Refresh metrics after final suppression pass so exit code
+                        # reflects the post-suppression state.
+                        self._results = populate_metrics_from_unified_source(
+                            aggregated_results=self._results
+                        )
+                        self._asharp_model = self._results
+
                         # Create and execute the Report phase
                         report_phase = ReportPhase(
                             plugins=self.plugins["reporter"],
