@@ -463,15 +463,17 @@ def run_ash_scan(
         )
     )
 
-    # Count actionable findings from the SARIF serialization (post-suppression truth).
-    # Pydantic model mutation in apply_suppressions_to_sarif doesn't always persist
-    # on in-memory result.suppressions, but model_dump_json() correctly serializes them.
-    # Count unsuppressed findings from the serialized SARIF as the authoritative source.
+    # Count actionable findings from the persisted SARIF report file.
+    # The SARIF reporter correctly serializes all suppressions (including those
+    # from the final suppression pass), while in-memory model access has a
+    # Pydantic mutation bug where result.suppressions isn't reliably set.
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
     actionable_findings = sum(item.actionable for item in scanner_metrics)
-    if results is not None and hasattr(results, "sarif") and results.sarif:
+    sarif_file = Path(output_dir).joinpath("reports", "ash.sarif")
+    if sarif_file.exists():
         try:
-            sarif_json = json.loads(results.sarif.model_dump_json(by_alias=True))  # nosec
+            with open(sarif_file, encoding="utf-8") as f:
+                sarif_json = json.load(f)  # nosec
             sarif_active = 0
             for run in sarif_json.get("runs", []):
                 for r in run.get("results", []):
