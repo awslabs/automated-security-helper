@@ -50,10 +50,20 @@ def _make_sarif(*findings_dicts) -> SarifReport:
     return SarifReport(runs=[Run(**run_dict)])
 
 
-def _make_context(ignore_paths: list[str], source_dir: str = "/src"):
+_SOURCE_DIR = "D:\\repo" if sys.platform == "win32" else "/src"
+_OUTPUT_DIR = "D:\\out" if sys.platform == "win32" else "/out"
+
+
+def _prefix(relative_path: str) -> str:
+    """Prefix a relative path with the platform source dir + /."""
+    sep = "/" if sys.platform != "win32" else "/"
+    return f"{_SOURCE_DIR.replace(chr(92), sep)}/{relative_path}"
+
+
+def _make_context(ignore_paths: list[str], source_dir: str = _SOURCE_DIR):
     ctx = MagicMock()
     ctx.source_dir = Path(source_dir)
-    ctx.output_dir = Path("/out")
+    ctx.output_dir = Path(_OUTPUT_DIR)
     ctx.ignore_suppressions = False
     ctx.config = MagicMock()
     ctx.config.global_settings = MagicMock()
@@ -67,18 +77,24 @@ def _make_context(ignore_paths: list[str], source_dir: str = "/src"):
 class TestSuppressionTimingBug:
     """Reproduce the exact sequence that causes 14 findings to escape suppression."""
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Unix path semantics")
     def test_step1_sanitize_strips_source_prefix(self):
-        """Verify sanitize_sarif_paths converts /src/tests/... to tests/..."""
-        sarif = _make_sarif(_make_finding("/src/tests/test_data/scanners/cdk/foo.yaml"))
-        sanitized = sanitize_sarif_paths(sarif, "/src")
+        """Verify sanitize_sarif_paths strips the source_dir prefix from URIs."""
+        if sys.platform == "win32":
+            source_dir = "D:\\repo"
+            finding_uri = "D:/repo/tests/test_data/scanners/cdk/foo.yaml"
+        else:
+            source_dir = "/src"
+            finding_uri = "/src/tests/test_data/scanners/cdk/foo.yaml"
+
+        sarif = _make_sarif(_make_finding(finding_uri))
+        sanitized = sanitize_sarif_paths(sarif, source_dir)
         uri = sanitized.runs[0].results[0].locations[0].physicalLocation.root.artifactLocation.uri
         assert uri == "tests/test_data/scanners/cdk/foo.yaml", f"Got: {uri}"
 
     def test_step2_suppress_drops_ignored_finding(self):
         """After sanitization, apply_suppressions drops the finding."""
-        sarif = _make_sarif(_make_finding("/src/tests/test_data/scanners/cdk/foo.yaml"))
-        sanitized = sanitize_sarif_paths(sarif, "/src")
+        sarif = _make_sarif(_make_finding(_prefix("tests/test_data/scanners/cdk/foo.yaml")))
+        sanitized = sanitize_sarif_paths(sarif, _SOURCE_DIR)
         ctx = _make_context(["tests/test_data/**"])
         result = apply_suppressions_to_sarif(sanitized, ctx)
         remaining = result.runs[0].results
@@ -106,13 +122,13 @@ class TestSuppressionTimingBug:
         """
         # Simulate per-scanner flow: sanitize → suppress → merge
         sarif = _make_sarif(
-            _make_finding("/src/tests/test_data/scanners/cdk/foo.yaml"),
-            _make_finding("/src/automated_security_helper/cli/scan.py"),
+            _make_finding(_prefix("tests/test_data/scanners/cdk/foo.yaml")),
+            _make_finding(_prefix("automated_security_helper/cli/scan.py")),
         )
         ctx = _make_context(["tests/test_data/**"])
 
         # Step 1: Sanitize (like scan_phase.py:801)
-        sanitized = sanitize_sarif_paths(sarif, "/src")
+        sanitized = sanitize_sarif_paths(sarif, _SOURCE_DIR)
 
         # Step 2: Suppress (like scan_phase.py:812) — should drop test_data finding
         suppressed = apply_suppressions_to_sarif(sanitized, ctx)
