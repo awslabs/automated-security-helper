@@ -16,9 +16,6 @@ global_settings:
     - rule_id: "SECRET-*"
       path: "scripts/**"
       reason: "Build scripts contain seeded test data generators"
-    - rule_id: "SECRET-*"
-      path: ".ash/ash_output*/**"
-      reason: "ASH output files contain hashes and IDs that trigger entropy detection"
     # === detect-secrets: specific source files ===
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/secret_masking.py
@@ -40,13 +37,10 @@ global_settings:
     - rule_id: "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"
       path: "automated_security_helper/**/*.py"
       reason: "URLs are constructed from trusted config values, not user input"
-    # === Shell script security (IFS + eval in with-retry) ===
-    - rule_id: "bash.lang.security.*"
-      path: "automated_security_helper/assets/*.sh"
-      reason: "Utility scripts use eval for retry wrapper — args from Dockerfile RUN, not user input"
+    # === Shell script security (IFS in legacy utils scripts) ===
     - rule_id: "bash.lang.security.ifs-tampering.ifs-tampering"
-      path: "**/*.sh"
-      reason: "IFS manipulation in ASH shell scripts is intentional for delimiter parsing"
+      path: "utils/**/*.sh"
+      reason: "Legacy ASHv2 scripts use IFS for field splitting — not user-facing"
     # === Checkov Dockerfile findings ===
     - rule_id: "CKV_DOCKER_*"
       path: "Dockerfile"
