@@ -227,10 +227,10 @@ global_settings:
     - rule_id: "SECRET-*"
       path: "scripts/**"
       reason: "Build scripts may contain example tokens"
-    # === Checkov Dockerfile findings ===
-    - rule_id: "CKV_DOCKER_*"
-      path: "Dockerfile"
-      reason: "Intentional Dockerfile patterns for ASH container build"
+    # === All findings on test data (intentionally insecure fixtures) ===
+    - rule_id: "*"
+      path: "tests/test_data/**"
+      reason: "Intentionally insecure test data for scanner validation — not production code"
     # === Approved license findings (trivy license scanner) ===
     - rule_id: "*:MIT"
       reason: "MIT is an approved permissive license"
