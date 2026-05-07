@@ -29,7 +29,7 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.models.core import AshSuppression
-from automated_security_helper.utils.normalizers import path_matches_pattern
+from automated_security_helper.utils.suppression_matcher import _file_path_matches
 
 
 def _get_suppression_id(suppression: AshSuppression) -> str:
@@ -483,7 +483,7 @@ def apply_suppressions_to_sarif(
                             # Evaluate the global_settings.ignore_paths entries to see if this path matches an ignore_path
                             for ignore_path in ignore_paths:
                                 # Check if the URI matches the ignore path pattern
-                                if path_matches_pattern(uri, ignore_path.path):
+                                if _file_path_matches(uri, ignore_path.path):
                                     ASH_LOGGER.verbose(
                                         f"Ignoring finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
                                     )
