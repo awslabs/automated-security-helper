@@ -33,8 +33,12 @@ class CustomBuildHook(BuildHookInterface):
             dockerfile_copy_path = ASH_ASSETS_PATH.joinpath("Dockerfile")
 
             if dockerfile_path.exists():
-                dockerfile_copy_path.write_text(dockerfile_path.read_text())
-                print(f"Successfully copied Dockerfile to {dockerfile_copy_path}")
+                content = dockerfile_path.read_text()
+                content = content.replace(
+                    "COPY automated_security_helper/assets/", "COPY "
+                )
+                dockerfile_copy_path.write_text(content)
+                print(f"Successfully generated assets/Dockerfile from root Dockerfile")
             else:
                 print(f"Warning: Dockerfile not found at {dockerfile_path}")
                 if dockerfile_copy_path.exists():
