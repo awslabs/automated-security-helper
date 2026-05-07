@@ -463,15 +463,24 @@ def run_ash_scan(
         )
     )
 
-    # Get the count of actionable findings from unified metrics
+    # Re-read the actionable count from the serialized output (the authoritative
+    # post-suppression state). The in-memory model may have stale metrics from
+    # populate_metrics_from_unified_source which runs before final serialization.
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
-    actionable_findings = (
-        results.metadata.summary_stats.actionable
-        if (results and hasattr(results, 'metadata')
-            and results.metadata and results.metadata.summary_stats
-            and results.metadata.summary_stats.actionable is not None)
-        else sum(item.actionable for item in scanner_metrics)
-    )
+    actionable_findings = 0
+    try:
+        import json as _json
+        output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
+        if output_file.exists():
+            with open(output_file) as _f:
+                _data = _json.load(_f)
+            actionable_findings = (
+                _data.get("metadata", {}).get("summary_stats", {}).get("actionable", 0)
+            ) or 0
+        else:
+            actionable_findings = sum(item.actionable for item in scanner_metrics)
+    except Exception:
+        actionable_findings = sum(item.actionable for item in scanner_metrics)
 
     # Apply --min-severity filtering: if no finding meets the threshold,
     # treat actionable_findings as 0 for exit-code purposes.  Findings are
