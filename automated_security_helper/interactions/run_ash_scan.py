@@ -474,13 +474,17 @@ def run_ash_scan(
         if output_file.exists():
             with open(output_file) as _f:
                 _data = _json.load(_f)
-            actionable_findings = (
+            actionable_findings = int(
                 _data.get("metadata", {}).get("summary_stats", {}).get("actionable", 0)
-            ) or 0
+                or 0
+            )
+            logger.debug(f"Exit code using serialized actionable count: {actionable_findings} (from {output_file})")
         else:
             actionable_findings = sum(item.actionable for item in scanner_metrics)
-    except Exception:
+            logger.warning(f"Output file not found at {output_file}, using scanner_metrics sum: {actionable_findings}")
+    except Exception as _e:
         actionable_findings = sum(item.actionable for item in scanner_metrics)
+        logger.warning(f"Failed to read actionable from output: {_e}, using scanner_metrics sum: {actionable_findings}")
 
     # Apply --min-severity filtering: if no finding meets the threshold,
     # treat actionable_findings as 0 for exit-code purposes.  Findings are
