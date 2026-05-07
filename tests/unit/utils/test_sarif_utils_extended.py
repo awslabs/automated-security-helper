@@ -10,8 +10,8 @@ from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
     attach_scanner_details,
     apply_suppressions_to_sarif,
-    path_matches_pattern,
 )
+from automated_security_helper.utils.suppression_matcher import file_path_matches as path_matches_pattern
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Run,
@@ -183,21 +183,21 @@ def test_attach_scanner_details_with_no_tool():
 
 
 def test_path_matches_pattern():
-    """Test path matching patterns."""
-    # Test exact match
+    """Test file_path_matches (glob semantics)."""
+    # Exact match
     assert path_matches_pattern("dir/file.txt", "dir/file.txt") is True
 
-    # Test directory match
-    assert path_matches_pattern("dir/file.txt", "dir") is True
+    # Directory glob match (requires **)
+    assert path_matches_pattern("dir/file.txt", "dir/**") is True
 
-    # Test pattern with wildcards
+    # Pattern with wildcards
     assert path_matches_pattern("dir/subdir/file.txt", "dir/**/*") is True
 
-    # Test non-matching path
-    assert path_matches_pattern("other/file.txt", "dir") is False
+    # Non-matching path
+    assert path_matches_pattern("other/file.txt", "dir/**") is False
 
-    # Test with backslashes
-    assert path_matches_pattern("dir\\file.txt", "dir/file.txt") is True
+    # Backslash normalization (via ** glob which normalizes separators)
+    assert path_matches_pattern("dir\\file.txt", "dir/**") is True
 
 
 @patch(
@@ -211,8 +211,9 @@ def test_apply_suppressions_to_sarif(mock_check, test_output_dir):
 
     # Create a mock plugin context with suppressions
     plugin_context = MagicMock()
+    plugin_context.source_dir = Path("/absolute/path")
     plugin_context.config.global_settings.ignore_paths = [
-        MagicMock(path="to/test.py", reason="Test ignore")
+        MagicMock(path="**/test.py", reason="Test ignore")
     ]
     plugin_context.config.global_settings.suppressions = []
     plugin_context.ignore_suppressions = False
@@ -239,8 +240,9 @@ def test_apply_suppressions_with_ignore_flag(mock_check):
 
     # Create a mock plugin context with suppressions and ignore flag
     plugin_context = MagicMock()
+    plugin_context.source_dir = Path("/absolute/path")
     plugin_context.config.global_settings.ignore_paths = [
-        MagicMock(path="to/test.py", reason="Test ignore")
+        MagicMock(path="**/test.py", reason="Test ignore")
     ]
     plugin_context.config.global_settings.suppressions = []
     plugin_context.ignore_suppressions = True

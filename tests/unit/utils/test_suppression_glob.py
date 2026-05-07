@@ -2,7 +2,7 @@
 
 import pytest
 
-from automated_security_helper.utils.suppression_matcher import _file_path_matches
+from automated_security_helper.utils.suppression_matcher import file_path_matches
 
 
 @pytest.mark.parametrize(
@@ -30,5 +30,5 @@ from automated_security_helper.utils.suppression_matcher import _file_path_match
         ("tests/**", "src/test.py", False),
     ],
 )
-def test_file_path_matches(pattern, path, expected):
-    assert _file_path_matches(path, pattern) == expected
+def testfile_path_matches(pattern, path, expected):
+    assert file_path_matches(path, pattern) == expected

@@ -7,7 +7,7 @@ from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.suppression_matcher import (
     _rule_id_matches,
-    _file_path_matches,
+    file_path_matches,
     _line_range_matches,
     should_suppress_finding,
     check_for_expiring_suppressions,
@@ -19,9 +19,9 @@ def test_rule_id_matches_with_none():
     assert not _rule_id_matches(None, "TEST-001")
 
 
-def test_file_path_matches_with_none():
+def testfile_path_matches_with_none():
     """Test file path matching with None finding file path."""
-    assert not _file_path_matches(None, "src/file.py")
+    assert not file_path_matches(None, "src/file.py")
 
 
 def test_line_range_matches_with_none_line_start():

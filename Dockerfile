@@ -1,4 +1,6 @@
-#checkov:skip=CKV_DOCKER_7:Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
+#checkov:skip=CKV_DOCKER_7:Base image uses pinned tag via ARG, Checkov cannot parse ARG references
+#checkov:skip=CKV_DOCKER_3:ASH container runs as root — scanners require root for package installs and system tool access
+#checkov:skip=CKV_DOCKER_8:Same as CKV_DOCKER_3 — root is intentional for scanner tool execution
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-bookworm
 
 # First stage: Build UV requirements
@@ -17,7 +19,9 @@ ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 ENV ASH_REPO_CLONE_URL=${ASH_REPO_CLONE_URL}
 
 # Install UV
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
+RUN chmod +x /usr/local/bin/with-retry
+RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /src
@@ -66,6 +70,8 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 #
 # General / shared component installation
 #
+COPY automated_security_helper/assets/with-retry.sh /usr/local/bin/with-retry
+RUN chmod +x /usr/local/bin/with-retry
 WORKDIR /deps
 
 #
@@ -98,8 +104,7 @@ RUN set -uex; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
     mkdir -p /etc/apt/keyrings; \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-    | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+    with-retry 'curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg'; \
     NODE_MAJOR=20; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
@@ -108,14 +113,14 @@ RUN set -uex; \
 #
 # Install UV in the core stage
 #
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN with-retry 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 ENV PATH="/root/.local/bin:$PATH"
 
 #
 # Python (no-op other than updating pip --- Python deps managed via Poetry @ pyproject.toml)
 #
-RUN curl -sSf https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py
-RUN python3 -m pip install --no-cache-dir --upgrade pip
+RUN with-retry 'curl -sSf https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py'
+RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 
 # #
 # # Git (git-secrets)
@@ -126,19 +131,19 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip
 
 
 #
-# cfn-nag
+# cfn-nag (via Gemfile)
 #
-ARG CFN_NAG_VERSION="0.8.10"
+COPY automated_security_helper/assets/Gemfile /deps/Gemfile
+ARG BUNDLER_VERSION="2.4.22"
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    gem install cfn-nag -v ${CFN_NAG_VERSION}
+    with-retry 'gem install bundler -v ${BUNDLER_VERSION}'
+RUN with-retry 'bundle install --jobs=4'
 
 #
-# JavaScript:
+# JavaScript: corepack manages npm/yarn/pnpm versions via package.json engines
+# Prepare at build time so binaries are cached for offline runtime use
 #
-ARG NPM_VERSION="11.12.1"
-RUN npm install -g npm@${NPM_VERSION}
-RUN curl -o- -L https://yarnpkg.com/install.sh | bash
-RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
+RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && corepack prepare pnpm@latest --activate'
 
 
 #
@@ -146,28 +151,30 @@ RUN curl -fsSL https://get.pnpm.io/install.sh | sh -
 #
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
-RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR}
+ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
+RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 ARG SYFT_VERSION="v1.42.4"
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | \
-    sh -s -- -b /usr/local/bin ${SYFT_VERSION}
+RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}'
 RUN syft --version
 
 ARG GRYPE_VERSION="v0.111.0"
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | \
-    sh -s -- -b /usr/local/bin ${GRYPE_VERSION}
+RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${GRYPE_VERSION}'
 RUN grype --version
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
-    grype db update && \
-    mkdir -p ${SEMGREP_RULES_CACHE_DIR} && \
-    for i in $OFFLINE_SEMGREP_RULESETS; do curl "https://semgrep.dev/c/${i}" -o "${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; done \
+    with-retry 'grype db update' && \
+    mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
+    for i in $OFFLINE_SEMGREP_RULESETS; do \
+        outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
+        with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
+        cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
+    done \
     fi
 
 ARG TRIVY_VERSION="v0.69.3"
-RUN curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | \
-    sh -s -- -b /usr/local/bin ${TRIVY_VERSION}
+RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | sh -s -- -b /usr/local/bin ${TRIVY_VERSION}'
 RUN trivy --version
 
 #

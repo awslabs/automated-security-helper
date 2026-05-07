@@ -463,11 +463,25 @@ def run_ash_scan(
         )
     )
 
-    # Get the count of actionable findings from unified metrics
+    # Count actionable findings from the persisted SARIF report file.
+    # The SARIF reporter correctly serializes all suppressions (including those
+    # from the final suppression pass), while in-memory model access has a
+    # Pydantic mutation bug where result.suppressions isn't reliably set.
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
-    actionable_findings = 0
-    for item in scanner_metrics:
-        actionable_findings += item.actionable
+    actionable_findings = sum(item.actionable for item in scanner_metrics)
+    sarif_file = Path(output_dir).joinpath("reports", "ash.sarif")
+    if sarif_file.exists():
+        try:
+            with open(sarif_file, encoding="utf-8") as f:
+                sarif_json = json.load(f)  # nosec
+            sarif_active = 0
+            for run in sarif_json.get("runs", []):
+                for r in run.get("results", []):
+                    if not r.get("suppressions"):
+                        sarif_active += 1
+            actionable_findings = sarif_active
+        except Exception:  # nosec B110
+            pass  # Fall through to unified metrics count
 
     # Apply --min-severity filtering: if no finding meets the threshold,
     # treat actionable_findings as 0 for exit-code purposes.  Findings are
@@ -483,6 +497,8 @@ def run_ash_scan(
                 has_qualifying = True
             for run in getattr(sarif, "runs", []) if not has_qualifying else []:
                 for result in getattr(run, "results", []):
+                    if result.suppressions:
+                        continue
                     level = getattr(result, "level", "note")
                     if isinstance(level, str):
                         level = level.lower()

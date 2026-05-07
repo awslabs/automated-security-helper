@@ -84,3 +84,4 @@ runs:
       if: inputs.method == 'pre-commit'
       shell: bash
       run: pre-commit validate-manifest .pre-commit-hooks.yaml
+

@@ -37,9 +37,9 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     config: Annotated[
         str,
         Field(
-            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.",
         ),
-    ] = "auto"
+    ] = "p/ci"
 
     exclude: Annotated[
         List[str],
@@ -269,51 +269,28 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 for msg in offline_messages:
                     self._plugin_log(msg, level=logging.WARNING)
 
-            # Check if SEMGREP_RULES_CACHE_DIR is set in environment
+            # Use cached rules directory with --no-rewrite-rule-ids to produce
+            # clean rule IDs (the rule's own id field, no path-derived prefix).
             semgrep_rules_cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
-            if semgrep_rules_cache_dir:
-                semgrep_rules = [
-                    item
-                    for item in Path(semgrep_rules_cache_dir).glob("**/*")
-                    if (item.name.endswith(".yaml") or item.name.endswith(".yml"))
-                ]
-                if semgrep_rules:
-                    ASH_LOGGER.info(
-                        f"Semgrep offline mode: Found {len(semgrep_rules)} rule files in cache"
-                    )
-                    self.args.extra_args.extend(
-                        [
-                            ToolExtraArg(
-                                key="--config",
-                                value=item.as_posix(),
-                            )
-                            for item in semgrep_rules
-                        ]
-                    )
-                else:
-                    self._plugin_log(
-                        "🔴 Semgrep offline mode: No rules found in cache directory, falling back to p/ci",
-                        level=logging.WARNING,
-                    )
-                    self.args.extra_args.append(
-                        ToolExtraArg(
-                            key="--config",
-                            value="p/ci",
-                        )
-                    )
+            if semgrep_rules_cache_dir and Path(semgrep_rules_cache_dir).is_dir():
+                ASH_LOGGER.info(
+                    f"Semgrep offline mode: using cached rules from {semgrep_rules_cache_dir}"
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value=semgrep_rules_cache_dir)
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--no-rewrite-rule-ids", value="")
+                )
             else:
                 self._plugin_log(
-                    "🔴 Semgrep offline mode: SEMGREP_RULES_CACHE_DIR not set, falling back to p/ci",
+                    "🔴 Semgrep offline mode: cache dir not found, falling back to p/ci",
                     level=logging.WARNING,
                 )
                 self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--config",
-                        value="p/ci",
-                    )
+                    ToolExtraArg(key="--config", value="p/ci")
                 )
         else:
-            # In online mode, use config=auto
             self.args.extra_args.append(
                 ToolExtraArg(
                     key="--config",

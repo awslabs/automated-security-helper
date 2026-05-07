@@ -42,9 +42,9 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
     config: Annotated[
         str,
         Field(
-            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+            description="YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.",
         ),
-    ] = "auto"
+    ] = "p/ci"
 
     exclude: Annotated[
         List[str],
@@ -308,51 +308,26 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 for msg in offline_messages:
                     self._plugin_log(msg, level=logging.WARNING)
 
-            # Check if OPENGREP_RULES_CACHE_DIR is set in environment
+            # Use cached rules directory with --no-rewrite-rule-ids to produce
+            # clean rule IDs (the rule's own id field, no path-derived prefix).
             opengrep_rules_cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
-            if opengrep_rules_cache_dir:
-                opengrep_rules = [
-                    item
-                    for item in [
-                        *Path(opengrep_rules_cache_dir).glob("**/*"),
-                        *Path(opengrep_rules_cache_dir).glob("*"),
-                    ]
-                    if (item.name.endswith(".yaml") or item.name.endswith(".yml"))
-                ]
-                if opengrep_rules:
-                    ASH_LOGGER.info(
-                        f"Opengrep offline mode: Found {len(opengrep_rules)} rule files in cache"
-                    )
-                    self.args.extra_args.extend(
-                        [
-                            ToolExtraArg(
-                                key="--config",
-                                value=item.as_posix(),
-                            )
-                            for item in opengrep_rules
-                        ]
-                    )
-                else:
-                    self._plugin_log(
-                        "🔴 Opengrep offline mode: No rules found in cache directory, falling back to p/ci",
-                        level=logging.WARNING,
-                    )
-                    self.args.extra_args.append(
-                        ToolExtraArg(
-                            key="--config",
-                            value="p/ci",
-                        )
-                    )
+            if opengrep_rules_cache_dir and Path(opengrep_rules_cache_dir).is_dir():
+                ASH_LOGGER.info(
+                    f"Opengrep offline mode: using cached rules from {opengrep_rules_cache_dir}"
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value=opengrep_rules_cache_dir)
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--no-rewrite-rule-ids", value="")
+                )
             else:
                 self._plugin_log(
-                    "🔴 Opengrep offline mode: OPENGREP_RULES_CACHE_DIR not set, falling back to p/ci",
+                    "🔴 Opengrep offline mode: cache dir not found, falling back to p/ci",
                     level=logging.WARNING,
                 )
                 self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--config",
-                        value="p/ci",
-                    )
+                    ToolExtraArg(key="--config", value="p/ci")
                 )
         else:
             # In online mode, use config=auto
@@ -502,16 +477,8 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 level=logging.VERBOSE,
             )
 
-            # Build a local environment with offline-mode additions. Do
-            # not mutate os.environ: scanners run concurrently in thread
-            # pools and share the parent process env.
-            env_vars = {}
-            if self.config.options.offline and "OPENGREP_RULES_CACHE_DIR" in os.environ:
-                env_vars["OPENGREP_RULES"] = (
-                    f"{os.environ['OPENGREP_RULES_CACHE_DIR']}/*"
-                )
-
-            subprocess_env = {**os.environ, **env_vars} if env_vars else None
+            # No extra env vars needed — --config points to the cache directory
+            subprocess_env = None
             self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,

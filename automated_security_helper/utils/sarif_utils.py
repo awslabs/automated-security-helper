@@ -4,7 +4,7 @@ import random
 from contextlib import suppress
 from typing import List
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
@@ -29,7 +29,7 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.models.core import AshSuppression
-from automated_security_helper.utils.normalizers import path_matches_pattern
+from automated_security_helper.utils.suppression_matcher import file_path_matches
 
 
 def _get_suppression_id(suppression: AshSuppression) -> str:
@@ -421,6 +421,8 @@ def apply_suppressions_to_sarif(
     _source_dir_prefix_no_drive = (
         _source_dir_prefix[2:] if len(_source_dir_prefix) > 2 and _source_dir_prefix[1] == ":" else None
     )
+    # Offline opengrep produces relative paths with source_dir basename prefix (e.g., "src/.github/...")
+    _source_dir_basename = PurePosixPath(plugin_context.source_dir.resolve().name)
 
     for run in sarif_report.runs:
         if not run.results:
@@ -447,6 +449,9 @@ def apply_suppressions_to_sarif(
                                 uri = uri_normalized[len(_source_dir_prefix_with_slash):]
                             elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
                                 uri = uri_normalized[len(_source_dir_prefix_no_drive):]
+                            else:
+                                with suppress(ValueError):
+                                    uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
                         if uri:
                             if uri not in _uri_resolve_cache:
                                 _uri_resolve_cache[uri] = Path(uri).resolve()
@@ -464,7 +469,7 @@ def apply_suppressions_to_sarif(
                             # Evaluate the global_settings.ignore_paths entries to see if this path matches an ignore_path
                             for ignore_path in ignore_paths:
                                 # Check if the URI matches the ignore path pattern
-                                if path_matches_pattern(uri, ignore_path.path):
+                                if file_path_matches(uri, ignore_path.path):
                                     ASH_LOGGER.verbose(
                                         f"Ignoring finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
                                     )
@@ -495,6 +500,9 @@ def apply_suppressions_to_sarif(
                                 uri = uri_normalized[len(_source_dir_prefix_with_slash):]
                             elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
                                 uri = uri_normalized[len(_source_dir_prefix_no_drive):]
+                            else:
+                                with suppress(ValueError):
+                                    uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
                         line_start = None
                         line_end = None
                         if (

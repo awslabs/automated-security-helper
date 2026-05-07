@@ -5,7 +5,7 @@
 import re
 import sys
 from typing import List, Optional
-from pathspec import PathSpec
+from igittigitt import IgnoreParser
 from pathlib import Path
 import argparse
 import os
@@ -128,10 +128,14 @@ def get_ash_ignorespec_lines(
 def get_ash_ignorespec(
     lines: List[str],
     debug: bool = False,
-) -> PathSpec:
+) -> IgnoreParser:
     debug_echo("Generating spec from collected ignorespec lines", debug=debug)
-    spec = PathSpec.from_lines("gitwildmatch", lines)
-    return spec
+    parser = IgnoreParser()
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            parser.add_rule(stripped, base_path="/")
+    return parser
 
 
 def get_files_not_matching_spec(
@@ -152,7 +156,7 @@ def get_files_not_matching_spec(
         clean = re.sub(
             rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", inc_full
         )
-        if not spec.match_file(inc_full):
+        if not spec.match(Path(inc_full)):
             if "/node_modules/aws-cdk" not in inc_full:
                 debug_echo(f"Matched file for scan set: {clean}", debug=debug)
                 included.append(inc_full)

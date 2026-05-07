@@ -89,144 +89,21 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Create a minimal test file for self-test scans
-      - name: Create test fixture
-        run: |
-          mkdir -p /tmp/ash-selftest
-          echo "import os; os.system('echo hello')" > /tmp/ash-selftest/test_sample.py
-        shell: bash
+      # === pip / pipx / uvx / homebrew / pre-commit: install + verify + scan ===
+      - name: "Validate install method"
+        if: matrix.method == 'pip' || matrix.method == 'pipx' || matrix.method == 'uvx' || matrix.method == 'homebrew' || matrix.method == 'pre-commit'
+        uses: ./.github/actions/validate-install
+        with:
+          method: ${{ matrix.method }}
 
-      # === pip ===
-      - name: "pip: install"
-        if: matrix.method == 'pip'
-        run: pip install .
-      - name: "pip: verify"
-        if: matrix.method == 'pip'
-        run: |
-          ash --version
-          ash --help
-      - name: "pip: self-test scan"
-        if: matrix.method == 'pip'
-        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
-        shell: bash
-
-      # === pipx ===
-      - name: "pipx: install pipx"
-        if: matrix.method == 'pipx'
-        run: pip install pipx
-      - name: "pipx: install ASH"
-        if: matrix.method == 'pipx'
-        run: pipx install .
-      - name: "pipx: verify"
-        if: matrix.method == 'pipx'
-        run: |
-          ash --version
-          ash --help
-      - name: "pipx: self-test scan"
-        if: matrix.method == 'pipx'
-        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
-        shell: bash
-
-      # === uvx ===
-      - name: "uvx: install uv (Unix)"
-        if: matrix.method == 'uvx' && runner.os != 'Windows'
-        run: bash automated_security_helper/assets/with-retry.sh "curl -LsSf https://astral.sh/uv/install.sh | sh"
-      - name: "uvx: install uv (Windows)"
-        if: matrix.method == 'uvx' && runner.os == 'Windows'
-        run: irm https://astral.sh/uv/install.ps1 | iex
-        shell: pwsh
-      - name: "uvx: verify"
-        if: matrix.method == 'uvx'
-        run: uvx --from . ash --version
-        shell: bash
-      - name: "uvx: self-test scan"
-        if: matrix.method == 'uvx'
-        run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
-        shell: bash
-
-      # === homebrew ===
-      - name: "homebrew: validate formula"
-        if: matrix.method == 'homebrew'
-        run: ruby -c Formula/ash.rb
-
-      # === pre-commit ===
-      - name: "pre-commit: install"
-        if: matrix.method == 'pre-commit'
-        run: pip install pre-commit
-      - name: "pre-commit: validate manifest"
-        if: matrix.method == 'pre-commit'
-        run: pre-commit validate-manifest .pre-commit-hooks.yaml
-
-      # === podman ===
-      - name: "podman: install (macOS)"
-        if: matrix.method == 'podman' && runner.os == 'macOS'
-        run: |
-          brew install podman
-          podman machine init
-          podman machine start
-      - name: "podman: install ASH"
-        if: matrix.method == 'podman'
-        run: pip install .
-      - name: "podman: verify"
-        if: matrix.method == 'podman'
-        run: podman --version
-      - name: "podman: build container"
-        if: matrix.method == 'podman'
-        run: ash build-image --oci-runner podman --force
-
-      # === finch ===
-      - name: "finch: install (macOS)"
-        if: matrix.method == 'finch' && runner.os == 'macOS'
-        run: brew install --cask finch
-      - name: "finch: install (Linux)"
-        if: matrix.method == 'finch' && runner.os == 'Linux'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: sudo bash scripts/setup-finch-linux.sh
-      - name: "finch: init VM"
-        if: matrix.method == 'finch' && runner.os == 'macOS'
-        run: finch vm init
-      - name: "finch: start VM"
-        if: matrix.method == 'finch' && runner.os == 'macOS'
-        run: finch vm start
-      - name: "finch: install ASH"
-        if: matrix.method == 'finch'
-        run: pip install .
-      - name: "finch: build container"
-        if: matrix.method == 'finch'
-        env:
-          OCI_RUNNER_WRAPPER: sudo
-        run: ash build-image --oci-runner finch --force
-
-      # === mcp ===
-      - name: "mcp: install ASH"
+      # === mcp: server health check + scan ===
+      - name: "Validate MCP"
         if: matrix.method == 'mcp'
-        run: pip install .
-      - name: "mcp: verify command"
-        if: matrix.method == 'mcp'
-        run: ash mcp --help
-      - name: "mcp: test import"
-        if: matrix.method == 'mcp'
-        run: python -c "from automated_security_helper.cli.mcp_server import run_mcp_server; print('OK')"
-      - name: "mcp: start server and health check"
-        if: matrix.method == 'mcp' && runner.os != 'Windows'
-        run: |
-          sleep 5 | ash mcp &
-          MCP_PID=$!
-          sleep 2
-          if kill -0 $MCP_PID; then
-            kill $MCP_PID
-            wait $MCP_PID || :
-            echo "MCP server started and stopped cleanly"
-          else
-            echo "ERROR: MCP server exited prematurely"
-            exit 1
-          fi
-        shell: bash
-      - name: "mcp: install MCP Inspector"
-        if: matrix.method == 'mcp' && runner.os != 'Windows'
-        run: npm install -g @modelcontextprotocol/inspector
-      - name: "mcp: self-test scan"
-        if: matrix.method == 'mcp'
-        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
-        shell: bash
+        uses: ./.github/actions/validate-mcp
+
+      # === podman / finch: container runtime validation ===
+      - name: "Validate container runtime"
+        if: matrix.method == 'podman' || matrix.method == 'finch'
+        uses: ./.github/actions/validate-container
+        with:
+          runtime: ${{ matrix.method }}
