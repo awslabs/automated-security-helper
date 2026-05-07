@@ -31,10 +31,12 @@ def test_offline_flag_sets_env_var(tmp_path):
             self.config.fail_on_findings = False
 
         def execute_scan(self, phases=None):
-            return MagicMock(
+            mock_result = MagicMock(
                 runs=[],
                 model_dump_json=MagicMock(return_value="{}"),
             )
+            mock_result.metadata.summary_stats.actionable = 0
+            return mock_result
 
     # Patch at the *source* module because run_ash_scan imports lazily inside
     # the function body via ``from automated_security_helper.core.orchestrator
@@ -92,10 +94,12 @@ def test_offline_false_does_not_set_env_var(tmp_path):
             self.config.fail_on_findings = False
 
         def execute_scan(self, phases=None):
-            return MagicMock(
+            mock_result = MagicMock(
                 runs=[],
                 model_dump_json=MagicMock(return_value="{}"),
             )
+            mock_result.metadata.summary_stats.actionable = 0
+            return mock_result
 
     with (
         patch(
