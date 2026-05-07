@@ -463,9 +463,19 @@ def run_ash_scan(
         )
     )
 
+    # Re-hydrate results from the serialized JSON to ensure the in-memory model
+    # matches the persisted state (works around Pydantic model mutation not
+    # persisting on nested SARIF result objects during apply_suppressions_to_sarif).
+    if results is not None and isinstance(results, BaseModel):
+        try:
+            from automated_security_helper.models.asharp_model import AshAggregatedResults  # nosec
+            results = AshAggregatedResults.model_validate_json(
+                results.model_dump_json(by_alias=True)
+            )
+        except Exception:
+            pass  # Fall through to unified metrics if re-hydration fails
+
     # Get the count of actionable findings from unified metrics.
-    # execution_engine refreshes metrics after the final suppression pass,
-    # so these numbers reflect the post-suppression state.
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
     actionable_findings = sum(item.actionable for item in scanner_metrics)
 
