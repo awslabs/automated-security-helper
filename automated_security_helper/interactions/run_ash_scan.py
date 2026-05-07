@@ -463,18 +463,13 @@ def run_ash_scan(
         )
     )
 
-    # Count actionable findings directly from the SARIF model. The model has been
-    # through all suppression passes (per-scanner + final pass in execution_engine).
-    # A finding is actionable if it has no suppressions marked on it.
+    # Get the count of actionable findings from unified metrics.
+    # This uses per-scanner threshold logic and only counts findings
+    # properly attributed to scanners via SARIF property tags.
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
     actionable_findings = 0
-    if results and results.sarif and results.sarif.runs:
-        for _run in results.sarif.runs:
-            for _result in (_run.results or []):
-                if not _result.suppressions:
-                    actionable_findings += 1
-    else:
-        actionable_findings = sum(item.actionable for item in scanner_metrics)
+    for item in scanner_metrics:
+        actionable_findings += item.actionable
 
     # Apply --min-severity filtering: if no finding meets the threshold,
     # treat actionable_findings as 0 for exit-code purposes.  Findings are
