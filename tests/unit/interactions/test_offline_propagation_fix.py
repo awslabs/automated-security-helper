@@ -35,6 +35,7 @@ def test_offline_flag_sets_env_var(tmp_path):
                 runs=[],
                 model_dump_json=MagicMock(return_value="{}"),
             )
+            mock_result.sarif = None
             mock_result.metadata.summary_stats.actionable = 0
             return mock_result
 
@@ -98,6 +99,7 @@ def test_offline_false_does_not_set_env_var(tmp_path):
                 runs=[],
                 model_dump_json=MagicMock(return_value="{}"),
             )
+            mock_result.sarif = None
             mock_result.metadata.summary_stats.actionable = 0
             return mock_result
 
