@@ -3,6 +3,7 @@ on:
   pull_request:
     branches:
       - "*"
+  merge_group:
   workflow_dispatch: {}
 env:
   PYTHON_VERSION: "3.12"
