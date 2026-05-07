@@ -308,15 +308,27 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 for msg in offline_messages:
                     self._plugin_log(msg, level=logging.WARNING)
 
-            # Use p/ci — cache is prewarmed during Docker build so it resolves
-            # locally without network. Produces clean rule IDs without path prefix.
-            ASH_LOGGER.info("Opengrep offline mode: using p/ci (prewarmed cache)")
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--config",
-                    value="p/ci",
+            # Use cached rules directory with --no-rewrite-rule-ids to produce
+            # clean rule IDs (the rule's own id field, no path-derived prefix).
+            opengrep_rules_cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
+            if opengrep_rules_cache_dir and Path(opengrep_rules_cache_dir).is_dir():
+                ASH_LOGGER.info(
+                    f"Opengrep offline mode: using cached rules from {opengrep_rules_cache_dir}"
                 )
-            )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value=opengrep_rules_cache_dir)
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--no-rewrite-rule-ids", value="")
+                )
+            else:
+                self._plugin_log(
+                    "🔴 Opengrep offline mode: cache dir not found, falling back to p/ci",
+                    level=logging.WARNING,
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value="p/ci")
+                )
         else:
             # In online mode, use config=auto
             self.args.extra_args.append(

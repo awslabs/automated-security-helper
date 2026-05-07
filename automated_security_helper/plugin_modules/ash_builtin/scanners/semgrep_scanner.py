@@ -269,15 +269,27 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 for msg in offline_messages:
                     self._plugin_log(msg, level=logging.WARNING)
 
-            # Use p/ci — cache is prewarmed during Docker build so it resolves
-            # locally without network. Produces clean rule IDs without path prefix.
-            ASH_LOGGER.info("Semgrep offline mode: using p/ci (prewarmed cache)")
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--config",
-                    value="p/ci",
+            # Use cached rules directory with --no-rewrite-rule-ids to produce
+            # clean rule IDs (the rule's own id field, no path-derived prefix).
+            semgrep_rules_cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
+            if semgrep_rules_cache_dir and Path(semgrep_rules_cache_dir).is_dir():
+                ASH_LOGGER.info(
+                    f"Semgrep offline mode: using cached rules from {semgrep_rules_cache_dir}"
                 )
-            )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value=semgrep_rules_cache_dir)
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--no-rewrite-rule-ids", value="")
+                )
+            else:
+                self._plugin_log(
+                    "🔴 Semgrep offline mode: cache dir not found, falling back to p/ci",
+                    level=logging.WARNING,
+                )
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value="p/ci")
+                )
         else:
             self.args.extra_args.append(
                 ToolExtraArg(
