@@ -240,8 +240,9 @@ def test_apply_suppressions_with_ignore_flag(mock_check):
 
     # Create a mock plugin context with suppressions and ignore flag
     plugin_context = MagicMock()
+    plugin_context.source_dir = Path("/absolute/path")
     plugin_context.config.global_settings.ignore_paths = [
-        MagicMock(path="to/test.py", reason="Test ignore")
+        MagicMock(path="**/test.py", reason="Test ignore")
     ]
     plugin_context.config.global_settings.suppressions = []
     plugin_context.ignore_suppressions = True

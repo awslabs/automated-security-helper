@@ -410,25 +410,6 @@ def apply_suppressions_to_sarif(
     if not sarif_report or not sarif_report.runs:
         return sarif_report
 
-    # Diagnostic: log ignore_paths and finding count for debugging suppression timing
-    _total_results = sum(len(run.results or []) for run in sarif_report.runs)
-    _ignore_count = len(ignore_paths)
-    ASH_LOGGER.info(
-        f"[SUPPRESS-DIAG] apply_suppressions_to_sarif: {_total_results} results, "
-        f"{_ignore_count} ignore_paths, source_dir={plugin_context.source_dir}"
-    )
-    if ignore_paths:
-        ASH_LOGGER.info(f"[SUPPRESS-DIAG] ignore_paths patterns: {[ip.path for ip in ignore_paths[:5]]}")
-    if _total_results > 0 and sarif_report.runs[0].results:
-        _sample_uri = None
-        for _r in sarif_report.runs[0].results[:3]:
-            if _r.locations:
-                _loc = _r.locations[0]
-                if _loc.physicalLocation and _loc.physicalLocation.root.artifactLocation:
-                    _sample_uri = _loc.physicalLocation.root.artifactLocation.uri
-                    break
-        ASH_LOGGER.info(f"[SUPPRESS-DIAG] sample URI from first finding: {_sample_uri}")
-
     # Cache resolved output paths outside the inner loop (bug #46)
     _output_dir_resolved = plugin_context.output_dir.resolve()
     _work_dir_resolved = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME).resolve()
