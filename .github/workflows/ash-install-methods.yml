@@ -89,11 +89,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Create a minimal test file for self-test scans
+      # Create a minimal test file for self-test scans (clean code, no findings)
       - name: Create test fixture
         run: |
           mkdir -p /tmp/ash-selftest
-          echo "import os; os.system('echo hello')" > /tmp/ash-selftest/test_sample.py
+          echo 'print("hello world")' > /tmp/ash-selftest/test_sample.py
         shell: bash
 
       # === pip ===
