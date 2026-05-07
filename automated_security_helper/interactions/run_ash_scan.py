@@ -463,28 +463,18 @@ def run_ash_scan(
         )
     )
 
-    # Re-read the actionable count from the serialized output (the authoritative
-    # post-suppression state). The in-memory model may have stale metrics from
-    # populate_metrics_from_unified_source which runs before final serialization.
+    # Count actionable findings directly from the SARIF model. The model has been
+    # through all suppression passes (per-scanner + final pass in execution_engine).
+    # A finding is actionable if it has no suppressions marked on it.
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
     actionable_findings = 0
-    try:
-        import json as _json
-        output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
-        if output_file.exists():
-            with open(output_file) as _f:
-                _data = _json.load(_f)
-            actionable_findings = int(
-                _data.get("metadata", {}).get("summary_stats", {}).get("actionable", 0)
-                or 0
-            )
-            logger.debug(f"Exit code using serialized actionable count: {actionable_findings} (from {output_file})")
-        else:
-            actionable_findings = sum(item.actionable for item in scanner_metrics)
-            logger.warning(f"Output file not found at {output_file}, using scanner_metrics sum: {actionable_findings}")
-    except Exception as _e:
+    if results and results.sarif and results.sarif.runs:
+        for _run in results.sarif.runs:
+            for _result in (_run.results or []):
+                if not _result.suppressions:
+                    actionable_findings += 1
+    else:
         actionable_findings = sum(item.actionable for item in scanner_metrics)
-        logger.warning(f"Failed to read actionable from output: {_e}, using scanner_metrics sum: {actionable_findings}")
 
     # Apply --min-severity filtering: if no finding meets the threshold,
     # treat actionable_findings as 0 for exit-code purposes.  Findings are
