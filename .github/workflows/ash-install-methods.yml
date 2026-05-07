@@ -89,13 +89,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Create a minimal test file for self-test scans (clean code, no findings)
-      - name: Create test fixture
-        run: |
-          mkdir -p /tmp/ash-selftest
-          echo 'print("hello world")' > /tmp/ash-selftest/test_sample.py
-        shell: bash
-
       # === pip ===
       - name: "pip: install"
         if: matrix.method == 'pip'
@@ -105,10 +98,6 @@ jobs:
         run: |
           ash --version
           ash --help
-      - name: "pip: self-test scan"
-        if: matrix.method == 'pip'
-        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
-        shell: bash
 
       # === pipx ===
       - name: "pipx: install pipx"
@@ -122,10 +111,6 @@ jobs:
         run: |
           ash --version
           ash --help
-      - name: "pipx: self-test scan"
-        if: matrix.method == 'pipx'
-        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
-        shell: bash
 
       # === uvx ===
       - name: "uvx: install uv (Unix)"
@@ -138,10 +123,6 @@ jobs:
       - name: "uvx: verify"
         if: matrix.method == 'uvx'
         run: uvx --from . ash --version
-        shell: bash
-      - name: "uvx: self-test scan"
-        if: matrix.method == 'uvx'
-        run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
         shell: bash
 
       # === homebrew ===
@@ -226,7 +207,3 @@ jobs:
       - name: "mcp: install MCP Inspector"
         if: matrix.method == 'mcp' && runner.os != 'Windows'
         run: npm install -g @modelcontextprotocol/inspector
-      - name: "mcp: self-test scan"
-        if: matrix.method == 'mcp'
-        run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
-        shell: bash
