@@ -480,7 +480,7 @@ def run_ash_scan(
                     if not r.get("suppressions"):
                         sarif_active += 1
             actionable_findings = sarif_active
-        except Exception:
+        except Exception:  # nosec B110
             pass  # Fall through to unified metrics count
 
     # Apply --min-severity filtering: if no finding meets the threshold,
