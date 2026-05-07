@@ -37,17 +37,13 @@ global_settings:
     - rule_id: "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"
       path: "automated_security_helper/**/*.py"
       reason: "URLs are constructed from trusted config values, not user input"
-    # === Shell script security (IFS in legacy utils scripts) ===
-    - rule_id: "bash.lang.security.ifs-tampering.ifs-tampering"
-      path: "utils/**/*.sh"
-      reason: "Legacy ASHv2 scripts use IFS for field splitting — not user-facing"
-    # === Checkov Dockerfile findings ===
-    - rule_id: "CKV_DOCKER_*"
+    # === Checkov Dockerfile: HEALTHCHECK not applicable (CLI tool, not a service) ===
+    - rule_id: "CKV_DOCKER_2"
       path: "Dockerfile"
-      reason: "Intentional Dockerfile patterns for ASH container build"
-    - rule_id: "CKV_DOCKER_*"
+      reason: "ASH is a CLI tool — HEALTHCHECK is not applicable"
+    - rule_id: "CKV_DOCKER_2"
       path: "automated_security_helper/assets/Dockerfile"
-      reason: "Generated Dockerfile for pip-installed ASH container mode"
+      reason: "Generated Dockerfile for CLI tool — HEALTHCHECK not applicable"
     # === GitHub Actions rules (YAML — no inline suppression) ===
     - path: ".github/**/*.yml"
       rule_id: "yaml.github-actions.security.*"

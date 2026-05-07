@@ -1,4 +1,6 @@
-#checkov:skip=CKV_DOCKER_7:Base image is using a non-latest version tag by default, Checkov is unable to parse due to the use of ARG
+#checkov:skip=CKV_DOCKER_7:Base image uses pinned tag via ARG, Checkov cannot parse ARG references
+#checkov:skip=CKV_DOCKER_3:ASH container runs as root — scanners require root for package installs and system tool access
+#checkov:skip=CKV_DOCKER_8:Same as CKV_DOCKER_3 — root is intentional for scanner tool execution
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-bookworm
 
 # First stage: Build UV requirements
