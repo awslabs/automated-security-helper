@@ -101,48 +101,9 @@ jobs:
         if: matrix.method == 'mcp'
         uses: ./.github/actions/validate-mcp
 
-      # === podman ===
-      - name: "podman: install (macOS)"
-        if: matrix.method == 'podman' && runner.os == 'macOS'
-        run: |
-          brew install podman
-          podman machine init
-          podman machine start
-      - name: "podman: install ASH"
-        if: matrix.method == 'podman'
-        run: pip install .
-      - name: "podman: verify"
-        if: matrix.method == 'podman'
-        run: podman --version
-      - name: "podman: build container"
-        if: matrix.method == 'podman'
-        run: ash build-image --oci-runner podman --force
-
-      # === finch ===
-      - name: "finch: install (macOS)"
-        if: matrix.method == 'finch' && runner.os == 'macOS'
-        run: brew install --cask finch
-      - name: "finch: install (Linux)"
-        if: matrix.method == 'finch' && runner.os == 'Linux'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: sudo bash scripts/setup-finch-linux.sh
-      - name: "finch: init VM"
-        if: matrix.method == 'finch' && runner.os == 'macOS'
-        run: finch vm init
-      - name: "finch: start VM"
-        if: matrix.method == 'finch' && runner.os == 'macOS'
-        run: finch vm start
-      - name: "finch: install ASH"
-        if: matrix.method == 'finch'
-        run: pip install .
-      - name: "finch: build container"
-        if: matrix.method == 'finch'
-        env:
-          OCI_RUNNER_WRAPPER: sudo
-        run: ash build-image --oci-runner finch --force
-          sleep 2
-          if kill -0 $MCP_PID; then
-            kill $MCP_PID
-            wait $MCP_PID || :
-            echo "MCP server started and stopped cleanly"
+      # === podman / finch: container runtime validation ===
+      - name: "Validate container runtime"
+        if: matrix.method == 'podman' || matrix.method == 'finch'
+        uses: ./.github/actions/validate-container
+        with:
+          runtime: ${{ matrix.method }}
