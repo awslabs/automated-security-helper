@@ -182,6 +182,7 @@ def test_run_ash_scan_with_actionable_findings(
     mock_results.metadata.summary_stats.actionable = 5
     mock_result_obj = MagicMock()
     mock_result_obj.level = "error"
+    mock_result_obj.suppressions = None
     mock_run = MagicMock()
     mock_run.results = [mock_result_obj]
     mock_results.sarif.runs = [mock_run]
