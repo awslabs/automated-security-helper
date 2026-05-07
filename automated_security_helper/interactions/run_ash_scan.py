@@ -463,13 +463,22 @@ def run_ash_scan(
         )
     )
 
-    # Get the count of actionable findings from unified metrics.
-    # This uses per-scanner threshold logic and only counts findings
-    # properly attributed to scanners via SARIF property tags.
+    # Get the count of actionable findings. Prefer summary_stats.actionable
+    # (post-suppression, authoritative) over recomputing from unified metrics
+    # (which may reflect pre-final-suppression state in container mode).
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
-    actionable_findings = 0
-    for item in scanner_metrics:
-        actionable_findings += item.actionable
+    actionable_findings = (
+        results.metadata.summary_stats.actionable  # nosec
+        if (
+            results is not None
+            and hasattr(results, "metadata")
+            and results.metadata is not None
+            and hasattr(results.metadata, "summary_stats")
+            and results.metadata.summary_stats is not None
+            and results.metadata.summary_stats.actionable is not None
+        )
+        else sum(item.actionable for item in scanner_metrics)
+    )
 
     # Apply --min-severity filtering: if no finding meets the threshold,
     # treat actionable_findings as 0 for exit-code purposes.  Findings are

@@ -75,17 +75,20 @@ global_settings:
       reason: "Intentional test fixtures for secret masking regression tests"
     # === Non-bandit rules (semgrep/opengrep — no inline suppression mechanism) ===
     - path: "automated_security_helper/**/*.py"
-      rule_id: "python.lang.compatibility.*"
-      reason: "ASH requires Python 3.10+ (pyproject.toml) — compatibility warnings for older versions are not applicable"
+      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen1
+      reason: This package requires Python3.10 or greater (pyproject.toml).
     - path: "automated_security_helper/**/*.py"
-      rule_id: "python.lang.security.audit.*"
-      reason: "Plugin loading uses hardcoded paths from registry; URLs from trusted config — not user input"
-    - path: "**/*.py"
-      rule_id: "python.lang.security.*"
-      reason: "ASH self-scan: security patterns are intentional (dynamic imports for plugin system, subprocess for scanner execution)"
-    - path: "**/*.py"
-      rule_id: "python.lang.compatibility.*"
-      reason: "ASH requires Python 3.10+ — compatibility findings for older versions are not actionable"
+      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen2
+      reason: This package requires Python3.10 or greater (pyproject.toml).
+    - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
+      path: "automated_security_helper/**/*.py"
+      reason: "ASH requires Python 3.10+ (pyproject.toml), importlib.resources is available"
+    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
+      path: "automated_security_helper/**/*.py"
+      reason: "Plugin loading uses hardcoded module paths from registry, not user input"
+    - rule_id: "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"
+      path: "automated_security_helper/**/*.py"
+      reason: "URLs are constructed from trusted config values, not user input"
     - rule_id: "bash.lang.security.ifs-tampering.ifs-tampering"
       path: "**/*.sh"
       reason: "IFS manipulation in ASH shell scripts is intentional for delimiter parsing"
