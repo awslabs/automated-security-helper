@@ -463,21 +463,23 @@ def run_ash_scan(
         )
     )
 
-    # Re-hydrate results from the serialized JSON to ensure the in-memory model
-    # matches the persisted state (works around Pydantic model mutation not
-    # persisting on nested SARIF result objects during apply_suppressions_to_sarif).
-    if results is not None and isinstance(results, BaseModel):
-        try:
-            from automated_security_helper.models import asharp_model as _asharp_mod  # nosec
-            results = _asharp_mod.AshAggregatedResults.model_validate_json(
-                results.model_dump_json(by_alias=True)
-            )
-        except Exception:
-            pass  # Fall through to unified metrics if re-hydration fails
-
-    # Get the count of actionable findings from unified metrics.
+    # Count actionable findings from the SARIF serialization (post-suppression truth).
+    # Pydantic model mutation in apply_suppressions_to_sarif doesn't always persist
+    # on in-memory result.suppressions, but model_dump_json() correctly serializes them.
+    # Count unsuppressed findings from the serialized SARIF as the authoritative source.
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
     actionable_findings = sum(item.actionable for item in scanner_metrics)
+    if results is not None and hasattr(results, "sarif") and results.sarif:
+        try:
+            sarif_json = json.loads(results.sarif.model_dump_json(by_alias=True))  # nosec
+            sarif_active = 0
+            for run in sarif_json.get("runs", []):
+                for r in run.get("results", []):
+                    if not r.get("suppressions"):
+                        sarif_active += 1
+            actionable_findings = sarif_active
+        except Exception:
+            pass  # Fall through to unified metrics count
 
     # Apply --min-severity filtering: if no finding meets the threshold,
     # treat actionable_findings as 0 for exit-code purposes.  Findings are
