@@ -421,6 +421,8 @@ def apply_suppressions_to_sarif(
     _source_dir_prefix_no_drive = (
         _source_dir_prefix[2:] if len(_source_dir_prefix) > 2 and _source_dir_prefix[1] == ":" else None
     )
+    # Offline opengrep produces relative paths with source_dir basename prefix (e.g., "src/.github/...")
+    _source_dir_basename_prefix = Path(plugin_context.source_dir.resolve()).name + "/"
 
     for run in sarif_report.runs:
         if not run.results:
@@ -447,6 +449,8 @@ def apply_suppressions_to_sarif(
                                 uri = uri_normalized[len(_source_dir_prefix_with_slash):]
                             elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
                                 uri = uri_normalized[len(_source_dir_prefix_no_drive):]
+                            elif uri_normalized.startswith(_source_dir_basename_prefix):
+                                uri = uri_normalized[len(_source_dir_basename_prefix):]
                         if uri:
                             if uri not in _uri_resolve_cache:
                                 _uri_resolve_cache[uri] = Path(uri).resolve()
@@ -495,6 +499,8 @@ def apply_suppressions_to_sarif(
                                 uri = uri_normalized[len(_source_dir_prefix_with_slash):]
                             elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
                                 uri = uri_normalized[len(_source_dir_prefix_no_drive):]
+                            elif uri_normalized.startswith(_source_dir_basename_prefix):
+                                uri = uri_normalized[len(_source_dir_basename_prefix):]
                         line_start = None
                         line_end = None
                         if (
