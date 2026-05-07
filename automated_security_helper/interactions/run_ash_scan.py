@@ -468,8 +468,8 @@ def run_ash_scan(
     # persisting on nested SARIF result objects during apply_suppressions_to_sarif).
     if results is not None and isinstance(results, BaseModel):
         try:
-            from automated_security_helper.models.asharp_model import AshAggregatedResults  # nosec
-            results = AshAggregatedResults.model_validate_json(
+            from automated_security_helper.models import asharp_model as _asharp_mod  # nosec
+            results = _asharp_mod.AshAggregatedResults.model_validate_json(
                 results.model_dump_json(by_alias=True)
             )
         except Exception:
