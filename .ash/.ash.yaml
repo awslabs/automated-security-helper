@@ -9,109 +9,44 @@ external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
-    # === SECRET-* rules (detect-secrets doesn't support inline nosec) ===
-    - path: tests/integration/cli/test_mcp_file_tracking_integration.py
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive.
-    - path: tests/integration/cli/test_mcp_integration_simple.py
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive.
-    - path: tests/integration/cli/test_mcp_integration.py
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive.
-    - path: tests/integration/cli/conftest.py
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive.
-    - path: pyproject.toml
-      rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
-      reason: This is the project configuration. Findings of this type are false positives.
-    - path: tests/unit/plugin_modules/ash_aws_plugins/test_cloudwatch_logs_reporter*
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive, dummy test data and not an actual secret.
-    - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
-      rule_id: SECRET-SECRET-KEYWORD
-      line_start: 501
-      line_end: 501
-      reason: Documentation example showing the SECRET-SECRET-KEYWORD detection pattern.
-    - path: tests/unit/plugin_modules/ash_ferret_plugins/conftest.py
-      rule_id: SECRET-SECRET-KEYWORD
-      line_start: 146
-      line_end: 146
-      reason: False positive — SETTING = "placeholder" uses a neutral variable name.
-    - path: scripts/generate_test_docx.py
-      rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      line_start: 175
-      line_end: 177
-      reason: False positive — runtime-generated synthetic credit card numbers from seeded random for test data.
-    - path: docs/content/docs/plugins/aws/index.md
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive, not an actual secret
-    - path: docs/content/docs/plugins/development-guide.md
-      rule_id: SECRET-SECRET-KEYWORD
-      reason: False positive, not an actual secret
-    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
-      path: ".ash/ash_output*/*.*"
-      reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
-    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
-      path: ".ash/ash_output*/reports/*.json"
-      reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
-    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
-      path: ".ash/ash_output*/scanners/*.json"
-      reason: "False positive - ASH output files contain hashes and IDs that trigger entropy detection"
+    # === detect-secrets: broad patterns by path (no inline nosec support) ===
+    - rule_id: "SECRET-*"
+      path: "tests/**"
+      reason: "Test fixtures contain intentional secret patterns for validation"
+    - rule_id: "SECRET-*"
+      path: "scripts/**"
+      reason: "Build scripts contain seeded test data generators"
+    - rule_id: "SECRET-*"
+      path: ".ash/ash_output*/**"
+      reason: "ASH output files contain hashes and IDs that trigger entropy detection"
+    # === detect-secrets: specific source files ===
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/secret_masking.py
-      reason: "False positive - module processes secret-related strings, keyword matches are inherent"
+      reason: "Module processes secret-related strings — keyword matches are inherent"
     - rule_id: SECRET-SECRET-KEYWORD
-      path: tests/unit/utils/test_secret_masking.py
-      reason: "False positive - Multiple ocurrences of the keyword due to the nature of the test suite"
+      path: "docs/**"
+      reason: "Documentation examples showing detection patterns"
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
-      path: tests/unit/utils/test_secret_masking.py
-      reason: "False positive - Multiple ocurrences of the keyword due to the nature of the test suite"
-    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      path: tests/unit/test_defense_in_depth.py
-      reason: "False positive - test data contains hex strings for tarfile extraction validation"
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: "tests/unit/utils/test_secret_masking*.py"
-      reason: "Intentional test fixtures for secret masking regression tests"
-    # === Non-bandit rules (semgrep/opengrep — no inline suppression mechanism) ===
-    - path: "automated_security_helper/**/*.py"
-      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen1
-      reason: This package requires Python3.10 or greater (pyproject.toml).
-    - path: "automated_security_helper/**/*.py"
-      rule_id: python.lang.compatibility.python36.python36-compatibility-Popen2
-      reason: This package requires Python3.10 or greater (pyproject.toml).
-    - rule_id: "python.lang.compatibility.python37.python37-compatibility-importlib2"
+      path: pyproject.toml
+      reason: "Project configuration — base64 strings are dependency hashes"
+    # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
+    - rule_id: "python.lang.compatibility.*"
       path: "automated_security_helper/**/*.py"
-      reason: "ASH requires Python 3.10+ (pyproject.toml), importlib.resources is available"
+      reason: "ASH requires Python 3.10+ (pyproject.toml) — older-version warnings not applicable"
+    # === semgrep/opengrep Python security audit ===
     - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
       path: "automated_security_helper/**/*.py"
       reason: "Plugin loading uses hardcoded module paths from registry, not user input"
     - rule_id: "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"
       path: "automated_security_helper/**/*.py"
       reason: "URLs are constructed from trusted config values, not user input"
+    # === Shell script security (IFS + eval in with-retry) ===
+    - rule_id: "bash.lang.security.*"
+      path: "automated_security_helper/assets/*.sh"
+      reason: "Utility scripts use eval for retry wrapper — args from Dockerfile RUN, not user input"
     - rule_id: "bash.lang.security.ifs-tampering.ifs-tampering"
       path: "**/*.sh"
       reason: "IFS manipulation in ASH shell scripts is intentional for delimiter parsing"
-    # === Broad detect-secrets suppressions (tests + scripts) ===
-    - rule_id: "SECRET-SECRET-KEYWORD"
-      path: "tests/**"
-      reason: "Test fixtures contain intentional secret patterns for validation"
-    - rule_id: "SECRET-BASE64-HIGH-ENTROPY-STRING"
-      path: "tests/**"
-      reason: "Test fixtures contain intentional high-entropy strings"
-    - rule_id: "SECRET-HEX-HIGH-ENTROPY-STRING"
-      path: "tests/**"
-      reason: "Test fixtures contain intentional hex strings"
-    - rule_id: "SECRET-*"
-      path: "scripts/**"
-      reason: "Build scripts may contain example tokens"
-    # === Shell script security rules (with-retry.sh uses eval for retry wrapper) ===
-    - rule_id: "bash.lang.security.*"
-      path: "automated_security_helper/assets/*.sh"
-      reason: "Utility scripts use eval for retry wrapper — args come from Dockerfile RUN, not user input"
-    - rule_id: "bash.lang.security.*"
-      path: "**/*.sh"
-      reason: "Shell scripts in the repo use intentional patterns for build automation"
     # === Checkov Dockerfile findings ===
     - rule_id: "CKV_DOCKER_*"
       path: "Dockerfile"
@@ -121,9 +56,6 @@ global_settings:
       reason: "Generated Dockerfile for pip-installed ASH container mode"
     # === GitHub Actions rules (YAML — no inline suppression) ===
     - path: ".github/**/*.yml"
-      rule_id: "yaml.github-actions.security.*"
-      reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
-    - path: ".github/**/*.yaml"
       rule_id: "yaml.github-actions.security.*"
       reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
   ignore_paths:
