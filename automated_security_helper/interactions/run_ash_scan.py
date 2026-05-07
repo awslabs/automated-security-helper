@@ -490,6 +490,8 @@ def run_ash_scan(
                 has_qualifying = True
             for run in getattr(sarif, "runs", []) if not has_qualifying else []:
                 for result in getattr(run, "results", []):
+                    if result.suppressions:
+                        continue
                     level = getattr(result, "level", "note")
                     if isinstance(level, str):
                         level = level.lower()
