@@ -4,7 +4,7 @@ import random
 from contextlib import suppress
 from typing import List
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
@@ -422,7 +422,7 @@ def apply_suppressions_to_sarif(
         _source_dir_prefix[2:] if len(_source_dir_prefix) > 2 and _source_dir_prefix[1] == ":" else None
     )
     # Offline opengrep produces relative paths with source_dir basename prefix (e.g., "src/.github/...")
-    _source_dir_basename_prefix = Path(plugin_context.source_dir.resolve()).name + "/"
+    _source_dir_basename = PurePosixPath(plugin_context.source_dir.resolve().name)
 
     for run in sarif_report.runs:
         if not run.results:
@@ -449,8 +449,9 @@ def apply_suppressions_to_sarif(
                                 uri = uri_normalized[len(_source_dir_prefix_with_slash):]
                             elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
                                 uri = uri_normalized[len(_source_dir_prefix_no_drive):]
-                            elif uri_normalized.startswith(_source_dir_basename_prefix):
-                                uri = uri_normalized[len(_source_dir_basename_prefix):]
+                            else:
+                                with suppress(ValueError):
+                                    uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
                         if uri:
                             if uri not in _uri_resolve_cache:
                                 _uri_resolve_cache[uri] = Path(uri).resolve()
@@ -499,8 +500,9 @@ def apply_suppressions_to_sarif(
                                 uri = uri_normalized[len(_source_dir_prefix_with_slash):]
                             elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
                                 uri = uri_normalized[len(_source_dir_prefix_no_drive):]
-                            elif uri_normalized.startswith(_source_dir_basename_prefix):
-                                uri = uri_normalized[len(_source_dir_basename_prefix):]
+                            else:
+                                with suppress(ValueError):
+                                    uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
                         line_start = None
                         line_end = None
                         if (
