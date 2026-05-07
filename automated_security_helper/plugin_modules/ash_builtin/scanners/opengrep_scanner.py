@@ -311,44 +311,15 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             # Check if OPENGREP_RULES_CACHE_DIR is set in environment
             opengrep_rules_cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
             if opengrep_rules_cache_dir:
-                opengrep_rules = [
-                    item
-                    for item in [
-                        *Path(opengrep_rules_cache_dir).glob("**/*"),
-                        *Path(opengrep_rules_cache_dir).glob("*"),
-                    ]
-                    if (item.name.endswith(".yaml") or item.name.endswith(".yml"))
-                ]
-                if opengrep_rules:
-                    ASH_LOGGER.info(
-                        f"Opengrep offline mode: Found {len(opengrep_rules)} rule files in cache"
-                    )
-                    self.args.extra_args.extend(
-                        [
-                            ToolExtraArg(
-                                key="--config",
-                                value=item.as_posix(),
-                            )
-                            for item in opengrep_rules
-                        ]
-                    )
-                else:
-                    self._plugin_log(
-                        "🔴 Opengrep offline mode: No rules found in cache directory, falling back to p/ci",
-                        level=logging.WARNING,
-                    )
-                    self.args.extra_args.append(
-                        ToolExtraArg(
-                            key="--config",
-                            value="p/ci",
-                        )
-                    )
+                ASH_LOGGER.info(
+                    f"Opengrep offline mode: using p/ci with cache at {opengrep_rules_cache_dir}"
+                )
             else:
                 self._plugin_log(
-                    "🔴 Opengrep offline mode: OPENGREP_RULES_CACHE_DIR not set, falling back to p/ci",
+                    "🔴 Opengrep offline mode: OPENGREP_RULES_CACHE_DIR not set, p/ci may need network",
                     level=logging.WARNING,
                 )
-                self.args.extra_args.append(
+            self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config",
                         value="p/ci",

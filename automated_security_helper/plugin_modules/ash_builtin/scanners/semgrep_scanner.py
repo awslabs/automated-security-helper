@@ -269,49 +269,25 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 for msg in offline_messages:
                     self._plugin_log(msg, level=logging.WARNING)
 
-            # Check if SEMGREP_RULES_CACHE_DIR is set in environment
+            # Use p/ci in offline mode — SEMGREP_RULES_CACHE_DIR lets semgrep resolve
+            # rules locally without network. Using --config p/ci produces clean rule IDs
+            # (no path-derived prefix that breaks suppression matching).
             semgrep_rules_cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
             if semgrep_rules_cache_dir:
-                semgrep_rules = [
-                    item
-                    for item in Path(semgrep_rules_cache_dir).glob("**/*")
-                    if (item.name.endswith(".yaml") or item.name.endswith(".yml"))
-                ]
-                if semgrep_rules:
-                    ASH_LOGGER.info(
-                        f"Semgrep offline mode: Found {len(semgrep_rules)} rule files in cache"
-                    )
-                    self.args.extra_args.extend(
-                        [
-                            ToolExtraArg(
-                                key="--config",
-                                value=item.as_posix(),
-                            )
-                            for item in semgrep_rules
-                        ]
-                    )
-                else:
-                    self._plugin_log(
-                        "🔴 Semgrep offline mode: No rules found in cache directory, falling back to p/ci",
-                        level=logging.WARNING,
-                    )
-                    self.args.extra_args.append(
-                        ToolExtraArg(
-                            key="--config",
-                            value="p/ci",
-                        )
-                    )
+                ASH_LOGGER.info(
+                    f"Semgrep offline mode: using p/ci with cache at {semgrep_rules_cache_dir}"
+                )
             else:
                 self._plugin_log(
-                    "🔴 Semgrep offline mode: SEMGREP_RULES_CACHE_DIR not set, falling back to p/ci",
+                    "🔴 Semgrep offline mode: SEMGREP_RULES_CACHE_DIR not set, p/ci may need network",
                     level=logging.WARNING,
                 )
-                self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--config",
-                        value="p/ci",
-                    )
+            self.args.extra_args.append(
+                ToolExtraArg(
+                    key="--config",
+                    value="p/ci",
                 )
+            )
         else:
             self.args.extra_args.append(
                 ToolExtraArg(
