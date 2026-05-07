@@ -12,7 +12,10 @@ This test simulates the full flow:
 The bug: somewhere between steps 3 and 6, findings reappear or aren't suppressed.
 """
 
+import sys
 from pathlib import Path
+
+import pytest
 from unittest.mock import MagicMock
 
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -64,6 +67,7 @@ def _make_context(ignore_paths: list[str], source_dir: str = "/src"):
 class TestSuppressionTimingBug:
     """Reproduce the exact sequence that causes 14 findings to escape suppression."""
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Unix path semantics")
     def test_step1_sanitize_strips_source_prefix(self):
         """Verify sanitize_sarif_paths converts /src/tests/... to tests/..."""
         sarif = _make_sarif(_make_finding("/src/tests/test_data/scanners/cdk/foo.yaml"))
