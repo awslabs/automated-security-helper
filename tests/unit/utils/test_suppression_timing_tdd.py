@@ -152,11 +152,11 @@ class TestSuppressionTimingBug:
         """End-to-end: sanitize → suppress → merge → metrics should be 0 actionable
         for findings on ignored paths."""
         sarif = _make_sarif(
-            _make_finding("/src/tests/test_data/scanners/cdk/foo.yaml"),
+            _make_finding(_prefix("tests/test_data/scanners/cdk/foo.yaml")),
         )
         ctx = _make_context(["tests/test_data/**"])
 
-        sanitized = sanitize_sarif_paths(sarif, "/src")
+        sanitized = sanitize_sarif_paths(sarif, _SOURCE_DIR)
         suppressed = apply_suppressions_to_sarif(sanitized, ctx)
 
         # Build aggregated model
@@ -184,18 +184,18 @@ class TestSuppressionTimingBug:
         Does the second sanitize+suppress on already-processed data cause issues?
         """
         sarif = _make_sarif(
-            _make_finding("/src/tests/test_data/scanners/cdk/foo.yaml"),
-            _make_finding("/src/automated_security_helper/cli/scan.py"),
+            _make_finding(_prefix("tests/test_data/scanners/cdk/foo.yaml")),
+            _make_finding(_prefix("automated_security_helper/cli/scan.py")),
         )
         ctx = _make_context(["tests/test_data/**"])
 
         # First pass (like _execute_scanner)
-        sanitized1 = sanitize_sarif_paths(sarif, "/src")
+        sanitized1 = sanitize_sarif_paths(sarif, _SOURCE_DIR)
         suppressed1 = apply_suppressions_to_sarif(sanitized1, ctx)
         assert len(suppressed1.runs[0].results) == 1
 
         # Second pass (like _process_results) on the SAME object
-        sanitized2 = sanitize_sarif_paths(suppressed1, "/src")
+        sanitized2 = sanitize_sarif_paths(suppressed1, _SOURCE_DIR)
         suppressed2 = apply_suppressions_to_sarif(sanitized2, ctx)
         assert len(suppressed2.runs[0].results) == 1
 
