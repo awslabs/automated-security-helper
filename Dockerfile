@@ -168,7 +168,11 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
         cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
-    done \
+    done && \
+    mkdir -p /tmp/_warmup && echo 'x = 1' > /tmp/_warmup/warmup.py && \
+    semgrep scan --config p/ci --metrics=off --sarif -o /dev/null /tmp/_warmup 2>/dev/null || true && \
+    opengrep scan --config p/ci --metrics=off --sarif -o /dev/null /tmp/_warmup 2>/dev/null || true && \
+    rm -rf /tmp/_warmup \
     fi
 
 ARG TRIVY_VERSION="v0.69.3"
