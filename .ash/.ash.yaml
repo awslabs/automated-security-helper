@@ -121,10 +121,10 @@ global_settings:
       reason: "Generated Dockerfile for pip-installed ASH container mode"
     # === GitHub Actions rules (YAML — no inline suppression) ===
     - path: ".github/**/*.yml"
-      rule_id: "*yaml.github-actions.security.*"
+      rule_id: "yaml.github-actions.security.*"
       reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
     - path: ".github/**/*.yaml"
-      rule_id: "*yaml.github-actions.security.*"
+      rule_id: "yaml.github-actions.security.*"
       reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
   ignore_paths:
     - path: "**/.venv/**"
