@@ -465,9 +465,13 @@ def run_ash_scan(
 
     # Get the count of actionable findings from unified metrics
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
-    actionable_findings = 0
-    for item in scanner_metrics:
-        actionable_findings += item.actionable
+    actionable_findings = (
+        results.metadata.summary_stats.actionable
+        if (results and hasattr(results, 'metadata')
+            and results.metadata and results.metadata.summary_stats
+            and results.metadata.summary_stats.actionable is not None)
+        else sum(item.actionable for item in scanner_metrics)
+    )
 
     # Apply --min-severity filtering: if no finding meets the threshold,
     # treat actionable_findings as 0 for exit-code purposes.  Findings are
