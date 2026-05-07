@@ -9,7 +9,7 @@ from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
     check_for_expiring_suppressions,
     _rule_id_matches,
-    _file_path_matches,
+    file_path_matches,
     _line_range_matches,
 )
 
@@ -34,23 +34,23 @@ class TestSuppressionMatcher:
         # None case
         assert _rule_id_matches(None, "RULE-123") is False
 
-    def test_file_path_matches(self):
+    def testfile_path_matches(self):
         """Test file path matching."""
         # Exact match
-        assert _file_path_matches("src/example.py", "src/example.py") is True
+        assert file_path_matches("src/example.py", "src/example.py") is True
 
         # Pattern match
-        assert _file_path_matches("src/example.py", "src/*.py") is True
-        assert _file_path_matches("src/example.py", "src/*") is True
-        assert _file_path_matches("src/example.py", "*/example.py") is True
-        assert _file_path_matches("src/example.py", "src/ex*.py") is True
+        assert file_path_matches("src/example.py", "src/*.py") is True
+        assert file_path_matches("src/example.py", "src/*") is True
+        assert file_path_matches("src/example.py", "*/example.py") is True
+        assert file_path_matches("src/example.py", "src/ex*.py") is True
 
         # No match
-        assert _file_path_matches("src/example.py", "test/*.py") is False
-        assert _file_path_matches("src/example.py", "src/*.js") is False
+        assert file_path_matches("src/example.py", "test/*.py") is False
+        assert file_path_matches("src/example.py", "src/*.js") is False
 
         # None case
-        assert _file_path_matches(None, "src/example.py") is False
+        assert file_path_matches(None, "src/example.py") is False
 
     def test_line_range_matches(self):
         """Test line range matching."""

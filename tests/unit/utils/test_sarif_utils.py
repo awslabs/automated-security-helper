@@ -5,8 +5,8 @@ from unittest.mock import patch
 from automated_security_helper.utils.sarif_utils import (
     get_finding_id,
     _sanitize_uri,
-    path_matches_pattern,
 )
+from automated_security_helper.utils.suppression_matcher import file_path_matches as path_matches_pattern
 
 
 def test_get_finding_id():
@@ -60,21 +60,21 @@ def test_sanitize_uri(test_source_dir):
 
 
 def test_path_matches_pattern():
-    """Test the path_matches_pattern function."""
-    # Test exact match
+    """Test file_path_matches (glob semantics, platform-independent)."""
+    # Exact match
     assert path_matches_pattern("src/file.py", "src/file.py") is True
 
-    # Test directory match
-    assert path_matches_pattern("src/file.py", "src") is True
+    # Directory glob match (requires **)
+    assert path_matches_pattern("src/file.py", "src/**") is True
 
-    # Test with wildcards
+    # Wildcards
     assert path_matches_pattern("src/file.py", "src/*.py") is True
 
-    # Test with backslashes
-    assert path_matches_pattern("src\\file.py", "src") is True
+    # Backslash normalization
+    assert path_matches_pattern("src\\file.py", "src/**") is True
 
-    # Test non-matching path
+    # Non-matching path
     assert path_matches_pattern("src/file.py", "tests") is False
 
-    # Test directory with trailing slash
-    assert path_matches_pattern("src/subdir/file.py", "src/") is True
+    # Nested directory glob
+    assert path_matches_pattern("src/subdir/file.py", "src/**") is True

@@ -35,26 +35,25 @@ from automated_security_helper.schemas.sarif_schema_model import (
 # PR#274 Bug #12 -- sarif_utils.py: path_matches_pattern substring check backwards
 # ---------------------------------------------------------------------------
 class TestPathMatchesPattern:
-    """'path in pat' should be 'pat in path' (or fnmatch)."""
+    """Path matching uses file_path_matches (glob semantics, not substring)."""
 
-    def test_pattern_matches_subpath(self):
-        """Pattern 'src/foo' should match path 'src/foo/bar.py'."""
-        from automated_security_helper.utils.sarif_utils import path_matches_pattern
+    def test_glob_pattern_matches_subpath(self):
+        """Pattern 'src/foo/**' matches path 'src/foo/bar.py'."""
+        from automated_security_helper.utils.suppression_matcher import file_path_matches
 
-        assert path_matches_pattern("src/foo/bar.py", "src/foo") is True
+        assert file_path_matches("src/foo/bar.py", "src/foo/**") is True
 
     def test_path_does_not_match_longer_pattern(self):
         """Path 'foo' must NOT match pattern 'src/foo/bar.py'."""
-        from automated_security_helper.utils.sarif_utils import path_matches_pattern
+        from automated_security_helper.utils.suppression_matcher import file_path_matches
 
-        # With the bug: 'foo' in 'src/foo/bar.py' would be True
-        assert path_matches_pattern("foo", "src/foo/bar.py") is False
+        assert file_path_matches("foo", "src/foo/bar.py") is False
 
     def test_exact_match_still_works(self):
         """Exact match should still return True."""
-        from automated_security_helper.utils.sarif_utils import path_matches_pattern
+        from automated_security_helper.utils.suppression_matcher import file_path_matches
 
-        assert path_matches_pattern("src/foo.py", "src/foo.py") is True
+        assert file_path_matches("src/foo.py", "src/foo.py") is True
 
 
 # ---------------------------------------------------------------------------

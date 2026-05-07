@@ -562,16 +562,16 @@ class TestBug54FnmatchCaseSensitivity:
 
     def test_file_path_match_case_insensitive(self):
         """File path matching should be case-insensitive regardless of OS."""
-        from automated_security_helper.utils.suppression_matcher import _file_path_matches
+        from automated_security_helper.utils.suppression_matcher import file_path_matches
 
-        assert _file_path_matches("SRC/File.py", "src/file.py"), (
+        assert file_path_matches("SRC/File.py", "src/file.py"), (
             "Bug #54: file path match should be case-insensitive"
         )
 
     def test_file_path_glob_case_insensitive(self):
         """File path glob matching should be case-insensitive."""
-        from automated_security_helper.utils.suppression_matcher import _file_path_matches
+        from automated_security_helper.utils.suppression_matcher import file_path_matches
 
-        assert _file_path_matches("SRC/MyFile.py", "src/*.py"), (
+        assert file_path_matches("SRC/MyFile.py", "src/*.py"), (
             "Bug #54: file path glob should be case-insensitive"
         )

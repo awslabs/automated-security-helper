@@ -32,7 +32,7 @@ def matches_suppression(
         return False
 
     # Check if file path matches
-    if not _file_path_matches(finding.file_path, suppression.path):
+    if not file_path_matches(finding.file_path, suppression.path):
         return False
 
     # Check if line range matches (if specified)
@@ -53,7 +53,7 @@ def _rule_id_matches(finding_rule_id: Optional[str], suppression_rule_id: str) -
     return fnmatch.fnmatch(finding_rule_id.lower(), suppression_rule_id.lower())
 
 
-def _file_path_matches(
+def file_path_matches(
     finding_file_path: Optional[str], suppression_file_path: str
 ) -> bool:
     """Check if the finding's file path matches the suppression file path pattern.
