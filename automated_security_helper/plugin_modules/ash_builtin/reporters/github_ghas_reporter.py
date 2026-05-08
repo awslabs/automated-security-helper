@@ -59,6 +59,8 @@ class GHASReporterConfigOptions(ReporterOptionsBase):
 
 
 class GHASReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the GitHub Advanced Security SARIF reporter."""
+
     name: Literal["github-ghas"] = "github-ghas"
     extension: str = "ghas.sarif"
     enabled: bool = True

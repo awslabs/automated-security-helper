@@ -41,6 +41,14 @@ jobs:
             echo "::error::JSON schemas are out of date. Run 'python -m automated_security_helper.schemas.generate_schemas' and commit the result."
             exit 1
           fi
+      - name: Regenerate CLI reference docs
+        run: uv run python scripts/generate_cli_docs.py
+      - name: Check CLI docs are up to date
+        run: |
+          if ! git diff --exit-code docs/content/docs/cli-reference-generated.md; then
+            echo "::error::CLI reference docs are out of date. Run 'uv run python scripts/generate_cli_docs.py' and commit the result."
+            exit 1
+          fi
       - name: Verify documentation freshness
         run: uv run python scripts/verify_docs_freshness.py
 

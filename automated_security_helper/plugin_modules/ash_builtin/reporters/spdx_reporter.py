@@ -19,6 +19,8 @@ class SPDXReporterConfigOptions(ReporterOptionsBase):
 
 
 class SPDXReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the SPDX 2.3 SBOM reporter."""
+
     name: Literal["spdx"] = "spdx"
     extension: str = "spdx.json"
     enabled: bool = False

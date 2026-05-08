@@ -133,6 +133,8 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
 
 
 class CheckovScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the Checkov infrastructure-as-code scanner."""
+
     name: Literal["checkov"] = "checkov"
     enabled: bool = True
     options: Annotated[

@@ -24,6 +24,8 @@ class HTMLReporterConfigOptions(ReporterOptionsBase):
 
 
 class HTMLReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the interactive HTML findings report."""
+
     name: Literal["html"] = "html"
     extension: str = "html"
     enabled: bool = True

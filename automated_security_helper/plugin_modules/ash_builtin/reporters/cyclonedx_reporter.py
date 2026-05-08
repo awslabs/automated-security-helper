@@ -17,6 +17,8 @@ class CycloneDXReporterConfigOptions(ReporterOptionsBase):
 
 
 class CycloneDXReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the CycloneDX SBOM reporter."""
+
     name: Literal["cyclonedx"] = "cyclonedx"
     extension: str = "cdx.json"
     enabled: bool = True

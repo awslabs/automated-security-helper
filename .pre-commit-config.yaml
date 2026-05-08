@@ -9,6 +9,12 @@ repos:
         language: system
         verbose: true
         pass_filenames: false
+      - id: generate-cli-docs
+        name: Generate CLI reference docs
+        entry: uv run python scripts/generate_cli_docs.py
+        language: system
+        verbose: true
+        pass_filenames: false
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

@@ -134,6 +134,8 @@ class GitLabCycloneDXReporterConfigOptions(ReporterOptionsBase):
 
 
 class GitLabCycloneDXReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the GitLab Dependency List CycloneDX reporter."""
+
     name: Literal["gitlab-cyclonedx"] = "gitlab-cyclonedx"
     extension: str = "gl-dependency-scanning-report.cdx.json"
     enabled: bool = True

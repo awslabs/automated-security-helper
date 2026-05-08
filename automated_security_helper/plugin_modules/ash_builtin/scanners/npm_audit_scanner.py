@@ -52,6 +52,8 @@ class NpmAuditScannerConfigOptions(ScannerOptionsBase):
 
 
 class NpmAuditScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the npm/pnpm/yarn audit dependency scanner."""
+
     name: Literal["npm-audit"] = "npm-audit"
     enabled: bool = True
     options: Annotated[

@@ -40,6 +40,8 @@ class CfnNagScannerConfigOptions(ScannerOptionsBase):
 
 
 class CfnNagScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the cfn-nag CloudFormation linter."""
+
     name: Literal["cfn-nag"] = "cfn-nag"
     enabled: bool = True
     options: Annotated[

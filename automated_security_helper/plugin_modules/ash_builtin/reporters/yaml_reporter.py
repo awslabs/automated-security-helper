@@ -19,6 +19,8 @@ class YAMLReporterConfigOptions(ReporterOptionsBase):
 
 
 class YAMLReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the YAML findings export."""
+
     name: Literal["yaml"] = "yaml"
     extension: str = "yaml"
     enabled: bool = False

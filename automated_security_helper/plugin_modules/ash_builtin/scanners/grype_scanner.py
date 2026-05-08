@@ -52,6 +52,8 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
 
 
 class GrypeScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the Grype vulnerability scanner."""
+
     name: Literal["grype"] = "grype"
     enabled: bool = True
     options: Annotated[

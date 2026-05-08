@@ -92,6 +92,8 @@ class CdkNagScannerConfigOptions(ScannerOptionsBase):
 
 
 class CdkNagScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the CDK Nag AWS best-practices checker."""
+
     name: Literal["cdk-nag"] = "cdk-nag"
     enabled: bool = True
     options: Annotated[

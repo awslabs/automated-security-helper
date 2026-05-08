@@ -58,6 +58,8 @@ class SyftScannerConfigOptions(ScannerOptionsBase):
 
 
 class SyftScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the Syft SBOM generator."""
+
     name: Literal["syft"] = "syft"
     enabled: bool = True
     options: Annotated[

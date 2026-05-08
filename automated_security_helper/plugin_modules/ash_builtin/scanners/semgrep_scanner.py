@@ -91,6 +91,8 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
 
 
 class SemgrepScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the Semgrep SAST scanner."""
+
     name: Literal["semgrep"] = "semgrep"
     # Semgrep does not support Windows at all
     enabled: bool = platform.system().lower() != "windows"

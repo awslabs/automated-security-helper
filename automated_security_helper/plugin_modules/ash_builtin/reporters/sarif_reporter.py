@@ -17,6 +17,8 @@ class SARIFReporterConfigOptions(ReporterOptionsBase):
 
 
 class SARIFReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the SARIF 2.1.0 standard output."""
+
     name: Literal["sarif"] = "sarif"
     extension: str = "sarif"
     enabled: bool = True

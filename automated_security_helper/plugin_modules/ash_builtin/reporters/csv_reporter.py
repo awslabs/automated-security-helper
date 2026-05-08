@@ -17,6 +17,8 @@ class CSVReporterConfigOptions(ReporterOptionsBase):
 
 
 class CSVReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the CSV findings export reporter."""
+
     name: Literal["csv"] = "csv"
     extension: str = "csv"
     enabled: bool = True

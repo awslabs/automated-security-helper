@@ -36,6 +36,8 @@ class GitLabSASTReporterConfigOptions(ReporterOptionsBase):
 
 
 class GitLabSASTReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the GitLab SAST report format."""
+
     name: Literal["gitlab-sast"] = "gitlab-sast"
     extension: str = "gl-sast-report.json"
     enabled: bool = True

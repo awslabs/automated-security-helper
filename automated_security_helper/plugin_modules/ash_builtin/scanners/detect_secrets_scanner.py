@@ -97,6 +97,8 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
 
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the detect-secrets credential scanner."""
+
     name: Literal["detect-secrets"] = "detect-secrets"
     enabled: bool = True
     options: Annotated[

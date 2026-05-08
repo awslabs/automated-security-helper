@@ -22,6 +22,8 @@ class JUnitXMLReporterConfigOptions(ReporterOptionsBase):
 
 
 class JUnitXMLReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the JUnit XML test report format."""
+
     name: Literal["junitxml"] = "junitxml"
     extension: str = "junit.xml"
     enabled: bool = True

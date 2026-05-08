@@ -98,6 +98,8 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
 
 
 class OpengrepScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the OpenGrep SAST scanner."""
+
     name: Literal["opengrep"] = "opengrep"
     enabled: bool = platform.system().lower() != "windows"
     options: Annotated[

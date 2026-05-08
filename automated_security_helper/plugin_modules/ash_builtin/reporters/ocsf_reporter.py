@@ -36,6 +36,8 @@ class OCSFReporterConfigOptions(ReporterOptionsBase):
 
 
 class OCSFReporterConfig(ReporterPluginConfigBase):
+    """Configuration for the OCSF security event reporter."""
+
     name: Literal["ocsf"] = "ocsf"
     extension: str = "ocsf.json"
     enabled: bool = True

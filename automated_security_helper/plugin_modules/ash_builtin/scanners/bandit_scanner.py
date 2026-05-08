@@ -83,6 +83,8 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
 
 
 class BanditScannerConfig(ScannerPluginConfigBase):
+    """Configuration for the Bandit Python security linter."""
+
     name: Literal["bandit"] = "bandit"
     enabled: bool = True
     options: Annotated[
