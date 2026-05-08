@@ -5,11 +5,14 @@ import logging
 import os
 from pathlib import Path
 import sys
-from typing import Annotated, List
+from typing import Annotated, Dict, List
 import yaml
 import typer
 from rich import print
+from rich.console import Console
+from rich.panel import Panel
 from rich.syntax import Syntax
+from rich.table import Table
 
 from automated_security_helper.config.ash_config import (
     AshConfig,
@@ -686,6 +689,272 @@ def _apply_unused_fixes(
         f"\n✅ Commented out {len(fixed_issues)} unused suppression(s) in {config_path}",
         fg=typer.colors.GREEN,
     )
+
+
+
+
+def _get_scanner_names() -> List[tuple]:
+    """Return (python_name, display_name) tuples for built-in scanners.
+
+    display_name uses the field's YAML alias when available, falling back
+    to replacing underscores with hyphens.
+    """
+    names = []
+    for name, field_info in ScannerConfigSegment.model_fields.items():
+        alias = field_info.alias or name.replace("_", "-")
+        names.append((name, alias))
+    return names
+
+
+def _get_reporter_names() -> List[tuple]:
+    """Return (python_name, display_name) tuples for built-in reporters.
+
+    display_name uses the field's YAML alias when available, falling back
+    to replacing underscores with hyphens.
+    """
+    names = []
+    for name, field_info in ReporterConfigSegment.model_fields.items():
+        alias = field_info.alias or name.replace("_", "-")
+        names.append((name, alias))
+    return names
+
+
+def _prompt_toggle_items(
+    items: List[tuple],
+    current_enabled: Dict[str, bool],
+    label: str,
+) -> Dict[str, bool]:
+    """Prompt the user to toggle each item on or off.
+
+    items is a list of (python_name, display_name) tuples.
+    Returns a dict mapping python_name to enabled state.
+    """
+    console = Console()
+    table = Table(title=label, show_header=True, header_style="bold cyan")
+    table.add_column("Name", style="white")
+    table.add_column("Currently enabled", justify="center")
+    for python_name, display_name in items:
+        status = current_enabled.get(python_name, True)
+        table.add_row(display_name, "[green]yes[/green]" if status else "[red]no[/red]")
+    console.print(table)
+
+    result = {}
+    for python_name, display_name in items:
+        default = current_enabled.get(python_name, True)
+        answer = typer.confirm(
+            f"  Enable {display_name}?",
+            default=default,
+        )
+        result[python_name] = answer
+    return result
+
+
+@config_app.command()
+def wizard(
+    config: Annotated[
+        str,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to read/write the configuration file.",
+            envvar="ASH_CONFIG",
+        ),
+    ] = ".ash/.ash.yaml",
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+    ] = False,
+    color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
+):
+    """Interactive configuration wizard.
+
+    Reads an existing .ash.yaml (if present), walks through scanner,
+    reporter, offline-mode, and community-plugin settings interactively,
+    then writes the result back.
+    """
+    get_logger(
+        level=(logging.DEBUG if debug else 15 if verbose else logging.INFO),
+        show_progress=False,
+        use_color=color,
+    )
+    console = Console()
+    config_path = Path(config)
+
+    # --- Load existing config or start from defaults ---
+    if config_path.exists():
+        console.print(
+            Panel(
+                f"Loading existing config from [bold]{config_path.absolute()}[/bold]",
+                title="ASH Config Wizard",
+            )
+        )
+        try:
+            ash_config = AshConfig.from_file(config_path=config_path)
+        except Exception as exc:
+            typer.secho(
+                f"Failed to load existing config: {exc}. Starting from defaults.",
+                fg=typer.colors.YELLOW,
+            )
+            ash_config = AshConfig()
+    else:
+        console.print(
+            Panel(
+                "No existing config found -- starting from defaults.",
+                title="ASH Config Wizard",
+            )
+        )
+        ash_config = AshConfig()
+
+    # --- 1. Project name ---
+    project_name = typer.prompt(
+        "Project name",
+        default=ash_config.project_name,
+    )
+    ash_config.project_name = project_name
+
+    # --- 2. Scanners ---
+    console.print("\n[bold]Scanner configuration[/bold]")
+    scanner_items = _get_scanner_names()
+    current_scanner_enabled: Dict[str, bool] = {}
+    for python_name, _ in scanner_items:
+        scanner_cfg = getattr(ash_config.scanners, python_name, None)
+        current_scanner_enabled[python_name] = (
+            scanner_cfg.enabled if scanner_cfg is not None else True
+        )
+
+    scanner_states = _prompt_toggle_items(
+        scanner_items, current_scanner_enabled, "Scanners"
+    )
+    for name, enabled in scanner_states.items():
+        scanner_cfg = getattr(ash_config.scanners, name, None)
+        if scanner_cfg is not None:
+            scanner_cfg.enabled = enabled
+
+    # --- 3. Reporters (output formats) ---
+    console.print("\n[bold]Output format configuration[/bold]")
+    reporter_items = _get_reporter_names()
+    current_reporter_enabled: Dict[str, bool] = {}
+    for python_name, _ in reporter_items:
+        reporter_cfg = getattr(ash_config.reporters, python_name, None)
+        current_reporter_enabled[python_name] = (
+            reporter_cfg.enabled if reporter_cfg is not None else True
+        )
+
+    reporter_states = _prompt_toggle_items(
+        reporter_items, current_reporter_enabled, "Output Formats"
+    )
+    for name, enabled in reporter_states.items():
+        reporter_cfg = getattr(ash_config.reporters, name, None)
+        if reporter_cfg is not None:
+            reporter_cfg.enabled = enabled
+
+    # --- 4. Offline mode ---
+    console.print("\n[bold]Offline mode[/bold]")
+    console.print(
+        "  Offline mode skips tool installation. Set the ASH_OFFLINE "
+        "environment variable at runtime to activate it."
+    )
+    current_offline = (
+        os.environ.get("ASH_OFFLINE", "NO").upper() in ("YES", "TRUE", "1")
+    )
+    enable_offline = typer.confirm(
+        "  Set ASH_OFFLINE=YES in the generated config comments as a reminder?",
+        default=current_offline,
+    )
+
+    # --- 5. Community plugin modules ---
+    console.print("\n[bold]Community plugin modules[/bold]")
+    console.print(
+        "  Provide Python module paths for additional plugins, "
+        "one per line. Leave blank to finish."
+    )
+    existing_modules = list(ash_config.ash_plugin_modules)
+    if existing_modules:
+        console.print(f"  Currently configured: {existing_modules}")
+
+    plugin_modules: List[str] = []
+    for mod in existing_modules:
+        keep = typer.confirm(f"  Keep module '{mod}'?", default=True)
+        if keep:
+            plugin_modules.append(mod)
+
+    while True:
+        new_mod = typer.prompt(
+            "  Add a plugin module (blank to finish)",
+            default="",
+            show_default=False,
+        )
+        if not new_mod.strip():
+            break
+        plugin_modules.append(new_mod.strip())
+
+    ash_config.ash_plugin_modules = plugin_modules
+
+    # --- Write config ---
+    config_path.parent.mkdir(exist_ok=True, parents=True)
+    if config_path.parent.name == ".ash":
+        ash_gitignore_path = config_path.parent.joinpath(".gitignore")
+        if not ash_gitignore_path.exists():
+            ash_gitignore_path.write_text(
+                "# ASH default output directory (and variants)\nash_output*\n"
+            )
+
+    internal_scanner_fields = {"name", "extension", "tool_version", "install_timeout"}
+    scanner_exclusions = {
+        scanner_name: internal_scanner_fields
+        for scanner_name in ScannerConfigSegment.model_fields
+    }
+    reporter_exclusions = {
+        reporter_name: internal_scanner_fields
+        for reporter_name in ReporterConfigSegment.model_fields
+    }
+    converter_exclusions = {
+        converter_name: internal_scanner_fields
+        for converter_name in ConverterConfigSegment.model_fields
+    }
+
+    config_strings = [
+        "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json",
+    ]
+    if enable_offline:
+        config_strings.append("# Reminder: export ASH_OFFLINE=YES before running ASH for offline mode")
+
+    config_strings.append(
+        yaml.dump(
+            ash_config.model_dump(
+                by_alias=True,
+                exclude_defaults=False,
+                exclude_none=False,
+                exclude={
+                    "build": True,
+                    "mcp_resource_management": True,
+                    "scanners": scanner_exclusions,
+                    "reporters": reporter_exclusions,
+                    "converters": converter_exclusions,
+                },
+            ),
+            Dumper=IndentableYamlDumper,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    )
+    config_path.write_text("\n".join(config_strings))
+
+    console.print(
+        Panel(
+            f"Config written to [bold]{config_path.absolute()}[/bold]",
+            title="Done",
+            style="green",
+        )
+    )
+
+
+if __name__ == "__main__":
+    config_app()
+
+
 
 
 if __name__ == "__main__":

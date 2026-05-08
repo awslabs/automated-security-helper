@@ -10,6 +10,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_re
 from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
     GHASReporter,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter import (
+    GitLabCycloneDXReporter,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
     GitLabSASTReporter,
 )
@@ -51,6 +54,7 @@ __all__ = [
     "CsvReporter",
     "CycloneDXReporter",
     "GHASReporter",
+    "GitLabCycloneDXReporter",
     "GitLabSASTReporter",
     "HtmlReporter",
     "FlatJsonReporter",
