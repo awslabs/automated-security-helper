@@ -1565,7 +1565,7 @@
               "enabled": true,
               "name": "opengrep",
               "options": {
-                "config": "auto",
+                "config": "p/ci",
                 "exclude": [
                   "*-converted.py",
                   "*_report_result.txt"
@@ -1583,7 +1583,7 @@
               "enabled": true,
               "name": "semgrep",
               "options": {
-                "config": "auto",
+                "config": "p/ci",
                 "exclude": [
                   "*-converted.py",
                   "*_report_result.txt"
@@ -2005,18 +2005,18 @@
           "$ref": "#/$defs/BomLinkElementType"
         }
       ],
-      "title": "BomLink"
+      "title": "BOM-Link"
     },
     "BomLinkDocumentType": {
       "description": "Descriptor for another BOM document. See https://cyclonedx.org/capabilities/bomlink/",
       "pattern": "^urn:cdx:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[1-9][0-9]*$",
-      "title": "BomLinkDocumentType",
+      "title": "BOM-Link Document",
       "type": "string"
     },
     "BomLinkElementType": {
       "description": "Descriptor for an element in a BOM document. See https://cyclonedx.org/capabilities/bomlink/",
       "pattern": "^urn:cdx:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[1-9][0-9]*#.+$",
-      "title": "BomLinkElementType",
+      "title": "BOM-Link Element",
       "type": "string"
     },
     "BuildConfig": {
@@ -4633,7 +4633,7 @@
     "Cwe": {
       "description": "Integer representation of a Common Weaknesses Enumerations (CWE). For example 399 (of https://cwe.mitre.org/data/definitions/399.html)",
       "minimum": 1,
-      "title": "Cwe",
+      "title": "CWE",
       "type": "integer"
     },
     "CycloneDXReport": {
@@ -4936,7 +4936,7 @@
     },
     "DataClassification": {
       "description": "Data classification tags data according to its type, sensitivity, and value if altered, stolen, or destroyed.",
-      "title": "DataClassification",
+      "title": "Data Classification",
       "type": "string"
     },
     "DataFlowDirection": {
@@ -8001,8 +8001,11 @@
     },
     "HashContent": {
       "description": "The value of the hash.",
+      "examples": [
+        "3942447fac867ae5cdb3229b658f4d48"
+      ],
       "pattern": "^([a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64}|[a-fA-F0-9]{96}|[a-fA-F0-9]{128})$",
-      "title": "HashContent",
+      "title": "Hash Value",
       "type": "string"
     },
     "IdentifiableAction": {
@@ -8269,7 +8272,7 @@
         }
       ],
       "description": "Type that represents various input data types and formats.",
-      "title": "InputType"
+      "title": "Input type"
     },
     "InputType1": {
       "additionalProperties": false,
@@ -9329,7 +9332,7 @@
     "LicenseChoice": {
       "description": "EITHER (list of SPDX licenses and/or named licenses) OR (tuple of one SPDX License Expression)",
       "items": {},
-      "title": "LicenseChoice",
+      "title": "License Choice",
       "type": "array"
     },
     "Lifecycles": {
@@ -9377,7 +9380,7 @@
     "LocaleType": {
       "description": "Defines a syntax for representing two character language code (ISO-639) followed by an optional two character country code. The language code must be lower case. If the country code is specified, the country code must be upper case. The language code and country code must be separated by a minus sign. Examples: en, en-US, fr, fr-CA",
       "pattern": "^([a-z]{2})(-[A-Z]{2})?$",
-      "title": "LocaleType",
+      "title": "Locale",
       "type": "string"
     },
     "Location": {
@@ -10928,7 +10931,7 @@
         "options": {
           "$ref": "#/$defs/OpengrepScannerConfigOptions",
           "default": {
-            "config": "auto",
+            "config": "p/ci",
             "exclude": [
               "*-converted.py",
               "*_report_result.txt"
@@ -10951,8 +10954,8 @@
       "additionalProperties": true,
       "properties": {
         "config": {
-          "default": "auto",
-          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+          "default": "p/ci",
+          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.",
           "title": "Config",
           "type": "string"
         },
@@ -13100,6 +13103,13 @@
     },
     "ReleaseType": {
       "description": "The software versioning type. It is recommended that the release type use one of 'major', 'minor', 'patch', 'pre-release', or 'internal'. Representing all possible software release types is not practical, so standardizing on the recommended values, whenever possible, is strongly encouraged.\n\n* __major__ = A major release may contain significant changes or may introduce breaking changes.\n* __minor__ = A minor release, also known as an update, may contain a smaller number of changes than major releases.\n* __patch__ = Patch releases are typically unplanned and may resolve defects or important security issues.\n* __pre-release__ = A pre-release may include alpha, beta, or release candidates and typically have limited support. They provide the ability to preview a release prior to its general availability.\n* __internal__ = Internal releases are not for public consumption and are intended to be used exclusively by the project or manufacturer that produced it.",
+      "examples": [
+        "major",
+        "minor",
+        "patch",
+        "pre-release",
+        "internal"
+      ],
       "title": "ReleaseType",
       "type": "string"
     },
@@ -14153,7 +14163,7 @@
         }
       ],
       "description": "A reference to a locally defined resource (e.g., a bom-ref) or an externally accessible resource.",
-      "title": "ResourceReferenceChoice"
+      "title": "Resource reference choice"
     },
     "ResourceReferenceChoice1": {
       "additionalProperties": false,
@@ -15598,7 +15608,7 @@
             "enabled": true,
             "name": "opengrep",
             "options": {
-              "config": "auto",
+              "config": "p/ci",
               "exclude": [
                 "*-converted.py",
                 "*_report_result.txt"
@@ -15620,7 +15630,7 @@
             "enabled": true,
             "name": "semgrep",
             "options": {
-              "config": "auto",
+              "config": "p/ci",
               "exclude": [
                 "*-converted.py",
                 "*_report_result.txt"
@@ -16178,7 +16188,7 @@
         "options": {
           "$ref": "#/$defs/SemgrepScannerConfigOptions",
           "default": {
-            "config": "auto",
+            "config": "p/ci",
             "exclude": [
               "*-converted.py",
               "*_report_result.txt"
@@ -16201,8 +16211,8 @@
       "additionalProperties": true,
       "properties": {
         "config": {
-          "default": "auto",
-          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+          "default": "p/ci",
+          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.",
           "title": "Config",
           "type": "string"
         },
@@ -17708,6 +17718,13 @@
     },
     "Tags": {
       "description": "Textual strings that aid in discovery, search, and retrieval of the associated object. Tags often serve as a way to group or categorize similar or related objects by various attributes.",
+      "examples": [
+        "json-parser",
+        "object-persistence",
+        "text-to-image",
+        "translation",
+        "object-detection"
+      ],
       "items": {
         "type": "string"
       },
@@ -19510,6 +19527,13 @@
     },
     "VersionRange": {
       "description": "A version range specified in Package URL Version Range syntax (vers) which is defined at https://github.com/package-url/purl-spec/blob/master/VERSION-RANGE-SPEC.rst",
+      "examples": [
+        "vers:cargo/9.0.14",
+        "vers:npm/1.2.3|>=2.0.0|<5.0.0",
+        "vers:pypi/0.0.0|0.0.1|0.0.2|0.0.3|1.0|2.0pre1",
+        "vers:tomee/>=1.0.0-beta1|<=1.7.5|>=7.0.0-M1|<=7.0.7|>=7.1.0|<=7.1.2|>=8.0.0-M1|<=8.0.1",
+        "vers:gem/>=2.2.0|!= 2.2.1|<2.3.0"
+      ],
       "maxLength": 4096,
       "minLength": 1,
       "title": "VersionRange",
@@ -20990,6 +21014,14 @@
     },
     "automated_security_helper__schemas__cyclonedx_bom_1_6_schema__Version": {
       "description": "A single disjunctive version identifier, for a component or service.",
+      "examples": [
+        "9.0.14",
+        "v1.33.7",
+        "7.0.0-M1",
+        "2.0pre1",
+        "1.0.0-beta1",
+        "0.8.15"
+      ],
       "maxLength": 1024,
       "title": "Version",
       "type": "string"
