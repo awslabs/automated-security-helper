@@ -23,16 +23,13 @@ class TestUnifiedMetrics:
             medium=4,
             low=5,
             info=6,
-            total=20,
             actionable=9,
             duration=10.5,
             status="PASSED",
-            status_text="PASSED",
             threshold="MEDIUM",
             threshold_source="global",
             excluded=False,
             dependencies_missing=False,
-            passed=True,
         )
 
         assert metrics.scanner_name == "test_scanner"
@@ -42,15 +39,16 @@ class TestUnifiedMetrics:
         assert metrics.medium == 4
         assert metrics.low == 5
         assert metrics.info == 6
+        # total is computed from severity fields: 2+3+4+5+6 = 20 (suppressed excluded)
         assert metrics.total == 20
         assert metrics.actionable == 9
         assert metrics.duration == 10.5
         assert metrics.status == "PASSED"
-        assert metrics.status_text == "PASSED"
         assert metrics.threshold == "MEDIUM"
         assert metrics.threshold_source == "global"
         assert metrics.excluded is False
         assert metrics.dependencies_missing is False
+        # passed is computed from status
         assert metrics.passed is True
 
     def test_format_duration(self):
@@ -181,7 +179,6 @@ class TestUnifiedMetrics:
             assert metrics[0].actionable == 9
             assert metrics[0].duration == 10.5
             assert metrics[0].status == "FAILED"
-            assert metrics[0].status_text == "FAILED"
             assert metrics[0].threshold == "MEDIUM"
             assert metrics[0].threshold_source == "global"
             assert metrics[0].excluded is False
@@ -239,7 +236,6 @@ class TestUnifiedMetrics:
             error_metrics = metrics[0]
             assert error_metrics.scanner_name == "error_scanner"
             assert error_metrics.status == "ERROR"
-            assert error_metrics.status_text == "ERROR"
             assert (
                 error_metrics.passed is False
             )  # Error scanners should not be considered as passed

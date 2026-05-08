@@ -47,7 +47,7 @@ class TestDetermineStatus:
     def _container(self, **counts) -> ScanResultsContainer:
         c = ScanResultsContainer(scanner_name="test")
         for key, value in counts.items():
-            c.severity_counts[key] = value
+            setattr(c.severity_counts, key, value)
         return c
 
     def test_critical_over_critical_threshold_is_failed(self):

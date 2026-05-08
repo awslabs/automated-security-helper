@@ -10,6 +10,7 @@ from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
+    ScannerSeverityCount,
     ScannerStatusInfo,
 )
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
@@ -600,7 +601,7 @@ class ScanPhase(EnginePhase):
             sarif_report: SARIF report to extract metrics from
 
         Returns:
-            Tuple[Dict[str, int], int]: Severity counts and total finding count
+            Tuple[ScannerSeverityCount, int]: Severity counts and total finding count
 
         Note:
             This method is kept for backward compatibility. For new code, use
@@ -616,17 +617,9 @@ class ScanPhase(EnginePhase):
             sarif_report=sarif_report, plugin_context=self.plugin_context
         )
 
-        severity_counts = {
-            "suppressed": sev_count.suppressed,
-            "critical": sev_count.critical,
-            "high": sev_count.high,
-            "medium": sev_count.medium,
-            "low": sev_count.low,
-            "info": sev_count.info,
-        }
         total_findings = sev_count.total + sev_count.suppressed
 
-        return severity_counts, total_findings
+        return sev_count, total_findings
 
     def _execute_scanner(
         self,
@@ -816,11 +809,21 @@ class ScanPhase(EnginePhase):
                         else:
                             # Try to extract severity counts from dictionary
                             if "severity_counts" in raw_results:
-                                container.severity_counts = raw_results[
-                                    "severity_counts"
-                                ]
+                                raw_counts = raw_results["severity_counts"]
+                                # Accept either a ScannerSeverityCount or a plain dict.
+                                if isinstance(raw_counts, ScannerSeverityCount):
+                                    container.severity_counts = raw_counts
+                                else:
+                                    container.severity_counts = (
+                                        ScannerSeverityCount.model_validate(raw_counts)
+                                    )
                                 container.finding_count = sum(
-                                    raw_results["severity_counts"].values()
+                                    int(v)
+                                    for v in (
+                                        raw_counts.values()
+                                        if isinstance(raw_counts, dict)
+                                        else raw_counts.model_dump().values()
+                                    )
                                 )
                             elif "findings" in raw_results and isinstance(
                                 raw_results["findings"], list
@@ -829,10 +832,12 @@ class ScanPhase(EnginePhase):
                                 for finding in raw_results["findings"]:
                                     if "severity" in finding:
                                         severity = finding["severity"].lower()
-                                        if severity in container.severity_counts:
-                                            container.severity_counts[severity] += 1
-                                        else:
-                                            container.severity_counts["info"] += 1
+                                        try:
+                                            container.severity_counts.increment(
+                                                severity
+                                            )
+                                        except ValueError:
+                                            container.severity_counts.increment("info")
                                 container.finding_count = len(raw_results["findings"])
 
                     # Get exit code from scanner

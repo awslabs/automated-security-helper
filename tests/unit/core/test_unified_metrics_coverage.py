@@ -26,19 +26,17 @@ class TestScannerMetrics:
             medium=2,
             low=3,
             info=0,
-            total=6,
             actionable=6,
             duration=1.5,
             status="passed",
-            status_text="PASSED",
             threshold="MEDIUM",
             threshold_source="default",
             excluded=False,
             dependencies_missing=False,
-            passed=True,
         )
         assert metrics.scanner_name == "bandit"
         assert metrics.high == 1
+        # total is computed: 0+1+2+3+0 = 6
         assert metrics.total == 6
 
 
