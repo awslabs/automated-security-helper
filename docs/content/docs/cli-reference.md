@@ -657,7 +657,7 @@ For Amazon Q CLI (`~/.aws/amazonq/mcp.json`):
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.2.2",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.1",
         "ash",
         "mcp"
       ],

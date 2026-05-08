@@ -121,7 +121,7 @@ brew install ash
 
 ```bash
 # Install with pipx (isolated environment)
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0,1
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 
 # Use as normal
 ash --help
@@ -225,7 +225,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.1",
         "ash",
         "mcp"
       ],
@@ -243,7 +243,7 @@ The ASH MCP server provides:
     "ash-security": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.1",
         "ash",
         "mcp"
       ]
@@ -259,7 +259,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.1",
         "ash",
         "mcp"
       ],
@@ -321,7 +321,7 @@ based on the instructions provided in the prompt.
 
 The MCP server supports all ASH configuration methods:
 
-- **Configuration files**: `.ash/ash.yaml` or custom config paths
+- **Configuration files**: `.ash/.ash.yaml` or custom config paths
 - **Environment variables**: `ASH_DEFAULT_SEVERITY_LEVEL`, `ASH_OFFLINE`, etc.
 - **CLI parameters**: Severity thresholds, custom output directories
 
@@ -330,7 +330,7 @@ For detailed information about streaming capabilities and advanced usage, see th
 
 ## Configuration
 
-ASH v3 uses a YAML configuration file (`.ash/ash.yaml`) with support for JSON Schema validation:
+ASH v3 uses a YAML configuration file (`.ash/.ash.yaml`) with support for JSON Schema validation:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
@@ -359,7 +359,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v3.4.1
     hooks:
       - id: ash-simple-scan
 ```
@@ -382,7 +382,7 @@ ASH v3 produces several output files in the `.ash/ash_output/` directory:
 - `reports/ash.html`: Interactive HTML report
 - `reports/ash.csv`: CSV report for filtering and sorting findings
 
-ASH also supports CycloneDX, SPDX, OCSF, GitLab SAST, JUnit XML, and YAML output. Enable any combination of reporters in your `.ash/ash.yaml` configuration. For the complete schema reference, consumption examples, and format details, see [Output Formats](https://awslabs.github.io/automated-security-helper/docs/output-formats/).
+ASH also supports CycloneDX, SPDX, OCSF, GitLab SAST, JUnit XML, and YAML output. Enable any combination of reporters in your `.ash/.ash.yaml` configuration. For the complete schema reference, consumption examples, and format details, see [Output Formats](https://awslabs.github.io/automated-security-helper/docs/output-formats/).
 
 The `ash_aggregated_results.json` file includes comprehensive validation information that tracks scanner registration, enablement, execution, and result inclusion throughout the scan process. The Scanner Validation System can also generate detailed validation reports that provide comprehensive analysis of scanner states, validation checkpoints, dependency issues, and actionable recommendations for troubleshooting scan issues.
 
@@ -403,7 +403,7 @@ ASH can be run in container mode in any CI/CD environment that supports containe
 <details>
 <summary>How do I exclude files from scanning?</summary>
 
-ASH respects `.gitignore` files. You can also configure ignore paths in your `.ash/ash.yaml` configuration file.
+ASH respects `.gitignore` files. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file.
 </details>
 
 <details>

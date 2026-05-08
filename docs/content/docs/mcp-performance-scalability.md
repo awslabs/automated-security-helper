@@ -249,7 +249,7 @@ Test your configuration with representative projects:
 
 ```bash
 # Test with debug logging
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash mcp --debug
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.4.1 ash mcp --debug
 
 # Monitor system resources during scans
 top -p $(pgrep -f "ash mcp")

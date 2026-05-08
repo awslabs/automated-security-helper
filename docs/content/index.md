@@ -56,13 +56,13 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 
 ```bash
 # Install with pipx (isolated environment)
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 
 # Use as normal
 ash --help
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.4.0` to stay up to date automatically. Pin a specific version when you need reproducible builds.
+> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.4.1` to stay up to date automatically. Pin a specific version when you need reproducible builds.
 
 ### Other Installation Methods
 
@@ -74,17 +74,17 @@ ash --help
 ```bash
 # Linux/macOS
 curl -sSf https://astral.sh/uv/install.sh | sh
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1"
 
 # Windows PowerShell
 irm https://astral.sh/uv/install.ps1 | iex
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1 $args }
 ```
 
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 ```
 
 #### Clone the Repository
@@ -151,7 +151,7 @@ ERROR (2) Exiting due to 122 actionable findings found in ASH scan
 
 ## Configuration
 
-ASH v3 uses a YAML configuration file (`.ash/ash.yaml`) with support for JSON Schema validation:
+ASH v3 uses a YAML configuration file (`.ash/.ash.yaml`) with support for JSON Schema validation:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
@@ -180,7 +180,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v3.4.1
     hooks:
       - id: ash-simple-scan
 ```
@@ -218,7 +218,7 @@ ASH can be run in container mode in any CI/CD environment that supports containe
 <details>
 <summary>How do I exclude files from scanning?</summary>
 
-ASH respects `.gitignore` files. You can also configure ignore paths in your `.ash/ash.yaml` configuration file.
+ASH respects `.gitignore` files. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file.
 </details>
 
 <details>
