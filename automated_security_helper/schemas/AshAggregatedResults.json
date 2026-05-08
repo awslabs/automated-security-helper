@@ -1423,6 +1423,7 @@
               "extension": "summary.md",
               "name": "markdown",
               "options": {
+                "compact": false,
                 "include_detailed_findings": true,
                 "include_findings_table": false,
                 "include_summary": true,
@@ -9879,6 +9880,7 @@
         "options": {
           "$ref": "#/$defs/MarkdownReporterConfigOptions",
           "default": {
+            "compact": false,
             "include_detailed_findings": true,
             "include_findings_table": false,
             "include_summary": true,
@@ -9895,6 +9897,11 @@
       "additionalProperties": true,
       "description": "Configuration options for the Markdown reporter.",
       "properties": {
+        "compact": {
+          "default": false,
+          "title": "Compact",
+          "type": "boolean"
+        },
         "include_detailed_findings": {
           "default": true,
           "title": "Include Detailed Findings",
@@ -13358,6 +13365,7 @@
             "extension": "summary.md",
             "name": "markdown",
             "options": {
+              "compact": false,
               "include_detailed_findings": true,
               "include_findings_table": false,
               "include_summary": true,
