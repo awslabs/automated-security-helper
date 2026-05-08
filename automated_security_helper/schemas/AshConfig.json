@@ -327,7 +327,7 @@
               "enabled": true,
               "name": "opengrep",
               "options": {
-                "config": "auto",
+                "config": "p/ci",
                 "exclude": [
                   "*-converted.py",
                   "*_report_result.txt"
@@ -345,7 +345,7 @@
               "enabled": true,
               "name": "semgrep",
               "options": {
-                "config": "auto",
+                "config": "p/ci",
                 "exclude": [
                   "*-converted.py",
                   "*_report_result.txt"
@@ -2151,7 +2151,7 @@
         "options": {
           "$ref": "#/$defs/OpengrepScannerConfigOptions",
           "default": {
-            "config": "auto",
+            "config": "p/ci",
             "exclude": [
               "*-converted.py",
               "*_report_result.txt"
@@ -2174,8 +2174,8 @@
       "additionalProperties": true,
       "properties": {
         "config": {
-          "default": "auto",
-          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+          "default": "p/ci",
+          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Opengrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.",
           "title": "Config",
           "type": "string"
         },
@@ -2759,7 +2759,7 @@
             "enabled": true,
             "name": "opengrep",
             "options": {
-              "config": "auto",
+              "config": "p/ci",
               "exclude": [
                 "*-converted.py",
                 "*_report_result.txt"
@@ -2781,7 +2781,7 @@
             "enabled": true,
             "name": "semgrep",
             "options": {
-              "config": "auto",
+              "config": "p/ci",
               "exclude": [
                 "*-converted.py",
                 "*_report_result.txt"
@@ -3134,7 +3134,7 @@
         "options": {
           "$ref": "#/$defs/SemgrepScannerConfigOptions",
           "default": {
-            "config": "auto",
+            "config": "p/ci",
             "exclude": [
               "*-converted.py",
               "*_report_result.txt"
@@ -3157,8 +3157,8 @@
       "additionalProperties": true,
       "properties": {
         "config": {
-          "default": "auto",
-          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Use 'auto' to automatically obtain rules tailored to this project. Defaults to 'auto'.",
+          "default": "p/ci",
+          "description": "YAML configuration file, directory of YAML files ending in .yml|.yaml, URL of a configuration file, or Semgrep registry entry name. Defaults to 'p/ci' for consistent results across online and offline modes.",
           "title": "Config",
           "type": "string"
         },
