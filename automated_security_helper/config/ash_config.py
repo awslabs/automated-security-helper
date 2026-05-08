@@ -786,13 +786,16 @@ def add_suppression_to_config(
 
         # Append-only: find the suppressions list and append at its end
         lines = text.splitlines(keepends=True)
-        insert_idx = _find_suppressions_append_point(lines)
+        insert_idx, list_indent = _find_suppressions_append_point(lines)
         if insert_idx is not None:
-            indent = "  "
-            formatted = f"{indent}- " + f"\n{indent}  ".join(
-                f"{k}: {_yaml_scalar(v)}" for k, v in entry.items()
-            ) + "\n"
-            lines.insert(insert_idx, formatted)
+            field_indent = list_indent + "  "
+            items = list(entry.items())
+            first_key, first_val = items[0]
+            formatted_lines = [f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"]
+            for k, v in items[1:]:
+                formatted_lines.append(f"{field_indent}{k}: {_yaml_scalar(v)}\n")
+            for line in reversed(formatted_lines):
+                lines.insert(insert_idx, line)
             config_path.write_text("".join(lines), encoding="utf-8")
             return
 
@@ -834,20 +837,19 @@ def _yaml_scalar(value: object) -> str:
     return repr(value)
 
 
-def _find_suppressions_append_point(lines: list) -> int | None:
-    """Find the line index where a new suppression entry should be inserted.
+def _find_suppressions_append_point(lines: list) -> tuple:
+    """Find the line index and indentation for appending a new suppression.
 
-    Looks for the ``suppressions:`` key under ``global_settings:`` and returns
-    the index after the last existing list item (or after the key if the list
-    is empty).
+    Returns (insert_index, list_item_indent) or (None, None).
     """
     in_global = False
     in_suppressions = False
     last_item_end = None
+    list_indent = "    "  # default: 4 spaces
 
     for idx, line in enumerate(lines):
         stripped = line.lstrip()
-        indent_len = len(line) - len(stripped)
+        indent_len = len(line) - len(line.lstrip())
 
         if stripped.startswith("global_settings:"):
             in_global = True
@@ -856,7 +858,7 @@ def _find_suppressions_append_point(lines: list) -> int | None:
         if in_global and indent_len == 0 and stripped and not stripped.startswith("#"):
             in_global = False
             if in_suppressions:
-                return last_item_end if last_item_end else None
+                return (last_item_end, list_indent) if last_item_end else (None, None)
             continue
 
         if in_global and stripped.startswith("suppressions:"):
@@ -866,19 +868,19 @@ def _find_suppressions_append_point(lines: list) -> int | None:
 
         if in_suppressions:
             if stripped.startswith("- "):
+                list_indent = line[:indent_len]
                 last_item_end = idx + 1
-                # Walk forward past multi-line entry fields
                 continue
-            if indent_len >= 4 and not stripped.startswith("- "):
+            if indent_len > 0 and not stripped.startswith("- ") and not stripped.startswith("#"):
                 last_item_end = idx + 1
                 continue
             if stripped == "" or stripped.startswith("#"):
                 continue
-            return last_item_end
+            return (last_item_end, list_indent)
 
     if in_suppressions:
-        return last_item_end
-    return None
+        return (last_item_end, list_indent)
+    return (None, None)
 
 
 BuildConfig.model_rebuild()

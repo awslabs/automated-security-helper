@@ -330,7 +330,7 @@ def run_ash_scan(
                 get_changed_files,
             )
 
-            changed_paths = get_changed_files(base_ref=base_ref)
+            changed_paths = get_changed_files(base_ref=base_ref, cwd=Path(source_dir))
             if changed_paths is not None:
                 # Resolve to absolute paths rooted in source_dir for
                 # consistent comparison later.
@@ -476,6 +476,14 @@ def run_ash_scan(
                 results = _filter_results_to_changed_files(
                     results, _changed_file_set, source_dir
                 )
+                # Re-write SARIF and reports since the report phase already
+                # wrote them before filtering. Overwrite with filtered data.
+                sarif_path = Path(output_dir) / "reports" / "ash.sarif"
+                if sarif_path.exists() and results.sarif:
+                    sarif_path.write_text(
+                        results.sarif.model_dump_json(indent=2, by_alias=True),
+                        encoding="utf-8",
+                    )
 
             if isinstance(results, BaseModel):
                 content = results.model_dump_json(indent=2, by_alias=True)

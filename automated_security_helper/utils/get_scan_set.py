@@ -165,7 +165,7 @@ def get_files_not_matching_spec(
     return included
 
 
-def get_changed_files(base_ref: str = "origin/main") -> Optional[List[Path]]:
+def get_changed_files(base_ref: str = "origin/main", cwd: Optional[Path] = None) -> Optional[List[Path]]:
     """Return files changed between *base_ref* and HEAD using ``git diff``.
 
     Falls back to ``None`` (meaning "scan everything") when:
@@ -174,6 +174,8 @@ def get_changed_files(base_ref: str = "origin/main") -> Optional[List[Path]]:
 
     Args:
         base_ref: The git ref to diff against.  Defaults to ``origin/main``.
+        cwd: Directory to run git from (must be inside the target repo).
+             Defaults to the current working directory.
 
     Returns:
         A list of :class:`~pathlib.Path` objects relative to the repo root,
@@ -191,6 +193,7 @@ def get_changed_files(base_ref: str = "origin/main") -> Optional[List[Path]]:
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=cwd,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         ASH_LOGGER.warning(

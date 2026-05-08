@@ -41,6 +41,7 @@ class TestGetChangedFiles:
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=None,
         )
         assert result == [Path("src/app.py"), Path("README.md"), Path("lib/utils.js")]
 
@@ -86,6 +87,7 @@ class TestGetChangedFiles:
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=None,
         )
         assert result == [Path("file.txt")]
 
