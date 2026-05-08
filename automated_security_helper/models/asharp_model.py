@@ -21,7 +21,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.secret_masking import mask_secret_in_text
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -131,9 +130,6 @@ class SummaryStats(ScannerSeverityCount):
         self.start = start
         self.end = end
         self.duration = duration
-
-    def model_post_init(self, context):
-        return super().model_post_init(context)
 
 
 class ScannerTargetStatusInfo(BaseModel):
@@ -450,26 +446,22 @@ class AshAggregatedResults(BaseModel):
         if self._flat_cache is not None:
             return self._flat_cache
 
-        flat_vulns = []
+        flat_vulns: List[FlatVulnerability] = []
 
-        # Process SARIF results if available
-        if self.sarif and self.sarif.runs and len(self.sarif.runs) > 0:
+        if self.sarif and self.sarif.runs:
             for run in self.sarif.runs:
                 if not run.results:
                     continue
 
-                # Get tool information
                 tool_name = "Unknown"
                 tool_type = "UNKNOWN"
-
                 if run.tool and run.tool.driver:
                     tool_name = run.tool.driver.name
-                    # Try to determine tool type from properties
-                    if run.tool.driver.properties and hasattr(
-                        run.tool.driver.properties, "tags"
-                    ):
-                        for tag in run.tool.driver.properties.tags:
-                            if tag.upper() in [
+                    driver_props = getattr(run.tool.driver, "properties", None)
+                    driver_tags = getattr(driver_props, "tags", None) if driver_props else None
+                    if driver_tags:
+                        for tag in driver_tags:
+                            if tag.upper() in {
                                 "SAST",
                                 "DAST",
                                 "SCA",
@@ -477,341 +469,66 @@ class AshAggregatedResults(BaseModel):
                                 "SECRETS",
                                 "CONTAINER",
                                 "SBOM",
-                            ]:
+                            }:
                                 tool_type = tag.upper()
                                 break
 
-                # Process each result
                 for result in run.results:
-                    # Extract basic information
-                    severity = "UNKNOWN"
-                    if result.level:
-                        level_map = {
-                            "error": "HIGH",
-                            "warning": "MEDIUM",
-                            "note": "LOW",
-                            "none": "INFO",
-                        }
-                        severity = level_map.get(str(result.level).lower(), "MEDIUM")
-
-                    # Extract message
-                    description = ""
-                    if result.message:
-                        if hasattr(result.message, "text"):
-                            description = result.message.text
-                        elif hasattr(result.message, "root") and hasattr(
-                            result.message.root, "text"
-                        ):
-                            description = result.message.root.text
-
-                    # Mask secrets in the description based on rule ID
-                    if description and result.ruleId:
-                        description = mask_secret_in_text(description, result.ruleId)
-
-                    # Extract location information
-                    file_path = None
-                    line_start = None
-                    line_end = None
-                    code_snippet = None
-
-                    if result.locations and len(result.locations) > 0:
-                        location = result.locations[0]
-                        if location.physicalLocation:
-                            if (
-                                hasattr(location.physicalLocation, "root")
-                                and location.physicalLocation.root
-                                and hasattr(
-                                    location.physicalLocation.root, "artifactLocation"
-                                )
-                                and location.physicalLocation.root.artifactLocation
-                                and location.physicalLocation.root.artifactLocation.uri
-                            ):
-                                file_path = (
-                                    location.physicalLocation.root.artifactLocation.uri
-                                )
-                                if file_path and file_path.startswith("file://"):
-                                    file_path = file_path[7:]
-                                    if file_path.startswith("///"):
-                                        file_path = file_path[2:]
-
-                            if (
-                                hasattr(location.physicalLocation, "root")
-                                and location.physicalLocation.root
-                                and hasattr(
-                                    location.physicalLocation.root, "contextRegion"
-                                )
-                                and location.physicalLocation.root.contextRegion
-                            ):
-                                line_start = location.physicalLocation.root.contextRegion.startLine
-                                line_end = (
-                                    location.physicalLocation.root.contextRegion.endLine
-                                )
-                                if (
-                                    location.physicalLocation.root.contextRegion.snippet
-                                    is not None
-                                    and location.physicalLocation.root.contextRegion.snippet.text
-                                    is not None
-                                ):
-                                    code_snippet = location.physicalLocation.root.contextRegion.snippet.text
-
-                            elif (
-                                hasattr(location.physicalLocation, "root")
-                                and location.physicalLocation.root
-                                and hasattr(location.physicalLocation.root, "region")
-                                and location.physicalLocation.root.region
-                            ):
-                                line_start = (
-                                    location.physicalLocation.root.region.startLine
-                                )
-                                line_end = location.physicalLocation.root.region.endLine
-                                if (
-                                    location.physicalLocation.root.region.snippet
-                                    is not None
-                                    and location.physicalLocation.root.region.snippet.text
-                                    is not None
-                                ):
-                                    code_snippet = location.physicalLocation.root.region.snippet.text
-
-                    # Extract additional properties
-                    properties = {}
-                    if result.properties:
-                        properties = result.properties.model_dump(exclude_none=True)
-
-                    # Extract tags
-                    tags = []
-                    if result.properties and hasattr(result.properties, "tags"):
-                        tags = result.properties.tags
-
-                    # Try to get the actual scanner name from properties
-                    actual_scanner = tool_name
-                    if result.properties and hasattr(result.properties, "scanner_name"):
-                        actual_scanner = result.properties.scanner_name
-                    elif result.properties and hasattr(
-                        result.properties, "scanner_details"
-                    ):
-                        if hasattr(result.properties.scanner_details, "tool_name"):
-                            actual_scanner = result.properties.scanner_details.tool_name
-
-                    # If we have tags that might indicate the scanner, use those as a fallback
-                    if (
-                        actual_scanner == "AWS Labs - Automated Security Helper"
-                        and tags
-                    ):
-                        for tag in tags:
-                            # Common scanner names that might appear in tags
-                            if tag.lower() in [
-                                "bandit",
-                                "semgrep",
-                                "checkov",
-                                "cfn-nag",
-                                "cdk-nag",
-                                "detect-secrets",
-                                "grype",
-                                "syft",
-                                "npm-audit",
-                            ]:
-                                actual_scanner = tag
-                                break
-
-                    # Check if finding is suppressed
-                    is_suppressed = False
-                    supp_kind = None
-                    supp_reas = None
-                    if (
-                        hasattr(result, "suppressions")
-                        and result.suppressions
-                        and len(result.suppressions) > 0
-                    ):
-                        is_suppressed = True
-                        supp = result.suppressions[0]
-                        supp_kind = supp.kind or None
-                        supp_reas = supp.justification or None
-
-                        # Update suppressed count in summary stats
-                        self.metadata.summary_stats.bump("suppressed")
-
-                        # Update scanner status info if available
-                        scanner_name = (
-                            actual_scanner.lower() if actual_scanner else None
-                        )
-                        if scanner_name and scanner_name in self.scanner_results:
-                            # Update suppressed finding count
-                            target_info: ScannerTargetStatusInfo | dict = (
-                                self.scanner_results[scanner_name]
-                            )
-                            if isinstance(target_info, dict):
-                                target_info = ScannerTargetStatusInfo.model_validate(
-                                    target_info
-                                )
-                            if target_info:
-                                if target_info.suppressed_finding_count is None:
-                                    target_info.suppressed_finding_count = 1
-                                else:
-                                    target_info.suppressed_finding_count += 1
-
-                                # Update severity counts
-                                if not hasattr(
-                                    target_info.severity_counts, "suppressed"
-                                ):
-                                    target_info.severity_counts.suppressed = 1
-                                else:
-                                    target_info.severity_counts.suppressed += 1
-
-                    # Extract code snippet if available and not already extracted
-                    if code_snippet is None:
-                        if result.properties and hasattr(result.properties, "snippet"):
-                            code_snippet = result.properties.snippet
-
-                        # Try to extract snippet from message if not found in properties
-                        if not code_snippet and description and "```" in description:
-                            # Some scanners include snippets in the message text
-                            try:
-                                parts = description.split("```")
-                                if len(parts) >= 3:  # Has at least one code block
-                                    code_snippet = parts[1].strip()
-                            except Exception as e:
-                                ASH_LOGGER.debug(e)
-
-                        # Try to extract from locations
-                        if (
-                            not code_snippet
-                            and result.locations
-                            and len(result.locations) > 0
-                        ):
-                            location = result.locations[0]
-                            if (
-                                location.physicalLocation
-                                and hasattr(location.physicalLocation, "root")
-                                and location.physicalLocation.root
-                                and hasattr(location.physicalLocation.root, "snippet")
-                                and location.physicalLocation.root.snippet
-                            ):
-                                code_snippet = location.physicalLocation.root.snippet
-
-                    # Tags already extracted above
-
-                    # Extract references
-                    references = []
-                    if hasattr(result, "relatedLocations") and result.relatedLocations:
-                        for loc in result.relatedLocations:
-                            if (
-                                loc.physicalLocation
-                                and loc.physicalLocation.root
-                                and loc.physicalLocation.root.artifactLocation
-                                and loc.physicalLocation.root.artifactLocation.uri
-                            ):
-                                references.append(
-                                    loc.physicalLocation.root.artifactLocation.uri
-                                )
-
-                    # Extract tags
-                    tags = []
-                    if result.properties and hasattr(result.properties, "tags"):
-                        tags = result.properties.tags
-
-                    # Try to get the actual scanner name from properties
-                    actual_scanner = tool_name
-                    if result.properties and hasattr(result.properties, "scanner_name"):
-                        actual_scanner = result.properties.scanner_name
-                    elif result.properties and hasattr(
-                        result.properties, "scanner_details"
-                    ):
-                        if hasattr(result.properties.scanner_details, "tool_name"):
-                            actual_scanner = result.properties.scanner_details.tool_name
-
-                    # If we have tags that might indicate the scanner, use those as a fallback
-                    if (
-                        actual_scanner == "AWS Labs - Automated Security Helper"
-                        and tags
-                    ):
-                        for tag in tags:
-                            # Common scanner names that might appear in tags
-                            if tag.lower() in [
-                                "bandit",
-                                "semgrep",
-                                "checkov",
-                                "cfn-nag",
-                                "cdk-nag",
-                                "detect-secrets",
-                                "grype",
-                                "syft",
-                                "npm-audit",
-                            ]:
-                                actual_scanner = tag
-                                break
-
-                    # Create the flattened vulnerability
-                    flat_vuln = FlatVulnerability(
-                        id=f"{actual_scanner}-{result.ruleId or 'unknown'}-{hash(description) % 10000}",
-                        title=result.ruleId or "Unknown Issue",
-                        description=description,
-                        severity=severity,
-                        is_suppressed=is_suppressed,
-                        suppression_kind=supp_kind,
-                        suppression_justification=supp_reas,
-                        scanner=actual_scanner,
-                        scanner_type=tool_type,
-                        rule_id=result.ruleId,
-                        file_path=file_path,
-                        line_start=line_start,
-                        line_end=line_end,
-                        code_snippet=code_snippet,
-                        tags=json.dumps(tags, default=str) if tags else None,
-                        properties=(
-                            json.dumps(properties, default=str) if properties else None
-                        ),
-                        references=(
-                            json.dumps(references, default=str) if references else None
-                        ),
-                        detected_at=datetime.now(timezone.utc).isoformat(),
-                        raw_data=result.model_dump_json(exclude_none=True),
+                    flat_vuln = FlatVulnerability.from_sarif_result(
+                        result, tool_name, tool_type
                     )
-
                     flat_vulns.append(flat_vuln)
 
-        # Process additional reports if available
+                    if flat_vuln.is_suppressed:
+                        self._apply_suppression_side_effects(flat_vuln.scanner)
+
         for scanner_name, results in self.additional_reports.items():
             if results is None:
                 continue
-
             if isinstance(results, dict) and "severity_counts" in results:
-                # This is a summary report, not individual findings
                 continue
-
-            # Try to extract findings from the report data
-            # This is a simplified approach - in a real implementation,
-            # you would need to handle different report formats
             if isinstance(results, list):
                 for finding in results:
                     if not isinstance(finding, dict):
                         continue
-
-                    flat_vuln = FlatVulnerability(
-                        id=f"{scanner_name}-{finding.get('id', hash(str(finding)) % 10000)}",
-                        title=finding.get("title", "Unknown Issue"),
-                        description=finding.get(
-                            "description", "No description available"
-                        ),
-                        severity=finding.get("severity", "MEDIUM").upper(),
-                        scanner=scanner_name,
-                        scanner_type=finding.get("type", "UNKNOWN"),
-                        rule_id=finding.get("rule_id"),
-                        file_path=finding.get("file_path"),
-                        line_start=finding.get("line_start"),
-                        line_end=finding.get("line_end"),
-                        cve_id=finding.get("cve_id"),
-                        cwe_id=finding.get("cwe_id"),
-                        fix_available=finding.get("fix_available"),
-                        detected_at=finding.get(
-                            "detected_at", datetime.now(timezone.utc).isoformat()
-                        ),
-                        raw_data=json.dumps(finding, default=str),
+                    flat_vulns.append(
+                        FlatVulnerability.from_additional_report(finding, scanner_name)
                     )
-
-                    flat_vulns.append(flat_vuln)
 
         self._flat_cache = flat_vulns
         return flat_vulns
+
+    def _apply_suppression_side_effects(self, scanner: Optional[str]) -> None:
+        """Bump summary_stats.suppressed and the matching scanner_results entry.
+
+        Extracted from the inline SARIF processing in to_flat_vulnerabilities()
+        so the conversion factory can stay side-effect free. Preserves the
+        legacy behavior: one ``suppressed`` bump per suppressed finding plus an
+        increment to the scanner_results entry when one exists.
+        """
+        self.metadata.summary_stats.bump("suppressed")
+
+        if not scanner:
+            return
+        key = scanner.lower()
+        if key not in self.scanner_results:
+            return
+
+        target_info: ScannerTargetStatusInfo | dict = self.scanner_results[key]
+        if isinstance(target_info, dict):
+            target_info = ScannerTargetStatusInfo.model_validate(target_info)
+        if target_info is None:
+            return
+
+        if target_info.suppressed_finding_count is None:
+            target_info.suppressed_finding_count = 1
+        else:
+            target_info.suppressed_finding_count += 1
+
+        if not hasattr(target_info.severity_counts, "suppressed"):
+            target_info.severity_counts.suppressed = 1
+        else:
+            target_info.severity_counts.suppressed += 1
 
     @classmethod
     def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "AshAggregatedResults":
@@ -861,6 +578,7 @@ class AshAggregatedResults(BaseModel):
         SARIF data after all suppressions have been applied.
         """
         from automated_security_helper.core.unified_metrics import (
+            _populate_summary_stats_from_unified_metrics,
             get_unified_scanner_metrics,
         )
 
@@ -877,8 +595,9 @@ class AshAggregatedResults(BaseModel):
                 f"Unified metrics computed for {len(unified_metrics)} scanners"
             )
 
-            # Populate summary_stats from unified metrics
-            self._populate_summary_stats_from_unified_metrics(unified_metrics)
+            # Populate summary_stats from unified metrics using the canonical
+            # module-level helper in core.unified_metrics.
+            _populate_summary_stats_from_unified_metrics(self, unified_metrics)
 
             ASH_LOGGER.debug(
                 f"Populated final metrics for {len(unified_metrics)} scanners"
@@ -890,56 +609,6 @@ class AshAggregatedResults(BaseModel):
 
             ASH_LOGGER.error(f"Stack trace: {traceback.format_exc()}")
             # Don't raise to avoid breaking the save operation
-
-    def _populate_summary_stats_from_unified_metrics(
-        self, unified_metrics: list
-    ) -> None:
-        """Populate summary_stats from unified metrics."""
-        # Calculate totals from unified metrics
-        total_suppressed = sum(m.suppressed for m in unified_metrics)
-        total_critical = sum(m.critical for m in unified_metrics)
-        total_high = sum(m.high for m in unified_metrics)
-        total_medium = sum(m.medium for m in unified_metrics)
-        total_low = sum(m.low for m in unified_metrics)
-        total_info = sum(m.info for m in unified_metrics)
-        total_findings = sum(m.total for m in unified_metrics)
-        total_actionable = sum(m.actionable for m in unified_metrics)
-
-        # Count scanner statuses
-        passed_count = sum(1 for m in unified_metrics if m.status == "PASSED")
-        failed_count = sum(1 for m in unified_metrics if m.status == "FAILED")
-        skipped_count = sum(1 for m in unified_metrics if m.status == "SKIPPED")
-        missing_count = sum(1 for m in unified_metrics if m.status == "MISSING")
-
-        # Preserve timing information if it exists, ensuring they are strings
-        existing_start = self.metadata.summary_stats.start
-        existing_end = self.metadata.summary_stats.end
-        existing_duration = self.metadata.summary_stats.duration
-
-        # Convert datetime objects to strings if needed
-        if existing_start is not None and not isinstance(existing_start, str):
-            existing_start = str(existing_start)
-        if existing_end is not None and not isinstance(existing_end, str):
-            existing_end = str(existing_end)
-
-        # Update summary stats with unified metrics
-        self.metadata.summary_stats = SummaryStats(
-            start=existing_start,
-            end=existing_end,
-            duration=existing_duration,
-            suppressed=total_suppressed,
-            critical=total_critical,
-            high=total_high,
-            medium=total_medium,
-            low=total_low,
-            info=total_info,
-            total=total_findings,
-            actionable=total_actionable,
-            passed=passed_count,
-            failed=failed_count,
-            missing=missing_count,
-            skipped=skipped_count,
-        )
 
     @classmethod
     def load_model(cls, json_path: Path) -> Optional["AshAggregatedResults"]:

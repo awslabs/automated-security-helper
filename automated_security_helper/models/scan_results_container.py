@@ -9,6 +9,7 @@ from typing import Annotated, Any, Dict, Literal, List, Optional
 from pydantic import BaseModel, Field
 
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.asharp_model import ScannerSeverityCount
 
 
 class ScanResultsContainer(BaseModel):
@@ -47,17 +48,7 @@ class ScanResultsContainer(BaseModel):
     duration: float | None = 0
     metadata: Dict[str, Any] = {}
     raw_results: Any | None = None
-    severity_counts: Dict[str, int] = Field(
-        default_factory=lambda: {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 0,
-            "suppressed": 0,
-            "total": 0,
-        }
-    )
+    severity_counts: ScannerSeverityCount = Field(default_factory=ScannerSeverityCount)
     scanner_severity_threshold: (
         Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None
     ) = None
@@ -155,21 +146,16 @@ class ScanResultsContainer(BaseModel):
         if not threshold:
             return ScannerStatus.PASSED
 
-        counts = self.severity_counts or {}
-        critical = counts.get("critical", 0) or 0
-        high = counts.get("high", 0) or 0
-        medium = counts.get("medium", 0) or 0
-        low = counts.get("low", 0) or 0
-        info = counts.get("info", 0) or 0
+        counts = self.severity_counts
 
-        if critical > 0:
+        if counts.critical > 0:
             return ScannerStatus.FAILED
-        if high > 0 and threshold in ("ALL", "LOW", "MEDIUM", "HIGH"):
+        if counts.high > 0 and threshold in ("ALL", "LOW", "MEDIUM", "HIGH"):
             return ScannerStatus.FAILED
-        if medium > 0 and threshold in ("ALL", "LOW", "MEDIUM"):
+        if counts.medium > 0 and threshold in ("ALL", "LOW", "MEDIUM"):
             return ScannerStatus.FAILED
-        if low > 0 and threshold in ("ALL", "LOW"):
+        if counts.low > 0 and threshold in ("ALL", "LOW"):
             return ScannerStatus.FAILED
-        if info > 0 and threshold == "ALL":
+        if counts.info > 0 and threshold == "ALL":
             return ScannerStatus.FAILED
         return ScannerStatus.PASSED

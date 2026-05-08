@@ -425,8 +425,8 @@ class TestExecuteScanner:
 
         assert len(results) == 1
         assert results[0].scanner_name == "trivy"
-        assert results[0].severity_counts["critical"] == 1
-        assert results[0].severity_counts["high"] == 2
+        assert results[0].severity_counts.critical == 1
+        assert results[0].severity_counts.high == 2
 
     def test_scanner_exception_produces_error_container(self, scan_phase):
         """If scan() raises, result contains error info."""
@@ -839,9 +839,9 @@ class TestMetricsExtraction:
             mock_sarif = MagicMock()
             severity_counts, total = scan_phase._extract_metrics_from_sarif(mock_sarif)
 
-            assert severity_counts["critical"] == 1
-            assert severity_counts["high"] == 3
-            assert severity_counts["medium"] == 5
+            assert severity_counts.critical == 1
+            assert severity_counts.high == 3
+            assert severity_counts.medium == 5
             assert total == 14  # 1+3+5+2+1+2
 
 
