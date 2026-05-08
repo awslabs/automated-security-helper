@@ -1388,6 +1388,14 @@
                 "include_summary_metrics": true
               }
             },
+            "github-ghas": {
+              "enabled": true,
+              "extension": "ghas.sarif",
+              "name": "github-ghas",
+              "options": {
+                "exclude_suppressed": true
+              }
+            },
             "gitlab-sast": {
               "enabled": true,
               "extension": "gl-sast-report.json",
@@ -1483,6 +1491,7 @@
               "enabled": true,
               "name": "cdk-nag",
               "options": {
+                "include_compliant_checks": false,
                 "nag_packs": {
                   "AwsSolutionsChecks": true,
                   "HIPAASecurityChecks": false,
@@ -1531,6 +1540,7 @@
                   "results": {},
                   "version": null
                 },
+                "scan_timeout": 300,
                 "severity_threshold": null
               }
             },
@@ -2158,6 +2168,7 @@
         "options": {
           "$ref": "#/$defs/CdkNagScannerConfigOptions",
           "default": {
+            "include_compliant_checks": false,
             "nag_packs": {
               "AwsSolutionsChecks": true,
               "HIPAASecurityChecks": false,
@@ -2177,6 +2188,12 @@
       "additionalProperties": true,
       "description": "CDK Nag IAC SAST scanner options.",
       "properties": {
+        "include_compliant_checks": {
+          "default": false,
+          "description": "Include INFO-level findings for compliant resources in the report.",
+          "title": "Include Compliant Checks",
+          "type": "boolean"
+        },
         "nag_packs": {
           "$ref": "#/$defs/CdkNagPacks",
           "default": {
@@ -2561,7 +2578,6 @@
           "type": "integer"
         },
         "offline": {
-          "default": false,
           "description": "Run in offline mode, disabling policy downloads",
           "title": "Offline",
           "type": "boolean"
@@ -5506,6 +5522,7 @@
               "results": {},
               "version": null
             },
+            "scan_timeout": 300,
             "severity_threshold": null
           },
           "description": "Configure detect-secrets scanner"
@@ -5544,6 +5561,12 @@
             "version": null
           },
           "description": "Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file"
+        },
+        "scan_timeout": {
+          "default": 300,
+          "description": "Maximum time in seconds to allow the detect-secrets scan to run before aborting. Prevents hangs on pathological files.",
+          "title": "Scan Timeout",
+          "type": "integer"
         },
         "severity_threshold": {
           "anyOf": [
@@ -7397,6 +7420,48 @@
       "title": "Frame",
       "type": "object"
     },
+    "GHASReporterConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "ghas.sarif",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "github-ghas",
+          "default": "github-ghas",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/GHASReporterConfigOptions",
+          "default": {
+            "exclude_suppressed": true
+          }
+        }
+      },
+      "title": "GHASReporterConfig",
+      "type": "object"
+    },
+    "GHASReporterConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "exclude_suppressed": {
+          "default": true,
+          "description": "When true (default), suppressed findings are excluded from the GHAS report. GitHub has its own dismissal workflow so suppressed findings are typically not needed.",
+          "title": "Exclude Suppressed",
+          "type": "boolean"
+        }
+      },
+      "title": "GHASReporterConfigOptions",
+      "type": "object"
+    },
     "GitLabSASTReporterConfig": {
       "additionalProperties": true,
       "properties": {
@@ -7839,7 +7904,6 @@
           "title": "Config File"
         },
         "offline": {
-          "default": false,
           "description": "Run in offline mode, disabling database updates and validation",
           "title": "Offline",
           "type": "boolean"
@@ -10704,7 +10768,6 @@
       "additionalProperties": true,
       "properties": {
         "offline": {
-          "default": false,
           "description": "Run in offline mode, using locally cached data",
           "title": "Offline",
           "type": "boolean"
@@ -10926,7 +10989,6 @@
           "type": "string"
         },
         "offline": {
-          "default": false,
           "description": "Run in offline mode, using locally cached rules.",
           "title": "Offline",
           "type": "boolean"
@@ -13233,6 +13295,18 @@
           },
           "description": "Configure the options for the Flat JSON reporter"
         },
+        "github-ghas": {
+          "$ref": "#/$defs/GHASReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "ghas.sarif",
+            "name": "github-ghas",
+            "options": {
+              "exclude_suppressed": true
+            }
+          },
+          "description": "Configure the options for the GitHub Advanced Security (GHAS) SARIF reporter"
+        },
         "gitlab-sast": {
           "$ref": "#/$defs/GitLabSASTReporterConfig",
           "default": {
@@ -15426,6 +15500,7 @@
             "enabled": true,
             "name": "cdk-nag",
             "options": {
+              "include_compliant_checks": false,
               "nag_packs": {
                 "AwsSolutionsChecks": true,
                 "HIPAASecurityChecks": false,
@@ -15486,6 +15561,7 @@
                 "results": {},
                 "version": null
               },
+              "scan_timeout": 300,
               "severity_threshold": null
             }
           },
@@ -16169,7 +16245,6 @@
           "type": "string"
         },
         "offline": {
-          "default": false,
           "description": "Run in offline mode, using locally cached rules.",
           "title": "Offline",
           "type": "boolean"
@@ -21212,7 +21287,7 @@
                 "supportedTaxonomies": [],
                 "taxa": [],
                 "translationMetadata": null,
-                "version": "3.2.7"
+                "version": "3.4.1"
               },
               "extensions": [],
               "properties": null

@@ -1,6 +1,6 @@
 # Built-in Reporters
 
-ASH includes 13 built-in reporters that generate scan results in various formats to support different use cases, from human-readable reports to machine-processable data formats for CI/CD integration.
+ASH includes 14 built-in reporters that generate scan results in various formats to support different use cases, from human-readable reports to machine-processable data formats for CI/CD integration.
 
 > For detailed visual diagrams of the built-in reporter architecture and workflows, see [Built-in Reporter Diagrams](reporters-diagrams.md).
 
@@ -12,6 +12,7 @@ ASH includes 13 built-in reporters that generate scan results in various formats
 | **[CycloneDX Reporter](#cyclonedx-reporter)**     | JSON/XML   | SBOM compliance             | Software Bill of Materials                 |
 | **[Flat JSON Reporter](#flat-json-reporter)**     | JSON       | Simple data processing      | Flattened structure                        |
 | **[GitLab SAST Reporter](#gitlab-sast-reporter)** | JSON       | GitLab Security Dashboard   | GitLab CI/CD integration                   |
+| **[GitHub GHAS Reporter](#github-ghas-reporter)** | SARIF      | GitHub Advanced Security    | Optimized SARIF with proper severity mapping |
 | **[HTML Reporter](#html-reporter)**               | HTML       | Interactive reports         | Web-based, searchable                      |
 | **[JUnit XML Reporter](#junit-xml-reporter)**     | XML        | CI/CD test results          | Test framework integration                 |
 | **[Markdown Reporter](#markdown-reporter)**       | Markdown   | Documentation, README       | Human-readable, version control friendly   |
@@ -183,6 +184,85 @@ security_scan:
   artifacts:
     reports:
       sast: output/gl-sast-report.json
+```
+
+---
+
+### GitHub GHAS Reporter
+
+**Purpose**: Produces a streamlined SARIF report optimized for GitHub Advanced Security (Code Scanning).
+
+The standard SARIF reporter outputs a faithful representation of scanner results, but GitHub Code Scanning requires specific fields to display severity correctly. Without `properties["security-severity"]` on rules, GitHub falls back to showing raw SARIF levels ("Error"/"Warning"/"Note") instead of security severity (Critical/High/Medium/Low).
+
+This reporter solves that by:
+
+1. Ensuring every rule has `properties["security-severity"]` — preserving scanner-provided values when present, or deriving from `defaultConfiguration.level` / `result.level` when missing
+2. Flattening rules from `tool.extensions[]` into `tool.driver.rules` for reliable rule resolution
+3. Stripping verbose fields to significantly reduce file size (~80% smaller than the standard SARIF)
+4. Excluding suppressed findings by default (GitHub has its own dismissal workflow)
+
+**Configuration**:
+```yaml
+reporters:
+  github-ghas:
+    enabled: true
+    options:
+      exclude_suppressed: true  # Exclude ASH-suppressed findings (default: true)
+```
+
+**Output File**: `reports/ash.ghas.sarif`
+
+**Severity Mapping** (when `security-severity` is not provided by the scanner):
+
+| SARIF Level | security-severity | GitHub displays as |
+|---|---|---|
+| `error` | 8.0 | High |
+| `warning` | 6.0 | Medium |
+| `note` | 3.0 | Low |
+| `none` | 1.0 | Low |
+
+When a scanner already provides `security-severity` (e.g., Grype with CVSS scores), that value is preserved as-is.
+
+**Use Cases**:
+- GitHub Advanced Security Code Scanning
+- GitHub Security tab integration
+- Pull request security annotations
+- Repository security overview
+
+**Integration Example**:
+```yaml
+# .github/workflows/ash-security-scan.yml
+name: ASH Security Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ASH
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git
+      - name: Run ASH scan
+        run: ash --mode local --no-fail-on-findings
+      - name: Upload GHAS SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: .ash/ash_output/reports/ash.ghas.sarif
+          category: ash-security-scan
 ```
 
 ---
@@ -518,10 +598,12 @@ ash --output-dir results/ \
 - name: Security Scan
   run: ash --reporters sarif,text
 
-- name: Upload SARIF
-  uses: github/codeql-action/upload-sarif@v2
+- name: Upload SARIF to GitHub Advanced Security
+  uses: github/codeql-action/upload-sarif@v3
+  if: always()
   with:
-    sarif_file: results/sarif/results.sarif
+    sarif_file: .ash/ash_output/reports/ash.ghas.sarif
+    category: ash-security-scan
 ```
 
 ### GitLab CI

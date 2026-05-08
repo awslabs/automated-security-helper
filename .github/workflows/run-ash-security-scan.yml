@@ -49,7 +49,7 @@ on:
         default: ""
         type: string
       collect-sarif-report:
-        description: "Whether to collect the ash.sarif report using github/codeql-action/upload-sarif for GitHub Advanced Security Code Scanning results"
+        description: "Whether to collect the ash.ghas.sarif report using github/codeql-action/upload-sarif for GitHub Advanced Security Code Scanning results"
         required: false
         default: true
         type: boolean
@@ -209,6 +209,6 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         if: inputs.collect-sarif-report && github.event_name != 'merge_group' && (success() || failure())
         with:
-          sarif_file: ${{ inputs.output-dir }}/reports/ash.sarif
+          sarif_file: ${{ inputs.output-dir }}/reports/ash.ghas.sarif
           wait-for-processing: true
           category: ash
