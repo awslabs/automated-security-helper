@@ -615,23 +615,16 @@ class ScanPhase(EnginePhase):
         sev_count = get_severity_metrics_from_sarif(
             sarif_report=sarif_report, plugin_context=self.plugin_context
         )
-        suppressed = sev_count.suppressed or 0
-        critical = sev_count.critical or 0
-        high = sev_count.high or 0
-        medium = sev_count.medium or 0
-        low = sev_count.low or 0
-        info = sev_count.info or 0
 
-        # Format the results to match the expected return format
         severity_counts = {
-            "suppressed": suppressed,
-            "critical": critical,
-            "high": high,
-            "medium": medium,
-            "low": low,
-            "info": info,
+            "suppressed": sev_count.suppressed,
+            "critical": sev_count.critical,
+            "high": sev_count.high,
+            "medium": sev_count.medium,
+            "low": sev_count.low,
+            "info": sev_count.info,
         }
-        total_findings = critical + high + medium + low + info + suppressed
+        total_findings = sev_count.total + sev_count.suppressed
 
         return severity_counts, total_findings
 

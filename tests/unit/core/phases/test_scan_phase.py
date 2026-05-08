@@ -833,6 +833,7 @@ class TestMetricsExtraction:
             mock_metrics.medium = 5
             mock_metrics.low = 2
             mock_metrics.info = 1
+            mock_metrics.total = 12  # critical+high+medium+low+info
             mock_get.return_value = mock_metrics
 
             mock_sarif = MagicMock()
