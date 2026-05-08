@@ -33,6 +33,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter
 from automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter import (
     CycloneDXReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter import (
+    GitLabCycloneDXReporterConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
     GitLabSASTReporterConfig,
 )
@@ -208,6 +211,13 @@ class ReporterConfigSegment(BaseModel):
         CycloneDXReporterConfig,
         Field(description="Configure the options for the CycloneDX reporter"),
     ] = CycloneDXReporterConfig()
+    gitlab_cyclonedx: Annotated[
+        GitLabCycloneDXReporterConfig,
+        Field(
+            description="Configure the options for the GitLab CycloneDX dependency scanning reporter",
+            alias="gitlab-cyclonedx",
+        ),
+    ] = GitLabCycloneDXReporterConfig()
     # Do the same for html, json, junitxml, ocsf, sarif, spdx, text, and yaml
     html: Annotated[
         HTMLReporterConfig,
@@ -738,6 +748,137 @@ class AshConfig(BaseModel):
             )
 
         return found
+
+
+def add_suppression_to_config(
+    config_path: Path, suppression: AshSuppression
+) -> None:
+    """Append a suppression to the suppressions list in an .ash.yaml config file.
+
+    Uses an append-only strategy when the file already contains a suppressions
+    section, preserving existing comments and formatting. Falls back to a full
+    rewrite for new files or files without a suppressions section.
+    """
+    entry = suppression.model_dump(exclude_none=True)
+    entry_yaml = yaml.safe_dump(
+        [entry], default_flow_style=False, sort_keys=False
+    ).rstrip("\n")
+    # yaml.safe_dump wraps in a list; strip the leading "- " indent is handled below
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if config_path.exists():
+        text = config_path.read_text(encoding="utf-8")
+
+        # Duplicate detection: check if rule_id+path already suppressed
+        data = yaml.safe_load(text) or {}
+        if isinstance(data, dict):
+            existing = (
+                data.get("global_settings", {}).get("suppressions", []) or []
+            )
+            for existing_entry in existing:
+                if (
+                    isinstance(existing_entry, dict)
+                    and existing_entry.get("rule_id") == entry.get("rule_id")
+                    and existing_entry.get("path") == entry.get("path")
+                ):
+                    return  # already suppressed
+
+        # Append-only: find the suppressions list and append at its end
+        lines = text.splitlines(keepends=True)
+        insert_idx = _find_suppressions_append_point(lines)
+        if insert_idx is not None:
+            indent = "  "
+            formatted = f"{indent}- " + f"\n{indent}  ".join(
+                f"{k}: {_yaml_scalar(v)}" for k, v in entry.items()
+            ) + "\n"
+            lines.insert(insert_idx, formatted)
+            config_path.write_text("".join(lines), encoding="utf-8")
+            return
+
+    # Fallback: full rewrite (new file or no suppressions section found)
+    if config_path.exists():
+        with open(config_path, mode="r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    else:
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    global_settings = data.setdefault("global_settings", {})
+    if not isinstance(global_settings, dict):
+        global_settings = {}
+        data["global_settings"] = global_settings
+
+    suppressions_list = global_settings.setdefault("suppressions", [])
+    if not isinstance(suppressions_list, list):
+        suppressions_list = []
+        global_settings["suppressions"] = suppressions_list
+
+    suppressions_list.append(entry)
+    with open(config_path, mode="w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+
+
+def _yaml_scalar(value: object) -> str:
+    """Format a value for inline YAML output."""
+    if isinstance(value, str):
+        if any(c in value for c in ":#{}[]&*!|>'\","):
+            return f'"{value}"'
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    return repr(value)
+
+
+def _find_suppressions_append_point(lines: list) -> int | None:
+    """Find the line index where a new suppression entry should be inserted.
+
+    Looks for the ``suppressions:`` key under ``global_settings:`` and returns
+    the index after the last existing list item (or after the key if the list
+    is empty).
+    """
+    in_global = False
+    in_suppressions = False
+    last_item_end = None
+
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+        indent_len = len(line) - len(stripped)
+
+        if stripped.startswith("global_settings:"):
+            in_global = True
+            continue
+
+        if in_global and indent_len == 0 and stripped and not stripped.startswith("#"):
+            in_global = False
+            if in_suppressions:
+                return last_item_end if last_item_end else None
+            continue
+
+        if in_global and stripped.startswith("suppressions:"):
+            in_suppressions = True
+            last_item_end = idx + 1
+            continue
+
+        if in_suppressions:
+            if stripped.startswith("- "):
+                last_item_end = idx + 1
+                # Walk forward past multi-line entry fields
+                continue
+            if indent_len >= 4 and not stripped.startswith("- "):
+                last_item_end = idx + 1
+                continue
+            if stripped == "" or stripped.startswith("#"):
+                continue
+            return last_item_end
+
+    if in_suppressions:
+        return last_item_end
+    return None
 
 
 BuildConfig.model_rebuild()

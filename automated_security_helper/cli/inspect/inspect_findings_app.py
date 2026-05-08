@@ -2,6 +2,7 @@ import typer
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.widgets import (
+    Button,
     DataTable,
     Footer,
     Header,
@@ -17,12 +18,107 @@ from textual.containers import (
     Container,
     VerticalGroup,
 )
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.binding import Binding
 
+from automated_security_helper.config.ash_config import add_suppression_to_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils.log import ASH_LOGGER
+
+
+class SuppressDialog(ModalScreen[bool]):
+    """Modal dialog for creating a suppression from a finding."""
+
+    CSS = """
+    SuppressDialog {
+        align: center middle;
+    }
+
+    #suppress-dialog {
+        width: 70;
+        height: auto;
+        max-height: 80%;
+        background: rgb(30, 30, 30);
+        border: solid rgb(60, 60, 60);
+        padding: 1 2;
+    }
+
+    #suppress-dialog Label {
+        margin: 1 0 0 0;
+    }
+
+    #suppress-dialog Input {
+        margin: 0 0 1 0;
+    }
+
+    #suppress-dialog .button-row {
+        margin: 1 0 0 0;
+        height: 3;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, finding: dict, config_path: Path | None = None):
+        super().__init__()
+        self.finding = finding
+        self.config_path = config_path or Path.cwd() / ".ash.yaml"
+
+    def compose(self) -> ComposeResult:
+        with Container(id="suppress-dialog"):
+            yield Label("Suppress Finding")
+            yield Label(f"Rule: {self.finding.get('rule_id', 'N/A')}")
+            yield Label(f"File: {self.finding.get('file', 'N/A')}")
+            yield Label(f"Line: {self.finding.get('line', 'N/A')}")
+            yield Label("Reason (required):")
+            yield Input(placeholder="Why is this finding suppressed?", id="reason_input")
+            yield Label("Expiration date (optional, YYYY-MM-DD):")
+            yield Input(placeholder="e.g. 2025-12-31", id="expiration_input")
+            with HorizontalGroup(classes="button-row"):
+                yield Button("Suppress", variant="primary", id="btn_suppress")
+                yield Button("Cancel", variant="default", id="btn_cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_cancel":
+            self.dismiss(False)
+            return
+
+        if event.button.id == "btn_suppress":
+            reason_input = self.query_one("#reason_input", Input)
+            reason = reason_input.value.strip()
+            if not reason:
+                reason_input.focus()
+                return
+
+            expiration_input = self.query_one("#expiration_input", Input)
+            expiration = expiration_input.value.strip() or None
+
+            try:
+                suppression = AshSuppression(
+                    rule_id=self.finding.get("rule_id"),
+                    path=self.finding.get("file") or "*",
+                    reason=reason,
+                    expiration=expiration,
+                    line_start=int(self.finding["line"]) if self.finding.get("line") else None,
+                    line_end=int(self.finding["line"]) if self.finding.get("line") else None,
+                )
+                add_suppression_to_config(self.config_path, suppression)
+                self.dismiss(True)
+            except Exception as exc:
+                ASH_LOGGER.error(f"Failed to create or write suppression: {exc}")
+                self.app.notify(
+                    f"Failed to save suppression: {exc}",
+                    severity="error",
+                    timeout=8,
+                )
+                self.dismiss(False)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
 
 
 class FindingDetailScreen(Screen):
@@ -108,6 +204,7 @@ class FindingsExplorerApp(App):
         Binding("/", "toggle_search", "Search"),
         Binding("escape", "exit_search", "Exit Search"),
         Binding("h", "toggle_suppressed", "Toggle Suppressed"),
+        Binding("x", "suppress_selected", "Suppress"),
     ]
 
     CSS = """
@@ -411,6 +508,27 @@ class FindingsExplorerApp(App):
             pass
 
         self._populate_table()
+
+    def action_suppress_selected(self) -> None:
+        """Open the suppression dialog for the selected finding."""
+        table = self.query_one("#findings_table", DataTable)
+        if table.row_count > 0 and table.cursor_row is not None:
+            finding_idx = table.cursor_row
+            if 0 <= finding_idx < len(self.filtered_findings):
+                finding = self.filtered_findings[finding_idx]
+                self.push_screen(SuppressDialog(finding), self._on_suppress_result)
+
+    def _on_suppress_result(self, result: bool) -> None:
+        """Handle the result from the suppression dialog."""
+        if result:
+            status_bar = self.query_one("#status_bar", Static)
+            status_bar.update("Suppression saved to .ash.yaml")
+
+            table = self.query_one("#findings_table", DataTable)
+            idx = table.cursor_row
+            if idx is not None and idx < len(self.filtered_findings):
+                self.filtered_findings[idx]["suppressed"] = True
+                self._populate_table()
 
     def action_previous_finding(self) -> None:
         """Select the previous finding in the table."""
