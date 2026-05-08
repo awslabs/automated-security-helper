@@ -22,6 +22,26 @@ jobs:
   # ---------------------------------------------------------------------------
   # Unit tests: all OS x all Python versions (matches ash-repo-unit-tests.yml)
   # ---------------------------------------------------------------------------
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install ASH
+        run: uv pip install --system -e .
+      - name: Regenerate JSON schemas
+        run: python -m automated_security_helper.schemas.generate_schemas
+      - name: Check schemas are up to date
+        run: |
+          if ! git diff --exit-code automated_security_helper/schemas/*.json; then
+            echo "::error::JSON schemas are out of date. Run 'python -m automated_security_helper.schemas.generate_schemas' and commit the result."
+            exit 1
+          fi
+
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
