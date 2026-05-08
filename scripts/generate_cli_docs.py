@@ -39,7 +39,7 @@ def _get_type_name(annotation: Any) -> str:
                 args = typing.get_args(annotation)
                 if args:
                     return _get_type_name(args[0])
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     # Handle Union types (Optional[X] = Union[X, None])
@@ -52,7 +52,7 @@ def _get_type_name(annotation: Any) -> str:
             if len(inner) == 1:
                 return _get_type_name(inner[0])
             return " | ".join(_get_type_name(a) for a in inner)
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     # typing.Union
@@ -63,7 +63,7 @@ def _get_type_name(annotation: Any) -> str:
             if len(inner) == 1:
                 return _get_type_name(inner[0])
             return " | ".join(_get_type_name(a) for a in inner)
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     # Handle List[X]
@@ -80,7 +80,7 @@ def _get_type_name(annotation: Any) -> str:
             args = get_args(annotation)
             if args:
                 return _get_type_name(args[0])
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     # Enum types
