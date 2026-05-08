@@ -24,7 +24,7 @@ ASH produces scan results in multiple formats. Every scan writes an internal agg
 By default, ASH generates flat-json, SARIF, CycloneDX, OCSF, GitLab SAST, JUnit XML, CSV, HTML, Markdown, and Text reports. SPDX and YAML are available but disabled by default. To request a specific set of formats, use the `reporters` section in your configuration file:
 
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 reporters:
   flat-json:
     enabled: true
