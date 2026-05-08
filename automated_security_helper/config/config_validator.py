@@ -41,7 +41,6 @@ class ConfigValidator:
     # Top-level fields that should NOT appear in user configs
     INVALID_TOP_LEVEL_FIELDS = {
         "build",
-        "mcp-resource-management",
     }
 
     # Required top-level fields
@@ -59,6 +58,7 @@ class ConfigValidator:
         "scanners",
         "reporters",
         "converters",
+        "mcp-resource-management",
     }
 
     @classmethod

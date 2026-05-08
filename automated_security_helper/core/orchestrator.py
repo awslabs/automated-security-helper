@@ -166,6 +166,11 @@ class ASHScanOrchestrator(BaseModel):
             else [],
         )
 
+        # Surface config resolution warnings prominently
+        if self.config._resolution_warnings:
+            for warning in self.config._resolution_warnings:
+                ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
+
         ASH_LOGGER.verbose("Setting up working directories")
         if self.source_dir is None:
             ASH_LOGGER.warning(
@@ -440,6 +445,21 @@ class ASHScanOrchestrator(BaseModel):
             except Exception as e:
                 ASH_LOGGER.error(f"Execution failed: {str(e)}")
                 raise
+
+            # Add config resolution warnings to validation checkpoints
+            if self.config._resolution_warnings:
+                for warning in self.config._resolution_warnings:
+                    asharp_model_results.validation_checkpoints.append(
+                        {
+                            "type": "config_warning",
+                            "severity": "warning",
+                            "message": warning,
+                            "metadata": {
+                                "source": "config_resolution",
+                                "impact": "Suppressions and custom settings may not be active",
+                            },
+                        }
+                    )
 
             if not self.no_cleanup:
                 if self.work_dir and Path(self.work_dir).exists():

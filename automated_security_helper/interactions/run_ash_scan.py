@@ -374,11 +374,7 @@ def run_ash_scan(
                     if color
                     else None
                 ),
-                offline=(
-                    offline
-                    if offline is not None
-                    else is_offline_mode()
-                ),
+                offline=(offline if offline is not None else is_offline_mode()),
                 existing_results_path=(
                     Path(existing_results) if existing_results else None
                 ),
@@ -530,6 +526,19 @@ def run_ash_scan(
             relative_out_dir.as_posix(),
         )
         if not quiet:
+            # Show config resolution warnings prominently before results
+            if results and hasattr(results, "validation_checkpoints"):
+                config_warnings = [
+                    cp
+                    for cp in results.validation_checkpoints
+                    if cp.get("type") == "config_warning"
+                ]
+                if config_warnings:
+                    print("\n[bold yellow]⚠️  CONFIGURATION WARNING ⚠️[/bold yellow]")
+                    for cw in config_warnings:
+                        print(f"[yellow]  {cw['message']}[/yellow]")
+                    print("")
+
             print(
                 f"\n[cyan]=== ASH Scan Completed in {duration_str}: Next Steps ===[/cyan]"
             )
