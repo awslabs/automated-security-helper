@@ -453,6 +453,9 @@ class AshConfig(BaseModel):
         extra="ignore",
     )
 
+    # Internal field to track config resolution warnings (not serialized)
+    _resolution_warnings: List[str] = []
+
     # Project information
     project_name: Annotated[
         str,

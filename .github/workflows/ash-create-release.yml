@@ -62,6 +62,17 @@ jobs:
         if: steps.bump.outputs.bumped == 'true'
         run: uv run python scripts/version_template_manager.py generate
 
+      - name: Regenerate JSON schemas
+        if: steps.bump.outputs.bumped == 'true'
+        run: uv run python -m automated_security_helper.schemas.generate_schemas
+
+      - name: Smoke test release artifacts
+        if: steps.bump.outputs.bumped == 'true'
+        run: |
+          uv run ash --help
+          uv run ash config validate
+          uv run python -m pytest tests/unit/cli/test_config_init.py -x -q --no-header
+
       - name: Create release PR
         if: steps.bump.outputs.bumped == 'true'
         env:
