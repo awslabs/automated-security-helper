@@ -1487,7 +1487,7 @@ yamllint .ash/.ash.yaml
 
 ## Version Information
 
-This guide is for ASH v3.2.2 and later. For earlier versions, some features may not be available.
+This guide is for ASH v3.4.1 and later. For earlier versions, some features may not be available.
 
 ---
 

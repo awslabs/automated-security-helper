@@ -323,7 +323,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
 ASH v3 includes comprehensive resource management that can be configured through your ASH configuration file:
 
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 mcp-resource-management:
   max_concurrent_scans: 5          # Limit simultaneous scans
   max_concurrent_tasks: 25         # Limit async tasks
@@ -340,7 +340,7 @@ This prevents memory leaks, manages system resources, and ensures stable operati
 This is a resource protection feature. You can adjust the limits in your configuration:
 
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 mcp-resource-management:
   max_concurrent_scans: 10  # Increase from default of 3
   max_concurrent_tasks: 50  # Increase task limit if needed
@@ -372,7 +372,7 @@ uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.4.1 ash -
 Enable resource monitoring in your configuration:
 
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 mcp-resource-management:
   enable_health_checks: true
   enable_resource_logging: true

@@ -308,9 +308,8 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                     )
                 ]
 
-                for run in sarif_report.runs:
-                    for result in run.results or []:
-                        self._normalize_result_uris(result)
+                for result in sarif_report.get_all_results():
+                    self._normalize_result_uris(result)
             except Exception as e:
                 ASH_LOGGER.warning(
                     f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}"

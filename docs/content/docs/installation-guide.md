@@ -84,7 +84,7 @@ For development or if you want to modify ASH:
 
 ```bash
 # Works on Windows, macOS, and Linux
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.1
 cd automated-security-helper
 pip install .
 

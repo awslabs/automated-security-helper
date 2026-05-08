@@ -176,10 +176,10 @@ ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reaso
 
 ```bash
 # Add a suppression rule
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "file_path": "src/example.py", "reason": "False positive"}]'
+ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
 
 # Add a suppression with line range and expiration
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "file_path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
+ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
 ```
 
 ### Inline code suppressions

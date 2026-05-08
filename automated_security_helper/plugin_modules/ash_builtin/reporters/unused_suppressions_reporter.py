@@ -62,9 +62,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
         # Identify unused suppressions
         unused_suppressions = []
         for suppression in all_suppressions:
-            # Create a unique identifier for the suppression
-            suppression_id = self._get_suppression_id(suppression)
-            if suppression_id not in used_suppressions:
+            if suppression.id not in used_suppressions:
                 unused_suppressions.append(suppression)
 
         # Build the report data
@@ -105,24 +103,6 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             return self._generate_markdown_report(report_data, unused_suppressions)
         else:
             return json.dumps(report_data, indent=2, default=str)
-
-    @staticmethod
-    def _get_suppression_id(suppression: AshSuppression) -> str:
-        """Generate a unique identifier for a suppression rule."""
-        # If line_start is specified but line_end is not, use line_start for both
-        line_end_val = (
-            suppression.line_end
-            if suppression.line_end is not None
-            else suppression.line_start
-        )
-
-        parts = [
-            suppression.path,
-            suppression.rule_id or "*",
-            str(suppression.line_start) if suppression.line_start is not None else "*",
-            str(line_end_val) if line_end_val is not None else "*",
-        ]
-        return "|".join(parts)
 
     @staticmethod
     def _suppression_to_dict(suppression: AshSuppression) -> Dict[str, Any]:

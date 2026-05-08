@@ -226,11 +226,8 @@ class ScanPhase(EnginePhase):
                             excluded_scanner_names.append(display_name)
 
                             # Create a ScanResultsContainer with excluded=True
-                            results_container = ScanResultsContainer(
-                                scanner_name=display_name,
-                                excluded=True,
-                                status=ScannerStatus.SKIPPED,
-                                duration=None,  # Set duration to None for skipped scanners to show "N/A"
+                            results_container = ScanResultsContainer.for_excluded(
+                                display_name
                             )
 
                             # Process the container through _process_results to store duration info
@@ -267,11 +264,8 @@ class ScanPhase(EnginePhase):
                             ]
 
                             # Create a ScanResultsContainer with dependencies_satisfied=False
-                            results_container = ScanResultsContainer(
-                                scanner_name=display_name,
-                                dependencies_satisfied=False,
-                                status=ScannerStatus.MISSING,
-                                duration=None,  # Set duration to None for missing dependency scanners to show "N/A"
+                            results_container = ScanResultsContainer.for_missing_deps(
+                                display_name
                             )
 
                             # Process the container through _process_results to store duration info
@@ -405,11 +399,8 @@ class ScanPhase(EnginePhase):
                             )
 
                             # Create a ScanResultsContainer with excluded=True
-                            results_container = ScanResultsContainer(
-                                scanner_name=display_name,
-                                excluded=True,
-                                status=ScannerStatus.SKIPPED,
-                                duration=None,
+                            results_container = ScanResultsContainer.for_excluded(
+                                display_name
                             )
 
                             # Process the container through _process_results to store duration info
@@ -856,41 +847,9 @@ class ScanPhase(EnginePhase):
 
                     # Skip severity count for failed scans
                     if container.status != ScannerStatus.ERROR:
-                        # Determine status based on severity counts
-                        if container.severity_counts.get("critical", 0) > 0:
-                            container.status = ScannerStatus.FAILED
-                        elif container.severity_counts.get(
-                            "high", 0
-                        ) > 0 and scanner_config.options.severity_threshold in [
-                            "ALL",
-                            "LOW",
-                            "MEDIUM",
-                            "HIGH",
-                        ]:
-                            container.status = ScannerStatus.FAILED
-                        elif container.severity_counts.get(
-                            "medium", 0
-                        ) > 0 and scanner_config.options.severity_threshold in [
-                            "ALL",
-                            "LOW",
-                            "MEDIUM",
-                        ]:
-                            container.status = ScannerStatus.FAILED
-                        elif container.severity_counts.get(
-                            "low", 0
-                        ) > 0 and scanner_config.options.severity_threshold in [
-                            "ALL",
-                            "LOW",
-                        ]:
-                            container.status = ScannerStatus.FAILED
-                        elif container.severity_counts.get(
-                            "info", 0
-                        ) > 0 and scanner_config.options.severity_threshold in [
-                            "ALL",
-                        ]:
-                            container.status = ScannerStatus.FAILED
-                        else:
-                            container.status = ScannerStatus.PASSED
+                        container.status = container.determine_status(
+                            scanner_config.options.severity_threshold
+                        )
 
                     # Extract and add metadata if present
                     if isinstance(raw_results, dict) and "metadata" in raw_results:
@@ -986,17 +945,15 @@ class ScanPhase(EnginePhase):
                     ASH_LOGGER.error(f"Scanner {scanner_name} returned None results")
 
                     # Create a failure container
-                    failure_container = ScanResultsContainer(
-                        scanner_name=scanner_name,
-                        status=ScannerStatus.FAILED,
-                        raw_results={
-                            "errors": [
-                                f"Scanner {scanner_name} failed with no results"
-                            ],
-                            "status": "failed",
-                            "exception": "Scanner returned None results",
-                        },
+                    failure_container = ScanResultsContainer.for_failure(
+                        scanner_name,
+                        errors=[f"Scanner {scanner_name} failed with no results"],
                     )
+                    failure_container.raw_results = {
+                        "errors": [f"Scanner {scanner_name} failed with no results"],
+                        "status": "failed",
+                        "exception": "Scanner returned None results",
+                    }
 
                     # Process the failure container
                     processed = self._process_results(
@@ -1082,16 +1039,17 @@ class ScanPhase(EnginePhase):
                 ASH_LOGGER.error(f"Scanner failed: {scanner_name} - {str(e)}")
 
                 # Create a failure container
-                failure_container = ScanResultsContainer(
-                    scanner_name=scanner_name,
-                    status=ScannerStatus.FAILED,
-                    raw_results={
-                        "errors": [f"Scanner {scanner_name} failed: {str(e)}"],
-                        "status": "failed",
-                        "exception": str(e),
-                        "stack_trace": stack_trace,
-                    },
+                failure_container = ScanResultsContainer.for_failure(
+                    scanner_name,
+                    errors=[f"Scanner {scanner_name} failed: {str(e)}"],
+                    exception=e,
                 )
+                failure_container.raw_results = {
+                    "errors": [f"Scanner {scanner_name} failed: {str(e)}"],
+                    "status": "failed",
+                    "exception": str(e),
+                    "stack_trace": stack_trace,
+                }
 
                 # Process the failure container
                 try:
@@ -1202,17 +1160,19 @@ class ScanPhase(EnginePhase):
                         )
 
                         # Create a failure container
-                        failure_container = ScanResultsContainer(
-                            scanner_name=scanner_name,
-                            status=ScannerStatus.FAILED,
-                            raw_results={
-                                "errors": [
-                                    f"Scanner {scanner_name} failed with no results"
-                                ],
-                                "status": "failed",
-                                "exception": "Scanner returned None results",
-                            },
+                        failure_container = ScanResultsContainer.for_failure(
+                            scanner_name,
+                            errors=[
+                                f"Scanner {scanner_name} failed with no results"
+                            ],
                         )
+                        failure_container.raw_results = {
+                            "errors": [
+                                f"Scanner {scanner_name} failed with no results"
+                            ],
+                            "status": "failed",
+                            "exception": "Scanner returned None results",
+                        }
 
                         # Process the failure container
                         processed = self._process_results(
@@ -1328,18 +1288,21 @@ class ScanPhase(EnginePhase):
                     )
 
                     # Create a failure container
-                    failure_container = ScanResultsContainer(
-                        scanner_name=scanner_name,
-                        status=ScannerStatus.FAILED,
-                        raw_results={
-                            "errors": [
-                                f"Scanner {scanner_name} failed in thread pool: {str(e)}"
-                            ],
-                            "status": "failed",
-                            "exception": str(e),
-                            "stack_trace": stack_trace,
-                        },
+                    failure_container = ScanResultsContainer.for_failure(
+                        scanner_name,
+                        errors=[
+                            f"Scanner {scanner_name} failed in thread pool: {str(e)}"
+                        ],
+                        exception=e,
                     )
+                    failure_container.raw_results = {
+                        "errors": [
+                            f"Scanner {scanner_name} failed in thread pool: {str(e)}"
+                        ],
+                        "status": "failed",
+                        "exception": str(e),
+                        "stack_trace": stack_trace,
+                    }
 
                     # Process the failure container
                     try:
@@ -1607,16 +1570,17 @@ class ScanPhase(EnginePhase):
             )
 
             # Create a failure container to report the error
-            failure_container = ScanResultsContainer(
-                scanner_name=scanner_name,
-                status=ScannerStatus.FAILED,
-                raw_results={
-                    "errors": [error_msg],
-                    "status": "failed",
-                    "exception": str(e),
-                    "stack_trace": stack_trace,
-                },
+            failure_container = ScanResultsContainer.for_failure(
+                scanner_name,
+                errors=[error_msg],
+                exception=e,
             )
+            failure_container.raw_results = {
+                "errors": [error_msg],
+                "status": "failed",
+                "exception": str(e),
+                "stack_trace": stack_trace,
+            }
 
             # Try to notify about the error through the event system
             try:

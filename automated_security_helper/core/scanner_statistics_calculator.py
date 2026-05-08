@@ -341,83 +341,78 @@ class ScannerStatisticsCalculator:
         info = 0
 
         # Process the main SARIF report
-        if asharp_model.sarif and asharp_model.sarif.runs:
-            for run in asharp_model.sarif.runs:
-                if not run.results:
-                    continue
-
-                # Process each result in the run
-                for result in run.results:
-                    # Check if this result belongs to the scanner we're interested in
-                    result_scanner = (
-                        ScannerStatisticsCalculator._get_scanner_name_from_result(
-                            result
-                        )
+        if asharp_model.sarif:
+            for result in asharp_model.sarif.get_all_results():
+                # Check if this result belongs to the scanner we're interested in
+                result_scanner = (
+                    ScannerStatisticsCalculator._get_scanner_name_from_result(
+                        result
                     )
+                )
 
-                    if (
-                        result_scanner
-                        and result_scanner.lower() == scanner_name.lower()
-                    ):
-                        # Check if finding is suppressed (either native or ASH-applied)
-                        is_suppressed = False
-                        if result.suppressions and len(result.suppressions) > 0:
-                            is_suppressed = True
-                            suppressed += 1
+                if (
+                    result_scanner
+                    and result_scanner.lower() == scanner_name.lower()
+                ):
+                    # Check if finding is suppressed (either native or ASH-applied)
+                    is_suppressed = False
+                    if result.suppressions and len(result.suppressions) > 0:
+                        is_suppressed = True
+                        suppressed += 1
 
-                        # Only count in severity bucket if not suppressed
-                        if not is_suppressed:
-                            # Check if scanner provides issue_severity in properties (e.g., Bandit)
-                            properties = result.properties or {}
-                            if isinstance(properties, PropertyBag):
-                                properties = properties.model_dump(
-                                    mode="json",
-                                    exclude_unset=True,
-                                    exclude_none=True,
-                                )
-                            issue_severity = (
-                                properties.get("issue_severity", "").upper()
-                                if isinstance(properties, dict)
-                                else ""
+                    # Only count in severity bucket if not suppressed
+                    if not is_suppressed:
+                        # Check if scanner provides issue_severity in properties (e.g., Bandit)
+                        properties = result.properties or {}
+                        if isinstance(properties, PropertyBag):
+                            properties = properties.model_dump(
+                                mode="json",
+                                exclude_unset=True,
+                                exclude_none=True,
                             )
+                        issue_severity = (
+                            properties.get("issue_severity", "").upper()
+                            if isinstance(properties, dict)
+                            else ""
+                        )
 
-                            # If issue_severity is provided, use it as the primary severity indicator
-                            if issue_severity and issue_severity in [
-                                "CRITICAL",
-                                "HIGH",
-                                "MEDIUM",
-                                "LOW",
-                                "INFO",
-                            ]:
-                                if issue_severity == "CRITICAL":
+                        # If issue_severity is provided, use it as the primary severity indicator
+                        if issue_severity and issue_severity in [
+                            "CRITICAL",
+                            "HIGH",
+                            "MEDIUM",
+                            "LOW",
+                            "INFO",
+                        ]:
+                            if issue_severity == "CRITICAL":
+                                critical += 1
+                            elif issue_severity == "HIGH":
+                                high += 1
+                            elif issue_severity == "MEDIUM":
+                                medium += 1
+                            elif issue_severity == "LOW":
+                                low += 1
+                            elif issue_severity == "INFO":
+                                info += 1
+                        else:
+                            # Fall back to SARIF level mapping for scanners that don't use issue_severity
+                            if result.level:
+                                level = str(result.level).lower()
+                                if level == "error":
                                     critical += 1
-                                elif issue_severity == "HIGH":
-                                    high += 1
-                                elif issue_severity == "MEDIUM":
-                                    medium += 1
-                                elif issue_severity == "LOW":
+                                elif level == "warning":
+                                    medium += (
+                                        1  # Most scanners map warning to medium
+                                    )
+                                elif level == "note":
                                     low += 1
-                                elif issue_severity == "INFO":
+                                elif level == "none":
+                                    info += 1
+                                else:
                                     info += 1
                             else:
-                                # Fall back to SARIF level mapping for scanners that don't use issue_severity
-                                if result.level:
-                                    level = str(result.level).lower()
-                                    if level == "error":
-                                        critical += 1
-                                    elif level == "warning":
-                                        medium += (
-                                            1  # Most scanners map warning to medium
-                                        )
-                                    elif level == "note":
-                                        low += 1
-                                    elif level == "none":
-                                        info += 1
-                                    else:
-                                        info += 1
-                                else:
-                                    # Default to info if no level specified
-                                    info += 1
+                                # Default to info if no level specified
+                                info += 1
 
         # # Verify that the total number of findings matches what we expect
         # total_findings = critical + high + medium + low + info + suppressed
@@ -861,10 +856,8 @@ class ScannerStatisticsCalculator:
         """
         # Count findings in SARIF
         sarif_finding_count = 0
-        if asharp_model.sarif and asharp_model.sarif.runs:
-            for run in asharp_model.sarif.runs:
-                if run.results:
-                    sarif_finding_count += len(run.results)
+        if asharp_model.sarif:
+            sarif_finding_count = len(asharp_model.sarif.get_all_results())
 
         # Count findings from scanner statistics
         scanner_stats = ScannerStatisticsCalculator.extract_scanner_statistics(

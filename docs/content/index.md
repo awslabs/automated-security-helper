@@ -90,7 +90,7 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.1
 cd automated-security-helper
 pip install .
 ```

@@ -29,33 +29,7 @@ from automated_security_helper.utils.suppression_matcher import (
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
-from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.utils.suppression_matcher import file_path_matches
-
-
-def _get_suppression_id(suppression: AshSuppression) -> str:
-    """Generate a unique identifier for a suppression rule.
-
-    Args:
-        suppression: The suppression rule
-
-    Returns:
-        A unique string identifier for the suppression
-    """
-    # If line_start is specified but line_end is not, use line_start for both
-    line_end_val = (
-        suppression.line_end
-        if suppression.line_end is not None
-        else suppression.line_start
-    )
-
-    parts = [
-        suppression.path,
-        suppression.rule_id or "*",
-        str(suppression.line_start) if suppression.line_start is not None else "*",
-        str(line_end_val) if line_end_val is not None else "*",
-    ]
-    return "|".join(parts)
 
 
 def get_finding_id(
@@ -548,7 +522,7 @@ def apply_suppressions_to_sarif(
                     if should_suppress:
                         # Track the used suppression
                         if used_suppressions is not None and matching_suppression:
-                            suppression_id = _get_suppression_id(matching_suppression)
+                            suppression_id = matching_suppression.id
                             used_suppressions.add(suppression_id)
 
                         # Initialize suppressions list if it doesn't exist

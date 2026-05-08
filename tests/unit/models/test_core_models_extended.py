@@ -2,7 +2,6 @@ import pytest
 from datetime import date, timedelta
 from automated_security_helper.models.core import (
     ToolExtraArg,
-    ScanStatistics,
     IgnorePathWithReason,
     ToolArgs,
     AshSuppression,
@@ -30,23 +29,6 @@ def test_tool_extra_arg_model():
     arg = ToolExtraArg(key="config")
     assert arg.key == "config"
     assert arg.value is None
-
-
-def test_scan_statistics_model():
-    """Test the ScanStatistics model."""
-    stats = ScanStatistics(
-        files_scanned=100,
-        lines_of_code=5000,
-        total_findings=10,
-        findings_by_type={"critical": 2, "high": 3, "medium": 5},
-        scan_duration_seconds=15.5,
-    )
-
-    assert stats.files_scanned == 100
-    assert stats.lines_of_code == 5000
-    assert stats.total_findings == 10
-    assert stats.findings_by_type == {"critical": 2, "high": 3, "medium": 5}
-    assert stats.scan_duration_seconds == 15.5
 
 
 def test_ignore_path_with_reason_model():

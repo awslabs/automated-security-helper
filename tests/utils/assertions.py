@@ -19,9 +19,8 @@ def assert_finding_suppressed(
     Raises:
         AssertionError: If the finding is not found or not suppressed
     """
-    for run in result.runs:
-        for finding in run.results:
-            if finding.ruleId == rule_id:
+    for finding in result.get_all_results():
+        if finding.ruleId == rule_id:
                 if file_path is None or any(
                     loc.physicalLocation.artifactLocation.uri == file_path
                     for loc in finding.locations
@@ -50,9 +49,8 @@ def assert_finding_not_suppressed(
     Raises:
         AssertionError: If the finding is not found or is suppressed
     """
-    for run in result.runs:
-        for finding in run.results:
-            if finding.ruleId == rule_id:
+    for finding in result.get_all_results():
+        if finding.ruleId == rule_id:
                 if file_path is None or any(
                     loc.physicalLocation.artifactLocation.uri == file_path
                     for loc in finding.locations
@@ -78,9 +76,8 @@ def assert_sarif_has_finding(
     Raises:
         AssertionError: If the finding is not found
     """
-    for run in result.runs:
-        for finding in run.results:
-            if finding.ruleId == rule_id:
+    for finding in result.get_all_results():
+        if finding.ruleId == rule_id:
                 if file_path is None or any(
                     loc.physicalLocation.artifactLocation.uri == file_path
                     for loc in finding.locations
@@ -103,9 +100,8 @@ def assert_sarif_has_no_finding(
     Raises:
         AssertionError: If the finding is found
     """
-    for run in result.runs:
-        for finding in run.results:
-            if finding.ruleId == rule_id:
+    for finding in result.get_all_results():
+        if finding.ruleId == rule_id:
                 if file_path is None or any(
                     loc.physicalLocation.artifactLocation.uri == file_path
                     for loc in finding.locations
@@ -134,9 +130,8 @@ def assert_finding_has_severity(
     Raises:
         AssertionError: If the finding is not found or has incorrect severity
     """
-    for run in result.runs:
-        for finding in run.results:
-            if finding.ruleId == rule_id:
+    for finding in result.get_all_results():
+        if finding.ruleId == rule_id:
                 if file_path is None or any(
                     loc.physicalLocation.artifactLocation.uri == file_path
                     for loc in finding.locations

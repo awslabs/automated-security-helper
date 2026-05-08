@@ -19,7 +19,7 @@ This guide helps users migrate from ASH v2 to ASH v3.
    - **Recommendation**: Add `ash report` to your script after `ash` has completed to pretty-print the summary report in the terminal or job stdout.
 4. **Update Pre-commit Configuration**:
    - Change hook ID from `ash` to `ash-simple-scan`
-   - Update the revision to `v3.0.0` or later
+   - Update the revision to `v3.4.1` or later
 5. **Test Your Migration**:
    ```bash
    ash --mode local
