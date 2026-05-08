@@ -81,10 +81,10 @@ jobs:
           - { os: windows-latest, python-version: "3.11", method: uvx }
           - { os: windows-latest, python-version: "3.13", method: uvx }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Python setup (skip for uvx which bundles its own)
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: matrix.method != 'uvx'
         with:
           python-version: ${{ matrix.python-version }}
