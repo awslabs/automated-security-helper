@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-import subprocess
+import subprocess  # nosec B404
 import sys
 from typing import List, Optional
 from igittigitt import IgnoreParser
