@@ -27,7 +27,7 @@ The ASH MCP server in v3 includes comprehensive resource management designed to 
 ### Basic Performance Configuration
 
 ```yaml
-# .ash/ash.yaml - Optimized for performance
+# .ash/.ash.yaml - Optimized for performance
 mcp-resource-management:
   # Concurrent operations - adjust based on system resources
   max_concurrent_scans: 5              # Higher for powerful systems
@@ -48,7 +48,7 @@ mcp-resource-management:
 For powerful systems with ample resources:
 
 ```yaml
-# .ash/ash.yaml - High-performance setup
+# .ash/.ash.yaml - High-performance setup
 mcp-resource-management:
   # Maximize concurrent operations
   max_concurrent_scans: 8
@@ -74,7 +74,7 @@ mcp-resource-management:
 For systems with limited resources:
 
 ```yaml
-# .ash/ash.yaml - Resource-constrained setup
+# .ash/.ash.yaml - Resource-constrained setup
 mcp-resource-management:
   # Conservative limits
   max_concurrent_scans: 2

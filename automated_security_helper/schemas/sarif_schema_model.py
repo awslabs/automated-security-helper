@@ -2377,6 +2377,72 @@ class SarifReport(BaseModel):
 
         return sanitize_sarif_paths(self, source_dir)
 
+    def get_all_results(self) -> List["Result"]:
+        """Return a flat list of every Result across every Run in this report."""
+        return [r for run in (self.runs or []) for r in (run.results or [])]
+
+    def get_scanner_names(self) -> List[str]:
+        """Return sorted, unique tool driver names across all runs."""
+        names = set()
+        for run in self.runs or []:
+            if run.tool and run.tool.driver and run.tool.driver.name:
+                names.add(run.tool.driver.name)
+        return sorted(names)
+
+    def filter_results_by_files(
+        self, file_set: set, source_dir: str | Path
+    ) -> None:
+        """Remove results whose primary location is not in *file_set*.
+
+        Args:
+            file_set: Set of relative file paths (as strings) to retain.
+                     Results whose first location maps to a path not in this set
+                     are dropped. Results with no location are always retained.
+            source_dir: The source directory used to normalize absolute URIs to
+                     relative paths for comparison.
+
+        Mutates self in place. A no-op if the report has no runs.
+        """
+        if not self.runs:
+            return
+        source_dir_path = Path(source_dir)
+        for run in self.runs:
+            if not run.results:
+                continue
+            filtered = []
+            for result in run.results:
+                if not result.locations:
+                    filtered.append(result)
+                    continue
+                loc = result.locations[0]
+                if (
+                    not loc.physicalLocation
+                    or not loc.physicalLocation.root.artifactLocation
+                ):
+                    filtered.append(result)
+                    continue
+                uri = loc.physicalLocation.root.artifactLocation.uri or ""
+                # Strip file:// prefix variants emitted by some scanners.
+                if uri.startswith("file://"):
+                    uri = uri[7:]
+                    if uri.startswith("///"):
+                        uri = uri[2:]
+                # Normalize to a path relative to source_dir for comparison.
+                candidate = Path(uri)
+                if candidate.is_absolute():
+                    try:
+                        rel = candidate.resolve().relative_to(
+                            source_dir_path.resolve()
+                        )
+                        rel_str = rel.as_posix()
+                    except ValueError:
+                        rel_str = candidate.as_posix()
+                else:
+                    rel_str = candidate.as_posix()
+                if rel_str in file_set:
+                    filtered.append(result)
+            run.results = filtered
+
     def attach_scanner_details(
         self,
         scanner_name: str,

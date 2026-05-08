@@ -4,7 +4,7 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 __all__ = ["AshAggregatedResults"]
 
 
+_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+_VALID_INCREMENT_FIELDS = _SEVERITY_ORDER + ("suppressed",)
+
+
 class ScannerSeverityCount(BaseModel):
     """Information about scanner status."""
 
@@ -45,6 +49,58 @@ class ScannerSeverityCount(BaseModel):
     medium: int = 0
     low: int = 0
     info: int = 0
+
+    @property
+    def total(self) -> int:
+        """Sum of all non-suppressed severity counts.
+
+        Subclasses (e.g., SummaryStats) may override ``total`` with a plain int
+        field; in that case, the stored value is returned.
+        """
+        declared = self.__dict__.get("total")
+        if declared is not None:
+            return declared
+        return self.critical + self.high + self.medium + self.low + self.info
+
+    @total.setter
+    def total(self, value: int) -> None:
+        """Allow subclasses that redeclare total as a field to set it."""
+        self.__dict__["total"] = value
+
+    def actionable_count(self, threshold: str) -> int:
+        """Count findings at or above the given severity threshold.
+
+        threshold is case-insensitive. Valid values: critical, high, medium, low, info.
+        """
+        if not isinstance(threshold, str):
+            raise ValueError(f"Invalid severity threshold: {threshold!r}")
+        key = threshold.lower()
+        if key not in _SEVERITY_ORDER:
+            raise ValueError(f"Invalid severity threshold: {threshold!r}")
+        idx = _SEVERITY_ORDER.index(key)
+        return sum(getattr(self, name) for name in _SEVERITY_ORDER[: idx + 1])
+
+    def increment(self, severity: str) -> None:
+        """Increment the named severity field by 1.
+
+        severity is case-insensitive. Valid values: critical, high, medium, low, info, suppressed.
+        """
+        if not isinstance(severity, str):
+            raise ValueError(f"Invalid severity: {severity!r}")
+        key = severity.lower()
+        if key not in _VALID_INCREMENT_FIELDS:
+            raise ValueError(f"Invalid severity: {severity!r}")
+        setattr(self, key, getattr(self, key) + 1)
+
+    def max_severity(self) -> str:
+        """Return the name of the highest non-zero severity, or "none" if all zero.
+
+        suppressed is not considered.
+        """
+        for name in _SEVERITY_ORDER:
+            if getattr(self, name) > 0:
+                return name
+        return "none"
 
 
 class SummaryStats(ScannerSeverityCount):
@@ -64,6 +120,17 @@ class SummaryStats(ScannerSeverityCount):
     def bump(self, key: str, amount: int = 1) -> int:
         setattr(self, key, getattr(self, key) + amount)
         return getattr(self, key)
+
+    def set_timing(
+        self,
+        start: str | datetime | None,
+        end: str | datetime | None,
+        duration: float,
+    ) -> None:
+        """Set start, end, and duration in a single call."""
+        self.start = start
+        self.end = end
+        self.duration = duration
 
     def model_post_init(self, context):
         return super().model_post_init(context)
@@ -88,6 +155,11 @@ class ScannerTargetStatusInfo(BaseModel):
     exit_code: int | None = 0
     duration: float | None = 0.0
 
+    @property
+    def total_duration(self) -> float:
+        """Alias for duration; returns 0.0 when duration is None."""
+        return self.duration or 0.0
+
 
 class ScannerStatusInfo(BaseModel):
     """Information about scanner status."""
@@ -105,6 +177,28 @@ class ScannerStatusInfo(BaseModel):
 
     source: ScannerTargetStatusInfo = ScannerTargetStatusInfo()
     converted: ScannerTargetStatusInfo = ScannerTargetStatusInfo()
+
+    @property
+    def is_dual_layer(self) -> bool:
+        """True when both source and converted targets show non-default state.
+
+        A target is "non-default" if its status is not PASSED, or if any of its
+        severity counts (including suppressed) are non-zero.
+        """
+        def _non_default(t: ScannerTargetStatusInfo) -> bool:
+            if t.status != ScannerStatus.PASSED:
+                return True
+            sc = t.severity_counts
+            return (
+                sc.critical
+                + sc.high
+                + sc.medium
+                + sc.low
+                + sc.info
+                + sc.suppressed
+            ) > 0
+
+        return _non_default(self.source) and _non_default(self.converted)
 
 
 class ConverterStatusInfo(BaseModel):
@@ -278,6 +372,12 @@ class AshAggregatedResults(BaseModel):
         ),
     ]
 
+    # Private cache for to_flat_vulnerabilities() — the method mutates
+    # summary_stats.suppressed and scanner_results as a side effect, so
+    # we memoize the result to keep the method idempotent when reporters
+    # call it multiple times during rendering.
+    _flat_cache: Optional[List[FlatVulnerability]] = PrivateAttr(default=None)
+
     @field_validator("ash_config")
     @classmethod
     def validate_ash_config(cls, v: Any):
@@ -339,9 +439,17 @@ class AshAggregatedResults(BaseModel):
     def to_flat_vulnerabilities(self) -> List[FlatVulnerability]:
         """Convert the AshAggregatedResults to a list of flattened vulnerability objects.
 
+        The first call materializes the list and applies legacy side effects
+        (bumping summary_stats.suppressed, updating scanner_results). Subsequent
+        calls return the memoized list so the method is safe to call from
+        reporters multiple times per run.
+
         Returns:
             List[FlatVulnerability]: A list of flattened vulnerability objects
         """
+        if self._flat_cache is not None:
+            return self._flat_cache
+
         flat_vulns = []
 
         # Process SARIF results if available
@@ -702,6 +810,7 @@ class AshAggregatedResults(BaseModel):
 
                     flat_vulns.append(flat_vuln)
 
+        self._flat_cache = flat_vulns
         return flat_vulns
 
     @classmethod
