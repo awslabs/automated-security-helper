@@ -182,6 +182,45 @@ ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "
 ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "file_path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
 ```
 
+### Inline code suppressions
+
+You can suppress individual findings directly in your source code using
+special comments. This is useful when a suppression only applies to a
+single line and you want the context to live next to the code.
+
+Two directives are supported:
+
+| Directive | Effect |
+|-----------|--------|
+| `# ash-ignore: <rule-id> [reason]` | Suppresses the finding on the **same line** as the comment. |
+| `# ash-ignore-next-line: <rule-id> [reason]` | Suppresses the finding on the **next line**. |
+
+The directives are case-insensitive. The reason text is optional but
+recommended.
+
+```python
+# Suppress a specific rule on the same line:
+password = os.environ["DB_PASS"]  # ash-ignore: CKV-SEC-001 loaded from env, not hardcoded
+
+# Suppress a specific rule on the next line:
+# ash-ignore-next-line: BANDIT-B105 password variable is a placeholder
+password = "changeme"
+```
+
+```javascript
+// Languages that use // comments (JS, TS, Java, C#, Go):
+const key = process.env.KEY; // ash-ignore: SEC-KEY env var is safe
+
+// Or suppress the next line:
+// ash-ignore-next-line: SEC-KEY env var is safe
+const key = process.env.KEY;
+```
+
+Both inline and config-file suppressions use `Kind1.inSource` in the SARIF
+output. They are distinguishable by their justification prefix: config
+suppressions start with `"(ASH)"` while inline suppressions start with
+`"(ASH inline)"`.
+
 ### Temporarily Ignoring Suppressions
 
 ```bash

@@ -4,12 +4,48 @@
 """Utility functions for matching findings against suppression rules."""
 
 import fnmatch
+import re
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.log import ASH_LOGGER
+
+# Regex patterns for inline suppression comments.
+# Supported formats (hash-style for Python/Ruby/YAML/Shell):
+#   # ash-ignore: RULE-ID [reason]
+#   # ash-ignore-next-line: RULE-ID [reason]
+# Supported formats (slash-style for JS/TS/Java/C#/Go):
+#   // ash-ignore: RULE-ID [reason]
+#   // ash-ignore-next-line: RULE-ID [reason]
+_HASH_INLINE_PATTERN = re.compile(
+    r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+)
+_HASH_NEXT_LINE_PATTERN = re.compile(
+    r"#\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+)
+_SLASH_INLINE_PATTERN = re.compile(
+    r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+)
+_SLASH_NEXT_LINE_PATTERN = re.compile(
+    r"//\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
+)
+
+_INLINE_PATTERNS = [_HASH_INLINE_PATTERN, _SLASH_INLINE_PATTERN]
+_NEXT_LINE_PATTERNS = [_HASH_NEXT_LINE_PATTERN, _SLASH_NEXT_LINE_PATTERN]
+
+
+@dataclass(frozen=True)
+class InlineSuppression:
+    """A suppression directive parsed from an inline source comment."""
+
+    line_number: int
+    """The source line that the suppression applies to."""
+    rule_id: str
+    reason: str
 
 
 def matches_suppression(
@@ -299,3 +335,64 @@ def check_for_expiring_suppressions(
                 )
 
     return expiring_suppressions
+
+
+def find_inline_suppressions(file_path: Path) -> List[InlineSuppression]:
+    """Scan a source file for inline suppression comments.
+
+    Recognised directives (both ``#`` and ``//`` comment styles):
+
+    * ``# ash-ignore: <rule-id> [reason]``  --  suppresses same line.
+    * ``# ash-ignore-next-line: <rule-id> [reason]``  --  suppresses next line.
+    * ``// ash-ignore: <rule-id> [reason]``  --  same (JS/TS/Java/C#/Go).
+    * ``// ash-ignore-next-line: <rule-id> [reason]``  --  same.
+
+    Args:
+        file_path: Path to the source file to scan.
+
+    Returns:
+        List of ``InlineSuppression`` instances, one per directive found.
+    """
+    suppressions: List[InlineSuppression] = []
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    except (OSError, UnicodeDecodeError) as exc:
+        ASH_LOGGER.debug(f"Could not read {file_path} for inline suppressions: {exc}")
+        return suppressions
+
+    for line_num_0, line in enumerate(text.splitlines()):
+        line_num = line_num_0 + 1  # 1-based
+
+        matched = False
+        for pattern in _INLINE_PATTERNS:
+            match = pattern.search(line)
+            if match:
+                rule_id = match.group(1)
+                reason = (match.group(2) or "").strip()
+                suppressions.append(
+                    InlineSuppression(
+                        line_number=line_num,
+                        rule_id=rule_id,
+                        reason=reason or "Inline suppression",
+                    )
+                )
+                matched = True
+                break
+        if matched:
+            continue
+
+        for pattern in _NEXT_LINE_PATTERNS:
+            match = pattern.search(line)
+            if match:
+                rule_id = match.group(1)
+                reason = (match.group(2) or "").strip()
+                suppressions.append(
+                    InlineSuppression(
+                        line_number=line_num + 1,
+                        rule_id=rule_id,
+                        reason=reason or "Inline suppression (next-line)",
+                    )
+                )
+                break
+
+    return suppressions
