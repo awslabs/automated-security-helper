@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import fnmatch
 import re
-import warnings
 from typing import List, Annotated, Optional, TYPE_CHECKING
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from datetime import datetime, date
@@ -185,23 +184,18 @@ class AshSuppression(IgnorePathWithReason):
     @field_validator("expiration")
     @classmethod
     def validate_expiration_date(cls, v):
-        """Validate that expiration date is in the correct format and is a valid date."""
+        """Validate that expiration date is in YYYY-MM-DD format.
+
+        Past dates are accepted; use is_expired to check whether the
+        suppression has expired at runtime.
+        """
         if v is not None:
             try:
-                # Parse the date string to ensure it's a valid date
-                expiration_date = datetime.strptime(v, "%Y-%m-%d").date()
+                datetime.strptime(v, "%Y-%m-%d")
             except ValueError:
                 raise ValueError(
                     f"Invalid expiration date format. Use YYYY-MM-DD: {v}"
                 )
-            # Check if the date is in the future (outside the try so the
-            # semantic error is not rewrapped as a format error).
-            if expiration_date < date.today():
-                warnings.warn(
-                    f"Suppression expiration date {v} is in the past and will be ignored"
-                )
-                return None
-            return v
         return v
 
     @property
