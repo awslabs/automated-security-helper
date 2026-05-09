@@ -78,6 +78,70 @@ def validate_grype_offline_mode() -> Tuple[bool, List[str]]:
     return is_valid, messages
 
 
+def validate_trivy_offline_mode() -> Tuple[bool, List[str]]:
+    """
+    Validate that Trivy offline mode requirements are met.
+
+    Returns:
+        Tuple of (is_valid, list_of_messages)
+    """
+    messages = []
+    is_valid = True
+
+    cache_dir = os.environ.get("TRIVY_CACHE_DIR")
+    if not cache_dir:
+        ASH_LOGGER.warning("Trivy offline mode: TRIVY_CACHE_DIR not set")
+        messages.append("TRIVY_CACHE_DIR environment variable not set")
+        is_valid = False
+        return is_valid, messages
+
+    cache_path = Path(cache_dir)
+    if not cache_path.exists():
+        ASH_LOGGER.warning(
+            f"Trivy offline mode: Cache directory does not exist: {cache_dir}"
+        )
+        messages.append(f"Cache directory does not exist: {cache_dir}")
+        is_valid = False
+        return is_valid, messages
+
+    db_files = [
+        item
+        for item in cache_path.glob("**/*")
+        if item.is_file()
+        and (
+            item.name.endswith(".db")
+            or item.name.endswith(".sqlite")
+            or "trivy" in item.name.lower()
+        )
+    ]
+
+    if not db_files:
+        ASH_LOGGER.warning(
+            f"Trivy offline mode: No database files found in cache directory: {cache_dir}"
+        )
+        messages.append(f"No database files found in cache directory: {cache_dir}")
+        is_valid = False
+        return is_valid, messages
+
+    newest_db = max(db_files, key=lambda f: f.stat().st_mtime)
+    db_age = datetime.now() - datetime.fromtimestamp(newest_db.stat().st_mtime)
+
+    if db_age > timedelta(days=7):
+        ASH_LOGGER.warning(
+            f"Trivy offline mode: Database is {db_age.days} days old, consider updating"
+        )
+        messages.append(f"Database is {db_age.days} days old, consider updating")
+    else:
+        ASH_LOGGER.info(
+            f"Trivy offline mode: Found {len(db_files)} database files, newest is {db_age.days} days old"
+        )
+        messages.append(
+            f"Found {len(db_files)} database files, newest is {db_age.days} days old"
+        )
+
+    return is_valid, messages
+
+
 def validate_npm_audit_offline_mode() -> Tuple[bool, List[str]]:
     """
     Validate that npm audit offline mode requirements are met.
