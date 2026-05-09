@@ -5,7 +5,8 @@ This module provides utilities to manage version information dynamically
 from pyproject.toml, ensuring a single source of truth.
 """
 
-import toml
+import re
+import tomllib
 from pathlib import Path
 from typing import Optional
 import importlib.metadata
@@ -30,8 +31,8 @@ def get_version_from_pyproject() -> Optional[str]:
         pyproject_path = project_root / "pyproject.toml"
 
         if pyproject_path.exists():
-            with open(pyproject_path, "r", encoding="utf-8") as f:
-                pyproject_data = toml.load(f)
+            with open(pyproject_path, "rb") as f:
+                pyproject_data = tomllib.load(f)
             return pyproject_data.get("project", {}).get("version")
         return None
     except Exception:
@@ -83,8 +84,6 @@ def update_version_in_pyproject(new_version: str) -> bool:
             content = f.read()
 
         # Replace version using regex to preserve formatting
-        import re
-
         pattern = r'(version\s*=\s*")([^"]+)(")'
         match = re.search(pattern, content)
 
