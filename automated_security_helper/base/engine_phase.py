@@ -221,6 +221,41 @@ class EnginePhase(ABC):
                 progress_event, completed=completed, description=description
             )
 
+    def filter_enabled_plugins(
+        self,
+        plugin_instances: list,
+        plugin_context: Any,
+        python_only: bool = False,
+    ) -> list:
+        """Return only the plugins that are enabled and have satisfied dependencies.
+
+        This replaces the duplicated filtering loop in ConvertPhase, ReportPhase,
+        and ScanPhase.  Callers that need the display_name for their own tracking
+        should inspect ``instance.config.name`` after filtering.
+
+        Args:
+            plugin_instances: Pre-instantiated plugin objects to filter.
+            plugin_context: Current plugin context (used for future extension).
+            python_only: When True, exclude plugins where is_python_only() is False.
+
+        Returns:
+            Filtered list of plugin instances in original order.
+        """
+        result = []
+        for instance in plugin_instances:
+            try:
+                if hasattr(instance, "config") and hasattr(instance.config, "enabled"):
+                    if not instance.config.enabled:
+                        continue
+                if python_only and not instance.is_python_only():
+                    continue
+                if not instance.validate_plugin_dependencies():
+                    continue
+                result.append(instance)
+            except Exception:
+                pass
+        return result
+
     def add_summary(self, status: str, details: str) -> None:
         """Add a summary row for this phase.
 
