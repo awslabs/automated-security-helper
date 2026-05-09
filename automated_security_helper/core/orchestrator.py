@@ -152,9 +152,32 @@ class ASHScanOrchestrator(BaseModel):
         ),
     ] = True
 
+    # Sentinel: True after initialize() has run successfully
+    _initialized: bool = False
+
     def model_post_init(self, context):
-        """Post initialization configuration."""
+        """Post initialization — data-only; no filesystem I/O."""
         super().model_post_init(context)
+        # Coerce source_dir / output_dir to Path so callers never get str
+        if self.source_dir is None:
+            self.source_dir = Path.cwd()
+        elif not isinstance(self.source_dir, Path):
+            self.source_dir = Path(self.source_dir)
+
+        if self.output_dir is None:
+            self.output_dir = self.source_dir.joinpath(".ash", "ash_output")
+        elif not isinstance(self.output_dir, Path):
+            self.output_dir = Path(self.output_dir)
+
+    def initialize(self) -> None:
+        """Perform all filesystem I/O and engine setup.
+
+        Idempotent: subsequent calls are no-ops once _initialized is True.
+        Call this explicitly, or use the .create() factory which calls it for you.
+        """
+        if self._initialized:
+            return
+
         ASH_LOGGER.info(f"Initializing ASH v{get_ash_version()}")
 
         self.config = resolve_config(
@@ -168,22 +191,7 @@ class ASHScanOrchestrator(BaseModel):
             for warning in self.config._resolution_warnings:
                 ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
 
-        ASH_LOGGER.verbose("Setting up working directories")  # type: ignore[attr-defined]
-        if self.source_dir is None:
-            ASH_LOGGER.warning(
-                "No explicit source directory provided, using current working directory"
-            )
-            self.source_dir = Path.cwd()
-        elif not isinstance(self.source_dir, Path):
-            self.source_dir = Path(self.source_dir)
-
-        if self.output_dir is None:
-            ASH_LOGGER.verbose(  # type: ignore[attr-defined]
-                "No explicit output directory provided, using '.ash/ash_output' within the source directory."
-            )
-            self.output_dir = self.source_dir.joinpath(".ash", "ash_output")
-        elif not isinstance(self.output_dir, Path):
-            self.output_dir = Path(self.output_dir)
+        ASH_LOGGER.verbose("Setting up working directories")
 
         self.ensure_directories()
 
@@ -211,7 +219,7 @@ class ASHScanOrchestrator(BaseModel):
                         f"Permission denied when trying to remove {old_file}: {str(e)}"
                     )
                     continue
-            exec_engine_params = {}
+            exec_engine_params: Dict[str, Any] = {}
         else:
             asharp_model = AshAggregatedResults.model_validate_json(
                 Path(self.existing_results_path).read_text()
@@ -241,8 +249,20 @@ class ASHScanOrchestrator(BaseModel):
             asharp_model=exec_engine_params.get("asharp_model"),
         )
 
+        self._initialized = True
         ASH_LOGGER.info("ASH Orchestrator and ScanExecutionEngine initialized")
-        return super().model_post_init(context)
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> "ASHScanOrchestrator":
+        """Construct and fully initialize an orchestrator.
+
+        Equivalent to ASHScanOrchestrator(**kwargs) followed by .initialize().
+        Use this in production code; use the bare constructor in tests that
+        need an uninitialized instance.
+        """
+        instance = cls(**kwargs)
+        instance.initialize()
+        return instance
 
     def ensure_directories(self):
         """Ensure required directories exist in a thread-safe manner.
@@ -266,7 +286,7 @@ class ASHScanOrchestrator(BaseModel):
                 for working_dir in ["analysis", "reports", "scanners", "converted"]:
                     path_working_dir = self.output_dir.joinpath(working_dir)
                     if path_working_dir.exists() and self.existing_results_path is None:
-                        ASH_LOGGER.verbose(  # type: ignore[attr-defined]
+                        ASH_LOGGER.verbose(
                             f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
                         )
                         shutil.rmtree(path_working_dir)
@@ -289,11 +309,11 @@ class ASHScanOrchestrator(BaseModel):
         """
         if phases is None:
             phases = ["convert", "scan", "report"]
-        ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")  # type: ignore[attr-defined]
-        ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")  # type: ignore[attr-defined]
-        ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")  # type: ignore[attr-defined]
-        ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")  # type: ignore[attr-defined]
-        ASH_LOGGER.verbose(f"Executing phases: {phases}")  # type: ignore[attr-defined]
+        ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
+        ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
+        ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")
+        ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")
+        ASH_LOGGER.verbose(f"Executing phases: {phases}")
 
         try:
             # If existing results path is provided, load the model from it
@@ -379,7 +399,7 @@ class ASHScanOrchestrator(BaseModel):
 
             if not self.no_cleanup:
                 if self.work_dir and Path(self.work_dir).exists():
-                    ASH_LOGGER.verbose("Cleaning up working directory...")  # type: ignore[attr-defined]
+                    ASH_LOGGER.verbose("Cleaning up working directory...")
                     shutil.rmtree(self.work_dir)
             return asharp_model_results
 

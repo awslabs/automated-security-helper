@@ -231,8 +231,7 @@ def populate_metrics_from_unified_source(
     Args:
         aggregated_results: The AshAggregatedResults model to update
     """
-    ASH_LOGGER.verbose(  # type: ignore[attr-defined]
-        "Aligning all metrics using unified scanner metrics as source of truth"
+    ASH_LOGGER.verbose(        "Aligning all metrics using unified scanner metrics as source of truth"
     )
 
     # Get unified metrics from the final SARIF data
@@ -248,8 +247,7 @@ def populate_metrics_from_unified_source(
         aggregated_results, unified_metrics
     )
 
-    ASH_LOGGER.verbose(  # type: ignore[attr-defined]
-        "Metrics alignment completed - all sources now use unified metrics"
+    ASH_LOGGER.verbose(        "Metrics alignment completed - all sources now use unified metrics"
     )
     return aggregated_results
 
