@@ -235,10 +235,6 @@ class ScannerExecutor:
 
                     results.append(container)
 
-            ASH_LOGGER.debug(
-                f"Appending {scanner_plugin.__class__.__name__} to completed_scanners"
-            )
-            self.completed_scanners.append(scanner_plugin)
             return results
 
         except Exception as e:
@@ -255,10 +251,15 @@ class ScannerExecutor:
         scanner_name: str,
         scanner_plugin: ScannerPluginBase,
         scan_targets: List[Dict[str, Any]],
-    ) -> List[ScanResultsContainer]:
-        """Wrap _execute_scanner so unexpected exceptions become failure containers."""
+    ) -> Tuple[List[ScanResultsContainer], bool]:
+        """Wrap _execute_scanner so unexpected exceptions become failure containers.
+
+        Returns a tuple of (results, succeeded) where succeeded is False when
+        _execute_scanner raised an unhandled exception.  Callers use the flag to
+        decide whether to record the scanner in completed_scanners.
+        """
         try:
-            return self._execute_scanner(scanner_name, scanner_plugin, scan_targets)
+            return self._execute_scanner(scanner_name, scanner_plugin, scan_targets), True
         except Exception as e:
             stack_trace = traceback.format_exc()
             error_msg = f"Unexpected error in scanner {scanner_name}: {str(e)}"
@@ -280,7 +281,7 @@ class ScannerExecutor:
             except Exception:
                 pass
 
-            return [failure_container]
+            return [failure_container], False
 
     # ------------------------------------------------------------------
     # Sequential execution
@@ -323,7 +324,9 @@ class ScannerExecutor:
                 except Exception:
                     pass
 
-                results_list = self._safe_execute_scanner(scanner_name, scanner_plugin, scan_targets)
+                results_list, scanner_succeeded = self._safe_execute_scanner(
+                    scanner_name, scanner_plugin, scan_targets
+                )
 
                 if results_list is None:
                     ASH_LOGGER.error(f"Scanner {scanner_name} returned None results")
@@ -347,6 +350,12 @@ class ScannerExecutor:
                     for r in results_list:
                         processed = self._process_results_fn(r, aggregated_results)
                         aggregated_results = processed
+
+                    if scanner_succeeded:
+                        ASH_LOGGER.debug(
+                            f"Appending {scanner_plugin.__class__.__name__} to completed_scanners"
+                        )
+                        self.completed_scanners.append(scanner_plugin)
 
                     self.progress_display.update_task(
                         phase=ExecutionPhase.SCAN,
@@ -425,7 +434,7 @@ class ScannerExecutor:
         remaining_scanners_lock = threading.Lock()
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures: List[Future[List[ScanResultsContainer]]] = []
+            futures: List[Future[Tuple[List[ScanResultsContainer], bool]]] = []
 
             for scanner_name, scanner_plugin, scan_targets in self.scanner_tasks:
                 task_key = f"{scanner_name}_task"
@@ -458,7 +467,7 @@ class ScannerExecutor:
                 task_id = scanner_tasks_map.get(task_key)
 
                 try:
-                    results_list = future.result()
+                    results_list, scanner_succeeded = future.result()
 
                     if results_list is None:
                         ASH_LOGGER.error(f"Scanner {scanner_name} returned None results")
@@ -485,11 +494,15 @@ class ScannerExecutor:
                             processed = self._process_results_fn(r, aggregated_results)
                             aggregated_results = processed
 
-                        plugin_inst = next(
-                            (t[1] for t in self.scanner_tasks if t[0] == scanner_name), None
-                        )
-                        if plugin_inst is not None:
-                            self.completed_scanners.append(plugin_inst)
+                        if scanner_succeeded:
+                            plugin_inst = next(
+                                (t[1] for t in self.scanner_tasks if t[0] == scanner_name), None
+                            )
+                            if plugin_inst is not None:
+                                ASH_LOGGER.debug(
+                                    f"Appending {scanner_name} to completed_scanners"
+                                )
+                                self.completed_scanners.append(plugin_inst)
 
                         if task_id is not None:
                             self.progress_display.update_task(
