@@ -25,6 +25,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_cancel_scan,
     mcp_check_installation,
     mcp_get_config,
+    mcp_list_scanners,
     mcp_diff_scan_results,
     mcp_validate_config,
     mcp_explain_finding,
@@ -632,6 +633,24 @@ async def get_config(
             "error": f"Error getting config: {str(e)}",
             "error_type": type(e).__name__,
         }
+
+
+@mcp.tool()
+def list_scanners() -> list:
+    """List all registered ASH scanners with their metadata.
+
+    Returns one entry per scanner with:
+      name: scanner config name (e.g. "bandit", "checkov")
+      version: detected version string, or null if unavailable
+      dependencies_satisfied: whether the scanner's runtime dependencies are met
+      offline_strategy: one of "bundled", "cache_flags", "skip_offline", "unknown"
+      enabled: whether the scanner is enabled in the default ASH config
+    """
+    try:
+        return mcp_list_scanners()
+    except Exception as e:
+        logger.exception(f"Error in list_scanners: {str(e)}")
+        return [{"success": False, "error": f"Error listing scanners: {str(e)}", "error_type": type(e).__name__}]
 
 
 @mcp.tool()
