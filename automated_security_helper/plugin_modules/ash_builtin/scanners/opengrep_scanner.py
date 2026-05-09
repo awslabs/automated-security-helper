@@ -305,30 +305,26 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 scanner_name="Opengrep",
             )
             if not offline_valid:
-                for msg in offline_messages:
-                    self._plugin_log(msg, level=logging.WARNING)
+                raise ScannerError(
+                    "Opengrep is running in offline mode but no rule cache was found. "
+                    "Set $OPENGREP_RULES_CACHE_DIR to a directory containing .yaml/.yml rule files. "
+                    "Run `ash build-image --offline` to pre-warm the cache via Dockerfile, "
+                    "or download rulesets manually with `semgrep --config p/ci --dryrun` "
+                    "while online and copy to cache."
+                )
 
             # Use cached rules directory with --no-rewrite-rule-ids to produce
             # clean rule IDs (the rule's own id field, no path-derived prefix).
             opengrep_rules_cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
-            if opengrep_rules_cache_dir and Path(opengrep_rules_cache_dir).is_dir():
-                ASH_LOGGER.info(
-                    f"Opengrep offline mode: using cached rules from {opengrep_rules_cache_dir}"
-                )
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--config", value=opengrep_rules_cache_dir)
-                )
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--no-rewrite-rule-ids", value="")
-                )
-            else:
-                self._plugin_log(
-                    "🔴 Opengrep offline mode: cache dir not found, falling back to p/ci",
-                    level=logging.WARNING,
-                )
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--config", value="p/ci")
-                )
+            ASH_LOGGER.info(
+                f"Opengrep offline mode: using cached rules from {opengrep_rules_cache_dir}"
+            )
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=opengrep_rules_cache_dir)
+            )
+            self.args.extra_args.append(
+                ToolExtraArg(key="--no-rewrite-rule-ids", value="")
+            )
         else:
             # In online mode, use config=auto
             self.args.extra_args.append(
