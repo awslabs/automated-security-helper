@@ -15,11 +15,14 @@ def test_build_ash_image_cli_command_basic(mock_run_ash_scan):
     ctx.resilient_parsing = False
     ctx.invoked_subcommand = None
 
-    # Call the function with minimal parameters
+    # Call the function with minimal parameters; no_run defaults to False so run=True
     build_ash_image_cli_command(
         ctx,
+        no_build=False,
+        no_run=False,
         force=True,
         oci_runner=None,
+        container_network="bridge",
         build_target=BuildTarget.CI
         if platform.system().lower().startswith("win")
         else BuildTarget.NON_ROOT,
@@ -42,9 +45,10 @@ def test_build_ash_image_cli_command_basic(mock_run_ash_scan):
     # Verify run_ash_scan was called with the correct parameters
     mock_run_ash_scan.assert_called_once_with(
         build=True,
-        run=False,
+        run=True,
         force=True,
         oci_runner=None,
+        container_network="bridge",
         build_target=BuildTarget.CI
         if platform.system().lower().startswith("win")
         else BuildTarget.NON_ROOT,
@@ -76,11 +80,14 @@ def test_build_ash_image_cli_command_with_custom_options(mock_run_ash_scan):
     ctx.resilient_parsing = False
     ctx.invoked_subcommand = None
 
-    # Call the function with custom parameters
+    # Call the function with custom parameters; no_run=True so run=False
     build_ash_image_cli_command(
         ctx,
+        no_build=False,
+        no_run=True,
         force=True,
         oci_runner="podman",
+        container_network="bridge",
         build_target=BuildTarget.CI,
         offline_semgrep_rulesets="p/custom",
         container_uid="1000",
@@ -104,6 +111,7 @@ def test_build_ash_image_cli_command_with_custom_options(mock_run_ash_scan):
         run=False,
         force=True,
         oci_runner="podman",
+        container_network="bridge",
         build_target=BuildTarget.CI,
         offline_semgrep_rulesets="p/custom",
         container_uid="1000",

@@ -14,6 +14,20 @@ from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 def build_ash_image_cli_command(
     ctx: typer.Context,
     ### CONTAINER-RELATED OPTIONS
+    no_build: Annotated[
+        bool,
+        typer.Option(
+            "--no-build",
+            help="Skip building the ASH container image; reuse an existing image if present",
+        ),
+    ] = False,
+    no_run: Annotated[
+        bool,
+        typer.Option(
+            "--no-run",
+            help="Build the ASH container image but do not run a scan",
+        ),
+    ] = False,
     force: Annotated[
         bool,
         typer.Option(
@@ -33,6 +47,14 @@ def build_ash_image_cli_command(
             envvar="OCI_RUNNER",
         ),
     ] = None,
+    container_network: Annotated[
+        str,
+        typer.Option(
+            "--container-network",
+            help="Docker network mode for the container run (e.g. 'bridge', 'none', 'host'). "
+                 "Pass 'none' to force offline/airgapped network isolation independently of --offline.",
+        ),
+    ] = "bridge",
     build_target: Annotated[
         BuildTarget,
         typer.Option(
@@ -133,10 +155,11 @@ def build_ash_image_cli_command(
     # Call run_ash_scan with all parameters
     run_ash_scan(
         # Container-specific params
-        build=True,
-        run=False,
+        build=not no_build,
+        run=not no_run,
         force=force,
         oci_runner=oci_runner,
+        container_network=container_network,
         # TODO - Windows cannot map write permissions to the bind-mounted output directory, so reports and logs fail to emit successfully.
         build_target=BuildTarget.CI
         if platform.system().lower().startswith("win")
