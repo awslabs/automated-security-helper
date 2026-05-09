@@ -211,48 +211,38 @@ async def _run_scan_async(
         _logger.error(f"Scan {scan_id} not found in registry")
         return
 
-    try:
-        # Mark the scan as running
-        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+    # Mark the scan as running
+    registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
-        # Log the scan start
-        _logger.info(
-            f"Starting scan process for scan {scan_id} in directory {directory_path}"
+    # Log the scan start
+    _logger.info(
+        f"Starting scan process for scan {scan_id} in directory {directory_path}"
+    )
+
+    try:
+        # Create a task to run the scan in a separate thread to avoid blocking
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: run_ash_scan(
+                source_dir=directory_path,
+                output_dir=output_dir,
+                config=config_path,
+                mode=RunMode.local,
+                log_level=AshLogLevel.INFO,
+                fail_on_findings=False,  # Don't exit on findings
+                show_summary=False,  # Don't show summary
+            ),
         )
 
-        # Run the scan using direct Python calls
-        try:
-            # Create a task to run the scan in a separate thread to avoid blocking
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: run_ash_scan(
-                    source_dir=directory_path,
-                    output_dir=output_dir,
-                    config=config_path,
-                    mode=RunMode.local,
-                    log_level=AshLogLevel.INFO,
-                    fail_on_findings=False,  # Don't exit on findings
-                    show_summary=False,  # Don't show summary
-                ),
-            )
-
-            # Update scan status based on result
-            registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
-            _logger.info(f"Scan {scan_id} completed successfully")
-
-        except Exception as e:
-            # Handle scan execution errors
-            error_message = f"Error executing scan: {str(e)}"
-            registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
-            _logger.error(f"Scan {scan_id} failed: {error_message}")
-            return
+        # Update scan status based on result
+        registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+        _logger.info(f"Scan {scan_id} completed successfully")
 
     except Exception as e:
-        # Handle unexpected errors
-        error_message = f"Unexpected error running scan: {str(e)}"
+        error_message = f"Error executing scan: {str(e)}"
         registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
-        _logger.error(error_message, exc_info=True)
+        _logger.error(f"Scan {scan_id} failed: {error_message}")
 
 
 async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
@@ -537,14 +527,9 @@ async def mcp_check_installation() -> Dict[str, Any]:
         # Get ASH version
         version = get_ash_version()
 
-        # Check if ASH is available using direct Python calls
-        try:
-            # We already have the version from get_ash_version()
-            ash_command_available = True
-            ash_command_output = f"ASH version {version}"
-        except Exception:
-            ash_command_available = False
-            ash_command_output = ""
+        # We already have the version from get_ash_version()
+        ash_command_available = True
+        ash_command_output = f"ASH version {version}"
 
         return {
             "success": True,
@@ -577,3 +562,46 @@ async def mcp_check_installation() -> Dict[str, Any]:
                 "Try reinstalling ASH",
             ],
         )
+
+
+def mcp_get_config(
+    config_path: Optional[str] = None,
+    raw: bool = False,
+    search_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return the resolved ASH config (or raw file contents if raw=True).
+
+    Args:
+        config_path: Explicit path to config file. If None, auto-discovers.
+        raw: If True, returns the user file contents without merging defaults.
+        search_dir: Directory to search for config file when config_path is None.
+                    Defaults to cwd.
+
+    Returns:
+        Dict representation of the resolved AshConfig, or raw YAML dict if raw=True.
+    """
+    import yaml as _yaml
+    from automated_security_helper.config.resolve_config import (
+        resolve_config,
+        find_config_file,
+    )
+    from automated_security_helper.config.default_config import get_default_config
+
+    if config_path is not None:
+        path: Optional[Path] = Path(config_path)
+        if not path.exists():
+            return get_default_config().model_dump()
+    else:
+        search = Path(search_dir) if search_dir else None
+        path = find_config_file(search_dir=search)
+
+    if path is None:
+        return get_default_config().model_dump()
+
+    if raw:
+        return _yaml.safe_load(path.read_text()) or {}
+
+    # resolve_config short-circuits to default when source_dir is None,
+    # so supply source_dir to force it to read the specified file.
+    resolved = resolve_config(config_path=path, source_dir=path.parent)
+    return resolved.model_dump()

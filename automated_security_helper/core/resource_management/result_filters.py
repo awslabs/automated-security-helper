@@ -237,3 +237,64 @@ def apply_content_filters(
     filtered_results["_content_filters"] = filter_metadata
 
     return filtered_results
+
+
+def add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract a flat list of actionable findings from SARIF results and add it
+    to the top level of the response for easy consumption.
+
+    This provides a clear, focused list of findings that require attention,
+    rather than requiring consumers to navigate the nested SARIF structure.
+
+    Args:
+        results: The filtered scan results (after actionable_only and severity filters)
+
+    Returns:
+        Results with an added top-level 'findings' list
+    """
+    findings_list = []
+
+    # Extract findings from SARIF runs
+    sarif = results.get("raw_results", {}).get("sarif", {})
+    if "runs" in sarif:
+        for run in sarif["runs"]:
+            for result in run.get("results", []):
+                props = result.get("properties", {}) or {}
+                locations = result.get("locations", [])
+
+                # Extract location info
+                file_path = None
+                line_start = None
+                line_end = None
+                if locations:
+                    phys_loc = (
+                        locations[0].get("physicalLocation", {}) if locations else {}
+                    )
+                    artifact_loc = phys_loc.get("artifactLocation", {})
+                    file_path = artifact_loc.get("uri")
+                    region = phys_loc.get("region", {})
+                    line_start = region.get("startLine")
+                    line_end = region.get("endLine")
+
+                finding = {
+                    "rule_id": result.get("ruleId"),
+                    "severity": _get_finding_severity(result),
+                    "message": (
+                        result.get("message", {}).get("text")
+                        or result.get("message", {}).get("markdown")
+                    ),
+                    "scanner": props.get("scanner_name"),
+                    "file_path": file_path,
+                    "line_start": line_start,
+                    "line_end": line_end,
+                }
+
+                # Only include non-None values
+                finding = {k: v for k, v in finding.items() if v is not None}
+                findings_list.append(finding)
+
+    results["findings"] = findings_list
+    results["findings_count"] = len(findings_list)
+
+    return results
