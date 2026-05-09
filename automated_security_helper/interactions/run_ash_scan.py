@@ -683,6 +683,7 @@ def run_ash_scan(
     logger = _setup_logger(opts)
 
     config_fail_on_findings: Optional[bool] = None
+    results: Optional[AshAggregatedResults]
     if opts.mode == RunMode.container:
         results = _run_container_mode(opts, logger)
     else:
