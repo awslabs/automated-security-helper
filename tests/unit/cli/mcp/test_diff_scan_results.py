@@ -157,6 +157,45 @@ class TestDiffScanResultsSeverityChanged:
         assert result["severity_changed"] == []
 
 
+class TestDiffScanResultsSeverityCaseNormalization:
+    def test_diff_severity_case_normalized(self, tmp_path):
+        """HIGH vs high for the same finding ID must NOT be flagged as severity_changed."""
+        before_vuln = _make_vuln("B101-aaa00001", severity="HIGH")
+        after_vuln = _make_vuln("B101-aaa00001", severity="high")
+
+        before_f = tmp_path / "before.json"
+        after_f = tmp_path / "after.json"
+        _write_results(before_f, [before_vuln])
+        _write_results(after_f, [after_vuln])
+
+        result = mcp_diff_scan_results(str(before_f), str(after_f))
+
+        assert result["new"] == []
+        assert result["resolved"] == []
+        assert result["severity_changed"] == []
+
+    def test_diff_severity_actually_changed_after_normalization(self, tmp_path):
+        """HIGH → CRITICAL must still be flagged after case normalization."""
+        before_vuln = _make_vuln("B101-aaa00001", severity="HIGH")
+        after_vuln = _make_vuln("B101-aaa00001", severity="critical")
+
+        before_f = tmp_path / "before.json"
+        after_f = tmp_path / "after.json"
+        _write_results(before_f, [before_vuln])
+        _write_results(after_f, [after_vuln])
+
+        result = mcp_diff_scan_results(str(before_f), str(after_f))
+
+        assert result["new"] == []
+        assert result["resolved"] == []
+        assert len(result["severity_changed"]) == 1
+        change = result["severity_changed"][0]
+        assert change["id"] == _loaded_id("B101-aaa00001")
+        assert change["before_severity"] == "HIGH"
+        # FlatVulnerability normalizes severity to uppercase on ingestion
+        assert change["after_severity"] == "CRITICAL"
+
+
 class TestDiffScanResultsMissingFile:
     def test_missing_before_file_returns_error(self, tmp_path):
         after_f = tmp_path / "after.json"
