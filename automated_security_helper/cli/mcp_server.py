@@ -28,6 +28,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_diff_scan_results,
     mcp_validate_config,
     mcp_explain_finding,
+    mcp_suggest_suppression,
 )
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 
@@ -698,6 +699,51 @@ def _read_ash_config_schema() -> str:
 def get_ash_config_schema() -> str:
     """Return the AshConfig JSON schema."""
     return _read_ash_config_schema()
+
+
+def _read_ash_suppression_schema() -> str:
+    """Return the AshSuppression JSON schema as a string."""
+    from automated_security_helper.models.core import AshSuppression
+    import json as _json
+    return _json.dumps(AshSuppression.model_json_schema(), indent=2)
+
+
+@mcp.resource("ash://schema/suppression")
+def get_ash_suppression_schema() -> str:
+    """Return the AshSuppression JSON schema."""
+    return _read_ash_suppression_schema()
+
+
+@mcp.tool()
+async def suggest_suppression(
+    finding_id: str,
+    results_path: Optional[str] = None,
+    expiration: Optional[str] = None,
+    justification: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build a paste-ready AshSuppression entry for a specific finding.
+
+    Args:
+        finding_id: Stable hash ID of the finding (from get_scan_results or explain_finding).
+        results_path: Path to ash_aggregated_results.json. Defaults to
+                      .ash/ash_output/ash_aggregated_results.json in cwd.
+        expiration: Expiration date in YYYY-MM-DD format. Defaults to 90 days from today.
+        justification: Human-readable reason for the suppression.
+    """
+    try:
+        return mcp_suggest_suppression(
+            finding_id=finding_id,
+            results_path=results_path,
+            expiration=expiration,
+            justification=justification,
+        )
+    except Exception as e:
+        logger.exception(f"Error in suggest_suppression: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error suggesting suppression: {str(e)}",
+            "error_type": type(e).__name__,
+        }
 
 
 def _build_ash_exit_codes() -> str:
