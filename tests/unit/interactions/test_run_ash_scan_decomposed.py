@@ -306,3 +306,83 @@ class TestRunLocalModeNoChdir:
                             result, _cfg_fof = _run_local_mode(opts, mock_logger)
 
         assert result is mock_results
+
+
+# ---------------------------------------------------------------------------
+# DA #49 — _run_local_mode returns tuple; consumers receive bare AshAggregatedResults
+# ---------------------------------------------------------------------------
+
+
+class TestRunLocalModeTupleUnpacking:
+    def test_compute_exit_code_receives_bare_aggregated_results(self, tmp_path):
+        """run_ash_scan must unpack the tuple from _run_local_mode before calling
+        _compute_exit_code — the arg must be AshAggregatedResults, not a tuple."""
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _run_local_mode,
+            _compute_exit_code,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+        opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
+        mock_logger = MagicMock()
+
+        mock_orchestrator = MagicMock()
+        mock_results = MagicMock(spec=AshAggregatedResults)
+        mock_orchestrator.execute_scan.return_value = mock_results
+        mock_orchestrator.config = MagicMock()
+        mock_orchestrator.config.fail_on_findings = False
+
+        with patch(
+            "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
+            return_value=mock_orchestrator,
+        ):
+            with patch("builtins.open", MagicMock()):
+                with patch("pathlib.Path.exists", return_value=False):
+                    result, cfg_fof = _run_local_mode(opts, mock_logger)
+
+        # result must be the bare model, not a tuple
+        assert result is mock_results
+        assert not isinstance(result, tuple)
+        # config_fail_on_findings propagated correctly
+        assert cfg_fof is False
+
+    def test_run_ash_scan_local_mode_passes_bare_results_to_compute_exit_code(self, tmp_path):
+        """Integration: run_ash_scan in local mode must pass bare AshAggregatedResults
+        (not a tuple) to _compute_exit_code."""
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _run_local_mode,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+        captured_args: list = []
+
+        opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out", fail_on_findings=False)
+        mock_logger = MagicMock()
+
+        mock_orchestrator = MagicMock()
+        mock_results = MagicMock(spec=AshAggregatedResults)
+        mock_orchestrator.execute_scan.return_value = mock_results
+        mock_orchestrator.config = MagicMock()
+        mock_orchestrator.config.fail_on_findings = None
+
+        with patch(
+            "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
+            return_value=mock_orchestrator,
+        ):
+            with patch("builtins.open", MagicMock()):
+                with patch("pathlib.Path.exists", return_value=False):
+                    result, _ = _run_local_mode(opts, mock_logger)
+
+        # Verify that calling _compute_exit_code with result (not a tuple) does not raise
+        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+
+        mock_metric = MagicMock()
+        mock_metric.actionable = 0
+        with patch(
+            "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
+            return_value=[mock_metric],
+        ):
+            code = _compute_exit_code(result, opts)
+        assert code == 0

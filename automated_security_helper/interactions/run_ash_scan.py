@@ -140,6 +140,38 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
 # Helper: resolve final AshLogLevel
 # ---------------------------------------------------------------------------
 
+def _resolve_config_fail_on_findings(opts: ScanOptions) -> Optional[bool]:
+    """Read fail_on_findings from the YAML config file, without loading the full orchestrator.
+
+    Returns None when no config file is found or when the field is absent.
+    Used by both container and local mode so that YAML overrides are honoured
+    regardless of execution path.
+    """
+    from automated_security_helper.config.ash_config import AshConfig
+
+    config_path_str = opts.config
+    if config_path_str is None:
+        for config_file in ASH_CONFIG_FILE_NAMES:
+            for candidate in (
+                opts.source_dir / config_file,
+                opts.source_dir / ".ash" / config_file,
+            ):
+                if candidate.exists():
+                    config_path_str = candidate.as_posix()
+                    break
+            if config_path_str is not None:
+                break
+
+    if config_path_str is None:
+        return None
+
+    try:
+        cfg = AshConfig.from_file(Path(config_path_str))
+        return getattr(cfg, "fail_on_findings", None)
+    except Exception:
+        return None
+
+
 def _resolve_log_level(opts: ScanOptions) -> AshLogLevel:
     if opts.verbose:
         return AshLogLevel.VERBOSE
@@ -682,12 +714,17 @@ def run_ash_scan(
 
     logger = _setup_logger(opts)
 
-    config_fail_on_findings: Optional[bool] = None
+    config_fail_on_findings: Optional[bool] = _resolve_config_fail_on_findings(opts)
     results: Optional[AshAggregatedResults]
     if opts.mode == RunMode.container:
         results = _run_container_mode(opts, logger)
     else:
-        results, config_fail_on_findings = _run_local_mode(opts, logger)
+        results, _local_config_fof = _run_local_mode(opts, logger)
+        # _run_local_mode resolves config via the live orchestrator; prefer that
+        # value over the file-based pre-read when it differs (e.g. config_overrides
+        # applied by the orchestrator may alter fail_on_findings).
+        if _local_config_fof is not None:
+            config_fail_on_findings = _local_config_fof
 
     exit_code = _compute_exit_code(results, opts, config_fail_on_findings)
 
