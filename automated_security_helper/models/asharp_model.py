@@ -517,6 +517,7 @@ class AshAggregatedResults(BaseModel):
         target_info: ScannerTargetStatusInfo | dict = self.scanner_results[key]
         if isinstance(target_info, dict):
             target_info = ScannerTargetStatusInfo.model_validate(target_info)
+            self.scanner_results[key] = target_info
         if target_info is None:
             return
 
