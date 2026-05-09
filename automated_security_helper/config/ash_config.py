@@ -585,107 +585,10 @@ class AshConfig(BaseModel):
                 config_data = yaml.load(f, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation
         return cls.model_validate(config_data, strict=True)
 
-    @classmethod
-    def load_config(
-        cls,
-        config_path: Path | str | None = None,
-        source_dir: Path | None = None,
-    ) -> "AshConfig":
-        """Load configuration from file or return default configuration."""
-        if source_dir is None:
-            source_dir = Path.cwd()
-        try:
-            config = get_default_config()
-            if not config_path:
-                ASH_LOGGER.verbose(
-                    "No configuration file provided, checking for default paths"
-                )
-                for item in ASH_CONFIG_FILE_NAMES:
-                    possible_config_paths = [
-                        source_dir.joinpath(item),
-                        source_dir.joinpath(".ash", item),
-                    ]
-                    for possible_config_path in possible_config_paths:
-                        if possible_config_path.exists():
-                            config_path = possible_config_path
-                            ASH_LOGGER.verbose(
-                                f"Found configuration file at: {possible_config_path.as_posix()}"
-                            )
-                            break
-                    if config_path:
-                        break
-                ASH_LOGGER.verbose(
-                    "Configuration file not found or provided, using default config"
-                )
-
-            # We *always* want to evaluate this after the inverse block above runs, in
-            # case self.config_path is resolved from a default location.
-            # Do not use `else:` here!
-            if config_path:
-                ASH_LOGGER.verbose(
-                    f"Loading configuration from {config_path.as_posix()}"
-                )
-                try:
-                    with open(config_path, mode="r", encoding="utf-8") as f:
-                        if str(config_path).endswith(".json"):
-                            config_data = json.load(f)
-                        else:
-                            config_data = yaml.safe_load(f)
-
-                    if not isinstance(config_data, dict):
-                        raise ValueError("Configuration must be a dictionary")
-
-                    ASH_LOGGER.verbose("Validating file config")
-                    config = cls.model_validate(config_data)
-                    ASH_LOGGER.debug(f"Loaded config from file: {config}")
-                except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
-                    ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
-                    raise ASHConfigValidationError(
-                        f"Failed to load configuration: {str(e)}"
-                    )
-                except ValidationError as e:
-                    ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
-                    raise ASHConfigValidationError(
-                        f"Configuration validation failed: {str(e)}"
-                    )
-
-            return config
-        except Exception as e:
-            raise e
-
     def save(self, config_path: Path):
         """Save configuration to a file."""
         with open(config_path, mode="w", encoding="utf-8") as f:
             yaml.safe_dump(self.model_dump(by_alias=True), f, indent=2)
-
-    def get_scanners(self) -> Dict[str, Any]:
-        """Get a dictionary of scanners and their corresponding configurations."""
-        scanner_configs: Dict[str, Any] = {
-            scanner.config.name: scanner for scanner in self.build.custom_scanners
-        }
-        scanner: (
-            BanditScannerConfig
-            | CdkNagScannerConfig
-            | CfnNagScannerConfig
-            | CheckovScannerConfig
-            | DetectSecretsScannerConfig
-            | GrypeScannerConfig
-            | NpmAuditScannerConfig
-            | SemgrepScannerConfig
-            | SyftScannerConfig
-            | OpengrepScannerConfig
-        )
-        for scanner in self.scanners.model_dump(by_alias=True).values():
-            sname = (
-                scanner.name
-                if hasattr(scanner, "name")
-                else scanner["name"]
-                if isinstance(scanner, dict)
-                else None
-            )
-            scanner_configs[sname] = scanner
-
-        return scanner_configs
 
     def get_plugin_config(
         self,

@@ -20,37 +20,6 @@ ASH_INCLUSIONS = [
 ]
 
 
-def red(msg) -> str:
-    return "\033[91m{}\033[00m".format(msg)
-
-
-def green(msg) -> str:
-    return "\033[92m{}\033[00m".format(msg)
-
-
-def yellow(msg) -> str:
-    return "\033[33m{}\033[00m".format(msg)
-
-
-def lightPurple(msg) -> str:
-    return "\033[94m{}\033[00m".format(msg)
-
-
-def purple(msg) -> str:
-    return "\033[95m{}\033[00m".format(msg)
-
-
-def cyan(msg) -> str:
-    return "\033[96m{}\033[00m".format(msg)
-
-
-def gray(msg) -> str:
-    return "\033[97m{}\033[00m".format(msg)
-
-
-def black(msg) -> str:
-    return "\033[98m{}\033[00m".format(msg)
-
 
 def debug_echo(*msg, debug: bool = False) -> str | None:
     message = " ".join(str(m) for m in msg)
@@ -62,7 +31,6 @@ def debug_echo(*msg, debug: bool = False) -> str | None:
 def _collect_ignorefiles_and_all_files(
     path: str,
     extra_ignorefiles: List[str] | None = None,
-    debug: bool = False,
 ) -> tuple[List[str], List[str]]:
     """Walk the directory tree once to collect ignore files and all file paths.
 
@@ -75,7 +43,7 @@ def _collect_ignorefiles_and_all_files(
     ignore_files: List[str] = []
     all_files: List[str] = []
 
-    for root, _dirs, files in os.walk(path):
+    for root, _, files in os.walk(path):
         for f in files:
             full_path = os.path.join(root, f)
             if f in _ignore_names:
@@ -104,7 +72,7 @@ def get_ash_ignorespec_lines(
         all_ignores = list(set(_discovered_ignore_files))
     else:
         # Fallback: collect ignore files via a walk (used when called standalone)
-        all_ignores, _ = _collect_ignorefiles_and_all_files(path, ignorefiles, debug)
+        all_ignores, _ = _collect_ignorefiles_and_all_files(path, ignorefiles)
         all_ignores = list(set(all_ignores))
 
     lines = []
@@ -148,7 +116,7 @@ def get_files_not_matching_spec(
     if _all_files is None:
         # Fallback: walk again if called standalone without pre-collected files
         _all_files = []
-        for root, _dirs, files in os.walk(path):
+        for root, _, files in os.walk(path):
             for f in files:
                 _all_files.append(os.path.join(root, f))
 
@@ -301,10 +269,13 @@ def scan_set(
                 f"Imported ash-scan-set-files-list.txt from {output}", debug=debug
             )
 
+    discovered_ignores: List[str] = []
+    all_files: List[str] = []
+
     if not ashignore_content or not ashscanset_list:
         # Single os.walk pass collects both ignore files and the full file list
         discovered_ignores, all_files = _collect_ignorefiles_and_all_files(
-            source, ignorefile, debug=debug
+            source, ignorefile
         )
 
     if not ashignore_content:

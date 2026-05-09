@@ -6,7 +6,7 @@ import logging
 import os
 import platform
 import time
-from typing import List
+from typing import List, cast
 from pydantic import BaseModel
 import typer
 import json
@@ -21,6 +21,7 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget
 from automated_security_helper.core.enums import ExecutionPhase
+from automated_security_helper.core.progress import ExecutionPhaseType
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.enums import ExecutionStrategy
 from automated_security_helper.core.enums import RunMode
@@ -78,7 +79,7 @@ def run_ash_scan(
     config: str | None = None,
     config_overrides: List[str] | None = None,
     offline: bool = False,
-    strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL.value,
+    strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL,
     scanners: List[str] | None = None,
     exclude_scanners: List[str] | None = None,
     progress: bool = True,
@@ -194,17 +195,11 @@ def run_ash_scan(
     )
     # Initialize results as None at the start to avoid UnboundLocalError
     results = None
+    orchestrator = None
     # If mode is container, run the container version
     if mode == RunMode.container:
         if changed_files_only:
             logger.warning("--changed-files-only is not supported in container mode; performing full scan")
-
-        # Pass the current context to run_ash_container
-        new_args = []
-
-        # Convert phases to args
-        for phase in phases:
-            new_args.extend(["--phases", phase.value])
 
         # Run the container version
         container_result = run_ash_container(
@@ -242,8 +237,6 @@ def run_ash_scan(
             custom_containerfile=custom_containerfile,
             custom_build_arg=custom_build_arg,
             ash_plugin_modules=ash_plugin_modules,
-            # *new_args,
-            # **kwargs,
         )
 
         # Add debug output to print the full command
@@ -329,17 +322,12 @@ def run_ash_scan(
             source_dir = Path(source_dir)
             output_dir = Path(output_dir)
 
-            # Placeholder for an optional shallow-clone of the source tree.
-            # The cleanup block at the end of this branch still references
-            # temp_clone_dir, so keep the sentinel even though no code path
-            # currently assigns it.
-            temp_clone_dir = None
 
             if not quiet and not simple:
-                logger.verbose(f"Source directory: {source_dir.as_posix()}")
-                logger.verbose(f"Output directory: {output_dir.as_posix()}")
-                logger.verbose(f"Scanners specified: {scanners}")
-                logger.verbose(f"Scanners excluded: {exclude_scanners}")
+                logger.verbose(f"Source directory: {source_dir.as_posix()}")  # type: ignore[attr-defined]
+                logger.verbose(f"Output directory: {output_dir.as_posix()}")  # type: ignore[attr-defined]
+                logger.verbose(f"Scanners specified: {scanners}")  # type: ignore[attr-defined]
+                logger.verbose(f"Scanners excluded: {exclude_scanners}")  # type: ignore[attr-defined]
 
             if config is None:
                 for config_file in ASH_CONFIG_FILE_NAMES:
@@ -427,7 +415,8 @@ def run_ash_scan(
                 ),
                 python_based_plugins_only=python_based_plugins_only,
                 ignore_suppressions=ignore_suppressions,
-                ash_plugin_modules=ash_plugin_modules,  # Pass the ash_plugin_modules parameter to the orchestrator
+                ash_plugin_modules=ash_plugin_modules,
+                metadata=None,
             )
 
             # Determine which phases to run. Process them in required order to build the
@@ -450,7 +439,7 @@ def run_ash_scan(
                 logger.debug(f"Running phases: {phases_to_run}")
 
             # Execute scan with specified phases
-            results = orchestrator.execute_scan(phases=phases_to_run)
+            results = orchestrator.execute_scan(phases=cast(List[ExecutionPhaseType], phases_to_run))
 
             # For simple mode, print a minimal completion message
             if simple and not quiet:
@@ -481,21 +470,6 @@ def run_ash_scan(
             with open(output_file, mode="w", encoding="utf-8") as f:
                 f.write(content)
 
-            # Clean up the temporary clone directory if it was created
-            try:
-                if (
-                    "temp_clone_dir" in locals()
-                    and temp_clone_dir
-                    and os.path.exists(temp_clone_dir)
-                ):
-                    import shutil
-
-                    shutil.rmtree(temp_clone_dir)
-                    logger.debug(
-                        f"Cleaned up temporary clone directory: {temp_clone_dir}"
-                    )
-            except Exception as e:
-                logger.warning(f"Error cleaning up temporary clone directory: {e}")
 
         except Exception as e:
             logger.exception(e)
@@ -514,9 +488,8 @@ def run_ash_scan(
         if fail_on_findings is not None
         else (
             orchestrator.config.fail_on_findings
-            if "orchestrator" in locals()
-            and hasattr(orchestrator, "config")
-            and orchestrator.config.fail_on_findings is not None
+            if orchestrator is not None
+            and orchestrator.config is not None
             else True
         )
     )
@@ -533,8 +506,8 @@ def run_ash_scan(
             with open(sarif_file, encoding="utf-8") as f:
                 sarif_json = json.load(f)  # nosec
             sarif_active = 0
-            for run in sarif_json.get("runs", []):
-                for r in run.get("results", []):
+            for sarif_run in sarif_json.get("runs", []):
+                for r in sarif_run.get("results", []):
                     if not r.get("suppressions"):
                         sarif_active += 1
             actionable_findings = sarif_active

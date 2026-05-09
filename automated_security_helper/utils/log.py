@@ -64,34 +64,6 @@ addLoggingLevel("TRACE", 5)
 addLoggingLevel("VERBOSE", 15)
 
 
-BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
-
-# The background is set with 40 plus the number of the color, and the foreground with 30
-
-# These are the sequences need to get colored ouput
-RESET_SEQ = "\033[0m"
-COLOR_SEQ = "\033[1;%dm"
-BOLD_SEQ = "\033[1m"
-
-COLORS = {
-    "WARNING": YELLOW,
-    "INFO": CYAN,
-    "DEBUG": BLUE,
-    "VERBOSE": MAGENTA,
-    "TRACE": GREEN,
-    "CRITICAL": YELLOW,
-    "ERROR": RED,
-}
-
-
-def formatter_message(message, use_color=True):
-    if use_color:
-        message = message.replace("$RESET", RESET_SEQ).replace("$BOLD", BOLD_SEQ)
-    else:
-        message = message.replace("$RESET", "").replace("$BOLD", "")
-    return message
-
-
 class JsonFormatter(logging.Formatter):
     """
     Formatter that outputs JSON strings after parsing the LogRecord.
@@ -153,21 +125,6 @@ class JsonFormatter(logging.Formatter):
             message_dict["stack_info"] = self.formatStack(record.stack_info)
 
         return json.dumps(message_dict, default=str)
-
-
-class ColoredFormatter(logging.Formatter):
-    def __init__(self, msg, use_color=True):
-        logging.Formatter.__init__(self, msg)
-        self.use_color = use_color
-
-    def format(self, record):
-        levelname = record.levelname
-        if self.use_color and levelname in COLORS:
-            levelname_color = (
-                COLOR_SEQ % (30 + COLORS[levelname]) + levelname + RESET_SEQ
-            )
-            record.levelname = levelname_color
-        return logging.Formatter.format(self, record)
 
 
 # Custom logger class with multiple destinations
@@ -376,39 +333,6 @@ def configure_windows_safe_logging():
     except ImportError:
         pass  # codecs/locale not available
 
-
-class Color:
-    @staticmethod
-    def red(msg) -> str:
-        return "\033[91m{}\033[00m".format(msg)
-
-    @staticmethod
-    def green(msg) -> str:
-        return "\033[92m{}\033[00m".format(msg)
-
-    @staticmethod
-    def yellow(msg) -> str:
-        return "\033[33m{}\033[00m".format(msg)
-
-    @staticmethod
-    def lightPurple(msg) -> str:
-        return "\033[94m{}\033[00m".format(msg)
-
-    @staticmethod
-    def purple(msg) -> str:
-        return "\033[95m{}\033[00m".format(msg)
-
-    @staticmethod
-    def cyan(msg) -> str:
-        return "\033[96m{}\033[00m".format(msg)
-
-    @staticmethod
-    def gray(msg) -> str:
-        return "\033[97m{}\033[00m".format(msg)
-
-    @staticmethod
-    def black(msg) -> str:
-        return "\033[98m{}\033[00m".format(msg)
 
 
 def get_logger(
