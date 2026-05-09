@@ -4,7 +4,7 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
@@ -30,6 +30,7 @@ __all__ = ["AshAggregatedResults"]
 
 _SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
 _VALID_INCREMENT_FIELDS = _SEVERITY_ORDER + ("suppressed",)
+_SUMMARY_SEVERITY_FIELDS = frozenset(("critical", "high", "medium", "low", "info", "suppressed"))
 
 
 class ScannerSeverityCount(BaseModel):
@@ -51,20 +52,8 @@ class ScannerSeverityCount(BaseModel):
 
     @property
     def total(self) -> int:
-        """Sum of all non-suppressed severity counts.
-
-        Subclasses (e.g., SummaryStats) may override ``total`` with a plain int
-        field; in that case, the stored value is returned.
-        """
-        declared = self.__dict__.get("total")
-        if declared is not None:
-            return declared
+        """Sum of all non-suppressed severity counts."""
         return self.critical + self.high + self.medium + self.low + self.info
-
-    @total.setter
-    def total(self, value: int) -> None:
-        """Allow subclasses that redeclare total as a field to set it."""
-        self.__dict__["total"] = value
 
     def actionable_count(self, threshold: str) -> int:
         """Count findings at or above the given severity threshold.
@@ -102,8 +91,22 @@ class ScannerSeverityCount(BaseModel):
         return "none"
 
 
-class SummaryStats(ScannerSeverityCount):
-    """Summary statistics for the final report"""
+class SummaryStats(BaseModel):
+    """Summary statistics for the final report.
+
+    Composes a ScannerSeverityCount for per-severity tallies. Flat severity
+    kwargs (e.g. critical=2) are accepted for backward compatibility and routed
+    into severity_counts. Forwarding properties expose severity fields at the
+    top level so all existing call sites continue to work unchanged.
+    """
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="allow",
+        arbitrary_types_allowed=True,
+    )
+
+    severity_counts: ScannerSeverityCount = Field(default_factory=ScannerSeverityCount)
 
     start: str | datetime | None = None
     end: str | datetime | None = None
@@ -114,7 +117,81 @@ class SummaryStats(ScannerSeverityCount):
     failed: int = 0
     missing: int = 0
     skipped: int = 0
-    suppressed: int = 0  # Add suppressed count to summary stats
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_flat_severity_kwargs(cls, data: Any) -> Any:
+        """Accept flat severity kwargs and route them into severity_counts."""
+        if not isinstance(data, dict):
+            return data
+        flat = {k: data.pop(k) for k in list(data) if k in _SUMMARY_SEVERITY_FIELDS}
+        if flat:
+            existing = data.get("severity_counts")
+            if existing is None:
+                data["severity_counts"] = flat
+            elif isinstance(existing, dict):
+                existing.update(flat)
+            else:
+                for field_name, val in flat.items():
+                    setattr(existing, field_name, val)
+        return data
+
+    @model_validator(mode="after")
+    def _derive_total_from_severity_counts(self) -> "SummaryStats":
+        """When total was not explicitly provided, compute it from severity_counts."""
+        if self.total == 0:
+            computed = self.severity_counts.total
+            if computed != 0:
+                self.total = computed
+        return self
+
+    @property
+    def critical(self) -> int:
+        return self.severity_counts.critical
+
+    @critical.setter
+    def critical(self, value: int) -> None:
+        self.severity_counts.critical = value
+
+    @property
+    def high(self) -> int:
+        return self.severity_counts.high
+
+    @high.setter
+    def high(self, value: int) -> None:
+        self.severity_counts.high = value
+
+    @property
+    def medium(self) -> int:
+        return self.severity_counts.medium
+
+    @medium.setter
+    def medium(self, value: int) -> None:
+        self.severity_counts.medium = value
+
+    @property
+    def low(self) -> int:
+        return self.severity_counts.low
+
+    @low.setter
+    def low(self, value: int) -> None:
+        self.severity_counts.low = value
+
+    @property
+    def info(self) -> int:
+        return self.severity_counts.info
+
+    @info.setter
+    def info(self, value: int) -> None:
+        self.severity_counts.info = value
+
+    @property
+    def suppressed(self) -> int:
+        return self.severity_counts.suppressed
+
+    @suppressed.setter
+    def suppressed(self, value: int) -> None:
+        self.severity_counts.suppressed = value
 
     def bump(self, key: str, amount: int = 1) -> int:
         setattr(self, key, getattr(self, key) + amount)
