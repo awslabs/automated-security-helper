@@ -271,7 +271,7 @@ def _run_container_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
 # _run_local_mode
 # ---------------------------------------------------------------------------
 
-def _run_local_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
+def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Optional[bool]]:
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
     _offline_was_set = False
@@ -365,6 +365,9 @@ def _run_local_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
             ash_plugin_modules=opts.ash_plugin_modules or [],
             metadata=None,
         )
+        _config_fail_on_findings: Optional[bool] = getattr(
+            getattr(orchestrator, "config", None), "fail_on_findings", None
+        )
 
         _phases = opts.phases or []
         phases_to_run = []
@@ -405,7 +408,7 @@ def _run_local_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
         with open(output_file, mode="w", encoding="utf-8") as f:
             f.write(content)
 
-        return results
+        return results, _config_fail_on_findings
 
     except ASHConfigValidationError as e:
         print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
@@ -432,18 +435,27 @@ def _run_local_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
 # than fixing it. Using in-memory results only is both correct and faster.
 # ---------------------------------------------------------------------------
 
-def _compute_exit_code(results: Optional[AshAggregatedResults], opts: ScanOptions) -> int:
+def _compute_exit_code(
+    results: Optional[AshAggregatedResults],
+    opts: ScanOptions,
+    config_fail_on_findings: Optional[bool] = None,
+) -> int:
+    if results is None:
+        logging.getLogger(__name__).error(
+            "ASH scan produced no results — scan may have crashed"
+        )
+        return 1
+
     final_fail_on_findings: bool
     if opts.fail_on_findings is not None:
         final_fail_on_findings = opts.fail_on_findings
+    elif config_fail_on_findings is not None:
+        final_fail_on_findings = config_fail_on_findings
     else:
         final_fail_on_findings = True
 
     if not final_fail_on_findings:
         return 0
-
-    if results is None:
-        return 1
 
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
     actionable_findings = sum(item.actionable for item in scanner_metrics)
@@ -670,12 +682,13 @@ def run_ash_scan(
 
     logger = _setup_logger(opts)
 
+    config_fail_on_findings: Optional[bool] = None
     if opts.mode == RunMode.container:
         results = _run_container_mode(opts, logger)
     else:
-        results = _run_local_mode(opts, logger)
+        results, config_fail_on_findings = _run_local_mode(opts, logger)
 
-    exit_code = _compute_exit_code(results, opts)
+    exit_code = _compute_exit_code(results, opts, config_fail_on_findings)
 
     if opts.show_summary:
         scanner_metrics = get_unified_scanner_metrics(asharp_model=results) if results else []
