@@ -441,7 +441,7 @@ class ConfigLinter:
     def _check_validation_issues(
         cls, config_path: Path, config_data: Dict[str, Any], result: LintResult
     ) -> None:
-        """Run the same checks as ConfigValidator but produce LintIssues."""
+        """Delegate shared structural checks to ConfigValidator, then enrich to LintIssues."""
         if not isinstance(config_data, dict):
             result.issues.append(
                 LintIssue(
@@ -452,115 +452,109 @@ class ConfigLinter:
             )
             return
 
-        # Check for required fields
-        for field_name in ConfigValidator.REQUIRED_TOP_LEVEL_FIELDS:
-            if field_name not in config_data:
-                result.issues.append(
-                    LintIssue(
-                        severity=LintSeverity.ERROR,
-                        category=LintCategory.MISSING_FIELD,
-                        message=f"Missing required top-level field: '{field_name}'",
-                        path=field_name,
-                    )
+        _, errors = ConfigValidator.validate_config_file(config_path)
+        for error in errors:
+            result.issues.append(cls._validator_error_to_lint_issue(error, config_data))
+
+    @classmethod
+    def _validator_error_to_lint_issue(
+        cls, error: str, config_data: Dict[str, Any]
+    ) -> LintIssue:
+        """Convert a ConfigValidator error string to a LintIssue with enriched metadata."""
+        # Missing required top-level field: 'field_name'
+        if error.startswith("Missing required top-level field: '"):
+            field_name = error.split("'")[1]
+            return LintIssue(
+                severity=LintSeverity.ERROR,
+                category=LintCategory.MISSING_FIELD,
+                message=error,
+                path=field_name,
+            )
+
+        # Invalid top-level field 'field_name' - this is an internal field...
+        if error.startswith("Invalid top-level field '"):
+            field_name = error.split("'")[1]
+            return LintIssue(
+                severity=LintSeverity.ERROR,
+                category=LintCategory.INVALID_SECTION,
+                message=error,
+                path=field_name,
+                fixable=True,
+                fix_description=f"Remove internal field '{field_name}'",
+            )
+
+        # Unknown top-level field 'field_name' - may cause parsing issues
+        if error.startswith("Unknown top-level field '"):
+            field_name = error.split("'")[1]
+            return LintIssue(
+                severity=LintSeverity.WARNING,
+                category=LintCategory.UNKNOWN_FIELD,
+                message=error,
+                path=field_name,
+            )
+
+        # Duplicate top-level field 'field_name' found at multiple locations
+        if error.startswith("Duplicate top-level field '"):
+            field_name = error.split("'")[1]
+            return LintIssue(
+                severity=LintSeverity.ERROR,
+                category=LintCategory.DUPLICATE_FIELD,
+                message=error,
+                path=field_name,
+            )
+
+        # Scanner 'scanner_name' contains internal-only field 'field_name' - ...
+        if error.startswith("Scanner '"):
+            parts = error.split("'")
+            # parts: ['Scanner ', scanner_name, ' contains internal-only field ', field_name, ...]
+            if len(parts) >= 4:
+                scanner_name = parts[1]
+                field_name = parts[3]
+                return LintIssue(
+                    severity=LintSeverity.ERROR,
+                    category=LintCategory.INTERNAL_FIELD,
+                    message=f"Scanner '{scanner_name}' contains internal-only field '{field_name}'",
+                    path=f"scanners.{scanner_name}.{field_name}",
+                    fixable=True,
+                    fix_description=f"Remove internal field '{field_name}' from scanner '{scanner_name}'",
                 )
 
-        # Check for invalid top-level fields
-        for field_name in config_data.keys():
-            if field_name in ConfigValidator.INVALID_TOP_LEVEL_FIELDS:
-                result.issues.append(
-                    LintIssue(
-                        severity=LintSeverity.ERROR,
-                        category=LintCategory.INVALID_SECTION,
-                        message=f"Invalid top-level field '{field_name}' - this is an internal field and should not be in user configs",
-                        path=field_name,
-                        fixable=True,
-                        fix_description=f"Remove internal field '{field_name}'",
-                    )
-                )
-            elif field_name not in ConfigValidator.VALID_TOP_LEVEL_FIELDS:
-                result.issues.append(
-                    LintIssue(
-                        severity=LintSeverity.WARNING,
-                        category=LintCategory.UNKNOWN_FIELD,
-                        message=f"Unknown top-level field '{field_name}' - may cause parsing issues",
-                        path=field_name,
-                    )
+        # Reporter 'reporter_name' contains internal-only field 'field_name' - ...
+        if error.startswith("Reporter '"):
+            parts = error.split("'")
+            if len(parts) >= 4:
+                reporter_name = parts[1]
+                field_name = parts[3]
+                return LintIssue(
+                    severity=LintSeverity.ERROR,
+                    category=LintCategory.INTERNAL_FIELD,
+                    message=f"Reporter '{reporter_name}' contains internal-only field '{field_name}'",
+                    path=f"reporters.{reporter_name}.{field_name}",
+                    fixable=True,
+                    fix_description=f"Remove internal field '{field_name}' from reporter '{reporter_name}'",
                 )
 
-        # Check for duplicate field definitions
-        raw_content = config_path.read_text(encoding="utf-8")
-        top_level_fields: Dict[str, int] = {}
-        for line in raw_content.split("\n"):
-            stripped = line.strip()
-            if (
-                stripped
-                and not stripped.startswith("#")
-                and ":" in stripped
-                and not line[0].isspace()
-            ):
-                field_name = stripped.split(":")[0].strip()
-                if field_name in ConfigValidator.VALID_TOP_LEVEL_FIELDS:
-                    if field_name in top_level_fields:
-                        result.issues.append(
-                            LintIssue(
-                                severity=LintSeverity.ERROR,
-                                category=LintCategory.DUPLICATE_FIELD,
-                                message=f"Duplicate top-level field '{field_name}' found at multiple locations",
-                                path=field_name,
-                            )
-                        )
-                    top_level_fields[field_name] = 1
+        # Converter 'converter_name' contains internal-only field 'field_name' - ...
+        if error.startswith("Converter '"):
+            parts = error.split("'")
+            if len(parts) >= 4:
+                converter_name = parts[1]
+                field_name = parts[3]
+                return LintIssue(
+                    severity=LintSeverity.ERROR,
+                    category=LintCategory.INTERNAL_FIELD,
+                    message=f"Converter '{converter_name}' contains internal-only field '{field_name}'",
+                    path=f"converters.{converter_name}.{field_name}",
+                    fixable=True,
+                    fix_description=f"Remove internal field '{field_name}' from converter '{converter_name}'",
+                )
 
-        # Validate scanners section
-        if "scanners" in config_data and isinstance(config_data["scanners"], dict):
-            for scanner_name, scanner_config in config_data["scanners"].items():
-                if isinstance(scanner_config, dict):
-                    for field_name in scanner_config.keys():
-                        if field_name in ConfigValidator.INTERNAL_SCANNER_FIELDS:
-                            result.issues.append(
-                                LintIssue(
-                                    severity=LintSeverity.ERROR,
-                                    category=LintCategory.INTERNAL_FIELD,
-                                    message=f"Scanner '{scanner_name}' contains internal-only field '{field_name}'",
-                                    path=f"scanners.{scanner_name}.{field_name}",
-                                    fixable=True,
-                                    fix_description=f"Remove internal field '{field_name}' from scanner '{scanner_name}'",
-                                )
-                            )
-
-        # Validate reporters section
-        if "reporters" in config_data and isinstance(config_data["reporters"], dict):
-            for reporter_name, reporter_config in config_data["reporters"].items():
-                if isinstance(reporter_config, dict):
-                    for field_name in reporter_config.keys():
-                        if field_name in ConfigValidator.INTERNAL_REPORTER_FIELDS:
-                            result.issues.append(
-                                LintIssue(
-                                    severity=LintSeverity.ERROR,
-                                    category=LintCategory.INTERNAL_FIELD,
-                                    message=f"Reporter '{reporter_name}' contains internal-only field '{field_name}'",
-                                    path=f"reporters.{reporter_name}.{field_name}",
-                                    fixable=True,
-                                    fix_description=f"Remove internal field '{field_name}' from reporter '{reporter_name}'",
-                                )
-                            )
-
-        # Validate converters section
-        if "converters" in config_data and isinstance(config_data["converters"], dict):
-            for converter_name, converter_config in config_data["converters"].items():
-                if isinstance(converter_config, dict):
-                    for field_name in converter_config.keys():
-                        if field_name in ConfigValidator.INTERNAL_CONVERTER_FIELDS:
-                            result.issues.append(
-                                LintIssue(
-                                    severity=LintSeverity.ERROR,
-                                    category=LintCategory.INTERNAL_FIELD,
-                                    message=f"Converter '{converter_name}' contains internal-only field '{field_name}'",
-                                    path=f"converters.{converter_name}.{field_name}",
-                                    fixable=True,
-                                    fix_description=f"Remove internal field '{field_name}' from converter '{converter_name}'",
-                                )
-                            )
+        # Fallback: unknown error format — surface as generic error
+        return LintIssue(
+            severity=LintSeverity.ERROR,
+            category=LintCategory.SYNTAX_ERROR,
+            message=error,
+        )
 
     @classmethod
     def _check_suppression_issues(
