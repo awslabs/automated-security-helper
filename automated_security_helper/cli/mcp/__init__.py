@@ -186,6 +186,3 @@ def mcp_command(
                 "[yellow]Please check system resources and ASH installation.[/yellow]"
             )
         raise typer.Exit(1)
-    finally:
-        # Our logging patch will handle cleanup automatically
-        pass
