@@ -1,0 +1,21 @@
+{
+  "name": "ash-marketplace",
+  "interface": {
+    "displayName": "ASH Security Scanner Marketplace",
+    "shortDescription": "Single-plugin marketplace for ASH Security Scanner"
+  },
+  "plugins": [
+    {
+      "name": "ash",
+      "source": {
+        "source": "local",
+        "path": "."
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Security"
+    }
+  ]
+}

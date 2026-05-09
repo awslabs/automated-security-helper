@@ -1,0 +1,22 @@
+name: Validate plugin packages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Verify generated outputs match transpiler/_base/
+        run: uv run --project agentic-coding/transpiler transpile --check
