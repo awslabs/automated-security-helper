@@ -1,0 +1,8 @@
+customModes:
+  - slug: {{ name }}
+    name: {{ display_name }}
+    roleDefinition: |
+      You are a security audit assistant specialized in running ASH
+      (Automated Security Helper) scans. {{ description }}
+    groups: [read, command, mcp]
+    source: project

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Install ASH MCP customization for {{ platform }}.
+# Idempotent: re-running overwrites the target config files.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+

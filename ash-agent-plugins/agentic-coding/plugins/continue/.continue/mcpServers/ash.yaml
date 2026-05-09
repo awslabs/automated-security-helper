@@ -1,0 +1,13 @@
+name: ASH Security Scanner
+version: 1.0.0
+schema: v1
+mcpServers:
+  - name: ash
+    type: stdio
+    command: uvx
+    args:
+      - "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.0"
+      - "ash"
+      - "mcp"
+    env:
+      FASTMCP_LOG_LEVEL: "ERROR"

@@ -1,0 +1,45 @@
+{
+  "name": "ash",
+  "skill_name": "ash-mcp",
+  "display_name": "ASH Security Scanner",
+  "version": "1.0.0",
+  "description": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
+  "trigger_description": "Run security scans with the ASH (Automated Security Helper) MCP server. Use this skill whenever the user asks to scan for vulnerabilities, run a security check, find CVEs, audit dependencies, check for secrets, run SAST or SCA, scan IaC (Terraform/CloudFormation/Kubernetes), check for hardcoded credentials, or mentions ASH, Bandit, Semgrep, Checkov, Grype, Syft, or detect-secrets. Also trigger when the user wants to find security issues, harden a codebase, or asks \"is my code secure\". Do NOT trigger for code review without security context, performance audits, or test writing.",
+  "author": {
+    "name": "AWS Labs",
+    "url": "https://github.com/awslabs/automated-security-helper"
+  },
+  "homepage": "https://github.com/awslabs/automated-security-helper",
+  "repository": "https://github.com/awslabs/automated-security-helper",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security-scan",
+    "vulnerability-scan",
+    "ash",
+    "sast",
+    "sca",
+    "checkov",
+    "bandit",
+    "semgrep",
+    "grype"
+  ],
+  "ash_version": "v3.4.0",
+  "commands": [
+    {
+      "name": "scan",
+      "description": "Run an ASH security scan on the current directory and report findings"
+    },
+    {
+      "name": "results",
+      "description": "Fetch and display results from the most recent ASH scan"
+    }
+  ],
+  "agents": [
+    {
+      "name": "security-scanner",
+      "description": "Use this agent when the user asks for a comprehensive security audit, a \"scan and analyze\" workflow, or wants the agent to autonomously run ASH and triage findings without back-and-forth.",
+      "model": "inherit",
+      "color": "red"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+extensions:
+  ash:
+    name: ASH Security Scanner
+    cmd: uvx
+    args:
+      - "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.0"
+      - "ash"
+      - "mcp"
+    enabled: true
+    type: stdio
+    timeout: 120
+    envs:
+      FASTMCP_LOG_LEVEL: "ERROR"

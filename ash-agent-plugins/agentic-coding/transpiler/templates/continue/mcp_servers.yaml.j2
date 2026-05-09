@@ -1,0 +1,17 @@
+name: {{ display_name }}
+version: {{ version }}
+schema: v1
+mcpServers:
+  - name: {{ server_name }}
+    type: stdio
+    command: {{ server_cfg.command }}
+    args:
+{%- for arg in server_cfg.args %}
+      - {{ arg | tojson }}
+{%- endfor %}
+{%- if server_cfg.env %}
+    env:
+{%- for k, v in server_cfg.env.items() %}
+      {{ k }}: {{ v | tojson }}
+{%- endfor %}
+{%- endif %}

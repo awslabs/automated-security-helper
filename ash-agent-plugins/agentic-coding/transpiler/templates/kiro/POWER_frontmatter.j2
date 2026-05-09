@@ -1,0 +1,10 @@
+---
+name: "{{ name }}-security-scanner"
+displayName: "{{ display_name }}"
+description: "{{ description }}"
+keywords: [{% for kw in keywords %}"{{ kw }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+author: "{{ author_name }}"
+---
+
+{{ skill_body }}
+{{ references -}}
