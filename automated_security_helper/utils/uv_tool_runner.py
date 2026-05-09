@@ -19,22 +19,11 @@ class UVToolRetryConfig:
     """Configuration for UV tool operation retry logic."""
 
     max_retries: int = 3
-    """Maximum number of retry attempts before giving up."""
-
     base_delay: float = 1.0
-    """Initial delay between retries in seconds."""
-
     max_delay: float = 60.0
-    """Maximum delay between retries in seconds."""
-
     exponential_base: float = 2.0
-    """Base for exponential backoff calculation."""
-
     jitter: bool = True
-    """Whether to add randomness to delay times to prevent thundering herd problems."""
-
     network_check_timeout: float = 5.0
-    """Timeout in seconds for network connectivity checks before retrying."""
 
 
 class UVToolRunner:
