@@ -41,7 +41,7 @@ class TestInspectPhase:
         assert inspect_phase.phase_name == "inspect"
 
     @patch(
-        "automated_security_helper.cli.inspect.sarif_fields.analyze_sarif_fields"
+        "automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields"
     )
     def test_execute_phase_success(self, mock_analyze, inspect_phase):
         """Successful execution calls analyze_sarif_fields and returns results."""
@@ -56,7 +56,7 @@ class TestInspectPhase:
         assert "analysis" in call_kwargs["output_dir"]
 
     @patch(
-        "automated_security_helper.cli.inspect.sarif_fields.analyze_sarif_fields"
+        "automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields"
     )
     def test_execute_phase_creates_analysis_dir(self, mock_analyze, inspect_phase):
         """The analysis subdirectory is created during execution."""
@@ -72,7 +72,7 @@ class TestInspectPhase:
         assert analysis_dir.exists()
 
     @patch(
-        "automated_security_helper.cli.inspect.sarif_fields.analyze_sarif_fields",
+        "automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields",
         side_effect=RuntimeError("analysis failed"),
     )
     def test_execute_phase_handles_exception(self, mock_analyze, inspect_phase):
@@ -89,7 +89,7 @@ class TestInspectPhase:
         )
 
     @patch(
-        "automated_security_helper.cli.inspect.sarif_fields.analyze_sarif_fields"
+        "automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields"
     )
     def test_progress_updates_on_success(self, mock_analyze, inspect_phase):
         """Progress updates are called in sequence during success."""
