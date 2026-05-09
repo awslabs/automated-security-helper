@@ -214,11 +214,22 @@ def _setup_logger(opts: ScanOptions):
 # _run_container_mode
 # ---------------------------------------------------------------------------
 
-def _run_container_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
+def _run_container_mode(
+    opts: ScanOptions,
+    logger,
+    resolved_fail_on_findings: Optional[bool] = None,
+) -> AshAggregatedResults:
     if opts.changed_files_only:
         logger.warning(
             "--changed-files-only is not supported in container mode; performing full scan"
         )
+
+    # Use the CLI-supplied value when present; fall back to the value already read from
+    # the config file on the host.  Passing the resolved value avoids a race where the
+    # user mutates the config file between the host read and the container's own read.
+    effective_fail_on_findings = (
+        opts.fail_on_findings if opts.fail_on_findings is not None else resolved_fail_on_findings
+    )
 
     container_result = run_ash_container(
         source_dir=opts.source_dir,
@@ -250,7 +261,7 @@ def _run_container_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
         inspect=opts.inspect,
         existing_results=opts.existing_results,
         python_based_plugins_only=opts.python_based_plugins_only,
-        fail_on_findings=opts.fail_on_findings,
+        fail_on_findings=effective_fail_on_findings,
         ash_revision_to_install=opts.ash_revision_to_install,
         custom_containerfile=opts.custom_containerfile,
         custom_build_arg=opts.custom_build_arg,
@@ -717,7 +728,7 @@ def run_ash_scan(
     config_fail_on_findings: Optional[bool] = _resolve_config_fail_on_findings(opts)
     results: Optional[AshAggregatedResults]
     if opts.mode == RunMode.container:
-        results = _run_container_mode(opts, logger)
+        results = _run_container_mode(opts, logger, resolved_fail_on_findings=config_fail_on_findings)
     else:
         results, _local_config_fof = _run_local_mode(opts, logger)
         # _run_local_mode resolves config via the live orchestrator; prefer that
