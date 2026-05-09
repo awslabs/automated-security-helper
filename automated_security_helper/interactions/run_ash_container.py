@@ -40,6 +40,9 @@ from automated_security_helper.utils.log import ASH_LOGGER
 # Pattern for safe git revision values: alphanumeric, dots, hyphens, underscores, forward slashes
 _SAFE_REVISION_PATTERN = re.compile(r"^[A-Za-z0-9._\-/]+$")
 
+# Discovery order for OCI runners (first found wins)
+_OCI_RUNNER_CANDIDATES = ["finch", "docker", "nerdctl", "podman"]
+
 
 def _validate_ash_revision(revision: str) -> bool:
     """Validate that an ASH revision string is safe for use as a Docker build-arg.
@@ -256,6 +259,367 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Private helpers extracted from run_ash_container
+# ---------------------------------------------------------------------------
+
+
+def _find_runner(name: str) -> str | None:
+    """Thin wrapper around find_executable used to enable test monkeypatching."""
+    try:
+        return subprocess_utils.find_executable(name)
+    except Exception:
+        ASH_LOGGER.debug(f"Unable to find {name} -- continuing")
+        return None
+
+
+def _resolve_oci_runner(oci_runner: str | None) -> str:
+    """Discover and return the path to an OCI runner.
+
+    Args:
+        oci_runner: Explicit runner name to use, or None to auto-discover.
+
+    Returns:
+        The resolved path to the OCI runner binary.
+
+    Raises:
+        RuntimeError: When no runner is found.
+    """
+    candidates = [oci_runner] if oci_runner else _OCI_RUNNER_CANDIDATES
+    for runner in candidates:
+        path = _find_runner(runner)
+        if path:
+            ASH_LOGGER.info(f"Resolved OCI_RUNNER to: {path}")
+            return path
+    raise RuntimeError("Unable to resolve an OCI runner")
+
+
+def _get_oci_wrapper_prefix() -> List[str]:
+    """Return the OCI_RUNNER_WRAPPER as a list suitable for command prefix."""
+    oci_wrapper = os.environ.get("OCI_RUNNER_WRAPPER", "").strip()
+    return shlex.split(oci_wrapper) if oci_wrapper else []
+
+
+def _find_dockerfile(resolved_revision: str | None) -> Path:
+    """Locate the Dockerfile to use for image builds.
+
+    Args:
+        resolved_revision: The resolved ASH revision string (or None).
+
+    Returns:
+        Path to the Dockerfile.
+
+    Raises:
+        FileNotFoundError: When the Dockerfile cannot be located.
+    """
+    if resolved_revision == "LOCAL":
+        dockerfile_path = Path.cwd().joinpath("Dockerfile")
+        if not dockerfile_path.exists():
+            current_path = Path.cwd().resolve()
+            while current_path.parent != current_path:
+                if (
+                    current_path.joinpath("Dockerfile").exists()
+                    and current_path.joinpath("pyproject.toml").exists()
+                ):
+                    dockerfile_path = current_path.joinpath("Dockerfile")
+                    break
+                current_path = current_path.parent
+    else:
+        cwd_dockerfile = Path.cwd().joinpath("Dockerfile")
+        if cwd_dockerfile.exists() and Path.cwd().joinpath("pyproject.toml").exists():
+            dockerfile_path = cwd_dockerfile
+            ASH_LOGGER.info(
+                f"Found Dockerfile in current directory, using LOCAL build context despite revision={resolved_revision}"
+            )
+        else:
+            dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
+
+    if not dockerfile_path.exists():
+        raise FileNotFoundError(f"Dockerfile not found at {dockerfile_path}")
+
+    return dockerfile_path
+
+
+def _build_image(
+    oci_command_prefix: List[str],
+    resolved_oci_runner: str,
+    dockerfile_path: Path,
+    image_name: str,
+    build_target: str,
+    container_uid: str,
+    container_gid: str,
+    resolved_revision: str | None,
+    offline: bool,
+    offline_semgrep_rulesets: str,
+    force: bool,
+    quiet: bool,
+    custom_build_arg: List[str],
+    debug: bool,
+) -> None:
+    """Build the base ASH container image.
+
+    Raises:
+        CalledProcessError: On non-zero exit from the build command.
+        Exception: On any other build failure.
+    """
+    typer.echo(
+        f"Building image {image_name} -- this may take a few minutes during the first build..."
+    )
+
+    build_cmd = [*oci_command_prefix, resolved_oci_runner, "build"]
+    build_cmd.extend(["--build-arg", f"UID={container_uid}"])
+    build_cmd.extend(["--build-arg", f"GID={container_gid}"])
+    build_cmd.extend(
+        [
+            "--tag",
+            image_name,
+            "--target",
+            build_target,
+            "--file",
+            dockerfile_path.as_posix(),
+            "--build-arg",
+            f"INSTALL_ASH_REVISION={resolved_revision}",
+            "--build-arg",
+            f"OFFLINE={'YES' if offline else 'NO'}",
+            "--build-arg",
+            f"OFFLINE_SEMGREP_RULESETS={offline_semgrep_rulesets}",
+            "--build-arg",
+            f"BUILD_DATE_EPOCH={int(datetime.now().timestamp())}",
+        ]
+    )
+
+    extra_args: List[str] = []
+    if force:
+        extra_args.append("--no-cache")
+    if quiet:
+        extra_args.append("-q")
+    build_cmd.extend(extra_args)
+    build_cmd.append(dockerfile_path.parent.as_posix())
+
+    if debug:
+        print(f"Running build command: {' '.join(str(a) for a in build_cmd)}")
+
+    result = run_cmd_direct(build_cmd, debug=debug)
+
+    if debug:
+        print(f"Build completed with return code: {result.returncode}")
+
+
+def _build_custom_image(
+    oci_command_prefix: List[str],
+    resolved_oci_runner: str,
+    base_image_name: str,
+    custom_containerfile: str,
+    quiet: bool,
+    debug: bool,
+) -> str:
+    """Build a custom image layered on top of the base ASH image.
+
+    Args:
+        base_image_name: Name of the base image to build on top of.
+        custom_containerfile: Path to the custom Containerfile/Dockerfile.
+
+    Returns:
+        The image name of the custom image.
+
+    Raises:
+        FileNotFoundError: When the custom containerfile does not exist.
+        CalledProcessError: On non-zero exit from the build command.
+    """
+    if not Path(custom_containerfile).exists():
+        raise FileNotFoundError(
+            f"Custom containerfile not found at {custom_containerfile}"
+        )
+
+    custom_build_cmd = [*oci_command_prefix, resolved_oci_runner, "build"]
+    custom_build_cmd.extend(
+        [
+            "--tag",
+            "automated-security-helper:custom",
+            "--file",
+            Path(custom_containerfile).as_posix(),
+            "--build-arg",
+            f"ASH_BASE_IMAGE={base_image_name}",
+        ]
+    )
+    if quiet:
+        custom_build_cmd.append("-q")
+    custom_build_cmd.append(Path(custom_containerfile).parent.as_posix())
+
+    result = run_cmd_direct(custom_build_cmd, debug=debug)
+
+    if debug:
+        print(f"Custom build completed with return code: {result.returncode}")
+
+    return "automated-security-helper:custom"
+
+
+def _assemble_run_command(
+    oci_command_prefix: List[str],
+    resolved_oci_runner: str,
+    image_name: str,
+    source_dir: Path,
+    output_dir: Path,
+    offline: bool,
+    debug: bool,
+    color: bool,
+    quiet: bool,
+    progress: bool,
+    verbose: bool,
+    simple: bool,
+    python_based_plugins_only: bool,
+    cleanup: bool,
+    inspect: bool,
+    fail_on_findings: bool | None,
+    phases: List,
+    scanners: List[str],
+    exclude_scanners: List[str],
+    output_formats: List,
+    config: str | None,
+    config_overrides: List[str],
+    existing_results: str | None,
+    ash_plugin_modules: List[str],
+    strategy,
+    ctx,
+) -> List[str]:
+    """Assemble the full `docker run` command list.
+
+    Returns:
+        A list of strings representing the complete run command.
+    """
+    cmd: List[str] = [*oci_command_prefix, resolved_oci_runner, "run", "--rm"]
+
+    # Environment variables
+    cmd.extend(
+        [
+            "-e", f"ASH_ACTUAL_SOURCE_DIR={source_dir}",
+            "-e", f"ASH_ACTUAL_OUTPUT_DIR={output_dir}",
+            "-e", f"ASH_DEBUG={'YES' if debug else 'NO'}",
+        ]
+    )
+
+    # Source dir mount
+    mount_source = f"type=bind,source={source_dir},destination=/src"
+    if not str(output_dir).startswith(str(source_dir)):
+        mount_source += ",readonly"
+    cmd.extend(["--mount", mount_source])
+
+    # Output dir mount
+    cmd.extend(["--mount", f"type=bind,source={output_dir},destination=/out"])
+
+    # Offline mode
+    if offline:
+        cmd.append("--network=none")
+        cmd.extend(["-e", "ASH_OFFLINE=YES"])
+
+    # Terminal size
+    try:
+        import shutil as _shutil
+        columns, lines = _shutil.get_terminal_size()
+        cmd.extend(["-e", f"COLUMNS={columns}", "-e", f"LINES={lines}"])
+    except Exception as e:
+        ASH_LOGGER.debug(f"Unable to determine terminal size via shutil: {e}")
+
+    if debug:
+        print(
+            f"TTY check (skipped): color={color}, stdout.isatty()={sys.stdout.isatty()}, stdin.isatty()={sys.stdin.isatty()}"
+        )
+
+    # Image name then ash subcommand
+    cmd.append(image_name)
+    cmd.append("ash")
+
+    # Core ASH path arguments
+    cmd.extend(["--source-dir", "/src", "--output-dir", "/out"])
+
+    # Build ash_args from context + parameters
+    ash_args: List[str] = []
+    if ctx and hasattr(ctx, "args"):
+        ash_args = list(ctx.args or [])
+
+    if quiet:
+        ash_args.append("--quiet")
+    if not progress:
+        ash_args.append("--no-progress")
+    if not color:
+        ash_args.append("--no-color")
+    if debug:
+        ash_args.append("--debug")
+    if verbose:
+        ash_args.append("--verbose")
+    if simple:
+        ash_args.append("--simple")
+    if python_based_plugins_only:
+        ash_args.append("--python-based-plugins-only")
+    if cleanup:
+        ash_args.append("--cleanup")
+    if inspect:
+        ash_args.append("--inspect")
+    if fail_on_findings:
+        ash_args.append("--fail-on-findings")
+    elif fail_on_findings is not None:
+        ash_args.append("--no-fail-on-findings")
+
+    for phase in phases:
+        ash_args.extend(["--phases", phase.value if hasattr(phase, "value") else str(phase)])
+
+    for scanner in scanners:
+        ash_args.extend(["--scanners", scanner])
+
+    for scanner in exclude_scanners:
+        ash_args.extend(["--exclude-scanners", scanner])
+
+    for fmt in output_formats:
+        ash_args.extend(["--output-formats", fmt.value if hasattr(fmt, "value") else str(fmt)])
+
+    if config:
+        ash_args.extend(["--config", config])
+
+    for override in config_overrides:
+        ash_args.extend(["--config-overrides", override])
+
+    if existing_results:
+        ash_args.extend(["--existing-results", existing_results])
+
+    for module in ash_plugin_modules:
+        ash_args.extend(["--ash-plugin-modules", module])
+
+    if strategy:
+        ash_args.extend(
+            ["--strategy", strategy.value if hasattr(strategy, "value") else str(strategy)]
+        )
+
+    ash_args.append("--no-show-summary")
+
+    cmd.extend(ash_args)
+    return cmd
+
+
+def _execute_container(cmd: List[str], debug: bool):
+    """Run the assembled container command and return the result.
+
+    Returns:
+        subprocess.CompletedProcess on success, CalledProcessError on failure.
+    """
+    typer.echo("Running ASH scan using built image...")
+    if debug:
+        print(f"Running container command: {' '.join(str(a) for a in cmd)}")
+    try:
+        result = run_cmd_direct(cmd, debug=debug)
+        if debug:
+            print(f"Container execution completed with return code: {result.returncode}")
+        return result
+    except CalledProcessError as e:
+        if debug:
+            print(f"Container execution failed with error: {e}")
+        return e
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
 def run_ash_container(
     ctx=None,
     source_dir: str | Path | None = None,
@@ -352,10 +716,7 @@ def run_ash_container(
         if not container_uid.isdigit():
             typer.secho("Container UID must be a numeric value", fg=typer.colors.RED)
             return create_completed_process(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr="Container UID must be a numeric value",
+                args=[], returncode=1, stdout="", stderr="Container UID must be a numeric value",
             )
     else:
         container_uid = str(host_uid)
@@ -364,48 +725,26 @@ def run_ash_container(
         if not container_gid.isdigit():
             typer.secho("Container GID must be a numeric value", fg=typer.colors.RED)
             return create_completed_process(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr="Container GID must be a numeric value",
+                args=[], returncode=1, stdout="", stderr="Container GID must be a numeric value",
             )
     else:
         container_gid = str(host_gid)
 
     # Resolve OCI runner
-    resolved_oci_runner = None
-    runners = [oci_runner] if oci_runner else ["docker", "finch", "nerdctl", "podman"]
-
-    for runner in runners:
-        try:
-            exists = subprocess_utils.find_executable(runner)
-            if not exists:
-                continue
-            resolved_oci_runner = exists
-            break
-        except Exception:
-            ASH_LOGGER.debug(f"Unable to find {runner} -- continuing")
-            continue
-
-    if not resolved_oci_runner:
-        typer.secho("Unable to resolve an OCI runner -- exiting", fg=typer.colors.RED)
+    try:
+        resolved_oci_runner = _resolve_oci_runner(oci_runner)
+    except RuntimeError as e:
+        typer.secho(str(e), fg=typer.colors.RED)
         return create_completed_process(
-            args=[], returncode=1, stdout="", stderr="Unable to resolve an OCI runner"
+            args=[], returncode=1, stdout="", stderr=str(e)
         )
 
-    ASH_LOGGER.info(f"Resolved OCI_RUNNER to: {resolved_oci_runner}")
+    oci_command_prefix = _get_oci_wrapper_prefix()
 
-    # OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER for cargo)
-    oci_wrapper = os.environ.get("OCI_RUNNER_WRAPPER", "").strip()
-    oci_command_prefix = shlex.split(oci_wrapper) if oci_wrapper else []
-
-    # Get ASH root directory
+    # Resolve ASH revision
     rev = get_ash_revision()
-    resolved_revision = (
-        ash_revision_to_install if ash_revision_to_install is not None else rev
-    )
+    resolved_revision = ash_revision_to_install if ash_revision_to_install is not None else rev
 
-    # Validate the revision string to prevent shell metacharacter injection
     if resolved_revision is not None and resolved_revision != "LOCAL":
         if not _validate_ash_revision(resolved_revision):
             typer.secho(
@@ -415,53 +754,21 @@ def run_ash_container(
                 fg=typer.colors.RED,
             )
             return create_completed_process(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr=f"Invalid ASH revision value: {resolved_revision!r}",
+                args=[], returncode=1, stdout="", stderr=f"Invalid ASH revision value: {resolved_revision!r}",
             )
 
-    if resolved_revision == "LOCAL":
-        # For LOCAL builds, use current working directory as repository root
-        # This handles cases where ASH is installed via pip but we're running from the repo
-        dockerfile_path = Path.cwd().joinpath("Dockerfile")
-
-        # If not found in current directory, search upwards
-        if not dockerfile_path.exists():
-            current_path = Path.cwd().resolve()
-            while current_path.parent != current_path:
-                if (
-                    current_path.joinpath("Dockerfile").exists()
-                    and current_path.joinpath("pyproject.toml").exists()
-                ):
-                    dockerfile_path = current_path.joinpath("Dockerfile")
-                    break
-                current_path = current_path.parent
-    else:
-        # When not LOCAL, check if we're in a repo directory anyway (e.g., running from cloned repo)
-        # This handles the case where uvx installs ASH but user is in the actual repo directory
-        cwd_dockerfile = Path.cwd().joinpath("Dockerfile")
-        if cwd_dockerfile.exists() and Path.cwd().joinpath("pyproject.toml").exists():
-            dockerfile_path = cwd_dockerfile
-            ASH_LOGGER.info(
-                f"Found Dockerfile in current directory, using LOCAL build context despite revision={resolved_revision}"
-            )
-        else:
-            dockerfile_path = ASH_ASSETS_DIR.joinpath("Dockerfile")
-
-    if not dockerfile_path.exists():
-        typer.secho(f"Dockerfile not found at {dockerfile_path}", fg=typer.colors.RED)
+    # Resolve Dockerfile path
+    try:
+        dockerfile_path = _find_dockerfile(resolved_revision)
+    except FileNotFoundError as e:
+        typer.secho(str(e), fg=typer.colors.RED)
         return create_completed_process(
-            args=[],
-            returncode=1,
-            stdout="",
-            stderr=f"Dockerfile not found at {dockerfile_path}",
+            args=[], returncode=1, stdout="", stderr=str(e)
         )
 
-    # Set image name from environment or use default
+    # Resolve build target
     resolved_build_target = (
         "ci"
-        # Force CI if a custom containerfile was provided
         if (
             custom_containerfile is not None
             or os.environ.get(
@@ -485,109 +792,35 @@ def run_ash_container(
         "ASH_IMAGE_NAME", f"automated-security-helper:{resolved_build_target}"
     )
 
-    # Build the image if the --build flag is set
+    # Build phase
     if build:
-        typer.echo(
-            f"Building image {ash_base_image_name} -- this may take a few minutes during the first build..."
-        )
-
-        # Prepare build command
-        build_cmd = [
-            *oci_command_prefix,
-            resolved_oci_runner,
-            "build",
-        ]
-
-        # Add other build args
-        # Add UID/GID build args
-        build_cmd.extend(["--build-arg", f"UID={container_uid}"])
-        build_cmd.extend(["--build-arg", f"GID={container_gid}"])
-
-        build_cmd.extend(
-            [
-                "--tag",
-                ash_base_image_name,
-                "--target",
-                resolved_build_target,
-                "--file",
-                dockerfile_path.as_posix(),
-                "--build-arg",
-                f"INSTALL_ASH_REVISION={resolved_revision}",
-                "--build-arg",
-                f"OFFLINE={'YES' if offline else 'NO'}",
-                "--build-arg",
-                f"OFFLINE_SEMGREP_RULESETS={offline_semgrep_rulesets}",
-                "--build-arg",
-                f"BUILD_DATE_EPOCH={int(datetime.now().timestamp())}",
-            ]
-        )
-
-        # Add extra build args
-        docker_extra_args = []
-        # Set environment variables for color output
-        if force:
-            docker_extra_args.append("--no-cache")
-        if quiet:
-            docker_extra_args.append("-q")
-
-        # Add any extra args
-        build_cmd.extend(docker_extra_args)
-
-        # Add the build context
-        build_cmd.append(dockerfile_path.parent.as_posix())
-
         try:
-            if debug:
-                print(
-                    f"Building image {ash_base_image_name} -- this may take a few minutes during the first build..."
-                )
-                print(
-                    f"Running build command: {' '.join(str(arg) for arg in build_cmd)}"
-                )
-
-            build_result = run_cmd_direct(build_cmd, debug=debug)
-
-            if debug:
-                print(f"Build completed with return code: {build_result.returncode}")
+            _build_image(
+                oci_command_prefix=oci_command_prefix,
+                resolved_oci_runner=resolved_oci_runner,
+                dockerfile_path=dockerfile_path,
+                image_name=ash_base_image_name,
+                build_target=resolved_build_target,
+                container_uid=container_uid,
+                container_gid=container_gid,
+                resolved_revision=resolved_revision,
+                offline=offline,
+                offline_semgrep_rulesets=offline_semgrep_rulesets,
+                force=force,
+                quiet=quiet,
+                custom_build_arg=custom_build_arg,
+                debug=debug,
+            )
 
             if custom_containerfile is not None:
-                if not Path(custom_containerfile).exists():
-                    raise FileNotFoundError(
-                        f"Custom containerfile not found at {custom_containerfile}"
-                    )
-
-                # Prepare build command
-                custom_build_cmd = [
-                    *oci_command_prefix,
-                    resolved_oci_runner,
-                    "build",
-                ]
-
-                custom_build_cmd.extend(
-                    [
-                        "--tag",
-                        "automated-security-helper:custom",
-                        "--file",
-                        Path(custom_containerfile).as_posix(),
-                        "--build-arg",
-                        f"ASH_BASE_IMAGE={ash_base_image_name}",
-                    ]
+                ash_base_image_name = _build_custom_image(
+                    oci_command_prefix=oci_command_prefix,
+                    resolved_oci_runner=resolved_oci_runner,
+                    base_image_name=ash_base_image_name,
+                    custom_containerfile=custom_containerfile,
+                    quiet=quiet,
+                    debug=debug,
                 )
-                # Add any extra args (do not map --no-cache at this point, we need
-                # to build on top of the base image that was built just before this.
-                if quiet:
-                    custom_build_cmd.append("-q")
-
-                # Add the build context
-                custom_build_cmd.append(Path(custom_containerfile).parent.as_posix())
-
-                # Actually execute the custom build command
-                custom_build_result = run_cmd_direct(custom_build_cmd, debug=debug)
-                # Override the image name so the run phase uses the custom image
-                ash_base_image_name = "automated-security-helper:custom"
-
-                if debug:
-                    print(f"Custom build completed with return code: {custom_build_result.returncode}")
 
         except Exception as e:
             typer.secho(f"Error building ASH image: {e}", fg=typer.colors.RED)
@@ -599,12 +832,11 @@ def run_ash_container(
             if isinstance(e, CalledProcessError):
                 return e
             return create_completed_process(
-                args=build_cmd, returncode=1, stdout="", stderr=str(e)
+                args=[], returncode=1, stdout="", stderr=str(e)
             )
 
-    # Run the image if the --run flag is set
+    # Run phase
     if run:
-        # Validate source directory
         if source_dir:
             try:
                 source_dir = validate_path(source_dir)
@@ -614,203 +846,55 @@ def run_ash_container(
                     args=[], returncode=1, stdout="", stderr=str(e)
                 )
 
-        # Set default source directory if not provided
         if not source_dir:
             source_dir = Path.cwd()
             ASH_LOGGER.info(f"Using current directory as source: {source_dir}")
 
-        # Validate output directory
         if output_dir:
             try:
-                # Create output directory if it doesn't exist
                 output_dir = Path(output_dir)
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_dir = output_dir.resolve()
             except Exception as e:
-                typer.secho(
-                    f"Error creating output directory: {e}", fg=typer.colors.RED
-                )
+                typer.secho(f"Error creating output directory: {e}", fg=typer.colors.RED)
                 return create_completed_process(
                     args=[], returncode=1, stdout="", stderr=str(e)
                 )
         else:
-            # Default to ash_output in the source directory
             output_dir = source_dir.joinpath("ash_output")
             output_dir.mkdir(parents=True, exist_ok=True)
             ASH_LOGGER.info(f"Using default output directory: {output_dir}")
 
-        run_cmd = [
-            *oci_command_prefix,
-            resolved_oci_runner,
-            "run",
-            "--rm",
-        ]
-
-        # Add environment variables
-        run_cmd.extend(
-            [
-                "-e",
-                f"ASH_ACTUAL_SOURCE_DIR={source_dir}",
-                "-e",
-                f"ASH_ACTUAL_OUTPUT_DIR={output_dir}",
-                "-e",
-                f"ASH_DEBUG={'YES' if debug else 'NO'}",
-            ]
+        run_cmd = _assemble_run_command(
+            oci_command_prefix=oci_command_prefix,
+            resolved_oci_runner=resolved_oci_runner,
+            image_name=ash_base_image_name,
+            source_dir=source_dir,
+            output_dir=output_dir,
+            offline=offline,
+            debug=debug,
+            color=color,
+            quiet=quiet,
+            progress=progress,
+            verbose=verbose,
+            simple=simple,
+            python_based_plugins_only=python_based_plugins_only,
+            cleanup=cleanup,
+            inspect=inspect,
+            fail_on_findings=fail_on_findings,
+            phases=phases,
+            scanners=scanners,
+            exclude_scanners=exclude_scanners,
+            output_formats=output_formats,
+            config=config,
+            config_overrides=config_overrides,
+            existing_results=existing_results,
+            ash_plugin_modules=ash_plugin_modules,
+            strategy=strategy,
+            ctx=ctx,
         )
 
-        # Add mount for source directory
-        mount_source_dir = f"type=bind,source={source_dir},destination=/src"
+        return _execute_container(run_cmd, debug=debug)
 
-        # Only make source dir readonly if output dir is not a subdirectory
-        if output_dir and not str(output_dir).startswith(str(source_dir)):
-            mount_source_dir += ",readonly"
-
-        run_cmd.extend(["--mount", mount_source_dir])
-
-        # Add mount for output directory
-        run_cmd.extend(["--mount", f"type=bind,source={output_dir},destination=/out"])
-
-        # Add offline mode flag
-        if offline:
-            run_cmd.append("--network=none")
-            run_cmd.extend(["-e", "ASH_OFFLINE=YES"])
-
-        # Add terminal size environment variables
-        try:
-            import shutil
-
-            columns, lines = shutil.get_terminal_size()
-            run_cmd.extend(["-e", f"COLUMNS={columns}", "-e", f"LINES={lines}"])
-        except Exception as e:
-            ASH_LOGGER.debug(f"Unable to determine terminal size via shutil: {e}")
-
-        # Skip -t flag entirely — the container sets ASH_IN_CONTAINER=YES which
-        # disables the progress bar, so a pseudo-TTY is unnecessary. Finch/nerdctl
-        # (via Lima VM) often rejects -t with "provided file is not a console" even
-        # when isatty() returns True on the host, because the fd doesn't survive the
-        # Lima VM boundary. Docker is more lenient but also doesn't need it.
-        if debug:
-            print(
-                f"TTY check (skipped): color={color}, stdout.isatty()={sys.stdout.isatty()}, stdin.isatty()={sys.stdin.isatty()}"
-            )
-
-        # Add image name
-        run_cmd.append(ash_base_image_name)
-
-        # Add ASH command
-        run_cmd.append("ash")
-
-        # Add ASH arguments
-        run_cmd.extend(["--source-dir", "/src", "--output-dir", "/out"])
-
-        # Add additional ASH arguments
-        if ctx and hasattr(ctx, "args"):
-            ash_args = ctx.args or []
-        else:
-            ash_args = []
-
-        # Add parameters based on function arguments
-        if quiet:
-            ash_args.append("--quiet")
-        if not progress:
-            ash_args.append("--no-progress")
-        if not color:
-            ash_args.append("--no-color")
-        if debug:
-            ash_args.append("--debug")
-        if verbose:
-            ash_args.append("--verbose")
-        if simple:
-            ash_args.append("--simple")
-        if python_based_plugins_only:
-            ash_args.append("--python-based-plugins-only")
-        if cleanup:
-            ash_args.append("--cleanup")
-        if inspect:
-            ash_args.append("--inspect")
-        if fail_on_findings:
-            ash_args.append("--fail-on-findings")
-        elif fail_on_findings is not None:
-            ash_args.append("--no-fail-on-findings")
-
-        # Add phases if specified
-        if phases:
-            for phase in phases:
-                if hasattr(phase, "value"):
-                    ash_args.extend(["--phases", phase.value])
-                else:
-                    ash_args.extend(["--phases", str(phase)])
-
-        # Add scanners if specified
-        if scanners:
-            for scanner in scanners:
-                ash_args.extend(["--scanners", scanner])
-
-        # Add exclude_scanners if specified
-        if exclude_scanners:
-            for scanner in exclude_scanners:
-                ash_args.extend(["--exclude-scanners", scanner])
-
-        # Add output formats if specified
-        if output_formats:
-            for format in output_formats:
-                if hasattr(format, "value"):
-                    ash_args.extend(["--output-formats", format.value])
-                else:
-                    ash_args.extend(["--output-formats", str(format)])
-
-        # Add config if specified
-        if config:
-            ash_args.extend(["--config", config])
-
-        # Add config overrides if specified
-        if config_overrides:
-            for override in config_overrides:
-                ash_args.extend(["--config-overrides", override])
-
-        # Add existing results if specified
-        if existing_results:
-            ash_args.extend(["--existing-results", existing_results])
-
-        # Add ash_plugin_modules if specified
-        if ash_plugin_modules:
-            for module in ash_plugin_modules:
-                ash_args.extend(["--ash-plugin-modules", module])
-
-        # Add strategy if not default
-        if strategy:
-            if hasattr(strategy, "value"):
-                ash_args.extend(["--strategy", strategy.value])
-            else:
-                ash_args.extend(["--strategy", str(strategy)])
-
-        ash_args.append("--no-show-summary")
-
-        # Add any additional ASH arguments
-        run_cmd.extend(ash_args)
-
-        typer.echo("Running ASH scan using built image...")
-        try:
-            # Print the full command if debug is enabled
-            if debug:
-                print(
-                    f"Running container command: {' '.join(str(arg) for arg in run_cmd)}"
-                )
-
-            run_result = run_cmd_direct(run_cmd, debug=debug)
-
-            if debug:
-                print(
-                    f"Container execution completed with return code: {run_result.returncode}"
-                )
-
-            # Return the result instead of exiting
-            return run_result
-        except CalledProcessError as e:
-            # Return the error instead of exiting
-            if debug:
-                print(f"Container execution failed with error: {e}")
-            return e
-
-    # If we only built but didn't run, return a success result
+    # Built but not run
     return create_completed_process(args=[], returncode=0, stdout="", stderr="")
