@@ -17,12 +17,11 @@ class TestBug94CustomContainerfileSilentlyIgnored:
 
     def test_custom_build_cmd_is_executed(self):
         from automated_security_helper.interactions.run_ash_container import (
-            run_ash_container,
+            _build_custom_image,
         )
 
-        source = inspect.getsource(run_ash_container)
-        # After the custom_build_cmd is assembled, we must find
-        # run_cmd_direct(custom_build_cmd ...) invocation
+        source = inspect.getsource(_build_custom_image)
+        # The helper must call run_cmd_direct with the assembled command
         assert "run_cmd_direct(custom_build_cmd" in source, (
             "custom_build_cmd is constructed but never passed to run_cmd_direct"
         )
@@ -36,10 +35,10 @@ class TestBug95OfflineFlagNotForwarded:
 
     def test_offline_env_var_set_in_run_cmd(self):
         from automated_security_helper.interactions.run_ash_container import (
-            run_ash_container,
+            _assemble_run_command,
         )
 
-        source = inspect.getsource(run_ash_container)
+        source = inspect.getsource(_assemble_run_command)
         assert "ASH_OFFLINE" in source, (
             "ASH_OFFLINE environment variable not forwarded to container"
         )
