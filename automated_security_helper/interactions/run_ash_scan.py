@@ -116,6 +116,7 @@ def run_ash_scan(
     custom_containerfile: str | None = None,
     custom_build_arg: List[str] | None = None,
     ash_plugin_modules: List[str] | None = None,
+    container_network: str = "bridge",
     *args,
     **kwargs,
 ):
@@ -238,6 +239,7 @@ def run_ash_scan(
             custom_containerfile=custom_containerfile,
             custom_build_arg=custom_build_arg,
             ash_plugin_modules=ash_plugin_modules,
+            container_network=container_network,
         )
 
         # Add debug output to print the full command
@@ -325,10 +327,10 @@ def run_ash_scan(
 
 
             if not quiet and not simple:
-                logger.verbose(f"Source directory: {source_dir.as_posix()}")  # type: ignore[attr-defined]
-                logger.verbose(f"Output directory: {output_dir.as_posix()}")  # type: ignore[attr-defined]
-                logger.verbose(f"Scanners specified: {scanners}")  # type: ignore[attr-defined]
-                logger.verbose(f"Scanners excluded: {exclude_scanners}")  # type: ignore[attr-defined]
+                logger.verbose(f"Source directory: {source_dir.as_posix()}")
+                logger.verbose(f"Output directory: {output_dir.as_posix()}")
+                logger.verbose(f"Scanners specified: {scanners}")
+                logger.verbose(f"Scanners excluded: {exclude_scanners}")
 
             if config is None:
                 for config_file in ASH_CONFIG_FILE_NAMES:
@@ -383,7 +385,7 @@ def run_ash_scan(
                 ]
             )
 
-            orchestrator = ASHScanOrchestrator(
+            orchestrator = ASHScanOrchestrator.create(
                 source_dir=source_dir,
                 output_dir=output_dir,
                 work_dir=output_dir.joinpath(ASH_WORK_DIR_NAME),
