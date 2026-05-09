@@ -128,10 +128,6 @@ def format_duration(duration_seconds: Optional[float]) -> str:
         total_minutes = int(duration_seconds) // 60
         seconds = int(duration_seconds) % 60
 
-        # Special case for test compatibility
-        if total_minutes == 61 and seconds == 1:
-            return "61m 1s"
-
         hours, minutes = divmod(total_minutes, 60)
 
         if hours > 0:
