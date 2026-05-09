@@ -19,6 +19,7 @@ from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
     is_offline_mode,
 )
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.core.progress import ExecutionPhaseType
@@ -471,6 +472,11 @@ def run_ash_scan(
                 f.write(content)
 
 
+        except ASHConfigValidationError as e:
+            print(
+                f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]",
+            )
+            sys.exit(3)
         except Exception as e:
             logger.exception(e)
             print(

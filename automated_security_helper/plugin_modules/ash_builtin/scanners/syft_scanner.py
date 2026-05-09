@@ -1,13 +1,15 @@
-import logging
 """Module containing the Syft security scanner implementation."""
 
 import json
+import logging
+import os
 from pathlib import Path
 from typing import Annotated, List, Literal
 
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
@@ -55,6 +57,13 @@ class SyftScannerConfigOptions(ScannerOptionsBase):
             description="List of additional formats to output. Defaults to syft-table."
         ),
     ] = ["syft-table"]
+    offline: Annotated[
+        bool,
+        Field(
+            description="Run in offline mode, disabling update checks",
+            default_factory=is_offline_mode,
+        ),
+    ]
 
 
 class SyftScannerConfig(ScannerPluginConfigBase):
@@ -62,18 +71,36 @@ class SyftScannerConfig(ScannerPluginConfigBase):
     enabled: bool = True
     options: Annotated[
         SyftScannerConfigOptions, Field(description="Configure Syft scanner")
-    ] = SyftScannerConfigOptions()
+    ] = SyftScannerConfigOptions()  # type: ignore[call-arg]
 
 
 @ash_scanner_plugin
 class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     """SyftScanner implements IaC scanning using Syft."""
 
+    # Env vars to layer onto the subprocess. Populated in model_post_init when
+    # offline mode is active. Kept local to the scanner instance so concurrent
+    # scanners don't race on os.environ.
+    extra_env: Annotated[dict, Field(default_factory=dict)]
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = SyftScannerConfig()
         self.command = "syft"
         self.tool_type = ScannerToolType.SBOM
+
+        syft_config: SyftScannerConfig = self.config  # type: ignore[assignment]
+        if syft_config.options.offline:
+            self.extra_env.update(
+                {
+                    "SYFT_CHECK_FOR_APP_UPDATE": "false",
+                    "SYFT_LOG_QUIET": "true",
+                }
+            )
+            ASH_LOGGER.info(
+                "Running Syft in offline mode - update checks disabled"
+            )
+
         super().model_post_init(context)
 
     @model_validator(mode="after")
@@ -224,9 +251,13 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             final_args = self._resolve_arguments(
                 target=target,
             )
+            subprocess_env = (
+                {**os.environ, **self.extra_env} if self.extra_env else None
+            )
             self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
+                env=subprocess_env,
             )
 
             self._post_scan(
@@ -253,7 +284,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
 
 if __name__ == "__main__":
-    scanner = SyftScanner(
+    scanner = SyftScanner(  # type: ignore[call-arg]
         source_dir=Path.cwd(),
         output_dir=Path.cwd().joinpath(".ash", "ash_output"),
     )
