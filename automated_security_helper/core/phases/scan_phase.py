@@ -293,40 +293,47 @@ class ScanPhase(EnginePhase):
 
                             continue
 
-                        # Check if scanner is enabled and if python_based_plugins_only is set, check if it's a Python-only scanner
-                        is_enabled = hasattr(
-                            plugin_instance.config, "enabled"
-                        ) and bool(plugin_instance.config.enabled)
+                        # Use the shared helper for the enabled + python_only check.
+                        # validate_plugin_dependencies is already checked above with full tracking.
+                        # The helper also calls validate_plugin_dependencies internally; since
+                        # we already know deps are satisfied at this point, the second call is
+                        # a no-op that always returns True and does not change state.
                         is_in_enabled_scanners = (
                             not enabled_scanners
                             or display_name.lower().strip()
                             in [s.lower().strip() for s in enabled_scanners]
                         )
 
+                        passes_enabled_and_python = bool(
+                            self.filter_enabled_plugins(
+                                plugin_instances=[plugin_instance],
+                                plugin_context=self.plugin_context,
+                                python_only=python_based_plugins_only,
+                            )
+                        )
+
+                        is_enabled = hasattr(
+                            plugin_instance.config, "enabled"
+                        ) and bool(plugin_instance.config.enabled)
+                        is_python_only_scanner = (
+                            plugin_instance.is_python_only()
+                            if python_based_plugins_only
+                            else True
+                        )
+
                         ASH_LOGGER.debug(
                             f"Scanner {display_name}: enabled={is_enabled}, in_enabled_list={is_in_enabled_scanners}"
                         )
-
-                        # Add debug logging for python_based_plugins_only check
-                        is_python_only_scanner = True  # Default to True to allow all scanners if not checking
                         if python_based_plugins_only:
-                            is_python_only_scanner = plugin_instance.is_python_only()
                             ASH_LOGGER.info(
                                 f"Scanner {display_name}: Python-only check result: {is_python_only_scanner}"
                             )
 
-                        final_check = (
-                            is_enabled
-                            and is_in_enabled_scanners
-                            and (
-                                not python_based_plugins_only or is_python_only_scanner
-                            )
-                        )
+                        final_check = passes_enabled_and_python and is_in_enabled_scanners
                         ASH_LOGGER.debug(
                             f"Scanner {display_name}: final check result: {final_check}"
                         )
 
-                        # Add detailed logging for debugging scanner filtering issues
                         ASH_LOGGER.debug(
                             f"Scanner {display_name} filtering details: "
                             f"is_enabled={is_enabled}, "
