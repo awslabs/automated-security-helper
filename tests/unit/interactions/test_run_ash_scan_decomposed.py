@@ -303,6 +303,6 @@ class TestRunLocalModeNoChdir:
                     # _run_local_mode writes results to disk — patch open
                     with patch("builtins.open", MagicMock()):
                         with patch("pathlib.Path.exists", return_value=False):
-                            result = _run_local_mode(opts, mock_logger)
+                            result, _cfg_fof = _run_local_mode(opts, mock_logger)
 
         assert result is mock_results
