@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from pydantic import ValidationError
 import yaml
@@ -8,6 +8,21 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.utils.log import ASH_LOGGER
+
+
+def find_config_file(search_dir: Path | None = None) -> Optional[Path]:
+    """Search for an ASH config file in search_dir, then search_dir/.ash/.
+
+    Iterates ASH_CONFIG_FILE_NAMES in order; checks the directory itself first,
+    then the .ash/ subdirectory. Returns the first match, or None.
+    """
+    if search_dir is None:
+        search_dir = Path.cwd()
+    for name in ASH_CONFIG_FILE_NAMES:
+        for candidate in [search_dir / name, search_dir / ".ash" / name]:
+            if candidate.exists():
+                return candidate
+    return None
 
 
 def _apply_config_override(
