@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 from subprocess import (
     CalledProcessError,
 )  # nosec B404 - Using the exception class to evaluate subprocess invocations
@@ -481,6 +482,7 @@ def _assemble_run_command(
     ash_plugin_modules: List[str],
     strategy,
     ctx,
+    container_network: str = "bridge",
 ) -> List[str]:
     """Assemble the full `docker run` command list.
 
@@ -507,23 +509,25 @@ def _assemble_run_command(
     # Output dir mount
     cmd.extend(["--mount", f"type=bind,source={output_dir},destination=/out"])
 
-    # Offline mode
-    if offline:
+    # Network: offline always uses none; container_network overrides otherwise
+    if offline or container_network == "none":
         cmd.append("--network=none")
+    elif container_network and container_network != "bridge":
+        cmd.append(f"--network={container_network}")
+    if offline:
         cmd.extend(["-e", "ASH_OFFLINE=YES"])
 
-    # Terminal size
+    # Terminal size passthrough (matches ./ash lines 190-191)
     try:
-        import shutil as _shutil
-        columns, lines = _shutil.get_terminal_size()
+        columns, lines = shutil.get_terminal_size()
         cmd.extend(["-e", f"COLUMNS={columns}", "-e", f"LINES={lines}"])
     except Exception as e:
         ASH_LOGGER.debug(f"Unable to determine terminal size via shutil: {e}")
 
-    if debug:
-        print(
-            f"TTY check (skipped): color={color}, stdout.isatty()={sys.stdout.isatty()}, stdin.isatty()={sys.stdin.isatty()}"
-        )
+    # TTY flag: attach pseudo-TTY when stdout is a terminal and color is on
+    # (matches ./ash lines 193-195: COLOR_OUTPUT=true && [ -t 1 ])
+    if color and sys.stdout.isatty():
+        cmd.append("-t")
 
     # Image name then ash subcommand
     cmd.append(image_name)
@@ -657,6 +661,7 @@ def run_ash_container(
     custom_containerfile: str | None = None,
     custom_build_arg: List[str] | None = None,
     ash_plugin_modules: List[str] | None = None,
+    container_network: str = "bridge",
 ):
     """Build and run the ASH container image.
 
@@ -892,6 +897,7 @@ def run_ash_container(
             ash_plugin_modules=ash_plugin_modules,
             strategy=strategy,
             ctx=ctx,
+            container_network=container_network,
         )
 
         return _execute_container(run_cmd, debug=debug)
