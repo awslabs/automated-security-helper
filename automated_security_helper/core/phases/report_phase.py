@@ -57,9 +57,8 @@ class ReportPhase(EnginePhase):
         # Create a list of reporter classes
         reporter_classes = self.plugins
 
-        # Filter enabled reporters and those matching requested formats
-        enabled_reporters = []
-        enabled_reporter_names = []
+        # Create all reporter instances upfront, then filter via the shared helper.
+        all_reporter_instances = []
         for plugin_class in reporter_classes:
             try:
                 plugin_name = getattr(plugin_class, "__name__", "Unknown")
@@ -71,56 +70,46 @@ class ReportPhase(EnginePhase):
                     if self.plugin_context.config is not None
                     else None
                 )
-                # Create temporary instance to check config
                 plugin_instance = plugin_class(
                     context=self.plugin_context,
                     config=plugin_config,
                 )
-                # Use the configured name if available
-                display_name = plugin_name
-                if hasattr(plugin_instance, "config") and hasattr(
-                    plugin_instance.config, "name"
-                ):
-                    display_name = plugin_instance.config.name
+                all_reporter_instances.append(plugin_instance)
+            except Exception as e:
+                ASH_LOGGER.error(
+                    f"Error creating reporter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
+                )
 
-                # Check if enabled
-                if hasattr(plugin_instance, "config") and hasattr(
-                    plugin_instance.config, "enabled"
-                ):
-                    if not plugin_instance.config.enabled:
-                        ASH_LOGGER.debug(
-                            f"Reporter {display_name} is disabled, skipping"
-                        )
-                        continue
+        base_filtered = self.filter_enabled_plugins(
+            plugin_instances=all_reporter_instances,
+            plugin_context=self.plugin_context,
+            python_only=python_based_plugins_only,
+        )
 
-                # Check if python_based_plugins_only is set and if the reporter is Python-only
-                if python_based_plugins_only and not plugin_instance.is_python_only():
+        # Apply the format filter on top of the base enabled/deps/python check.
+        enabled_reporters = []
+        enabled_reporter_names = []
+        for plugin_instance in base_filtered:
+            display_name = plugin_instance.__class__.__name__
+            if hasattr(plugin_instance, "config") and hasattr(
+                plugin_instance.config, "name"
+            ):
+                display_name = plugin_instance.config.name
+
+            if (
+                output_formats
+                and hasattr(plugin_instance, "config")
+                and hasattr(plugin_instance.config, "extension")
+            ):
+                extension = plugin_instance.config.extension
+                if extension not in output_formats:
                     ASH_LOGGER.debug(
-                        f"Reporter {display_name} is not Python-only, skipping due to python_based_plugins_only flag"
+                        f"Reporter {display_name} format '{extension}' not in requested formats {output_formats}, skipping"
                     )
                     continue
 
-                # Check if format matches requested formats
-                if (
-                    output_formats
-                    and hasattr(plugin_instance, "config")
-                    and hasattr(plugin_instance.config, "extension")
-                ):
-                    extension = plugin_instance.config.extension
-                    if extension not in output_formats:
-                        ASH_LOGGER.debug(
-                            f"Reporter {display_name} format '{extension}' not in requested formats {output_formats}, skipping"
-                        )
-                        continue
-
-                # If we got here, the reporter is enabled and matches requested formats
-                enabled_reporters.append(plugin_class)
-                enabled_reporter_names.append(display_name)
-
-            except Exception as e:
-                ASH_LOGGER.error(
-                    f"Error checking reporter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
-                )
+            enabled_reporters.append(plugin_instance)
+            enabled_reporter_names.append(display_name)
 
         ASH_LOGGER.verbose(
             f"Prepared {len(enabled_reporter_names)} enabled reporters: {enabled_reporter_names}"
@@ -151,9 +140,9 @@ class ReportPhase(EnginePhase):
             ASH_LOGGER.debug(
                 f"Processing {len(enabled_reporters)} enabled reporter classes"
             )
-            for plugin_class in enabled_reporters:
+            for plugin_instance in enabled_reporters:
                 try:
-                    plugin_name = getattr(plugin_class, "__name__", "Unknown")
+                    plugin_name = plugin_instance.__class__.__name__
                     ASH_LOGGER.debug(f"Initializing reporter: {plugin_name}")
 
                     # Create a task for this reporter
@@ -161,19 +150,6 @@ class ReportPhase(EnginePhase):
                         phase=ExecutionPhase.REPORT,
                         description=f"Starting reporter: {plugin_name}",
                         total=100,
-                    )
-
-                    # Create reporter instance with context and config
-                    plugin_instance = plugin_class(
-                        context=self.plugin_context,
-                        config=(
-                            self.plugin_context.config.get_plugin_config(
-                                plugin_type="reporter",
-                                plugin_name=plugin_name.lower(),
-                            )
-                            if self.plugin_context.config is not None
-                            else None
-                        ),
                     )
 
                     # Use the configured name if available
@@ -210,7 +186,7 @@ class ReportPhase(EnginePhase):
                         self.notify_event(
                             AshEventType.REPORT_START,
                             reporter=display_name,
-                            reporter_class=plugin_class.__name__,
+                            reporter_class=plugin_instance.__class__.__name__,
                             message=f"Starting reporter: {display_name}",
                         )
                     except Exception as event_error:
@@ -258,7 +234,7 @@ class ReportPhase(EnginePhase):
                             self.notify_event(
                                 AshEventType.REPORT_COMPLETE,
                                 reporter=display_name,
-                                reporter_class=plugin_class.__name__,
+                                reporter_class=plugin_instance.__class__.__name__,
                                 output_file=str(output_file),
                                 output_filename=output_filename,
                                 message=f"Reporter {display_name} completed: {output_filename}",
@@ -289,7 +265,7 @@ class ReportPhase(EnginePhase):
                             self.notify_event(
                                 AshEventType.REPORT_COMPLETE,
                                 reporter=display_name,
-                                reporter_class=plugin_class.__name__,
+                                reporter_class=plugin_instance.__class__.__name__,
                                 output_file=None,
                                 output_filename=None,
                                 message=f"Reporter {display_name} completed: no report generated",
