@@ -286,7 +286,7 @@ class ASHScanOrchestrator(BaseModel):
                 for working_dir in ["analysis", "reports", "scanners", "converted"]:
                     path_working_dir = self.output_dir.joinpath(working_dir)
                     if path_working_dir.exists() and self.existing_results_path is None:
-                        ASH_LOGGER.verbose(  # type: ignore[attr-defined]
+                        ASH_LOGGER.verbose(
                             f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
                         )
                         shutil.rmtree(path_working_dir)
@@ -309,11 +309,11 @@ class ASHScanOrchestrator(BaseModel):
         """
         if phases is None:
             phases = ["convert", "scan", "report"]
-        ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")  # type: ignore[attr-defined]
-        ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")  # type: ignore[attr-defined]
-        ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")  # type: ignore[attr-defined]
-        ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")  # type: ignore[attr-defined]
-        ASH_LOGGER.verbose(f"Executing phases: {phases}")  # type: ignore[attr-defined]
+        ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
+        ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
+        ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")
+        ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")
+        ASH_LOGGER.verbose(f"Executing phases: {phases}")
 
         try:
             # If existing results path is provided, load the model from it
@@ -399,7 +399,7 @@ class ASHScanOrchestrator(BaseModel):
 
             if not self.no_cleanup:
                 if self.work_dir and Path(self.work_dir).exists():
-                    ASH_LOGGER.verbose("Cleaning up working directory...")  # type: ignore[attr-defined]
+                    ASH_LOGGER.verbose("Cleaning up working directory...")
                     shutil.rmtree(self.work_dir)
             return asharp_model_results
 
