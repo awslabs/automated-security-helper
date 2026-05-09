@@ -3,12 +3,12 @@
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Any
+from typing import Annotated, ClassVar, Dict, List, Literal, Any
 
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -62,6 +62,8 @@ class NpmAuditScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     """NpmAuditScanner implements IaC scanning using `npm/yarn/pnpm audit` based on the lock files discovered in the source directory."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     def model_post_init(self, context):
         if self.config is None:

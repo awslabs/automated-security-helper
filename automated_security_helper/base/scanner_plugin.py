@@ -4,7 +4,7 @@ import re
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
@@ -13,7 +13,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 from pydantic import Field
-from typing import Annotated, Any, Generic, List, Literal, Optional, TypeVar
+from typing import Annotated, Any, ClassVar, Generic, List, Literal, Optional, TypeVar
 from abc import abstractmethod
 
 # Pattern for valid CLI flag keys: one or two leading dashes followed by
@@ -41,6 +41,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     dependencies_satisfied: bool = False
 
     tool_type: ScannerToolType = ScannerToolType.UNKNOWN
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.UNKNOWN
 
     command: Annotated[
         str | None,

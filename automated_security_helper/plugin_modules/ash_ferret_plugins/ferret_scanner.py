@@ -8,7 +8,7 @@ import logging
 import re
 import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked via subprocess
 from pathlib import Path
-from typing import Annotated, Any, List, Literal, Optional, Tuple
+from typing import Annotated, Any, ClassVar, List, Literal, Optional, Tuple
 
 from pydantic import Field, model_validator
 
@@ -16,7 +16,7 @@ from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -365,6 +365,8 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         MIN_SUPPORTED_VERSION=MIN_SUPPORTED_VERSION,
         MAX_SUPPORTED_VERSION=MAX_SUPPORTED_VERSION,
     )
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     def model_post_init(self, context):
         if self.config is None:

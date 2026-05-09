@@ -8,7 +8,7 @@ import multiprocessing
 from pathlib import Path
 import re
 import sys
-from typing import Annotated, Any, Dict, List, Literal
+from typing import Annotated, Any, ClassVar, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -17,7 +17,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.core.constants import KNOWN_LOCKFILE_NAMES
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -108,6 +108,8 @@ class DetectSecretsScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     """DetectSecretsScanner implements SECRET scanning using detect-secrets."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     def model_post_init(self, context):
         if self.config is None:

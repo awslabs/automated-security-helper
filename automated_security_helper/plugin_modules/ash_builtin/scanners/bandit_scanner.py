@@ -3,12 +3,12 @@
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, List, Literal
+from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -97,6 +97,8 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     This scanner uses Bandit to perform static security analysis of Python code
     and returns results in a structured format using the StaticAnalysisReport model.
     """
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     def model_post_init(self, context):
         if self.config is None:

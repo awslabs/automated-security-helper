@@ -19,6 +19,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.schemas.sarif_schema_model import (
+    Result,
     Suppression,
     Kind1,
 )
@@ -312,22 +313,121 @@ def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:
     return sarif_report
 
 
+def _normalize_sarif_uri(
+    uri: str,
+    source_dir_prefix: str,
+    source_dir_prefix_with_slash: str,
+    source_dir_prefix_no_drive: str | None,
+    source_dir_basename: PurePosixPath,
+) -> str:
+    """Strip source-directory prefix from a SARIF artifact URI.
+
+    Handles five platform variants:
+    1. Standard Unix/Windows absolute: uri starts with source_dir_prefix
+    2. Windows with leading slash before drive: /D:/path/...
+    3. Windows with drive letter stripped by scanner: /a/repo/... vs D:/a/repo/
+    4. Offline opengrep basename-relative: basename/subpath/file.py
+    5. No match: returned unchanged (forward-slash normalised)
+    """
+    uri_normalized = uri.replace("\\", "/")
+    if uri_normalized.startswith(source_dir_prefix):
+        return uri_normalized[len(source_dir_prefix):]
+    if uri_normalized.startswith(source_dir_prefix_with_slash):
+        return uri_normalized[len(source_dir_prefix_with_slash):]
+    if source_dir_prefix_no_drive and uri_normalized.startswith(source_dir_prefix_no_drive):
+        return uri_normalized[len(source_dir_prefix_no_drive):]
+    with suppress(ValueError):
+        return str(PurePosixPath(uri_normalized).relative_to(source_dir_basename))
+    return uri_normalized
+
+
+def _check_ignore_paths(
+    normalized_uri: str,
+    ignore_paths: List[IgnorePathWithReason],
+) -> str | None:
+    """Return the reason string if *normalized_uri* matches any ignore path, else None."""
+    for ignore_path in ignore_paths:
+        if file_path_matches(normalized_uri, ignore_path.path):
+            return ignore_path.reason
+    return None
+
+
+def _apply_config_suppression(
+    result: Result,
+    suppressions: list,
+    flat_finding: "FlatVulnerability",
+    used_suppressions: set | None,
+) -> bool:
+    """Apply a config-based suppression to *result* if one matches *flat_finding*.
+
+    Mutates result.suppressions on match. Returns True when a suppression was applied.
+    """
+    should_suppress, matching_suppression = should_suppress_finding(flat_finding, suppressions)
+    if not should_suppress:
+        return False
+
+    if used_suppressions is not None and matching_suppression:
+        used_suppressions.add(matching_suppression.id)
+
+    if not result.suppressions:
+        result.suppressions = []
+    if len(result.suppressions) >= 1:
+        ASH_LOGGER.debug(
+            f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues."
+        )
+        return True
+
+    reason = (matching_suppression and matching_suppression.reason) or "No reason provided"
+    ASH_LOGGER.verbose(
+        f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
+    )
+    result.suppressions.append(
+        Suppression(
+            kind=Kind1.inSource,
+            justification=f"(ASH) Suppressing finding for rule '{result.ruleId}' in '{flat_finding.file_path}' with reason: {reason}",
+        )
+    )
+    return True
+
+
+def _apply_inline_suppression(
+    result: Result,
+    normalized_uri: str,
+    source_dir: Path,
+    result_line: int,
+    inline_cache: dict[str, list],
+) -> bool:
+    """Scan the source file for an inline suppression comment matching *result*.
+
+    Mutates result.suppressions on match. Returns True when a suppression was applied.
+    """
+    file_path = source_dir / normalized_uri
+    file_key = str(file_path)
+    if file_key not in inline_cache:
+        inline_cache[file_key] = find_inline_suppressions(file_path)
+    for isup in inline_cache[file_key]:
+        if isup.rule_id.lower() == result.ruleId.lower() and isup.line_number == result_line:
+            if not result.suppressions:
+                result.suppressions = []
+            ASH_LOGGER.verbose(
+                f"Suppressing rule '{result.ruleId}' at line {result_line} in '{normalized_uri}' via inline comment: [yellow]{isup.reason}[/yellow]"
+            )
+            result.suppressions.append(
+                Suppression(
+                    kind=Kind1.inSource,
+                    justification=f"(ASH inline) {isup.reason}",
+                )
+            )
+            return True
+    return False
+
+
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
     used_suppressions: set | None = None,
 ) -> SarifReport:
-    """
-    Apply suppressions to a SARIF report based on global ignore paths and suppression rules.
-
-    Args:
-        sarif_report: The SARIF report to modify
-        plugin_context: Plugin context containing configuration
-        used_suppressions: Optional set to track which suppressions were actually used
-
-    Returns:
-        The modified SARIF report with suppressions applied
-    """
+    """Apply suppressions to a SARIF report based on global ignore paths and suppression rules."""
     known_ignore_formatted: List[IgnorePathWithReason] = [
         IgnorePathWithReason(path=p, reason="Known ignore path")
         for item in KNOWN_IGNORE_PATHS
@@ -340,8 +440,6 @@ def apply_suppressions_to_sarif(
 
     suppressions = plugin_context.config.global_settings.suppressions or []
 
-    # Check if ignore_suppressions flag is set
-    # ASH_LOGGER.info(plugin_context.model_dump_json(indent=2))
     ignore_suppressions = (
         hasattr(plugin_context, "ignore_suppressions")
         and plugin_context.ignore_suppressions
@@ -372,7 +470,6 @@ def apply_suppressions_to_sarif(
     # Offline opengrep produces relative paths with source_dir basename prefix (e.g., "src/.github/...")
     _source_dir_basename = PurePosixPath(plugin_context.source_dir.resolve().name)
 
-    # Cache inline suppressions per file to avoid re-scanning the same file.
     _inline_suppression_cache: dict[str, list] = {}
 
     for run in sarif_report.runs:
@@ -382,59 +479,54 @@ def apply_suppressions_to_sarif(
         updated_results = []
         for result in run.results:
             is_in_ignorable_path = False
-            # Check if result location matches any ignore path
+
+            # --- Step 1: ignore-path check ---
             if result.locations:
                 for location in result.locations:
                     if is_in_ignorable_path:
                         continue
-                    if (
+                    if not (
                         location.physicalLocation
                         and location.physicalLocation.root.artifactLocation
                     ):
-                        uri = location.physicalLocation.root.artifactLocation.uri
-                        if uri:
-                            uri_normalized = uri.replace("\\", "/")
-                            if uri_normalized.startswith(_source_dir_prefix):
-                                uri = uri_normalized[len(_source_dir_prefix):]
-                            elif uri_normalized.startswith(_source_dir_prefix_with_slash):
-                                uri = uri_normalized[len(_source_dir_prefix_with_slash):]
-                            elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
-                                uri = uri_normalized[len(_source_dir_prefix_no_drive):]
-                            else:
-                                with suppress(ValueError):
-                                    uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
-                        if uri:
-                            if uri not in _uri_resolve_cache:
-                                _uri_resolve_cache[uri] = Path(uri).resolve()
-                            resolved_uri = _uri_resolve_cache[uri]
-                            if resolved_uri.is_relative_to(
-                                _output_dir_resolved
-                            ) and not resolved_uri.is_relative_to(
-                                _work_dir_resolved
-                            ):
-                                ASH_LOGGER.verbose(
-                                    f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'"
-                                )
-                                is_in_ignorable_path = True
-                                continue
-                            # Evaluate the global_settings.ignore_paths entries to see if this path matches an ignore_path
-                            for ignore_path in ignore_paths:
-                                # Check if the URI matches the ignore path pattern
-                                if file_path_matches(uri, ignore_path.path):
-                                    ASH_LOGGER.verbose(
-                                        f"Ignoring finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match against '{ignore_path.path}' with global reason: [yellow]{ignore_path.reason}[/yellow]"
-                                    )
-                                    is_in_ignorable_path = True
-                                    break  # No need to check other ignore paths
+                        continue
+                    raw_uri = location.physicalLocation.root.artifactLocation.uri
+                    if not raw_uri:
+                        continue
+                    uri = _normalize_sarif_uri(
+                        raw_uri,
+                        _source_dir_prefix,
+                        _source_dir_prefix_with_slash,
+                        _source_dir_prefix_no_drive,
+                        _source_dir_basename,
+                    )
+                    if uri not in _uri_resolve_cache:
+                        _uri_resolve_cache[uri] = Path(uri).resolve()
+                    resolved_uri = _uri_resolve_cache[uri]
+                    if resolved_uri.is_relative_to(_output_dir_resolved) and not resolved_uri.is_relative_to(
+                        _work_dir_resolved
+                    ):
+                        ASH_LOGGER.verbose(
+                            f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'"
+                        )
+                        is_in_ignorable_path = True
+                        continue
+                    ignore_reason = _check_ignore_paths(uri, ignore_paths)
+                    if ignore_reason is not None:
+                        ASH_LOGGER.verbose(
+                            f"Ignoring finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match with global reason: [yellow]{ignore_reason}[/yellow]"
+                        )
+                        is_in_ignorable_path = True
 
             if is_in_ignorable_path:
                 continue
-            # Check if result matches any suppression rule (only if suppressions are not being ignored)
+
             ASH_LOGGER.debug(
                 f"Suppression check: is_in_ignorable_path={is_in_ignorable_path}, suppressions={bool(suppressions)}, ignore_suppressions={ignore_suppressions}"
             )
+
+            # --- Step 2: config suppression ---
             if suppressions and not ignore_suppressions:
-                # Convert SARIF result to FlatVulnerability for suppression matching
                 flat_finding = None
                 if result.ruleId and result.locations and len(result.locations) > 0:
                     location = result.locations[0]
@@ -442,18 +534,14 @@ def apply_suppressions_to_sarif(
                         location.physicalLocation
                         and location.physicalLocation.root.artifactLocation
                     ):
-                        uri = location.physicalLocation.root.artifactLocation.uri
-                        if uri:
-                            uri_normalized = uri.replace("\\", "/")
-                            if uri_normalized.startswith(_source_dir_prefix):
-                                uri = uri_normalized[len(_source_dir_prefix):]
-                            elif uri_normalized.startswith(_source_dir_prefix_with_slash):
-                                uri = uri_normalized[len(_source_dir_prefix_with_slash):]
-                            elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
-                                uri = uri_normalized[len(_source_dir_prefix_no_drive):]
-                            else:
-                                with suppress(ValueError):
-                                    uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
+                        raw_uri = location.physicalLocation.root.artifactLocation.uri
+                        uri = _normalize_sarif_uri(
+                            raw_uri or "",
+                            _source_dir_prefix,
+                            _source_dir_prefix_with_slash,
+                            _source_dir_prefix_no_drive,
+                            _source_dir_basename,
+                        ) if raw_uri else (raw_uri or "")
                         line_start = None
                         line_end = None
                         if (
@@ -475,13 +563,13 @@ def apply_suppressions_to_sarif(
                                 if result.message
                                 else "No description available"
                             ),
-                            severity="MEDIUM",  # Default severity, not used for matching
+                            severity="MEDIUM",
                             scanner=(
                                 run.tool.driver.name
                                 if run.tool and run.tool.driver
                                 else "unknown"
                             ),
-                            scanner_type="SAST",  # Default type, not used for matching
+                            scanner_type="SAST",
                             rule_id=result.ruleId,
                             file_path=uri,
                             line_start=line_start,
@@ -489,44 +577,15 @@ def apply_suppressions_to_sarif(
                         )
 
                 if flat_finding:
-                    should_suppress, matching_suppression = should_suppress_finding(
-                        flat_finding, suppressions
+                    config_suppressed = _apply_config_suppression(
+                        result, suppressions, flat_finding, used_suppressions
                     )
-                    if should_suppress:
-                        # Track the used suppression
-                        if used_suppressions is not None and matching_suppression:
-                            suppression_id = matching_suppression.id
-                            used_suppressions.add(suppression_id)
+                    if config_suppressed and len(result.suppressions or []) >= 1:
+                        updated_results.append(result)
+                        continue
 
-                        # Initialize suppressions list if it doesn't exist
-                        if not result.suppressions:
-                            result.suppressions = []
-                        if len(result.suppressions) >= 1:
-                            ASH_LOGGER.debug(
-                                f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues."
-                            )
-                            updated_results.append(result)
-                            continue
-                        # Add suppression
-                        reason = (
-                            matching_suppression and matching_suppression.reason
-                        ) or "No reason provided"
-                        ASH_LOGGER.verbose(
-                            f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
-                        )
-                        suppression = Suppression(
-                            kind=Kind1.inSource,
-                            justification=f"(ASH) Suppressing finding for rule '{result.ruleId}' in '{flat_finding.file_path}' with reason: {reason}",
-                        )
-                        result.suppressions.append(suppression)
-
-            # --- Inline suppression check ---
-            # If the result was not already suppressed by config rules, look
-            # for ``# ash-ignore:`` / ``# ash-ignore-next-line:`` comments
-            # in the source file that target the same rule + line.
-            if not ignore_suppressions and not (
-                result.suppressions and len(result.suppressions) >= 1
-            ):
+            # --- Step 3: inline suppression ---
+            if not ignore_suppressions and not (result.suppressions and len(result.suppressions) >= 1):
                 if result.ruleId and result.locations:
                     for location in result.locations:
                         if not (
@@ -534,52 +593,28 @@ def apply_suppressions_to_sarif(
                             and location.physicalLocation.root.artifactLocation
                         ):
                             continue
-                        uri = location.physicalLocation.root.artifactLocation.uri
-                        if not uri:
+                        raw_uri = location.physicalLocation.root.artifactLocation.uri
+                        if not raw_uri:
                             continue
-
                         result_line = None
                         if (
                             hasattr(location.physicalLocation.root, "region")
                             and location.physicalLocation.root.region
                         ):
-                            result_line = (
-                                location.physicalLocation.root.region.startLine
-                            )
-
+                            result_line = location.physicalLocation.root.region.startLine
                         if result_line is None:
                             continue
+                        uri = _normalize_sarif_uri(
+                            raw_uri,
+                            _source_dir_prefix,
+                            _source_dir_prefix_with_slash,
+                            _source_dir_prefix_no_drive,
+                            _source_dir_basename,
+                        )
+                        _apply_inline_suppression(
+                            result, uri, plugin_context.source_dir, result_line, _inline_suppression_cache
+                        )
 
-                        # Resolve the file path for reading the source
-                        # uri is relative (sanitize_sarif_paths already ran),
-                        # so resolve against the scan's source directory.
-                        file_path = plugin_context.source_dir / uri
-                        file_key = str(file_path)
-                        if file_key not in _inline_suppression_cache:
-                            _inline_suppression_cache[file_key] = (
-                                find_inline_suppressions(file_path)
-                            )
-                        inline_sups = _inline_suppression_cache[file_key]
-
-                        for isup in inline_sups:
-                            if (
-                                isup.rule_id.lower() == result.ruleId.lower()
-                                and isup.line_number == result_line
-                            ):
-                                if not result.suppressions:
-                                    result.suppressions = []
-                                ASH_LOGGER.verbose(
-                                    f"Suppressing rule '{result.ruleId}' at line {result_line} in '{uri}' via inline comment: [yellow]{isup.reason}[/yellow]"
-                                )
-                                result.suppressions.append(
-                                    Suppression(
-                                        kind=Kind1.inSource,
-                                        justification=f"(ASH inline) {isup.reason}",
-                                    )
-                                )
-                                break  # one suppression per result is enough
-
-            # Add the result to the updated results list
             updated_results.append(result)
 
         run.results = updated_results

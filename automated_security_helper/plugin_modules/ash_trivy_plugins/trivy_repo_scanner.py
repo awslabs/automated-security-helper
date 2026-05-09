@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, Literal, List
+from typing import Annotated, Any, ClassVar, Literal, List
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -18,7 +18,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -85,6 +85,8 @@ class TrivyRepoScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
     """Trivy repo scanner plugin."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     # Env vars layered onto the subprocess. Populated by _process_config_options
     # when offline mode is active. Kept on the instance so concurrent scanners
