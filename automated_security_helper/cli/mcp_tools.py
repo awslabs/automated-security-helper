@@ -564,6 +564,286 @@ async def mcp_check_installation() -> Dict[str, Any]:
         )
 
 
+_SEVERITY_RATIONALE: Dict[str, str] = {
+    "CRITICAL": "CRITICAL severity — above any threshold",
+    "HIGH": "HIGH severity — above MEDIUM threshold",
+    "MEDIUM": "MEDIUM severity — above LOW threshold",
+    "LOW": "LOW severity — below MEDIUM threshold",
+    "INFO": "INFO severity — below default threshold",
+}
+
+
+def _load_flat_vulns_for_explain(results_path: Optional[str]) -> list:
+    """Load FlatVulnerability list from an ash_aggregated_results.json directory."""
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    if results_path is None:
+        output_dir = Path.cwd() / ".ash" / "ash_output"
+    else:
+        candidate = Path(results_path)
+        output_dir = candidate if candidate.is_dir() else candidate.parent
+
+    agg_file = output_dir / "ash_aggregated_results.json"
+    if not agg_file.exists():
+        raise FileNotFoundError(f"Results file not found: {agg_file}")
+    model = AshAggregatedResults.from_json(agg_file.read_text())
+    return model.to_flat_vulnerabilities()
+
+
+def mcp_explain_finding(
+    finding_id: str,
+    results_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return structured details for a single finding by ID.
+
+    Purely a structured lookup — no LLM calls are made.
+
+    Args:
+        finding_id: The FlatVulnerability.id to look up.
+        results_path: Optional path to the output directory (or file inside it)
+                      containing ash_aggregated_results.json. Defaults to
+                      <cwd>/.ash/ash_output.
+
+    Returns:
+        Dict with ``success`` and ``finding`` keys on success, or
+        ``success: False`` with an ``error`` key when the ID is not found.
+    """
+    import json as _json
+
+    try:
+        flat_vulns = _load_flat_vulns_for_explain(results_path)
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to load scan results: {e}",
+            "operation": "explain_finding",
+        }
+
+    match = next((v for v in flat_vulns if v.id == finding_id), None)
+    if match is None:
+        return {
+            "success": False,
+            "error": f"Finding '{finding_id}' not found in scan results",
+            "operation": "explain_finding",
+        }
+
+    if match.references:
+        try:
+            references: list = _json.loads(match.references)
+        except Exception:
+            references = [match.references]
+    else:
+        references = []
+
+    if match.raw_data:
+        try:
+            scanner_metadata: dict = _json.loads(match.raw_data)
+        except Exception:
+            scanner_metadata = {"raw": match.raw_data}
+    else:
+        scanner_metadata = {}
+
+    severity_upper = (match.severity or "").upper()
+    severity_rationale = _SEVERITY_RATIONALE.get(
+        severity_upper, f"{severity_upper} severity"
+    )
+
+    return {
+        "success": True,
+        "operation": "explain_finding",
+        "finding": {
+            "title": match.title,
+            "description": match.description,
+            "severity": match.severity,
+            "severity_rationale": severity_rationale,
+            "cwe_id": match.cwe_id,
+            "cve_id": match.cve_id,
+            "references": references,
+            "scanner": match.scanner,
+            "scanner_metadata": scanner_metadata,
+        },
+    }
+
+
+def mcp_diff_scan_results(before_path: str, after_path: str) -> Dict[str, Any]:
+    """Compare two ash_aggregated_results.json files and return a structured diff.
+
+    Args:
+        before_path: Path to the baseline ash_aggregated_results.json file.
+        after_path: Path to the comparison ash_aggregated_results.json file.
+
+    Returns:
+        Dict with keys:
+          - new: List[dict] — findings present in after but not in before.
+          - resolved: List[dict] — findings present in before but not in after.
+          - severity_changed: List[dict] — findings in both with a different severity,
+            each entry has {id, before_severity, after_severity}.
+        On error, returns {"success": False, "error": <message>}.
+    """
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    before_file = Path(before_path)
+    after_file = Path(after_path)
+
+    if not before_file.exists():
+        return {
+            "success": False,
+            "error": f"before_path does not exist: {before_path}",
+        }
+    if not after_file.exists():
+        return {
+            "success": False,
+            "error": f"after_path does not exist: {after_path}",
+        }
+
+    try:
+        before_results = AshAggregatedResults.from_json(before_file.read_text())
+        after_results = AshAggregatedResults.from_json(after_file.read_text())
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to parse result file: {e}",
+        }
+
+    before_vulns = before_results.to_flat_vulnerabilities()
+    after_vulns = after_results.to_flat_vulnerabilities()
+
+    before_by_id: Dict[str, Any] = {v.id: v for v in before_vulns}
+    after_by_id: Dict[str, Any] = {v.id: v for v in after_vulns}
+
+    before_ids = set(before_by_id)
+    after_ids = set(after_by_id)
+
+    new = [after_by_id[i].model_dump() for i in sorted(after_ids - before_ids)]
+    resolved = [before_by_id[i].model_dump() for i in sorted(before_ids - after_ids)]
+
+    severity_changed = []
+    for vid in sorted(before_ids & after_ids):
+        b_sev = (before_by_id[vid].severity or "").upper()
+        a_sev = (after_by_id[vid].severity or "").upper()
+        if b_sev != a_sev:
+            severity_changed.append(
+                {"id": vid, "before_severity": b_sev or None, "after_severity": a_sev or None}
+            )
+
+    return {"new": new, "resolved": resolved, "severity_changed": severity_changed}
+
+
+def mcp_list_scanners() -> list:
+    """Return per-scanner metadata for all registered ASH scanners.
+
+    Each entry contains:
+      name: scanner config name (e.g. "bandit")
+      version: detected version string, or None if unavailable without an active context
+      dependencies_satisfied: whether the scanner's dependencies are met
+      offline_strategy: OfflineStrategy enum value string
+      enabled: whether the scanner is enabled in the default config
+    """
+    from automated_security_helper.plugins import ash_plugin_manager
+    from automated_security_helper.plugins.loader import load_internal_plugins, load_additional_plugin_modules
+    from automated_security_helper.config.default_config import get_default_config
+
+    load_internal_plugins()
+
+    # Discover external plugin modules via importlib.metadata: any installed package
+    # whose top-level name matches the ash plugin namespace pattern is imported so its
+    # @ash_scanner_plugin decorators fire and register the scanner into ash_plugin_manager.
+    import importlib as _importlib
+    try:
+        from importlib.metadata import packages_distributions
+        _pkg_dist = packages_distributions()
+    except Exception:
+        _pkg_dist = {}
+
+    _external_mods: list[str] = []
+    for _top_level, _dists in _pkg_dist.items():
+        if any(
+            d.startswith("ash_") and d.endswith("_plugins")
+            for d in _dists
+        ):
+            _external_mods.append(f"automated_security_helper.plugin_modules.{_top_level}")
+
+    if _external_mods:
+        load_additional_plugin_modules(_external_mods)
+    else:
+        # Fallback: import well-known external plugin modules directly so their decorators fire.
+        # TODO: replace with entry-points once external packages declare 'ash.plugins' group.
+        for _mod in (
+            "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner",
+            "automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner",
+            "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner",
+        ):
+            try:
+                _importlib.import_module(_mod)
+            except ImportError:
+                pass
+
+    scanner_classes = ash_plugin_manager.plugin_modules("scanner")
+    default_config = get_default_config()
+
+    results = []
+    for cls in scanner_classes:
+        offline_strategy = getattr(cls, "offline_strategy", None)
+        offline_strategy_value = offline_strategy.value if offline_strategy is not None else "unknown"
+
+        scanner_name: Optional[str] = None
+        scanner_enabled: bool = True
+
+        # Derive the concrete config class from Pydantic model_fields.
+        # The 'config' field annotation is Union[ConcreteConfig, ScannerPluginConfigBase, None].
+        # The first arg of that Union is always the scanner-specific config.
+        config_class = None
+        config_field = getattr(cls, "model_fields", {}).get("config")
+        if config_field is not None:
+            annotation = getattr(config_field, "annotation", None)
+            type_args = getattr(annotation, "__args__", None)
+            if type_args:
+                for arg in type_args:
+                    if isinstance(arg, type) and arg.__name__.endswith("ScannerConfig") and arg.__name__ != "ScannerPluginConfigBase":
+                        config_class = arg
+                        break
+
+        if config_class is not None:
+            try:
+                cfg_instance = config_class()
+                raw_name = getattr(cfg_instance, "name", None)
+                # Normalize kebab-case config names to snake_case
+                scanner_name = raw_name.replace("-", "_") if raw_name else None
+                scanner_enabled_default = getattr(cfg_instance, "enabled", True)
+
+                if scanner_name:
+                    found_cfg = default_config.get_plugin_config("scanner", scanner_name)
+                    if found_cfg is not None:
+                        scanner_enabled = (
+                            found_cfg.get("enabled", scanner_enabled_default)
+                            if isinstance(found_cfg, dict)
+                            else getattr(found_cfg, "enabled", scanner_enabled_default)
+                        )
+                    else:
+                        scanner_enabled = scanner_enabled_default
+                else:
+                    scanner_enabled = scanner_enabled_default
+            except Exception:
+                scanner_enabled = True
+
+        if not scanner_name:
+            import re as _re
+            # Convert PascalCase class name to snake_case, strip trailing "Scanner"
+            raw = cls.__name__
+            raw = _re.sub(r"Scanner$", "", raw)
+            scanner_name = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", raw).lower()
+
+        results.append({
+            "name": scanner_name,
+            "version": None,
+            "dependencies_satisfied": False,
+            "offline_strategy": offline_strategy_value,
+            "enabled": scanner_enabled,
+        })
+
+    return results
+
+
 def mcp_get_config(
     config_path: Optional[str] = None,
     raw: bool = False,
@@ -605,3 +885,169 @@ def mcp_get_config(
     # so supply source_dir to force it to read the specified file.
     resolved = resolve_config(config_path=path, source_dir=path.parent)
     return resolved.model_dump()
+
+
+def mcp_validate_config(
+    config_content: Optional[str] = None,
+    config_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Validate an ASH config supplied as a content string or file path.
+
+    Args:
+        config_content: YAML/JSON string to validate. Mutually exclusive with config_path.
+        config_path: Path to the config file to validate.
+
+    Returns:
+        Dict with keys:
+          - valid: bool
+          - errors: List[{field: str, message: str, type: str}]
+    """
+    import re
+    import tempfile
+
+    from automated_security_helper.config.config_validator import ConfigValidator
+
+    def _classify(raw: str) -> Dict[str, Any]:
+        if "YAML parsing error" in raw or "yaml" in raw.lower():
+            return {"field": "", "message": raw, "type": "yaml_parse_error"}
+        if "JSON parsing error" in raw:
+            return {"field": "", "message": raw, "type": "json_parse_error"}
+        if "Missing required" in raw:
+            m = re.search(r"'([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "missing_required_field"}
+        if "internal-only field" in raw or "internal field" in raw:
+            m = re.search(r"field '([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "internal_field"}
+        if "Unknown" in raw or "unknown" in raw:
+            m = re.search(r"'([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "unknown_field"}
+        if "Invalid" in raw or "invalid" in raw:
+            m = re.search(r"'([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "invalid_field"}
+        if "Duplicate" in raw:
+            m = re.search(r"'([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "duplicate_field"}
+        return {"field": "", "message": raw, "type": "validation_error"}
+
+    if config_content is not None:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False
+        ) as tmp:
+            tmp.write(config_content)
+            tmp_path = Path(tmp.name)
+        try:
+            valid, raw_errors = ConfigValidator.validate_config_file(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    elif config_path is not None:
+        path = Path(config_path)
+        if not path.exists():
+            return {
+                "valid": False,
+                "errors": [
+                    {
+                        "field": "config_path",
+                        "message": f"Config file not found: {config_path}",
+                        "type": "file_not_found",
+                    }
+                ],
+            }
+        valid, raw_errors = ConfigValidator.validate_config_file(path)
+    else:
+        return {
+            "valid": False,
+            "errors": [
+                {
+                    "field": "",
+                    "message": "Either config_content or config_path must be provided.",
+                    "type": "missing_input",
+                }
+            ],
+        }
+
+    return {
+        "valid": valid,
+        "errors": [_classify(e) for e in raw_errors],
+    }
+
+
+def mcp_suggest_suppression(
+    finding_id: str,
+    results_path: Optional[str] = None,
+    expiration: Optional[str] = None,
+    justification: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build a paste-ready AshSuppression entry for a specific finding.
+
+    Args:
+        finding_id: Stable hash ID of the finding to suppress.
+        results_path: Path to ash_aggregated_results.json. Defaults to
+                      .ash/ash_output/ash_aggregated_results.json in cwd.
+        expiration: Expiration date in YYYY-MM-DD format. Defaults to 90 days from today.
+        justification: Human-readable reason for the suppression.
+
+    Returns:
+        Dict with keys:
+          - success: bool
+          - yaml: str — paste-ready YAML block
+          - json: dict — same data as a dict
+        On error: {"success": False, "error": <message>}
+    """
+    import yaml as _yaml
+    from datetime import date, timedelta
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.models.core import AshSuppression
+
+    if results_path is None:
+        results_file = Path.cwd() / ".ash" / "ash_output" / "ash_aggregated_results.json"
+    else:
+        results_file = Path(results_path)
+
+    if not results_file.exists():
+        return {
+            "success": False,
+            "error": f"Results file not found: {results_file}",
+        }
+
+    try:
+        results = AshAggregatedResults.from_json(results_file.read_text())
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to parse results file: {e}",
+        }
+
+    flat_vulns = results.to_flat_vulnerabilities()
+    finding = next((v for v in flat_vulns if v.id == finding_id), None)
+
+    if finding is None:
+        return {
+            "success": False,
+            "error": f"Finding not found: {finding_id}",
+        }
+
+    expiration_date = expiration or (date.today() + timedelta(days=90)).strftime("%Y-%m-%d")
+    reason = justification or "Suppressed via ASH MCP suggest_suppression tool — review before merging"
+
+    suppression = AshSuppression(
+        path=finding.file_path or "",
+        rule_id=finding.rule_id,
+        line_start=finding.line_start,
+        line_end=finding.line_end,
+        expiration=expiration_date,
+        reason=reason,
+    )
+
+    suppression_dict = suppression.model_dump(exclude_none=True)
+    suppression_yaml = _yaml.safe_dump(suppression_dict, default_flow_style=False, sort_keys=True)
+
+    return {
+        "success": True,
+        "yaml": suppression_yaml,
+        "json": suppression_dict,
+    }
