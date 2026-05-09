@@ -152,25 +152,19 @@ def test_suppression_model_invalid_expiration_format():
 
 
 def test_suppression_model_past_expiration():
-    """Test the Suppression model with a past expiration date.
+    """Past expiration date must be stored; is_expired signals it at runtime.
 
-    Fixed in #171: past dates now warn and set expiration to None instead
-    of raising ValueError, so config parsing is not blocked by expired
-    suppressions.
+    Issue #171 updated: validator checks format only — past dates are preserved
+    so is_expired can return True instead of silently discarding the date.
     """
-    import warnings
-
     past_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        suppression = AshSuppression(
-            reason="Test suppression",
-            rule_id="TEST001",
-            path="src/main.py",
-            expiration=past_date,
-        )
+    suppression = AshSuppression(
+        reason="Test suppression",
+        rule_id="TEST001",
+        path="src/main.py",
+        expiration=past_date,
+    )
 
-    assert suppression.expiration is None
-    assert len(w) == 1
-    assert "past" in str(w[0].message).lower()
+    assert suppression.expiration == past_date
+    assert suppression.is_expired is True

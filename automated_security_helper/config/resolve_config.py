@@ -7,6 +7,7 @@ import yaml
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -276,24 +277,15 @@ def resolve_config(
 
         except ValidationError as e:
             ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
-            if fallback_to_default:
-                ASH_LOGGER.warning(
-                    "Using default configuration due to validation error"
-                )
-                # Apply overrides to default config if provided
-                if config_overrides and config:
-                    config = apply_config_overrides(config, config_overrides)
-                config._resolution_warnings.append(
-                    f"Configuration validation failed: {str(e)}. "
-                    "Using default configuration — suppressions and custom settings are NOT active. "
-                    "Run 'ash config lint' to identify and fix issues."
-                )
-                return config  # Return default config on validation error
-            else:
-                raise e
+            raise ASHConfigValidationError(
+                f"Configuration validation failed for '{config_path}': {str(e)}. "
+                "Run 'ash config lint' to identify and fix issues."
+            ) from e
 
         return config
 
+    except ASHConfigValidationError:
+        raise
     except Exception as e:
         # Always return a valid config, even in case of unexpected errors
         if fallback_to_default:
