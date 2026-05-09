@@ -10,15 +10,10 @@ import pytest
 
 from automated_security_helper.utils.log import (
     addLoggingLevel,
-    formatter_message,
     JsonFormatter,
-    ColoredFormatter,
     ASHLogger,
     get_logger,
     ASH_LOGGER,
-    COLORS,
-    RESET_SEQ,
-    COLOR_SEQ,
 )
 
 
@@ -36,23 +31,6 @@ class TestAddLoggingLevel:
         addLoggingLevel("DEBUG", logging.DEBUG)
         # Should not raise
 
-
-class TestFormatterMessage:
-    """Tests for formatter_message."""
-
-    def test_with_color(self):
-        msg = "$BOLDHello$RESET World"
-        result = formatter_message(msg, use_color=True)
-        assert "$BOLD" not in result
-        assert "$RESET" not in result
-        assert "Hello" in result
-
-    def test_without_color(self):
-        msg = "$BOLDHello$RESET World"
-        result = formatter_message(msg, use_color=False)
-        assert "$BOLD" not in result
-        assert "$RESET" not in result
-        assert "Hello World" in result
 
 
 class TestJsonFormatter:
@@ -136,38 +114,6 @@ class TestJsonFormatter:
         data = json.loads(output)
         assert "stack_info" in data
 
-
-class TestColoredFormatter:
-    """Tests for ColoredFormatter."""
-
-    def test_format_with_color(self):
-        formatter = ColoredFormatter("%(levelname)s - %(message)s", use_color=True)
-        record = logging.LogRecord(
-            name="test",
-            level=logging.WARNING,
-            pathname="test.py",
-            lineno=1,
-            msg="warning message",
-            args=None,
-            exc_info=None,
-        )
-        output = formatter.format(record)
-        assert "warning message" in output
-
-    def test_format_without_color(self):
-        formatter = ColoredFormatter("%(levelname)s - %(message)s", use_color=False)
-        record = logging.LogRecord(
-            name="test",
-            level=logging.WARNING,
-            pathname="test.py",
-            lineno=1,
-            msg="plain message",
-            args=None,
-            exc_info=None,
-        )
-        output = formatter.format(record)
-        assert "WARNING" in output
-        assert "plain message" in output
 
 
 class TestASHLogger:

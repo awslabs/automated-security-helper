@@ -6,7 +6,6 @@ import shutil
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -161,9 +160,7 @@ class ASHScanOrchestrator(BaseModel):
         self.config = resolve_config(
             config_path=self.config_path,
             source_dir=self.source_dir,
-            config_overrides=self.config_overrides
-            if hasattr(self, "config_overrides")
-            else [],
+            config_overrides=self.config_overrides or [],
         )
 
         # Surface config resolution warnings prominently
@@ -171,7 +168,7 @@ class ASHScanOrchestrator(BaseModel):
             for warning in self.config._resolution_warnings:
                 ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
 
-        ASH_LOGGER.verbose("Setting up working directories")
+        ASH_LOGGER.verbose("Setting up working directories")  # type: ignore[attr-defined]
         if self.source_dir is None:
             ASH_LOGGER.warning(
                 "No explicit source directory provided, using current working directory"
@@ -181,7 +178,7 @@ class ASHScanOrchestrator(BaseModel):
             self.source_dir = Path(self.source_dir)
 
         if self.output_dir is None:
-            ASH_LOGGER.verbose(
+            ASH_LOGGER.verbose(  # type: ignore[attr-defined]
                 "No explicit output directory provided, using '.ash/ash_output' within the source directory."
             )
             self.output_dir = self.source_dir.joinpath(".ash", "ash_output")
@@ -235,13 +232,13 @@ class ASHScanOrchestrator(BaseModel):
             show_progress=self.show_progress,
             show_summary=self.show_summary,
             global_ignore_paths=self.config.global_settings.ignore_paths,
-            color_system=self.color_system,
+            color_system=self.color_system,  # type: ignore[arg-type]
             verbose=self.verbose,
             debug=self.debug,
             python_based_plugins_only=self.python_based_plugins_only,
-            ash_plugin_modules=self.ash_plugin_modules,  # Pass the ash_plugin_modules to the execution engine
-            output_formats=self.output_formats,
-            **exec_engine_params,
+            ash_plugin_modules=self.ash_plugin_modules,
+            output_formats=[f.value for f in self.output_formats] or None,
+            asharp_model=exec_engine_params.get("asharp_model"),
         )
 
         ASH_LOGGER.info("ASH Orchestrator and ScanExecutionEngine initialized")
@@ -269,7 +266,7 @@ class ASHScanOrchestrator(BaseModel):
                 for working_dir in ["analysis", "reports", "scanners", "converted"]:
                     path_working_dir = self.output_dir.joinpath(working_dir)
                     if path_working_dir.exists() and self.existing_results_path is None:
-                        ASH_LOGGER.verbose(
+                        ASH_LOGGER.verbose(  # type: ignore[attr-defined]
                             f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
                         )
                         shutil.rmtree(path_working_dir)
@@ -277,68 +274,6 @@ class ASHScanOrchestrator(BaseModel):
         except Exception as e:
             ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
             raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
-
-    def _load_config(self) -> AshConfig:
-        """Load configuration from file or return default configuration."""
-        try:
-            config = get_default_config()
-            if not self.config_path:
-                ASH_LOGGER.verbose(
-                    "No configuration file provided, checking for default paths"
-                )
-                for item in ASH_CONFIG_FILE_NAMES:
-                    config_path = self.source_dir.joinpath(item)
-                    if config_path.exists():
-                        self.config_path = config_path
-                        ASH_LOGGER.verbose(
-                            f"Found configuration file at: {config_path.as_posix()}"
-                        )
-                        break
-                ASH_LOGGER.verbose(
-                    "Configuration file not found or provided, using default config"
-                )
-
-            # We *always* want to evaluate this after the inverse block above runs, in
-            # case self.config_path is resolved from a default location.
-            # Do not use `else:` here!
-            if self.config_path:
-                ASH_LOGGER.debug(
-                    f"Loading configuration from {self.config_path.as_posix()}"
-                )
-                try:
-                    with open(self.config_path, "r") as f:
-                        if str(self.config_path).endswith(".json"):
-                            config_data = json.load(f)
-                        else:
-                            config_data = yaml.safe_load(f)
-
-                    if not isinstance(config_data, dict):
-                        raise ValueError("Configuration must be a dictionary")
-
-                    ASH_LOGGER.debug("Transforming file config")
-                    config = AshConfig(**config_data)
-                    ASH_LOGGER.debug(f"Loaded config from file: {config}")
-                except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
-                    ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
-                    raise ASHConfigValidationError(
-                        f"Failed to load configuration: {str(e)}"
-                    )
-                except ValidationError as e:
-                    ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
-                    raise ASHConfigValidationError(
-                        f"Configuration validation failed: {str(e)}"
-                    )
-
-            # Use CLI-specified formats if provided
-            if self.output_formats:
-                config.output_formats = self.output_formats
-                ASH_LOGGER.debug(
-                    f"Using CLI-specified output formats: {self.output_formats}"
-                )
-
-            return config
-        except Exception as e:
-            raise e
 
     def execute_scan(
         self, phases: List[ExecutionPhaseType] | None = None
@@ -354,33 +289,13 @@ class ASHScanOrchestrator(BaseModel):
         """
         if phases is None:
             phases = ["convert", "scan", "report"]
-        ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
-        ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")
-        ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")
-        ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")
-        ASH_LOGGER.verbose(f"Executing phases: {phases}")
+        ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")  # type: ignore[attr-defined]
+        ASH_LOGGER.verbose(f"Output directory: {self.output_dir}")  # type: ignore[attr-defined]
+        ASH_LOGGER.verbose(f"Work directory: {self.work_dir}")  # type: ignore[attr-defined]
+        ASH_LOGGER.verbose(f"Configuration path: {self.config_path}")  # type: ignore[attr-defined]
+        ASH_LOGGER.verbose(f"Executing phases: {phases}")  # type: ignore[attr-defined]
 
         try:
-            # Setup execution engine if not already configured
-            if self.execution_engine is None:
-                ASH_LOGGER.debug("Creating execution engine")
-                self.execution_engine = ScanExecutionEngine(
-                    context=PluginContext(
-                        source_dir=self.source_dir,
-                        output_dir=self.output_dir,
-                        work_dir=self.output_dir.joinpath(ASH_WORK_DIR_NAME),
-                        config=self.config,
-                        ignore_suppressions=self.ignore_suppressions,
-                    ),
-                    strategy=self.strategy,
-                    enabled_scanners=self.enabled_scanners,
-                    show_progress=self.show_progress,
-                    global_ignore_paths=self.config.global_settings.ignore_paths,
-                    color_system=self.color_system,
-                    verbose=self.verbose,
-                    debug=self.debug,
-                )
-
             # If existing results path is provided, load the model from it
             if self.existing_results_path and self.existing_results_path.exists():
                 ASH_LOGGER.info(
@@ -398,7 +313,7 @@ class ASHScanOrchestrator(BaseModel):
                     asharp_model = AshAggregatedResults.from_json(model_data)
 
                     # Update the execution engine's model
-                    if hasattr(self.execution_engine, "_asharp_model"):
+                    if self.execution_engine is not None and hasattr(self.execution_engine, "_asharp_model"):
                         self.execution_engine._asharp_model = asharp_model
 
                     # When using existing results, only run the report phase
@@ -427,8 +342,8 @@ class ASHScanOrchestrator(BaseModel):
             elif "convert" in phases or "scan" in phases:
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")
                 self.source_scan_set = scan_set(
-                    source=self.source_dir,
-                    output=self.output_dir,
+                    source=str(self.source_dir),
+                    output=str(self.output_dir),
                     debug=self.debug,
                 )
                 ASH_LOGGER.info(
@@ -437,6 +352,7 @@ class ASHScanOrchestrator(BaseModel):
 
             try:
                 # Execute all phases
+                assert self.execution_engine is not None
                 asharp_model_results = self.execution_engine.execute_phases(
                     phases=phases,
                 )
@@ -447,7 +363,7 @@ class ASHScanOrchestrator(BaseModel):
                 raise
 
             # Add config resolution warnings to validation checkpoints
-            if self.config._resolution_warnings:
+            if self.config is not None and self.config._resolution_warnings:
                 for warning in self.config._resolution_warnings:
                     asharp_model_results.validation_checkpoints.append(
                         {
@@ -463,7 +379,7 @@ class ASHScanOrchestrator(BaseModel):
 
             if not self.no_cleanup:
                 if self.work_dir and Path(self.work_dir).exists():
-                    ASH_LOGGER.verbose("Cleaning up working directory...")
+                    ASH_LOGGER.verbose("Cleaning up working directory...")  # type: ignore[attr-defined]
                     shutil.rmtree(self.work_dir)
             return asharp_model_results
 

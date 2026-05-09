@@ -235,7 +235,7 @@ def populate_metrics_from_unified_source(
     Args:
         aggregated_results: The AshAggregatedResults model to update
     """
-    ASH_LOGGER.verbose(
+    ASH_LOGGER.verbose(  # type: ignore[attr-defined]
         "Aligning all metrics using unified scanner metrics as source of truth"
     )
 
@@ -252,7 +252,7 @@ def populate_metrics_from_unified_source(
         aggregated_results, unified_metrics
     )
 
-    ASH_LOGGER.verbose(
+    ASH_LOGGER.verbose(  # type: ignore[attr-defined]
         "Metrics alignment completed - all sources now use unified metrics"
     )
     return aggregated_results
@@ -384,98 +384,3 @@ def _populate_scanner_results_from_unified_metrics(
     return aggregated_results
 
 
-def verify_metrics_alignment(aggregated_results: AshAggregatedResults) -> bool:
-    """Verify that all metrics sources are aligned.
-
-    This function checks that summary_stats, scanner_results totals, and SARIF results
-    all report the same counts. It's useful for validation after calling
-    populate_metrics_from_unified_source().
-
-    Args:
-        aggregated_results: The AshAggregatedResults model to verify
-
-    Returns:
-        True if all metrics are aligned, False otherwise
-    """
-    # Get unified metrics
-    unified_metrics = get_unified_scanner_metrics(aggregated_results)
-    ASH_LOGGER.debug(f"unified_metrics: {unified_metrics}")
-
-    # Calculate expected totals
-    expected_totals = {
-        "critical": sum(m.critical for m in unified_metrics),
-        "high": sum(m.high for m in unified_metrics),
-        "medium": sum(m.medium for m in unified_metrics),
-        "low": sum(m.low for m in unified_metrics),
-        "info": sum(m.info for m in unified_metrics),
-        "suppressed": sum(m.suppressed for m in unified_metrics),
-        "total": sum(m.total for m in unified_metrics),
-        "actionable": sum(m.actionable for m in unified_metrics),
-    }
-    ASH_LOGGER.debug(f"expected_totals: {expected_totals}")
-
-    # Check summary_stats
-    summary_stats = aggregated_results.metadata.summary_stats
-    summary_totals = {
-        "critical": summary_stats.critical,
-        "high": summary_stats.high,
-        "medium": summary_stats.medium,
-        "low": summary_stats.low,
-        "info": summary_stats.info,
-        "suppressed": summary_stats.suppressed,
-        "total": summary_stats.total,
-        "actionable": summary_stats.actionable,
-    }
-    ASH_LOGGER.debug(f"summary_totals: {summary_totals}")
-
-    # Check scanner_results totals
-    scanner_results_totals = {
-        "critical": 0,
-        "high": 0,
-        "medium": 0,
-        "low": 0,
-        "info": 0,
-        "suppressed": 0,
-        "total": 0,
-        "actionable": 0,
-    }
-
-    for scanner_info in aggregated_results.scanner_results.values():
-        # Since we consolidated into 'source', only count source metrics
-        source_counts = scanner_info.severity_counts
-        scanner_results_totals["critical"] += source_counts.critical
-        scanner_results_totals["high"] += source_counts.high
-        scanner_results_totals["medium"] += source_counts.medium
-        scanner_results_totals["low"] += source_counts.low
-        scanner_results_totals["info"] += source_counts.info
-        scanner_results_totals["suppressed"] += source_counts.suppressed
-        scanner_results_totals["total"] += scanner_info.finding_count or 0
-        scanner_results_totals["actionable"] += scanner_info.actionable_finding_count
-
-    ASH_LOGGER.debug(f"scanner_results_totals: {scanner_results_totals}")
-
-    # Compare all three sources
-    alignment_ok = True
-    for metric in expected_totals.keys():
-        expected = expected_totals[metric]
-        summary = summary_totals[metric]
-        scanner_results = scanner_results_totals[metric]
-
-        if not (expected == summary == scanner_results):
-            ASH_LOGGER.error(
-                f"Metrics alignment failed for {metric}: "
-                f"unified={expected}, summary_stats={summary}, scanner_results={scanner_results}"
-            )
-            alignment_ok = False
-        else:
-            ASH_LOGGER.debug(
-                f"Metrics alignment passed for {metric}: "
-                f"unified={expected}, summary_stats={summary}, scanner_results={scanner_results}"
-            )
-
-    if alignment_ok:
-        ASH_LOGGER.info("All metrics sources are aligned")
-    else:
-        ASH_LOGGER.error("Metrics alignment verification failed")
-
-    return alignment_ok
