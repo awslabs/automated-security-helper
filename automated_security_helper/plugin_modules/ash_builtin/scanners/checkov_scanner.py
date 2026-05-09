@@ -3,13 +3,13 @@
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, List, Literal
+from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS, is_offline_mode
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -144,6 +144,7 @@ class CheckovScannerConfig(ScannerPluginConfigBase):
 class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     """CheckovScanner implements IaC scanning using Checkov."""
 
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
     check_conf: str = "NOT_PROVIDED"
 
     def model_post_init(self, context):

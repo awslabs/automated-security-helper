@@ -6,13 +6,13 @@ import os
 from pathlib import Path
 import platform
 import subprocess  # nosec B404 — required for version detection of opengrep binary
-from typing import Annotated, List, Literal
+from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import ASH_ASSETS_DIR, is_offline_mode
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -108,6 +108,8 @@ class OpengrepScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
     """OpengrepScanner implements code scanning using Opengrep."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     def model_post_init(self, context):
         if self.config is None:
