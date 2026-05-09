@@ -26,7 +26,7 @@ def mock_orchestrator():
         mock_instance.execute_scan.return_value = MagicMock()
         mock_instance.execute_scan.return_value.metadata.summary_stats.actionable = 0
         mock_instance.config.fail_on_findings = True
-        mock.return_value = mock_instance
+        mock.create.return_value = mock_instance
         yield mock_instance
 
 
@@ -64,7 +64,6 @@ def test_run_ash_scan_local_mode(mock_logger, mock_orchestrator, ash_temp_path):
             "pathlib.Path.cwd",
             return_value=Path("/fake/cwd"),
         ),
-        patch("os.chdir"),
         patch("builtins.open", mock_open()),
         patch(
             "automated_security_helper.models.asharp_model.AshAggregatedResults"

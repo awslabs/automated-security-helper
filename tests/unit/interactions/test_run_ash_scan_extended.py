@@ -56,7 +56,7 @@ def test_run_ash_scan_local_mode_basic(mock_orchestrator_class, mock_get_logger)
     mock_get_logger.return_value = mock_logger
 
     mock_orchestrator = MagicMock()
-    mock_orchestrator_class.return_value = mock_orchestrator
+    mock_orchestrator_class.create.return_value = mock_orchestrator
 
     mock_results = MagicMock()
     mock_results.metadata.summary_stats.actionable = 0
@@ -64,17 +64,16 @@ def test_run_ash_scan_local_mode_basic(mock_orchestrator_class, mock_get_logger)
 
     # Mock the open function
     with patch("builtins.open", mock_open()):
-        with patch("os.chdir"):
-            # Call the function
-            result = run_ash_scan(
-                mode=RunMode.local,
-                source_dir="/test/source",
-                output_dir="/test/output",
-                simple=True,
-            )
+        # Call the function
+        result = run_ash_scan(
+            mode=RunMode.local,
+            source_dir="/test/source",
+            output_dir="/test/output",
+            simple=True,
+        )
 
     # Verify orchestrator was created and execute_scan was called
-    mock_orchestrator_class.assert_called_once()
+    mock_orchestrator_class.create.assert_called_once()
     mock_orchestrator.execute_scan.assert_called_once()
 
     # Verify logger was configured
@@ -136,7 +135,7 @@ def test_run_ash_scan_with_custom_phases(mock_orchestrator_class, mock_get_logge
     mock_get_logger.return_value = mock_logger
 
     mock_orchestrator = MagicMock()
-    mock_orchestrator_class.return_value = mock_orchestrator
+    mock_orchestrator_class.create.return_value = mock_orchestrator
 
     mock_results = MagicMock()
     mock_results.metadata.summary_stats.actionable = 0
@@ -144,18 +143,17 @@ def test_run_ash_scan_with_custom_phases(mock_orchestrator_class, mock_get_logge
 
     # Mock the open function
     with patch("builtins.open", mock_open()):
-        with patch("os.chdir"):
-            # Call the function with custom phases
-            result = run_ash_scan(
-                mode=RunMode.local,
-                source_dir="/test/source",
-                output_dir="/test/output",
-                phases=[ExecutionPhase.CONVERT, ExecutionPhase.REPORT],
-                verbose=True,
-            )
+        # Call the function with custom phases
+        result = run_ash_scan(
+            mode=RunMode.local,
+            source_dir="/test/source",
+            output_dir="/test/output",
+            phases=[ExecutionPhase.CONVERT, ExecutionPhase.REPORT],
+            verbose=True,
+        )
 
     # Verify orchestrator was created
-    mock_orchestrator_class.assert_called_once()
+    mock_orchestrator_class.create.assert_called_once()
 
     # Verify execute_scan was called with the correct phases
     mock_orchestrator.execute_scan.assert_called_once_with(phases=["convert", "report"])
@@ -175,17 +173,10 @@ def test_run_ash_scan_with_actionable_findings(
     mock_get_logger.return_value = mock_logger
 
     mock_orchestrator = MagicMock()
-    mock_orchestrator_class.return_value = mock_orchestrator
-    mock_orchestrator.config.fail_on_findings = True
+    mock_orchestrator_class.create.return_value = mock_orchestrator
 
     mock_results = MagicMock()
-    mock_results.metadata.summary_stats.actionable = 5
-    mock_result_obj = MagicMock()
-    mock_result_obj.level = "error"
-    mock_result_obj.suppressions = None
-    mock_run = MagicMock()
-    mock_run.results = [mock_result_obj]
-    mock_results.sarif.runs = [mock_run]
+    mock_results.sarif = None
     mock_orchestrator.execute_scan.return_value = mock_results
 
     # Mock scanner metrics with actionable findings
@@ -193,22 +184,21 @@ def test_run_ash_scan_with_actionable_findings(
 
     # Mock the open function
     with patch("builtins.open", mock_open()):
-        with patch("os.chdir"):
-            # Mock sys.exit to prevent test from exiting
-            with patch("sys.exit") as mock_exit:
-                # Mock the unified metrics function
-                with patch(
-                    "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
-                    return_value=mock_scanner_metrics,
-                ):
-                    # Call the function with fail_on_findings=True
-                    run_ash_scan(
-                        mode=RunMode.local,
-                        source_dir="/test/source",
-                        output_dir="/test/output",
-                        fail_on_findings=True,
-                        show_summary=True,
-                    )
-                    # Verify sys.exit was called
-                    mock_exit.assert_called_once()
-                    mock_exit.assert_called_with(2)
+        # Mock sys.exit to prevent test from exiting
+        with patch("sys.exit") as mock_exit:
+            # Mock the unified metrics function
+            with patch(
+                "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
+                return_value=mock_scanner_metrics,
+            ):
+                # Call the function with fail_on_findings=True
+                run_ash_scan(
+                    mode=RunMode.local,
+                    source_dir="/test/source",
+                    output_dir="/test/output",
+                    fail_on_findings=True,
+                    show_summary=True,
+                )
+                # Verify sys.exit was called
+                mock_exit.assert_called_once()
+                mock_exit.assert_called_with(2)

@@ -23,12 +23,16 @@ def test_offline_flag_sets_env_var(tmp_path):
 
     captured_env = {}
 
-    # Build a mock orchestrator whose __init__ records the env state
+    # Build a mock orchestrator whose create() records the env state at call time.
     class FakeOrchestrator:
-        def __init__(self, **kwargs):
-            captured_env["ASH_OFFLINE"] = os.environ.get("ASH_OFFLINE")
+        def __init__(self):
             self.config = MagicMock()
             self.config.fail_on_findings = False
+
+        @classmethod
+        def create(cls, **kwargs):
+            captured_env["ASH_OFFLINE"] = os.environ.get("ASH_OFFLINE")
+            return cls()
 
         def execute_scan(self, phases=None):
             mock_result = MagicMock(
@@ -89,10 +93,14 @@ def test_offline_false_does_not_set_env_var(tmp_path):
     captured_env = {}
 
     class FakeOrchestrator:
-        def __init__(self, **kwargs):
-            captured_env["ASH_OFFLINE"] = os.environ.get("ASH_OFFLINE")
+        def __init__(self):
             self.config = MagicMock()
             self.config.fail_on_findings = False
+
+        @classmethod
+        def create(cls, **kwargs):
+            captured_env["ASH_OFFLINE"] = os.environ.get("ASH_OFFLINE")
+            return cls()
 
         def execute_scan(self, phases=None):
             mock_result = MagicMock(
