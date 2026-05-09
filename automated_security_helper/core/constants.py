@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-from typing import Literal
 from pathlib import Path
 
 ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
@@ -167,18 +166,6 @@ KNOWN_SCANNABLE_EXTENSIONS = [
     # "sqlite3db",
     # "sqlite3db",
     # "sqlite3db",
-]
-SCANNER_TYPES = Literal[
-    # Standard scanner types
-    "CONTAINER",
-    "DAST",
-    "DEPENDENCY",
-    "IAC",
-    "SAST",
-    "SBOM",
-    "SECRETS",
-    "UNKNOWN",
-    "CUSTOM",
 ]
 VALID_SEVERITY_VALUES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"})
 

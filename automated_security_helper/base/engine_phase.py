@@ -183,7 +183,6 @@ class EnginePhase(ABC):
             if not description:
                 description = f"Initializing {self.phase_name} phase..."
 
-
     def update_progress(self, completed: int, description: str = None) -> None:
         """Update progress for this phase.
 
