@@ -1,14 +1,11 @@
-"""Roo Code plugin backend.
-
-Emits a Roo layout: a per-plugin rules directory under `.roo/rules-{plugin_name}`
-that carries the skill body and references, a `.roomodes` file rendered from
-the custom-modes template, an `.roo/mcp.json` for MCP servers, and a shared
-AGENTS.md instruction file rendered from the cursor template.
-"""
+"""Roo Code backend."""
 from __future__ import annotations
+
+import json
 
 from ...core import (
     BaseBackend,
+    BuildContext,
     CustomModes,
     InstructionFile,
     MCPConfig,
@@ -46,3 +43,24 @@ class RooBackend(BaseBackend):
         include_skill_body=False,
         include_references="none",
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate .roo/mcp.json + .roomodes + rules dir."""
+        mcp = ctx.out / ".roo" / "mcp.json"
+        roomodes = ctx.out / ".roomodes"
+        agents = ctx.out / "AGENTS.md"
+
+        if not mcp.exists():
+            return {"ok": False, "reason": ".roo/mcp.json missing"}
+        try:
+            cfg = json.loads(mcp.read_text())
+        except json.JSONDecodeError as e:
+            return {"ok": False, "reason": f".roo/mcp.json invalid JSON: {e}"}
+        if "mcpServers" not in cfg:
+            return {"ok": False, "reason": ".roo/mcp.json missing `mcpServers` block"}
+        if not roomodes.exists():
+            return {"ok": False, "reason": ".roomodes missing"}
+        if not agents.exists():
+            return {"ok": False, "reason": "AGENTS.md missing"}
+
+        return {"ok": True, "detail": ".roo/mcp.json + .roomodes + AGENTS.md valid (Roo is VS Code-only)"}

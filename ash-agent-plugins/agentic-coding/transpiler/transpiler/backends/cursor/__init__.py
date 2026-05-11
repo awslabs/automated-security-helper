@@ -1,14 +1,11 @@
-"""Cursor backend.
-
-Emits a Cursor-compatible layout: MCP servers under .cursor/mcp.json, skills
-rendered as .cursor/rules/*.mdc files, and an AGENTS.md at the project root
-(Cursor reads AGENTS.md natively but the template gives it the same shape as
-the other AGENTS.md-aware platforms).
-"""
+"""Cursor backend."""
 from __future__ import annotations
+
+import json
 
 from ...core import (
     BaseBackend,
+    BuildContext,
     InstructionFile,
     MCPConfig,
     SkillConfig,
@@ -38,3 +35,21 @@ class CursorBackend(BaseBackend):
         include_skill_body=False,
         include_references="none",
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate .cursor/mcp.json parses + AGENTS.md exists."""
+        mcp = ctx.out / ".cursor" / "mcp.json"
+        agents = ctx.out / "AGENTS.md"
+
+        if not mcp.exists():
+            return {"ok": False, "reason": ".cursor/mcp.json missing"}
+        try:
+            cfg = json.loads(mcp.read_text())
+        except json.JSONDecodeError as e:
+            return {"ok": False, "reason": f".cursor/mcp.json invalid JSON: {e}"}
+        if "mcpServers" not in cfg:
+            return {"ok": False, "reason": ".cursor/mcp.json missing `mcpServers` block"}
+        if not agents.exists():
+            return {"ok": False, "reason": "AGENTS.md missing"}
+
+        return {"ok": True, "detail": "mcp.json + AGENTS.md valid (Cursor is GUI-only; no CLI)"}

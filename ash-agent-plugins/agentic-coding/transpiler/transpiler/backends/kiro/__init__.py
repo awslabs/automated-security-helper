@@ -1,14 +1,11 @@
-"""Kiro backend.
-
-Emits the Kiro layout: an mcp.json in mcpServers format and a single POWER.md
-instruction file rendered from a Jinja template. The instruction file inlines
-the skill body and appends reference content, so Kiro reads everything from
-one document without separate skill or command directories.
-"""
+"""Kiro IDE Power backend."""
 from __future__ import annotations
+
+import json
 
 from ...core import (
     BaseBackend,
+    BuildContext,
     InstructionFile,
     MCPConfig,
 )
@@ -31,3 +28,21 @@ class KiroBackend(BaseBackend):
         include_skill_body=True,
         include_references="appended",
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate mcp.json + POWER.md."""
+        mcp = ctx.out / "mcp.json"
+        power = ctx.out / "POWER.md"
+
+        if not mcp.exists():
+            return {"ok": False, "reason": "mcp.json missing"}
+        try:
+            cfg = json.loads(mcp.read_text())
+        except json.JSONDecodeError as e:
+            return {"ok": False, "reason": f"mcp.json invalid JSON: {e}"}
+        if "mcpServers" not in cfg:
+            return {"ok": False, "reason": "mcp.json missing `mcpServers` block"}
+        if not power.exists():
+            return {"ok": False, "reason": "POWER.md missing"}
+
+        return {"ok": True, "detail": "mcp.json + POWER.md valid (Kiro is GUI-only)"}

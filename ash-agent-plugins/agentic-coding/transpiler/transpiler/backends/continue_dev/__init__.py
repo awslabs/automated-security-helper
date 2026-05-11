@@ -1,15 +1,11 @@
-"""Continue.dev plugin backend.
-
-Emits a Continue.dev layout: an MCP server YAML at `.continue/mcpServers/{plugin_name}.yaml`
-rendered from a Jinja template (Continue uses its own YAML schema rather than
-the standard `mcpServers` JSON), and a skill placed under `.continue/rules/`
-with a minimal name+description frontmatter. The module is named `continue_dev`
-because `continue` is a Python keyword, but the backend's NAME stays "continue".
-"""
+"""Continue.dev backend."""
 from __future__ import annotations
+
+import yaml
 
 from ...core import (
     BaseBackend,
+    BuildContext,
     MCPConfig,
     SkillConfig,
 )
@@ -32,3 +28,23 @@ class ContinueBackend(BaseBackend):
         frontmatter_fields=("name", "description"),
         include_references="none",
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate .continue/mcpServers/*.yaml parses + .continue/rules/ exists."""
+        mcp_dir = ctx.out / ".continue" / "mcpServers"
+        rules_dir = ctx.out / ".continue" / "rules"
+
+        if not mcp_dir.exists() or not list(mcp_dir.glob("*.yaml")):
+            return {"ok": False, "reason": ".continue/mcpServers/*.yaml missing"}
+        for yml in mcp_dir.glob("*.yaml"):
+            try:
+                cfg = yaml.safe_load(yml.read_text())
+            except yaml.YAMLError as e:
+                return {"ok": False, "reason": f"{yml.name} YAML invalid: {e}"}
+            if not isinstance(cfg, dict) or "mcpServers" not in cfg:
+                return {"ok": False, "reason": f"{yml.name} missing `mcpServers` key"}
+
+        if not rules_dir.exists() or not list(rules_dir.glob("*.md")):
+            return {"ok": False, "reason": ".continue/rules/*.md missing"}
+
+        return {"ok": True, "detail": "mcpServers yaml + rules valid (Continue is VS Code-only)"}
