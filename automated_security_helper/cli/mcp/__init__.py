@@ -88,18 +88,30 @@ def _build_auth_middleware(header_name: str, header_value: str):
     Returns a class suitable for ``Starlette.add_middleware``. Requests missing
     the header — or carrying a different value — receive ``401 Unauthorized``.
     The header name is matched case-insensitively, mirroring HTTP semantics.
+
+    Uses ``hmac.compare_digest`` for the value comparison to defeat timing
+    side channels: a naive ``!=`` leaks per-byte equality timing, which an
+    attacker can exploit to recover the expected token one byte at a time.
+
+    Rejects all CORS preflight (``OPTIONS``) bypass attempts with the same
+    401 path: a permissive preflight handler in front would otherwise let
+    a browser-origin scan around the auth boundary without ever sending
+    the protected header.
     """
+    import hmac
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
     from starlette.responses import JSONResponse
 
     expected_name = header_name.lower()
-    expected_value = header_value
+    expected_value_bytes = header_value.encode("utf-8")
 
     class _StaticHeaderAuth(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
             received = request.headers.get(expected_name)
-            if received != expected_value:
+            if received is None or not hmac.compare_digest(
+                received.encode("utf-8"), expected_value_bytes
+            ):
                 return JSONResponse(
                     {"error": "unauthorized", "detail": "missing or invalid auth header"},
                     status_code=401,
