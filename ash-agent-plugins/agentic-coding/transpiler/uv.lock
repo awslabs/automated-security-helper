@@ -11,6 +11,7 @@ name = "agentic-plugin-transpiler"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "pydantic" },
@@ -25,6 +26,7 @@ refresh = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click", specifier = ">=8.1" },
     { name = "datamodel-code-generator", extras = ["http"], marker = "extra == 'refresh'", specifier = ">=0.25" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jsonschema", specifier = ">=4.0" },

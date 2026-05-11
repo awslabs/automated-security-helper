@@ -46,8 +46,6 @@ import frontmatter
 import yaml
 from jsonschema import Draft7Validator, Draft202012Validator
 
-from schema import PlatformConfig
-
 # ---------------------------------------------------------------------------
 # Tier 1 — external JSON schemas (cached under schemas/)
 # ---------------------------------------------------------------------------
@@ -213,7 +211,7 @@ def validate_structural_sanity(plugins_root: Path) -> list[Error]:
 
 def validate_paths_exist(
     plugins_root: Path,
-    configs: dict[str, PlatformConfig],
+    configs: dict[str, Any],
     plugin_name: str,
     skill_name: str,
 ) -> list[Error]:
@@ -504,7 +502,7 @@ def validate_mcpb_archive(plugins_root: Path) -> list[Error]:
 def validate_all(
     plugins_root: Path,
     schemas_dir: Path,
-    configs: dict[str, PlatformConfig],
+    configs: dict[str, Any],
     plugin_name: str,
     skill_name: str,
 ) -> list[Error]:
