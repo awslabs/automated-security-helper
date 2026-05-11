@@ -273,6 +273,28 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             level=logging.INFO,
         )
 
+    # Exit codes considered "successful". Grype uses {0, 2}; the default set
+    # works for bandit/checkov/etc. Override on subclasses where the scanner
+    # has a different convention.
+    success_exit_codes: ClassVar[Set[int]] = {0, 1}
+
+    # Log level used for the empty-target preamble message. Defaults to INFO;
+    # bandit overrides to VERBOSE since python-only repos commonly trip it.
+    empty_target_log_level: ClassVar[int] = logging.INFO
+
+    def _invocation_extras(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: "Path",
+    ) -> dict:
+        """Return additional Invocation kwargs (e.g. ``properties``).
+
+        Default returns an empty dict. Override to attach scanner-specific
+        Invocation fields like a PropertyBag. Called from ``_inject_invocation``.
+        """
+        return {}
+
     def _inject_invocation(
         self,
         sarif_report: SarifReport,
@@ -285,10 +307,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         No-op when sarif_report.runs is empty (avoids IndexError on empty reports).
         """
         if success_codes is None:
-            success_codes = {0, 1}
+            success_codes = self.success_exit_codes
         if not sarif_report.runs:
             return
         working_dir = ArtifactLocation(uri=get_shortest_name(input=target))  # type: ignore[call-arg]
+        extras = self._invocation_extras(sarif_report, final_args, target)
         sarif_report.runs[0].invocations = [
             Invocation(  # type: ignore[call-arg]
                 commandLine=final_args[0] if final_args else "",
@@ -299,8 +322,56 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 exitCode=self.exit_code,
                 exitCodeDescription="\n".join(self.errors) if self.errors else "",
                 workingDirectory=working_dir,
+                **extras,
             )
         ]
+
+    def _read_results_file(self, results_file: "Path") -> Optional[dict]:
+        """Read and parse the scanner results file as JSON.
+
+        Default reads the file as JSON. Subclasses may override to add
+        empty-file detection or alternative parsing. Return None to signal
+        an empty/missing result that should be replaced with the default
+        empty SARIF report (see ``_handle_empty_results``).
+        """
+        with open(results_file, mode="r", encoding="utf-8") as fh:
+            content = fh.read()
+        if not content or content.strip() == "":
+            return None
+        return json.loads(content)
+
+    def _handle_empty_results(self) -> SarifReport:
+        """Return a SARIF report representing an empty/missing scanner result.
+
+        Default returns an empty SARIF 2.1.0 report with no runs. Override
+        if a scanner needs richer empty-state handling.
+        """
+        return SarifReport(  # type: ignore[call-arg]
+            version="2.1.0",
+            runs=[],
+        )
+
+    def _ensure_runs(self, sarif_report: SarifReport) -> None:
+        """Ensure ``sarif_report.runs`` is non-empty before invocation injection.
+
+        Default no-op. Override (e.g. Grype) to synthesize a fallback Run
+        when the scanner produces a SARIF report with zero runs but the
+        template still needs to attach an invocation.
+        """
+        return None
+
+    def _post_process_sarif(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: "Path",
+    ) -> SarifReport:
+        """Apply scanner-specific tweaks to a SARIF report after invocation injection.
+
+        Default returns the report unchanged. Override to normalize URIs,
+        mask secrets, attach scanner details, etc.
+        """
+        return sarif_report
 
     def _execute_scan(
         self,
@@ -343,7 +414,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             self._plugin_log(
                 f"Target directory {target} is empty or doesn't exist. Skipping scan.",
                 target_type=target_type,
-                level=logging.INFO,
+                level=self.empty_target_log_level,
                 append_to_stream="stderr",
             )
             self._post_scan(target=target, target_type=target_type)
@@ -377,12 +448,28 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
             self._post_scan(target=target, target_type=target_type)
 
-            with open(results_file, mode="r", encoding="utf-8") as fh:
-                raw = json.load(fh)
+            raw = self._read_results_file(results_file)
+            if raw is None:
+                # Empty result file: defer to _handle_empty_results so
+                # subclasses can log or build a richer fallback report.
+                error_msg = (
+                    f"{self.__class__.__name__} results file is empty "
+                    f"(exit code: {self.exit_code}). "
+                )
+                if self.errors:
+                    error_msg += f"Stderr: {' '.join(self.errors)}"
+                else:
+                    error_msg += "No stderr output captured."
+                ASH_LOGGER.warning(error_msg)
+                return self._handle_empty_results()
 
             try:
                 sarif_report: SarifReport = SarifReport.model_validate(raw)
+                self._ensure_runs(sarif_report)
                 self._inject_invocation(sarif_report, final_args, target)
+                sarif_report = self._post_process_sarif(
+                    sarif_report, final_args, target
+                )
             except Exception as e:
                 ASH_LOGGER.warning(
                     f"Failed to parse {self.__class__.__name__} results as SARIF: {e}"
