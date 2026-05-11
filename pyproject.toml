@@ -31,6 +31,7 @@ dependencies = [
  "toml>=0.10.2,<1.0.0",
  "python-multipart>=0.0.22,<0.1",
  "uvicorn>=0.27,<1",
+ "jsonpatch>=1.33,<2",
 ]
 [project.optional-dependencies]
 cdk = [
