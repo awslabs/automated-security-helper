@@ -23,6 +23,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
 CheckFrameworks = Literal[
@@ -187,8 +188,12 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # First validate UV tool availability if required
         if not self._validate_uv_tool_availability():
+            # UV missing — defer to consolidated resolver for direct binary.
+            if get_uv_tool_command(self.command) is not None:
+                self.use_uv_tool = False
+                self.dependencies_satisfied = True
+                return True
             return False
 
         # For UV tool-based scanners, attempt explicit installation if needed
@@ -219,16 +224,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 self._plugin_log("Successfully installed checkov via UV tool")
                 self.dependencies_satisfied = True
                 return True
-            else:
-                self._plugin_log(
-                    "UV tool installation failed for checkov, falling back to existing validation",
-                    level=logging.WARNING,
-                )
-                # Fall back to existing validation logic
-                return super().validate_plugin_dependencies()
 
-        # Fall back to base class validation for non-UV tool scenarios
-        return super().validate_plugin_dependencies()
+            self._plugin_log(
+                "UV tool installation failed for checkov, falling back to consolidated resolver",
+                level=logging.WARNING,
+            )
+
+        # Final fallback: consolidated UV-or-direct-binary resolver.
+        return get_uv_tool_command(self.command) is not None
 
     def _process_config_options(self):
         # Checkov config path
