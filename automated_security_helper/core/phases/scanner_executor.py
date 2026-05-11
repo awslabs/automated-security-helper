@@ -351,7 +351,9 @@ class ScannerExecutor:
                         processed = self._process_results_fn(r, aggregated_results)
                         aggregated_results = processed
 
-                    if scanner_succeeded:
+                    if scanner_succeeded and all(
+                        getattr(c, "status", None) != ScannerStatus.ERROR for c in results_list
+                    ):
                         ASH_LOGGER.debug(
                             f"Appending {scanner_plugin.__class__.__name__} to completed_scanners"
                         )
@@ -494,7 +496,9 @@ class ScannerExecutor:
                             processed = self._process_results_fn(r, aggregated_results)
                             aggregated_results = processed
 
-                        if scanner_succeeded:
+                        if scanner_succeeded and all(
+                            getattr(c, "status", None) != ScannerStatus.ERROR for c in results_list
+                        ):
                             plugin_inst = next(
                                 (t[1] for t in self.scanner_tasks if t[0] == scanner_name), None
                             )
