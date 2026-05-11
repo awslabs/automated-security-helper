@@ -44,6 +44,34 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.0 (2026-05-11)
+
+### Feat
+
+- **#242**: support inline code suppressions (#297)
+- **#158**: support scanning only changed files in PRs (#296)
+- **#201**: add suppression creation from inspect UI (#298)
+- **reporters**: add gitlab-cyclonedx reporter for GitLab Dependency List (#284)
+- **#200**: add interactive configuration wizard (#299)
+- **#230**: add compact mode for markdown reporter (#293)
+- config lint command (#286)
+- add GitHub Advanced Security (GHAS) SARIF reporter (#291)
+- **#96**: CDK-based offline test infrastructure (#295)
+- 80%+ test coverage gate, OCI_RUNNER_WRAPPER, Finch CI, inline nosec (#285)
+
+### Fix
+
+- **ci**: disable coverage gate in release smoke test (#325)
+- handle None output_dir in inspect findings command (#321)
+- changed-files-only filter and YAML append indentation
+- **ci**: skip SARIF upload in merge_group events (#303)
+- **ci**: migrate PR title check to commitizen and skip in merge queue (#302)
+- Dockerfile retry hardening, offline parity, suppression & CI fixes (#292)
+
+### Refactor
+
+- codebase cleanup, bug fixes, and issue resolution (#283)
+
 ## v3.4.0 (2026-04-29)
 
 ### Feat
