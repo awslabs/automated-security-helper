@@ -18,5 +18,5 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Verify generated outputs match transpiler/_base/
-        run: uv run --project agentic-coding/transpiler transpile --check
+      - name: Verify drift + validation
+        run: uv run --project agentic-coding/transpiler agentic-plugins check

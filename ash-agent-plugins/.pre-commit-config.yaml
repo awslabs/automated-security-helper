@@ -15,16 +15,16 @@
 repos:
   - repo: local
     hooks:
-      - id: transpile-base
-        name: Transpile agentic-coding/transpiler/_base/ to platform variants
-        entry: uv run --project agentic-coding/transpiler transpile
+      - id: agentic-plugins-build
+        name: Build all platform plugins from _base/ + backend class vars
+        entry: uv run --project agentic-coding/transpiler agentic-plugins build
         language: system
         files: '^agentic-coding/transpiler/'
         pass_filenames: false
 
-      - id: verify-no-drift
-        name: Verify generated outputs match transpiler/_base/
-        entry: uv run --project agentic-coding/transpiler transpile --check
+      - id: agentic-plugins-check
+        name: Verify drift + validation across all backends
+        entry: uv run --project agentic-coding/transpiler agentic-plugins check
         language: system
         files: '^agentic-coding/'
         pass_filenames: false
