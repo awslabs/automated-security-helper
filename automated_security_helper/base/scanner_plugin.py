@@ -373,6 +373,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         return sarif_report
 
+    @abstractmethod
     def _execute_scan(
         self,
         target: "Path",
@@ -381,8 +382,13 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     ) -> Tuple[List[str], "Path", Optional[dict]]:
         """Run the scanner tool and return (final_args, results_file, subprocess_env).
 
-        Subclasses that use the template scan() MUST override this method.
-        Scanners that override scan() entirely may leave this unimplemented.
+        Abstract template-method hook. Subclasses that use the default
+        `scan()` template MUST implement this with real tool-invocation
+        logic. Subclasses that override `scan()` directly (e.g. Python-API
+        scanners, file-iterating scanners) must still satisfy the abstract
+        contract — provide a one-line stub that raises NotImplementedError
+        so ABC can verify the interface at class-definition time and the
+        stub is never reached at runtime.
 
         Returns:
             (final_args, results_file, subprocess_env) where subprocess_env is
