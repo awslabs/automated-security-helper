@@ -14,10 +14,10 @@ A unified source-of-truth (`agentic-coding/transpiler/_base/`) plus a config-dri
 | 6 | **Cursor** | `agentic-coding/plugins/cursor/` | Copy `.cursor/` into your repo |
 | 7 | **Windsurf** | `agentic-coding/plugins/windsurf/` | Copy `.windsurf/`, then `bash install.sh` |
 | 8 | **Cline** | `agentic-coding/plugins/cline/` | Copy `.clinerules/`, then `bash install.sh` |
-| 9 | **Roo Code** | `agentic-coding/plugins/roo/` | Copy `.roo/` and `.roomodes` into your repo |
+| 9 | **Roo Code** ⚠️ deprecated | `agentic-coding/plugins/roo/` | Copy `.roo/` and `.roomodes` into your repo. Roo Code [shuts down 2026-05-15](https://docs.roocode.com/sunset); the team recommends Cline as successor. |
 | 10 | **Continue.dev** | `agentic-coding/plugins/continue/` | Copy `.continue/` into your repo |
 | 11 | **Gemini CLI** | `agentic-coding/plugins/gemini/` | `gemini extensions install ./agentic-coding/plugins/gemini` |
-| 12 | **Block Goose** | `agentic-coding/plugins/goose/` | `bash install.sh` |
+| 12 | **Block Goose** | `agentic-coding/plugins/goose/` | `bash install.sh` (reads `AGENTS.md` natively) |
 | 13 | **Amazon Q Dev CLI** | `agentic-coding/plugins/amazonq/` | `bash install.sh` then `q --agent ash` |
 | 14 | **Aider** | `agentic-coding/plugins/aider/` | Copy `.aider.conf.yml` and `CONVENTIONS.md` (no MCP support in Aider) |
 | 15 | **MCPB / Claude Desktop** | `agentic-coding/plugins/mcpb/` | Double-click `ash.mcpb` for one-click install in Claude Desktop |
