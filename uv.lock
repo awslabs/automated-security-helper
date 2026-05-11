@@ -122,7 +122,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "attrs", specifier = ">=23.1.0,<27.0.0" },
-    { name = "aws-cdk-lib", marker = "extra == 'cdk'", specifier = ">=2.150.0,<2.249" },
+    { name = "aws-cdk-lib", marker = "extra == 'cdk'", specifier = ">=2.253.0,<2.254" },
     { name = "boto3", specifier = ">=1.34.0,<1.44" },
     { name = "cattrs", specifier = ">=22.1.0,<27.0.0" },
     { name = "cdk-nag", marker = "extra == 'cdk'", specifier = ">=2.28.0,<3.0.0" },
@@ -143,7 +143,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.22,<0.1" },
     { name = "requests", specifier = ">=2.28.0,<3.0.0" },
     { name = "rich", specifier = ">=13.5.3,<16" },
-    { name = "textual", specifier = ">=3.2.0,<9" },
+    { name = "textual", specifier = ">=8.2.5,<9" },
     { name = "toml", specifier = ">=0.10.2,<1.0.0" },
     { name = "typer", specifier = ">=0.16.0,<0.26" },
     { name = "uv", specifier = ">=0.9.21,<0.12" },
@@ -153,13 +153,13 @@ provides-extras = ["cdk"]
 [package.metadata.requires-dev]
 dev = [
     { name = "commitizen", specifier = ">=4.13.10" },
-    { name = "hatchling", specifier = ">=1.27.0" },
+    { name = "hatchling", specifier = ">=1.29.0" },
     { name = "lazydocs", specifier = ">=0.4.8,<1.0.0" },
     { name = "mcp", specifier = ">=1.23.3" },
     { name = "mkdocs", specifier = ">=1.6.1,<2.0.0" },
     { name = "mkdocs-autorefs", specifier = ">=1.4.1,<2.0.0" },
     { name = "mkdocs-awesome-nav", specifier = ">=3.1.2,<4.0.0" },
-    { name = "mkdocs-material", specifier = ">=9.6.11,<10.0.0" },
+    { name = "mkdocs-material", specifier = ">=9.7.6,<10.0.0" },
     { name = "mkdocs-mermaid2-plugin", specifier = ">=1.2.1,<2.0.0" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=0.29.1,<1.0.0" },
     { name = "mypy", specifier = ">=1.15.0,<2.0.0" },
@@ -167,7 +167,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.3,<10.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.26.0,<2.0.0" },
     { name = "pytest-cov", specifier = ">=6.1.0,<7.0.0" },
-    { name = "pytest-mock", specifier = ">=3.14.0,<4.0.0" },
+    { name = "pytest-mock", specifier = ">=3.15.1,<4.0.0" },
     { name = "pytest-xdist", specifier = ">=3.7.0,<4.0.0" },
     { name = "ruff", specifier = ">=0.11.2,<1.0.0" },
     { name = "toml", specifier = ">=0.10.2" },
@@ -219,7 +219,7 @@ wheels = [
 
 [[package]]
 name = "aws-cdk-lib"
-version = "2.248.0"
+version = "2.253.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aws-cdk-asset-awscli-v1" },
@@ -230,9 +230,9 @@ dependencies = [
     { name = "publication" },
     { name = "typeguard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/70/42/a8250f31763adb21acb90088b99f7f37c3b8d09c3fd94dc631c0e69d9463/aws_cdk_lib-2.248.0.tar.gz", hash = "sha256:a00c73bfa6865ef62d700d6f97dd4124979ccfe69dc1ef70f2526aa49c52bbc8", size = 48734274, upload-time = "2026-04-03T07:35:05.438Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/58/f4104842e277f000396f9f9e12588eb83615a1212fb3ee1668bb5dd1f97a/aws_cdk_lib-2.253.1.tar.gz", hash = "sha256:df03363cdaef4d2d7bac368b2d5d2bf4209921d21096cd5f8e5889347fee4793", size = 49586746, upload-time = "2026-05-08T16:05:27.185Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/0b/41b0979581668c709b01a7d26f9c2716031f2b0c53ad5a01341160c631b0/aws_cdk_lib-2.248.0-py3-none-any.whl", hash = "sha256:e89db288365371e6b42aaae8b45ad2064615dfbe87e95741a2f2bb7ec1f33dad", size = 49395398, upload-time = "2026-04-03T07:34:25.671Z" },
+    { url = "https://files.pythonhosted.org/packages/06/7c/1e7964f0f267301bb5026fed45369961f7311073412bcd36e09fbe4df0de/aws_cdk_lib-2.253.1-py3-none-any.whl", hash = "sha256:03a6f5080978f9e3576f490d06fbd1f41f159280d34dbca50721de4a19694136", size = 50271288, upload-time = "2026-05-08T16:04:41.956Z" },
 ]
 
 [[package]]
