@@ -14,6 +14,7 @@ phases in dependency order.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -165,6 +166,10 @@ class BuildContext:
 # ---------------------------------------------------------------------------
 
 
+_MANIFEST_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+_MANIFEST_SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+
 @dataclass(frozen=True)
 class Manifest:
     name: str
@@ -182,6 +187,24 @@ class Manifest:
     ash_version: str
     commands: tuple[dict, ...] = field(default_factory=tuple)
     agents: tuple[dict, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        # Enforce kebab-case on `name` and `skill_name` at load time.
+        # `name` interpolates into output paths ({plugin_name}) — a value with
+        # path separators or `..` would let a malformed _base/manifest.json
+        # write outside the plugins/ tree. The kebab-case regex is the
+        # documented constraint for both Claude plugin names and Roo slugs;
+        # enforcing it here means downstream emitters can trust the string.
+        if not _MANIFEST_NAME_RE.match(self.name):
+            raise ValueError(
+                f"Manifest.name {self.name!r} fails kebab-case "
+                f"^[a-z0-9]+(-[a-z0-9]+)*$ — edit transpiler/_base/manifest.json"
+            )
+        if not _MANIFEST_SKILL_NAME_RE.match(self.skill_name):
+            raise ValueError(
+                f"Manifest.skill_name {self.skill_name!r} fails kebab-case "
+                f"^[a-z0-9]+(-[a-z0-9]+)*$ — edit transpiler/_base/manifest.json"
+            )
 
     @classmethod
     def load(cls, path: Path) -> Manifest:
@@ -264,6 +287,20 @@ class BaseBackend:
 
     def check(self, plugins_root: Path) -> list[tuple[str, str, str]]:
         return []
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Verify the generated plugin loads under the platform's CLI/IDE.
+
+        Default: not implemented — backends opt in by overriding this. The
+        CLI catches NotImplementedError and reports the backend as 'skipped'.
+
+        Successful return: {"ok": True, "detail": "<short>"} or just {"ok": True}.
+        Failure: {"ok": False, "reason": "<short>"} or raise an exception.
+        Returning None is treated as 'skipped'.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} has not implemented smoke_test()"
+        )
 
     def _run_phases_for_stage(self, ctx: BuildContext, stage: PhaseStage) -> None:
         phases = [p for p in type(self).PHASES if p.stage == stage]

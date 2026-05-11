@@ -7,13 +7,13 @@ install script rather than a committed config file.
 """
 from __future__ import annotations
 
-from ..core import (
+from ...core import (
     BaseBackend,
     ExtensionManifest,
     InstructionFile,
     MCPConfig,
 )
-from ..registry import register_backend
+from ...registry import register_backend
 
 
 @register_backend

@@ -7,8 +7,8 @@ via an install script.
 """
 from __future__ import annotations
 
-from ..core import BaseBackend, MCPConfig
-from ..registry import register_backend
+from ...core import BaseBackend, MCPConfig
+from ...registry import register_backend
 
 
 @register_backend

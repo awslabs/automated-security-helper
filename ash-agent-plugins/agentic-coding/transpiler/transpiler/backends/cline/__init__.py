@@ -8,13 +8,13 @@ via Cline's install script (the MCP file itself is not committed; the
 """
 from __future__ import annotations
 
-from ..core import (
+from ...core import (
     BaseBackend,
     InstructionFile,
     MCPConfig,
     RulesDir,
 )
-from ..registry import register_backend
+from ...registry import register_backend
 
 
 @register_backend

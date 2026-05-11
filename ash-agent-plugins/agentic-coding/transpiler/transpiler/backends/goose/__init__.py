@@ -8,12 +8,12 @@ registration with the Goose CLI.
 """
 from __future__ import annotations
 
-from ..core import (
+from ...core import (
     BaseBackend,
     InstructionFile,
     MCPConfig,
 )
-from ..registry import register_backend
+from ...registry import register_backend
 
 
 @register_backend

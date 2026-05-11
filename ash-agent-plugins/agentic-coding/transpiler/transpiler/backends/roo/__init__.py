@@ -7,14 +7,14 @@ AGENTS.md instruction file rendered from the cursor template.
 """
 from __future__ import annotations
 
-from ..core import (
+from ...core import (
     BaseBackend,
     CustomModes,
     InstructionFile,
     MCPConfig,
     RulesDir,
 )
-from ..registry import register_backend
+from ...registry import register_backend
 
 
 @register_backend

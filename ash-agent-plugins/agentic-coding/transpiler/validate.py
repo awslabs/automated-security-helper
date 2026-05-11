@@ -51,22 +51,53 @@ from jsonschema import Draft7Validator, Draft202012Validator
 # ---------------------------------------------------------------------------
 
 # Map: relative path under each platform output -> (schema filename, validator class, fix-hint)
+#
+# Files listed here are validated via two parallel mechanisms (where available):
+#   1. JSON Schema validation via `jsonschema` library — catches schema-level
+#      shape violations using the vendored *.schema.json files.
+#   2. Pydantic model validation via the generated_models/ package — catches
+#      the same violations with richer Python-side error reporting.
+#
+# Both mechanisms run because they catch different classes of error: jsonschema
+# is the authoritative spec interpreter, Pydantic gives field-path-aware errors.
+# When a Pydantic model isn't available (e.g. OpenCode's 31k-line schema is too
+# large to commit as a generated model), the file gets jsonschema validation only.
 EXTERNAL_SCHEMAS: dict[str, tuple[str, type, str]] = {
     "mcpb/manifest.json": (
         "mcpb-manifest.schema.json",
         Draft7Validator,
-        "Edit transpiler/_base/manifest.json or transpiler/configs.yaml under the `mcpb` block, then re-transpile.",
+        "Edit transpiler/_base/manifest.json or the `mcpb` backend's MCPB_BUNDLE class var, then re-transpile.",
     ),
     "opencode/opencode.json": (
         "opencode-config.schema.json",
         Draft202012Validator,
-        "Edit transpiler/_base/mcp.json or transpiler/configs.yaml under the `opencode` block, then re-transpile.",
+        "Edit transpiler/_base/mcp.json or the `opencode` backend's MCP class var, then re-transpile.",
     ),
     "amazonq/agent.json": (
         "amazonq-agent.schema.json",
         Draft7Validator,
-        "Edit transpiler/_base/manifest.json or transpiler/configs.yaml under the `amazonq` block, then re-transpile.",
+        "Edit transpiler/_base/manifest.json or the `amazonq` backend's MCP class var, then re-transpile.",
     ),
+}
+
+
+# Map: relative path under each platform output -> (model module name, model class)
+# These run in addition to the jsonschema validation above. The generated models
+# come from `generated_models/` (produced by tools/generate_models.py from the
+# vendored schemas). Pydantic v2 ValidationError gives a per-field location which
+# is materially better UX than jsonschema's pointer paths.
+PYDANTIC_MODELS: dict[str, tuple[str, str]] = {
+    # datamodel-codegen names the root class differently per schema:
+    # MCPB (Draft 7 with nested $defs) -> "Model"
+    # Amazon Q (Draft 7 with title "Agent") -> "Agent"
+    # Continue (RootModel) -> "Model"
+    "mcpb/manifest.json": ("generated_models.mcpb_manifest", "Model"),
+    "amazonq/agent.json": ("generated_models.amazonq_agent", "Agent"),
+    # OpenCode model excluded: the generated module is 31k lines (provider matrix
+    # inlining) and was deliberately not committed. Falls back to jsonschema only.
+    # Continue YAML files don't have a single canonical entry-point file we can
+    # statically match here — Continue's model validates the full config.yaml,
+    # but we only emit a partial mcpServers/<name>.yaml drop-in.
 }
 
 
@@ -132,7 +163,13 @@ def _has_frontmatter_block(content: str) -> bool:
 
 
 def validate_external_schemas(plugins_root: Path, schemas_dir: Path) -> list[Error]:
-    """Validate generated files against cached external JSON Schemas."""
+    """Validate generated files against cached external JSON Schemas.
+
+    Runs two mechanisms in parallel where both apply:
+      * jsonschema.iter_errors — catches schema-level shape issues
+      * Pydantic generated_models — catches the same issues with field-path
+        error locations and Python type semantics
+    """
     errors: list[Error] = []
     for rel_path, (schema_filename, ValidatorCls, hint) in EXTERNAL_SCHEMAS.items():
         target = plugins_root / rel_path
@@ -148,7 +185,7 @@ def validate_external_schemas(plugins_root: Path, schemas_dir: Path) -> list[Err
         schema_path = schemas_dir / schema_filename
         if not schema_path.exists():
             errors.append(err(schema_path, "missing cached schema file",
-                              "Run `bash agentic-coding/transpiler/schemas/refresh.sh`"))
+                              "Run `uv run --project agentic-coding/transpiler refresh-schemas`"))
             continue
         schema = json.loads(schema_path.read_text())
 
@@ -157,7 +194,55 @@ def validate_external_schemas(plugins_root: Path, schemas_dir: Path) -> list[Err
             json_pointer = "/".join(str(p) for p in verr.absolute_path)
             location = f"{rel_path}#/{json_pointer}" if json_pointer else rel_path
             errors.append(err(location, f"schema violation: {verr.message}", hint))
+
+        # Pydantic pass: only for paths with a generated model
+        if rel_path in PYDANTIC_MODELS:
+            module_name, class_name = PYDANTIC_MODELS[rel_path]
+            errors.extend(_validate_via_pydantic(instance, rel_path, module_name, class_name, hint))
+
     return errors
+
+
+def _validate_via_pydantic(
+    instance: Any,
+    rel_path: str,
+    module_name: str,
+    class_name: str,
+    hint: str,
+) -> list[Error]:
+    """Validate `instance` against a Pydantic model from generated_models/.
+
+    Imports the model lazily so a missing/regenerated model surfaces as a
+    runtime error (with a clear hint) rather than an import error at module
+    load — matters during refactors where models exist but might be stale."""
+    try:
+        import importlib
+        module = importlib.import_module(module_name)
+    except ImportError as e:
+        return [err(rel_path,
+                    f"generated Pydantic model missing: {e}",
+                    "Run `uv run --project agentic-coding/transpiler --extra refresh generate-models`")]
+
+    Model = getattr(module, class_name, None)
+    if Model is None:
+        return [err(rel_path,
+                    f"generated module {module_name} has no class {class_name}",
+                    "Regenerate models — schema may have changed shape")]
+
+    try:
+        Model.model_validate(instance)
+    except Exception as e:  # pydantic.ValidationError or its parents
+        # Pydantic v2 ValidationError yields .errors() with loc tuples.
+        # We extract them when available; otherwise stringify the whole error.
+        if hasattr(e, "errors"):
+            out: list[Error] = []
+            for verr in e.errors():
+                loc = ".".join(str(x) for x in verr.get("loc", ()))
+                msg = verr.get("msg", "validation error")
+                out.append(err(f"{rel_path}#{loc}", f"pydantic: {msg}", hint))
+            return out
+        return [err(rel_path, f"pydantic validation: {e}", hint)]
+    return []
 
 
 # ---------------------------------------------------------------------------

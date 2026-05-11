@@ -8,12 +8,12 @@ because `continue` is a Python keyword, but the backend's NAME stays "continue".
 """
 from __future__ import annotations
 
-from ..core import (
+from ...core import (
     BaseBackend,
     MCPConfig,
     SkillConfig,
 )
-from ..registry import register_backend
+from ...registry import register_backend
 
 
 @register_backend

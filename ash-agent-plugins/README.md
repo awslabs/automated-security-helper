@@ -26,7 +26,9 @@ Plus a **universal `AGENTS.md`** at `agentic-coding/plugins/AGENTS.md`, read nat
 
 ## Architecture
 
-**Single source of truth, declarative config, deterministic transpiler.** Humans edit `agentic-coding/transpiler/_base/` and `agentic-coding/transpiler/configs.yaml`. The transpiler regenerates all platform outputs. A pre-commit hook + CI verifies that committed plugin files match what the transpiler would produce.
+**Single source of truth, class-per-backend, deterministic transpiler.** Humans edit `agentic-coding/transpiler/_base/` and (when adding a new platform) write a backend module under `agentic-coding/transpiler/transpiler/backends/<name>/`. The transpiler regenerates all platform outputs. A pre-commit hook + CI verifies that committed plugin files match what the transpiler would produce.
+
+Each backend is a class that subclasses `BaseBackend` and declares its layout via class-level constants (`PLUGIN_MANIFEST`, `MCP`, `SKILL`, `COMMANDS`, `AGENTS`, `INSTRUCTION_FILE`, `RULES_DIR`, `CUSTOM_MODES`, `CONFIG_FILE`, `MARKETPLACE`, `EXTENSION_MANIFEST`, `MCPB_BUNDLE`). Build behavior comes from `BaseBackend.build()`'s section-emitter dispatch; backends with multi-step builds opt into the `PHASES` machinery (setup/build/release stages with topo-sorted `depends_on`). Backends can also expose backend-specific Click subcommands via a `CLI_GROUP` class var, and override `smoke_test()` to confirm the generated package loads under the platform's CLI.
 
 ```
 agentic-coding/
@@ -74,21 +76,31 @@ The transpiler reads `_base/` content and `configs.yaml` layout descriptions, th
 pip install pre-commit
 pre-commit install
 
-# 2. Edit _base/ content or configs.yaml
+# 2. Edit _base/ content or a backend module
 $EDITOR agentic-coding/transpiler/_base/skill.md
-$EDITOR agentic-coding/transpiler/configs.yaml
+$EDITOR agentic-coding/transpiler/transpiler/backends/claude/__init__.py
 
-# 3. Re-transpile (uv handles deps automatically)
-uv run --project agentic-coding/transpiler transpile
+# 3. Re-build all 15 platforms
+uv run --project agentic-coding/transpiler agentic-plugins build
 
-# 4. Verify nothing else drifted
-uv run --project agentic-coding/transpiler transpile --check
+# 4. Verify drift + validation
+uv run --project agentic-coding/transpiler agentic-plugins check
 
-# 5. Commit — pre-commit re-runs the transpiler and the drift check
+# 5. Commit — pre-commit re-runs build + check
 git commit -am "feat: improve scan workflow"
 ```
 
-CI runs `uv run --project agentic-coding/transpiler transpile --check` on every push and PR. `--check` runs two passes: drift detection (do generated files match what the transpiler would produce?) followed by output validation (do generated files conform to each platform's spec?). Either failure surfaces details and exits non-zero. Drift is architecturally impossible to merge; spec violations are caught before they reach users.
+The Click CLI surfaces four lifecycle phases. Each subcommand takes an optional backend NAME; without one, the command runs across all 15 backends:
+
+```bash
+agentic-plugins build [NAME]       # build platform plugin packages
+agentic-plugins check              # drift detection + output validation (CI gate)
+agentic-plugins setup [NAME]       # phase stage="setup" (refresh-time work)
+agentic-plugins release [NAME]     # phase stage="release" (e.g. MCPB → dist/)
+agentic-plugins smoke-test [NAME]  # confirm each plugin loads under its platform CLI
+```
+
+CI runs `agentic-plugins check` and `agentic-plugins smoke-test` on every push and PR. `check` runs both passes unconditionally so a single CI run surfaces every problem; the exit code is non-zero if either fails. Drift is architecturally impossible to merge; spec violations are caught before they reach users.
 
 ## Output validation
 

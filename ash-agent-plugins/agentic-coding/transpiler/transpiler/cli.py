@@ -1,8 +1,13 @@
-"""Click CLI: `agentic-plugins {setup,build,release,check}`.
+"""Click CLI: `agentic-plugins {setup,build,release,check,smoke-test}`.
 
-Each command takes an optional backend name; without one, the command runs
-across all registered backends. The four-phase shape (setup, build, release,
-check) maps to BaseBackend lifecycle methods + the orchestrator.
+The four-phase shape (setup, build, release, check) maps to BaseBackend
+lifecycle methods + the orchestrator. Each command takes an optional backend
+NAME; without one, the command runs across all registered backends.
+
+Backends can contribute additional subcommands by defining a class-level
+`CLI_GROUP: ClassVar[click.Group | None]`. Such a group is mounted under
+`agentic-plugins <backend-name>` so the backend can offer custom commands
+beyond the four lifecycle phases (e.g. `agentic-plugins mcpb verify-archive`).
 """
 from __future__ import annotations
 
@@ -48,7 +53,8 @@ def setup(name: str | None) -> None:
     declares PHASES with `stage="setup"`."""
     m = orchestrator._load_manifest()
     out_root = orchestrator.OUTPUT_ROOT
-    for backend_name in _all_or_one(name):
+    targets = _all_or_one(name)
+    for backend_name in targets:
         BackendCls = BackendRegistry.get(backend_name)
         backend = BackendCls()
         ctx = BuildContext(
@@ -59,7 +65,7 @@ def setup(name: str | None) -> None:
             schemas_dir=orchestrator.SCHEMAS_DIR,
         )
         backend.setup(ctx)
-    click.echo(f"setup complete for {len(_all_or_one(name))} backend(s)")
+    click.echo(f"setup complete for {len(targets)} backend(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +119,7 @@ def release(name: str | None, dist: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# check
+# check (drift + validation, both run unconditionally; failures accumulate)
 # ---------------------------------------------------------------------------
 
 
@@ -123,26 +129,23 @@ def release(name: str | None, dist: Path) -> None:
 def check(drift_only: bool, validate_only: bool) -> None:
     """Run drift detection + output validation.
 
-    The canonical CI gate. Without flags: runs both passes, returns 1 on any
-    failure. --drift-only and --validate-only let local development iterate
-    without paying for the full check."""
-    rc = 0
+    The canonical CI gate. Both passes run unconditionally so a single CI run
+    surfaces every problem; the exit code is non-zero if either fails. Use
+    --drift-only or --validate-only to scope local iteration."""
+    failed = False
+
     if not validate_only:
-        rc = orchestrator.check_drift()
-    if rc == 0 and not drift_only:
-        # Lazy import — pulls jsonschema only when actually needed
+        if orchestrator.check_drift() != 0:
+            failed = True
+
+    if not drift_only:
+        # Lazy import keeps jsonschema and frontmatter out of the build hot path
         from validate import validate_all
         m = orchestrator._load_manifest()
         errors = validate_all(
             plugins_root=orchestrator.OUTPUT_ROOT,
             schemas_dir=orchestrator.SCHEMAS_DIR,
             configs={
-                # Compatibility shim: validate.py expects a dict[str, PlatformConfig]
-                # but the new architecture has BaseBackend subclasses. We pass the
-                # equivalent via the registry. validate.py uses cfg.output_dir and
-                # the section configs (cfg.mcp.path, cfg.skill.path, etc.).
-                # The registry's class vars line up with PlatformConfig fields, so
-                # we wrap classes in a thin adapter.
                 name: _backend_to_platform_config(BackendRegistry.get(name))
                 for name in BackendRegistry.names()
             },
@@ -155,26 +158,113 @@ def check(drift_only: bool, validate_only: bool) -> None:
                 click.echo(f"  [{path}] {msg}", err=True)
                 if hint:
                     click.echo(f"    hint: {hint}", err=True)
-            rc = 1
+            failed = True
         else:
             click.echo(
                 f"OK: validation passed for {len(BackendRegistry.names())} platforms + AGENTS.md."
             )
-    sys.exit(rc)
+
+    sys.exit(1 if failed else 0)
 
 
 # ---------------------------------------------------------------------------
-# Compatibility shim for validate.py
+# smoke-test (CI-time check that platform tooling can actually load each plugin)
+# ---------------------------------------------------------------------------
+
+
+@cli.command(name="smoke-test")
+@click.argument("name", required=False)
+def smoke_test(name: str | None) -> None:
+    """Verify each generated plugin package loads correctly under its target CLI.
+
+    Where a platform CLI is installable, run a load-only smoke test (e.g.
+    `claude /plugins`, `codex plugin list`, `gemini extensions install --dry-run`).
+    Backends that don't have a CLI smoke path (or the CLI isn't installed in
+    CI) are skipped with a clear message rather than failing.
+
+    Each backend that supports smoke testing implements a `smoke_test(ctx)`
+    method on its class; backends without one print 'skipped'."""
+    m = orchestrator._load_manifest()
+    out_root = orchestrator.OUTPUT_ROOT
+    targets = _all_or_one(name)
+
+    failed: list[str] = []
+    skipped: list[str] = []
+    passed: list[str] = []
+
+    for backend_name in targets:
+        BackendCls = BackendRegistry.get(backend_name)
+        backend = BackendCls()
+        ctx = BuildContext(
+            manifest=m,
+            out=out_root / BackendCls.OUTPUT_DIR,
+            plugins_root=out_root,
+            base_dir=orchestrator.BASE_DIR,
+            schemas_dir=orchestrator.SCHEMAS_DIR,
+        )
+        try:
+            result = backend.smoke_test(ctx)  # type: ignore[attr-defined]
+        except NotImplementedError:
+            skipped.append(backend_name)
+            click.echo(f"  [skip]   {backend_name}: no smoke test implemented")
+            continue
+        except Exception as e:  # noqa: BLE001 — surface anything as failure
+            failed.append(backend_name)
+            click.echo(f"  [FAIL]   {backend_name}: {e}", err=True)
+            continue
+
+        if result is None:
+            skipped.append(backend_name)
+            click.echo(f"  [skip]   {backend_name}: backend returned None")
+        elif result.get("ok") is False:
+            failed.append(backend_name)
+            click.echo(
+                f"  [FAIL]   {backend_name}: {result.get('reason', 'unknown')}",
+                err=True,
+            )
+        else:
+            passed.append(backend_name)
+            click.echo(f"  [pass]   {backend_name}: {result.get('detail', 'OK')}")
+
+    click.echo()
+    click.echo(
+        f"smoke-test summary: {len(passed)} passed, "
+        f"{len(skipped)} skipped, {len(failed)} failed"
+    )
+    sys.exit(1 if failed else 0)
+
+
+# ---------------------------------------------------------------------------
+# Per-backend subcommand registration
+# ---------------------------------------------------------------------------
+
+
+def _register_backend_groups() -> None:
+    """Mount each backend's CLI_GROUP under `agentic-plugins <backend-name>`.
+
+    Backends opt in by defining a module-level Click group and assigning it
+    to a CLI_GROUP class var on their class. Most backends don't, so the
+    namespace stays tidy."""
+    for backend_name in BackendRegistry.names():
+        BackendCls = BackendRegistry.get(backend_name)
+        group = getattr(BackendCls, "CLI_GROUP", None)
+        if group is None:
+            continue
+        # Click's add_command mounts the group as a subcommand
+        cli.add_command(group, name=backend_name)
+
+
+_register_backend_groups()
+
+
+# ---------------------------------------------------------------------------
+# Compatibility shim for the old validate.py expecting PlatformConfig
 # ---------------------------------------------------------------------------
 
 
 def _backend_to_platform_config(BackendCls):
-    """Build a PlatformConfig-shaped object from a BaseBackend subclass.
-
-    validate.py predates the class-per-backend refactor and expects a Pydantic
-    PlatformConfig model. The class vars on BaseBackend are structurally the
-    same — we wrap them in a SimpleNamespace-equivalent that exposes the same
-    attribute path."""
+    """Wrap a BaseBackend's class vars in a SimpleNamespace whose attribute
+    paths match what validate.py's old PlatformConfig consumer expects."""
     from types import SimpleNamespace
     return SimpleNamespace(
         output_dir=BackendCls.OUTPUT_DIR,
@@ -191,44 +281,6 @@ def _backend_to_platform_config(BackendCls):
         config_file=BackendCls.CONFIG_FILE,
         mcpb_bundle=BackendCls.MCPB_BUNDLE,
     )
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatible entry point
-# ---------------------------------------------------------------------------
-
-
-def transpile_compat() -> None:
-    """The original `transpile` entry point. Maps to `agentic-plugins build`
-    when called bare, or `agentic-plugins check` when called with --check.
-
-    Exists so existing pre-commit hooks and CI invocations don't break during
-    the transition. Both names are wired in pyproject.toml."""
-    args = sys.argv[1:]
-    if args == ["--check"]:
-        sys.argv = [sys.argv[0]]
-        check.callback(drift_only=False, validate_only=False)
-        return
-    if args == ["--drift-only"]:
-        sys.argv = [sys.argv[0]]
-        check.callback(drift_only=True, validate_only=False)
-        return
-    if args == ["--validate-only"]:
-        sys.argv = [sys.argv[0]]
-        check.callback(drift_only=False, validate_only=True)
-        return
-    if not args:
-        orchestrator.build_all()
-        click.echo(
-            f"Transpiled _base/ -> AGENTS.md + {len(BackendRegistry.names())} "
-            f"platforms: {', '.join(BackendRegistry.names())}"
-        )
-        return
-    click.echo(
-        f"Unsupported transpile args: {args}. Use `agentic-plugins` instead.",
-        err=True,
-    )
-    sys.exit(2)
 
 
 def main() -> None:

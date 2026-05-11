@@ -7,13 +7,13 @@ the other AGENTS.md-aware platforms).
 """
 from __future__ import annotations
 
-from ..core import (
+from ...core import (
     BaseBackend,
     InstructionFile,
     MCPConfig,
     SkillConfig,
 )
-from ..registry import register_backend
+from ...registry import register_backend
 
 
 @register_backend
