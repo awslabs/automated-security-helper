@@ -490,3 +490,90 @@ class TestGetUvToolCommand:
             assert get_uv_tool_command("bandit") is None
             assert get_uv_tool_command("bandit") is None
             assert mock_find.call_count == 1
+
+
+class TestGetUvToolCommandThreadSafety:
+    """Concurrency tests for the module-level cache (DA r4 #3).
+
+    Twenty threads race on the same cache key with a slow probe. The single
+    shared lock around the cache guarantees:
+
+    1. The probe subprocess is invoked exactly once.
+    2. Every thread observes the same return value.
+    3. No ``None`` value ever leaks to a caller during the racing window.
+    """
+
+    def test_probe_runs_exactly_once_under_thread_race(self, reset_module_caches):
+        import threading
+        import time
+
+        call_count = {"n": 0}
+        call_lock = threading.Lock()
+
+        def slow_probe(*_args, **_kwargs):
+            # Simulate a real subprocess that takes long enough for other
+            # threads to pile up at the cache. Without the cache lock, all
+            # 20 would launch their own probe.
+            with call_lock:
+                call_count["n"] += 1
+            time.sleep(0.05)
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="bandit 1.7\n", stderr=""
+            )
+
+        results: list = []
+        none_observations: list = []
+        results_lock = threading.Lock()
+        barrier = threading.Barrier(20)
+
+        def worker():
+            barrier.wait()  # Maximize the race window.
+            cmd = get_uv_tool_command("bandit")
+            with results_lock:
+                results.append(cmd)
+                if cmd is None:
+                    none_observations.append(cmd)
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value="/opt/uv/bin/uv",
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            side_effect=slow_probe,
+        ):
+            threads = [threading.Thread(target=worker) for _ in range(20)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+
+        # 1. Probe ran exactly once across the racing window.
+        assert call_count["n"] == 1, (
+            f"expected exactly one probe call, got {call_count['n']}"
+        )
+        # 2. All threads observed the same successful result.
+        assert len(results) == 20
+        expected = ["uv", "tool", "run", "bandit"]
+        assert all(r == expected for r in results), results
+        # 3. No transient ``None`` leak.
+        assert none_observations == [], (
+            f"unexpected None leak during racing window: {none_observations}"
+        )
+
+    def test_probe_uses_5s_timeout(self, reset_module_caches):
+        """The version probe timeout is 5 s, not 30 s (DA r4 #5)."""
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value="/opt/uv/bin/uv",
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="ok\n", stderr=""
+            )
+            get_uv_tool_command("bandit")
+            assert mock_run.call_count == 1
+            _, kwargs = mock_run.call_args
+            assert kwargs.get("timeout") == 5, (
+                f"expected 5 s probe timeout, got {kwargs.get('timeout')}"
+            )
