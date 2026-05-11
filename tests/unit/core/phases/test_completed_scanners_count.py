@@ -123,12 +123,15 @@ class TestSequentialCompletedScanners:
         executor.run_sequential(AshAggregatedResults())
         assert len(executor.completed_scanners) == 3
 
-    def test_inner_scan_failure_still_counted(self, tmp_path):
-        # scan() raises (inner exception) — _execute_scanner catches it and returns normally
-        # so the scanner IS counted as completed (it ran, just produced error results)
+    def test_inner_scan_failure_excluded_from_completed(self, tmp_path):
+        # DA r2 #1: scan() raises mid-target — _execute_scanner produces a container
+        # with status=ERROR. Even though _safe_execute_scanner returns succeeded=True,
+        # the ERROR-status container must exclude the scanner from completed_scanners.
         executor = _make_executor(tmp_path, ["bandit", "grype"], fail_names=frozenset(["grype"]))
         executor.run_sequential(AshAggregatedResults())
-        assert len(executor.completed_scanners) == 2
+        names = [p.config.name for p in executor.completed_scanners]
+        assert names == ["bandit"]
+        assert "grype" not in names
 
     def test_outer_crash_not_in_completed(self, tmp_path):
         # config=None causes _execute_scanner's outer except to raise
@@ -182,14 +185,16 @@ class TestParallelCompletedScanners:
             assert key not in seen, f"scanner {key} counted more than once"
             seen.add(key)
 
-    def test_inner_scan_failure_counted_parallel(self, tmp_path):
-        # scan() raises (inner exception) → _execute_scanner returns normally
-        # so the scanner IS counted (it ran, produced error results)
+    def test_inner_scan_failure_excluded_from_completed_parallel(self, tmp_path):
+        # DA r2 #1: scan() raises mid-target → ERROR-status container.
+        # The append predicate must reject ERROR-status containers in parallel too.
         executor = _make_executor(
             tmp_path, ["bandit", "grype"], fail_names=frozenset(["grype"]), max_workers=2
         )
         executor.run_parallel(AshAggregatedResults())
-        assert len(executor.completed_scanners) == 2
+        names = [p.config.name for p in executor.completed_scanners]
+        assert names == ["bandit"]
+        assert "grype" not in names
 
     def test_outer_crash_not_in_completed_parallel(self, tmp_path):
         # config=None → outer exception in _execute_scanner → _safe_execute_scanner catches
