@@ -462,22 +462,29 @@ class RuntimeOverridesConfig(BaseModel):
         Field(
             description=(
                 "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). "
-                "Defaults block the most dangerous fields."
+                "Defaults block the most dangerous fields on the real AshConfig schema."
             )
         ),
     ] = [
-        "/global_settings/fail_fast",
+        # Top-level safety: never let a runtime patch flip the failure semantics.
+        "/fail_on_findings",
+        # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
-        "/scanners/bedrock_summary/options/aws_*",
-        "/reporters/bedrock_summary/**",
+        "/global_settings/suppressions",
+        # AWS-credential-bearing reporter options (plugin-provided, hyphenated names).
+        "/reporters/bedrock-summary-reporter/options/aws_*",
+        "/reporters/cloudwatch-logs/**",
     ]
 
     denied_value_patterns: Annotated[
         Dict[str, str],
         Field(
             description=(
-                "Map of JSON-Pointer pattern → regex. add/replace ops with values matching "
-                "the regex on a path matching the pattern are rejected."
+                "Map of JSON-Pointer pattern → regex. add/replace ops are rejected when "
+                "any string leaf reachable from the op's value matches the regex; lists "
+                "and dicts are walked recursively so a forbidden token cannot be hidden "
+                "inside a nested structure. The `test` op is exempt because it is "
+                "read-only."
             )
         ),
     ] = {}
