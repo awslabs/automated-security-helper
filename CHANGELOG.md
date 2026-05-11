@@ -44,6 +44,12 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.1 (2026-05-11)
+
+### Fix
+
+- respect severity_threshold in SARIF file actionable count (#329)
+
 ## v3.5.0 (2026-05-11)
 
 ### Feat
