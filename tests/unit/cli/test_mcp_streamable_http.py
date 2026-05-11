@@ -23,7 +23,9 @@ from typing import Any, Dict
 
 import httpx
 import pytest
+from typer.testing import CliRunner
 
+from automated_security_helper.cli.main import app as ash_app
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
 
 
@@ -214,3 +216,26 @@ def test_streamable_http_check_installation_via_client(streamable_server) -> Non
     assert call_result is not None
     # Tool result content is a list of content blocks; assert non-empty.
     assert call_result.content, "check_installation returned no content"
+
+
+def test_mcp_wrapper_exposes_streamable_http_flags() -> None:
+    """``ash mcp --help`` must list the streamable-HTTP flags from the wrapper.
+
+    The typer wrapper in ``automated_security_helper/cli/main.py`` has to mirror
+    the parameters added to ``mcp_command`` — otherwise users hit
+    ``unknown option`` for ``--transport`` etc. when invoking the real CLI.
+    """
+    runner = CliRunner()
+    result = runner.invoke(ash_app, ["mcp", "--help"])
+    assert result.exit_code == 0, result.output
+    # Strip the help output of line wraps so flag tokens span boundaries.
+    flat = " ".join(result.output.split())
+    for flag in (
+        "--transport",
+        "--host",
+        "--port",
+        "--mount-path",
+        "--auth-header-name",
+        "--auth-header-value",
+    ):
+        assert flag in flat, f"Missing {flag} in `ash mcp --help`:\n{result.output}"
