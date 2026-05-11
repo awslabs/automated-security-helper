@@ -12,6 +12,7 @@ from ...core import (
     InstructionFile,
     MCPConfig,
 )
+from ...formats import GOOSE_CONFIG
 from ...registry import register_backend
 
 
@@ -19,6 +20,7 @@ from ...registry import register_backend
 class GooseBackend(BaseBackend):
     NAME = "goose"
     OUTPUT_DIR = "goose"
+    FORMAT = GOOSE_CONFIG
 
     MCP = MCPConfig(
         format="goose_yaml",

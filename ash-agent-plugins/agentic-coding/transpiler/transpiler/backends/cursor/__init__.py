@@ -10,6 +10,7 @@ from ...core import (
     MCPConfig,
     SkillConfig,
 )
+from ...formats import CURSOR_RULES
 from ...registry import register_backend
 
 
@@ -17,6 +18,7 @@ from ...registry import register_backend
 class CursorBackend(BaseBackend):
     NAME = "cursor"
     OUTPUT_DIR = "cursor"
+    FORMAT = CURSOR_RULES
 
     MCP = MCPConfig(
         format="mcpServers",

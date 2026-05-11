@@ -172,6 +172,17 @@ def check(drift_only: bool, validate_only: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _label(backend_name: str, BackendCls) -> str:
+    """Format the smoke-test display name as 'name (format)' when a
+    backend declares FORMAT, else just the name. Surfaces shared formats
+    (e.g., 'claude (claude-marketplace)' and 'codex (claude-marketplace)')
+    so the cross-agent relationship is visible in CI logs."""
+    fmt = getattr(BackendCls, "FORMAT", None)
+    if fmt is None:
+        return backend_name
+    return f"{backend_name} ({fmt.name})"
+
+
 @cli.command(name="smoke-test")
 @click.argument("name", required=False)
 def smoke_test(name: str | None) -> None:
@@ -229,10 +240,10 @@ def smoke_test(name: str | None) -> None:
             # from "15 passed" — silently passing skipped backends would hide
             # the fact that the strongest validator was bypassed.
             skipped.append(backend_name)
-            click.echo(f"  [skip]   {backend_name}: {result.get('detail', 'OK')}")
+            click.echo(f"  [skip]   {_label(backend_name, BackendCls)}: {result.get('detail', 'OK')}")
         else:
             passed.append(backend_name)
-            click.echo(f"  [pass]   {backend_name}: {result.get('detail', 'OK')}")
+            click.echo(f"  [pass]   {_label(backend_name, BackendCls)}: {result.get('detail', 'OK')}")
 
     click.echo()
     click.echo(
@@ -243,6 +254,48 @@ def smoke_test(name: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+
+
+@cli.command(name="formats")
+def formats_cmd() -> None:
+    """List the output formats that backends produce.
+
+    Surfaces the format → agents relationship: which backends emit
+    'claude-marketplace' (Claude + Codex), 'amazonq-agent' (Amazon Q +
+    kiro-cli), etc. Useful for understanding which artifacts can be
+    cross-consumed and which are single-agent.
+    """
+    from collections import defaultdict
+    from .formats import ALL_FORMATS
+    from .registry import BackendRegistry
+
+    fmt_to_backends = defaultdict(list)
+    no_format = []
+    for backend_name, BackendCls in BackendRegistry.all().items():
+        fmt = getattr(BackendCls, "FORMAT", None)
+        if fmt is None:
+            no_format.append(backend_name)
+        else:
+            fmt_to_backends[fmt.name].append(backend_name)
+
+    click.echo("Output formats:")
+    for fmt in ALL_FORMATS:
+        agents = fmt_to_backends.get(fmt.name, [])
+        agents_str = ", ".join(sorted(agents)) if agents else "(no backend points at this format)"
+        click.echo(f"  {fmt.name}")
+        click.echo(f"    consumed by: {agents_str}")
+        if fmt.spec_url:
+            click.echo(f"    spec: {fmt.spec_url}")
+        if fmt.schema_url:
+            click.echo(f"    schema: {fmt.schema_url}")
+
+    if no_format:
+        click.echo()
+        click.echo("Backends without a Format (legacy or bespoke shape):")
+        for b in sorted(no_format):
+            click.echo(f"  {b}")
+
+
 # Per-backend subcommand registration
 # ---------------------------------------------------------------------------
 

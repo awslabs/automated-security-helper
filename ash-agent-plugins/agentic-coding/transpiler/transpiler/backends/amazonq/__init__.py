@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 from ...core import BaseBackend, BuildContext, MCPConfig
+from ...formats import AMAZONQ_AGENT
 from ...registry import register_backend
 
 
@@ -15,6 +16,7 @@ from ...registry import register_backend
 class AmazonqBackend(BaseBackend):
     NAME = "amazonq"
     OUTPUT_DIR = "amazonq"
+    FORMAT = AMAZONQ_AGENT
 
     MCP = MCPConfig(
         format="amazonq",

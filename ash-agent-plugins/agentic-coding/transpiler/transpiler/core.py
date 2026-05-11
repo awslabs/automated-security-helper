@@ -164,6 +164,48 @@ class BuildContext:
 
 
 # ---------------------------------------------------------------------------
+# Format — defines an output shape (directory layout + validators)
+# decoupled from any specific consumer agent
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Format:
+    """An output format definition: directory layout + identity + validators.
+
+    A Format is the *generator definition* — what files to produce and how
+    they should look. An Agent (BaseBackend subclass) is the *consumer* —
+    a CLI/IDE that reads files in this shape. Multiple agents can consume
+    the same Format (e.g., Claude Code and Codex CLI both consume
+    `claude-marketplace`).
+
+    Today's section types (PluginManifest, MCPConfig, SkillConfig, etc.)
+    are class vars on BaseBackend. As backends migrate to point at Formats,
+    those class vars will move into Format.layout, and shared Formats
+    will deduplicate the section declarations across agents.
+
+    The Format object itself is layout-only metadata; the actual emission
+    runs through the existing emitters dispatcher, which reads section
+    objects in field-name order. This means a Format can be introduced
+    incrementally: agents that point at a Format inherit its sections
+    via __init_subclass__-style copy onto their class vars; agents that
+    don't are unaffected.
+    """
+
+    name: str
+    """Stable identifier (e.g., 'claude-marketplace', 'amazonq-agent', 'skill')."""
+
+    description: str
+    """Human-readable summary for README / smoke-test output."""
+
+    schema_url: str | None = None
+    """Canonical JSON Schema URL when one exists (vendored at schemas/)."""
+
+    spec_url: str | None = None
+    """Canonical specification page URL for the README / docs."""
+
+
+# ---------------------------------------------------------------------------
 # Manifest — _base/manifest.json content
 # ---------------------------------------------------------------------------
 
@@ -254,6 +296,13 @@ class BaseBackend:
 
     NAME: ClassVar[str] = ""
     OUTPUT_DIR: ClassVar[str] = ""
+
+    FORMAT: ClassVar[Format | None] = None
+    """Optional Format this backend produces. Today informational only —
+    smoke-test summary surfaces it so 'claude' and 'codex' both labeled
+    'claude-marketplace' make the shared-format relationship visible.
+    Future: section-emitter dispatch will pull layout from FORMAT,
+    eliminating per-backend duplication of PLUGIN_MANIFEST/MCP/etc."""
 
     PLUGIN_MANIFEST: ClassVar[PluginManifest | None] = None
     EXTENSION_MANIFEST: ClassVar[ExtensionManifest | None] = None

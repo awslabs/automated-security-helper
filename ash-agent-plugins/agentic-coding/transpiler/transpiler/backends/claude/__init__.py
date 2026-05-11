@@ -20,6 +20,7 @@ from ...core import (
     PluginManifest,
     SkillConfig,
 )
+from ...formats import CLAUDE_MARKETPLACE
 from ...registry import register_backend
 
 
@@ -27,6 +28,7 @@ from ...registry import register_backend
 class ClaudeBackend(BaseBackend):
     NAME = "claude"
     OUTPUT_DIR = "claude"
+    FORMAT = CLAUDE_MARKETPLACE
 
     PLUGIN_MANIFEST = PluginManifest(
         format="claude",

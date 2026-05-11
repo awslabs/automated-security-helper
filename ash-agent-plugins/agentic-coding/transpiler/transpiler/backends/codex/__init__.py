@@ -18,6 +18,7 @@ from ...core import (
     PluginManifest,
     SkillConfig,
 )
+from ...formats import CLAUDE_MARKETPLACE
 from ...registry import register_backend
 
 
@@ -25,10 +26,17 @@ from ...registry import register_backend
 class CodexBackend(BaseBackend):
     NAME = "codex"
     OUTPUT_DIR = "codex"
+    FORMAT = CLAUDE_MARKETPLACE
 
     PLUGIN_MANIFEST = PluginManifest(
+        # Codex's plugin loader searches both .codex-plugin/plugin.json AND
+        # .claude-plugin/plugin.json (DISCOVERABLE_PLUGIN_MANIFEST_PATHS in
+        # codex-rs/utils/plugins/src/plugin_namespace.rs). Emitting at the
+        # Claude path lets Codex AND Claude Code both consume the same
+        # artifact today, while keeping the codex backend free to switch
+        # to .codex-plugin/plugin.json later when divergence is needed.
         format="codex",
-        path=".codex-plugin/plugin.json",
+        path=".claude-plugin/plugin.json",
     )
 
     MCP = MCPConfig(
@@ -63,10 +71,10 @@ class CodexBackend(BaseBackend):
         Codex requires marketplace.json at `.claude-plugin/marketplace.json`
         (per MARKETPLACE_MANIFEST_RELATIVE_PATHS in core-plugins/marketplace.rs)."""
         marketplace = ctx.out / ".claude-plugin" / "marketplace.json"
-        manifest = ctx.out / ".codex-plugin" / "plugin.json"
+        manifest = ctx.out / ".claude-plugin" / "plugin.json"
 
         if not manifest.exists():
-            return {"ok": False, "reason": ".codex-plugin/plugin.json missing"}
+            return {"ok": False, "reason": ".claude-plugin/plugin.json missing"}
         try:
             json.loads(manifest.read_text())
         except json.JSONDecodeError as e:
@@ -87,7 +95,7 @@ class CodexBackend(BaseBackend):
             if ver and ver.get("ok") is False:
                 return ver
         # Use isolated CODEX_HOME so CI runs are reproducible.
-        import os, tempfile
+        import tempfile
         with tempfile.TemporaryDirectory() as codex_home:
             env_argv = ["env", f"CODEX_HOME={codex_home}", "codex", "plugin",
                         "marketplace", "add", str(ctx.out.resolve())]

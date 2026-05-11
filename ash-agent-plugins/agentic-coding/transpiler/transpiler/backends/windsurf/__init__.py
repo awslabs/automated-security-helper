@@ -8,6 +8,7 @@ from ...core import (
     MCPConfig,
     SkillConfig,
 )
+from ...formats import WINDSURF_RULES
 from ...registry import register_backend
 
 
@@ -15,6 +16,7 @@ from ...registry import register_backend
 class WindsurfBackend(BaseBackend):
     NAME = "windsurf"
     OUTPUT_DIR = "windsurf"
+    FORMAT = WINDSURF_RULES
 
     MCP = MCPConfig(
         format="mcpServers",
