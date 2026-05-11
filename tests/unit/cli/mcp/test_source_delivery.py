@@ -398,7 +398,7 @@ class TestTraversalDefenses:
         payload = _make_zip_with_symlink("evil", "/etc/passwd")
         sha = hashlib.sha256(payload).hexdigest()
         _upload(payload, "symabs", tmp_path)
-        with pytest.raises(ValueError, match="resolves outside session workspace"):
+        with pytest.raises(ValueError, match="symlinks are not allowed"):
             sd.set_source_zip_finalize(
                 upload_id="symabs",
                 expected_sha256=sha,
@@ -412,7 +412,7 @@ class TestTraversalDefenses:
         payload = _make_zip_with_symlink("evil", "../../etc/passwd")
         sha = hashlib.sha256(payload).hexdigest()
         _upload(payload, "symtrav", tmp_path)
-        with pytest.raises(ValueError, match="resolves outside session workspace"):
+        with pytest.raises(ValueError, match="symlinks are not allowed"):
             sd.set_source_zip_finalize(
                 upload_id="symtrav",
                 expected_sha256=sha,
