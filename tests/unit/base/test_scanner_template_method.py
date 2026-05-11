@@ -261,7 +261,9 @@ class TestTemplateScanInjectsInvocation:
         invocations = result.runs[0].invocations
         assert invocations and len(invocations) == 1
         inv = invocations[0]
-        assert inv.commandLine == "stub-tool"
+        # commandLine must be the full joined argv (parity with legacy
+        # GrepScannerBase.scan: ``" ".join(final_args)``), not just argv[0].
+        assert inv.commandLine == "stub-tool --arg val"
         assert inv.arguments == ["--arg", "val"]
 
     def test_invocation_exit_code_recorded(self, plugin_context, scanner_config, tmp_path):
@@ -368,7 +370,8 @@ class TestInjectInvocationHelper:
         scanner._inject_invocation(report, final_args, target)
 
         inv = report.runs[0].invocations[0]
-        assert inv.commandLine == "stub-tool"
+        # Match legacy GrepScannerBase.scan format: full joined argv.
+        assert inv.commandLine == "stub-tool --flag val"
 
     def test_populates_arguments_list(self, plugin_context, scanner_config):
         scanner = _make_scanner(plugin_context, scanner_config)
@@ -477,3 +480,88 @@ class TestInjectInvocationHelper:
         # Should not raise
         scanner._inject_invocation(report, ["stub-tool"], plugin_context.source_dir)
         assert report.runs == []
+
+    def test_command_line_matches_legacy_grep_scanner_format(
+        self, plugin_context, scanner_config
+    ):
+        """Regression: ``_inject_invocation`` MUST emit ``commandLine`` as the
+        full joined argv to match the legacy ``GrepScannerBase.scan`` format
+        (see ``_grep_scanner_base.py`` ~line 289: ``" ".join(final_args)``).
+
+        Pre-fix the helper emitted only ``final_args[0]``, which made any
+        scanner migrated to the new template (e.g. checkov, grype) produce
+        SARIF that omitted the arguments from ``commandLine`` — diverging
+        from the byte-for-byte parity claim of Track 2.1.
+        """
+        scanner = _make_scanner(plugin_context, scanner_config)
+        report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name="stub")),
+                    results=[],
+                )
+            ],
+        )
+        from datetime import datetime, timezone
+
+        scanner.start_time = datetime.now(timezone.utc)
+        scanner.end_time = datetime.now(timezone.utc)
+        scanner.exit_code = 0
+        scanner.errors = []
+
+        final_args = ["semgrep", "scan", "--config", "p/ci", "--json"]
+        target = plugin_context.source_dir
+        scanner._inject_invocation(report, final_args, target)
+
+        inv = report.runs[0].invocations[0]
+        # Mirror the legacy expression exactly.
+        assert inv.commandLine == " ".join(final_args)
+        # And, equivalently, the joined argv — NOT the binary alone.
+        assert inv.commandLine == "semgrep scan --config p/ci --json"
+        assert inv.commandLine != final_args[0]
+
+    def test_command_line_simulates_checkov_grype_post_migration(
+        self, plugin_context, scanner_config
+    ):
+        """Regression for migrated scanners (checkov, grype, commit 8c9c27e).
+
+        Pre-fix, a checkov SARIF Invocation would emit only ``"checkov"``
+        for ``commandLine`` and lose all argv context. Post-fix, the
+        emission must be the full joined argv string — what the legacy
+        per-scanner overrides would have produced.
+        """
+        scanner = _make_scanner(plugin_context, scanner_config)
+        report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name="checkov")),
+                    results=[],
+                )
+            ],
+        )
+        from datetime import datetime, timezone
+
+        scanner.start_time = datetime.now(timezone.utc)
+        scanner.end_time = datetime.now(timezone.utc)
+        scanner.exit_code = 0
+        scanner.errors = []
+
+        final_args = [
+            "checkov",
+            "-d",
+            "/tmp/src",
+            "--output",
+            "sarif",
+            "--output-file-path",
+            "/tmp/out",
+        ]
+        target = plugin_context.source_dir
+        scanner._inject_invocation(report, final_args, target)
+
+        inv = report.runs[0].invocations[0]
+        # Hardcoded legacy expectation (matches ``" ".join(final_args)``
+        # that the pre-migration per-scanner _post_scan emitted).
+        expected = "checkov -d /tmp/src --output sarif --output-file-path /tmp/out"
+        assert inv.commandLine == expected

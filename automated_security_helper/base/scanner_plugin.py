@@ -314,7 +314,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         extras = self._invocation_extras(sarif_report, final_args, target)
         sarif_report.runs[0].invocations = [
             Invocation(  # type: ignore[call-arg]
-                commandLine=final_args[0] if final_args else "",
+                commandLine=" ".join(str(a) for a in final_args) if final_args else "",
                 arguments=final_args[1:],
                 startTimeUtc=self.start_time,
                 endTimeUtc=self.end_time,
