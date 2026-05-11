@@ -71,7 +71,7 @@ jobs:
         run: |
           uv run ash --help
           uv run ash config validate
-          uv run python -m pytest tests/unit/cli/test_config_init.py -x -q --no-header
+          uv run python -m pytest tests/unit/cli/test_config_init.py -x -q --no-header --no-cov
 
       - name: Create release PR
         if: steps.bump.outputs.bumped == 'true'
