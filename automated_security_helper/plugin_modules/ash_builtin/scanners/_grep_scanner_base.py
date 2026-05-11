@@ -209,6 +209,10 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # implementation.
     # ---------------------------------------------------------------
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — GrepScannerBase overrides scan() and uses _execute_grep_scan instead."""
+        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
+
     def scan(
         self,
         target: Path,
