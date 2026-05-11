@@ -70,7 +70,10 @@ def _filter_results_to_changed_files(
                 filtered.append(result)
                 continue
             loc = result.locations[0]
-            if not loc.physicalLocation or not loc.physicalLocation.root.artifactLocation:
+            if (
+                not loc.physicalLocation
+                or not loc.physicalLocation.root.artifactLocation
+            ):
                 filtered.append(result)
                 continue
             uri = loc.physicalLocation.root.artifactLocation.uri or ""
@@ -211,7 +214,9 @@ def run_ash_scan(
     # If mode is container, run the container version
     if mode == RunMode.container:
         if changed_files_only:
-            logger.warning("--changed-files-only is not supported in container mode; performing full scan")
+            logger.warning(
+                "--changed-files-only is not supported in container mode; performing full scan"
+            )
 
         # Pass the current context to run_ash_container
         new_args = []
@@ -294,7 +299,10 @@ def run_ash_scan(
 
         # When build-only (run=False), no scan results are produced
         if not run:
-            if hasattr(container_result, "returncode") and container_result.returncode != 0:
+            if (
+                hasattr(container_result, "returncode")
+                and container_result.returncode != 0
+            ):
                 sys.exit(container_result.returncode)
             sys.exit(0)
 
@@ -546,11 +554,67 @@ def run_ash_scan(
         try:
             with open(sarif_file, encoding="utf-8") as f:
                 sarif_json = json.load(f)  # nosec
+
+            # Resolve the effective severity threshold from config
+            _severity_threshold = "MEDIUM"  # default
+            if results is not None and hasattr(results, "ash_config"):
+                _cfg = results.ash_config
+                if (
+                    _cfg
+                    and hasattr(_cfg, "global_settings")
+                    and hasattr(_cfg.global_settings, "severity_threshold")
+                    and _cfg.global_settings.severity_threshold
+                ):
+                    _severity_threshold = (
+                        _cfg.global_settings.severity_threshold.upper()
+                    )
+
+            # Map threshold to the set of qualifying SARIF levels
+            # SARIF levels: error -> critical/high, warning -> medium, note -> low, none -> info
+            _THRESHOLD_QUALIFYING_LEVELS = {
+                "ALL": {"error", "warning", "note", "none"},
+                "LOW": {"error", "warning", "note"},
+                "MEDIUM": {"error", "warning"},
+                "HIGH": {"error"},
+                "CRITICAL": {"error"},
+            }
+            _qualifying_levels = _THRESHOLD_QUALIFYING_LEVELS.get(
+                _severity_threshold, {"error", "warning"}
+            )
+
+            # Map explicit issue_severity values to threshold ranks for comparison
+            _SEVERITY_RANK_FOR_THRESHOLD = {
+                "CRITICAL": 4,
+                "HIGH": 3,
+                "MEDIUM": 2,
+                "LOW": 1,
+                "INFO": 0,
+            }
+            _THRESHOLD_MIN_RANK = {
+                "ALL": 0,
+                "LOW": 1,
+                "MEDIUM": 2,
+                "HIGH": 3,
+                "CRITICAL": 4,
+            }
+            _min_rank = _THRESHOLD_MIN_RANK.get(_severity_threshold, 2)
+
             sarif_active = 0
             for run in sarif_json.get("runs", []):
                 for r in run.get("results", []):
-                    if not r.get("suppressions"):
-                        sarif_active += 1
+                    if r.get("suppressions"):
+                        continue
+                    # Check explicit issue_severity in properties first
+                    props = r.get("properties", {}) or {}
+                    issue_severity = (props.get("issue_severity") or "").upper()
+                    if issue_severity in _SEVERITY_RANK_FOR_THRESHOLD:
+                        if _SEVERITY_RANK_FOR_THRESHOLD[issue_severity] >= _min_rank:
+                            sarif_active += 1
+                    else:
+                        # Fall back to SARIF level
+                        level = (r.get("level") or "note").lower()
+                        if level in _qualifying_levels:
+                            sarif_active += 1
             actionable_findings = sarif_active
         except Exception:  # nosec B110
             pass  # Fall through to unified metrics count
