@@ -30,6 +30,7 @@ dependencies = [
  "mcp>=1.23.3,<2",
  "toml>=0.10.2,<1.0.0",
  "python-multipart>=0.0.22,<0.1",
+ "uvicorn>=0.27,<1",
 ]
 [project.optional-dependencies]
 cdk = [
