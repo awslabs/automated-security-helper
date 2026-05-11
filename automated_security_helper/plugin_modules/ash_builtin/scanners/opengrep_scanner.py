@@ -1,40 +1,37 @@
-"""Module containing the Opengrep security scanner implementation."""
+"""Module containing the Opengrep security scanner implementation.
 
-import json
-import logging
-import os
-from pathlib import Path
+The bulk of the logic (arg-building, offline cache, SARIF post-processing)
+lives in :mod:`_grep_scanner_base`. This module only customises:
+
+- the binary command (`opengrep`) and its custom URL-based install commands
+- version-gated `--metrics` (deprecated in opengrep 1.7.0+)
+- patterns mode (`--pattern`) which switches the scanner to JSON output
+"""
+
+from __future__ import annotations
+
 import platform
-import subprocess  # nosec B404 — required for version detection of opengrep binary
-from typing import Annotated, ClassVar, List, Literal
+import struct
+import subprocess  # nosec B404 — required for opengrep --version detection
+from pathlib import Path
+from typing import Annotated, List, Literal, Optional, Tuple
 
 from pydantic import Field, model_validator
+
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import ASH_ASSETS_DIR, is_offline_mode
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.models.core import ToolArgs
-from automated_security_helper.models.core import (
-    IgnorePathWithReason,
-    ToolExtraArg,
+from automated_security_helper.core.constants import is_offline_mode
+from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.models.core import ToolArgs, ToolExtraArg
+from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
+    GrepScannerBase,
 )
-from automated_security_helper.base.scanner_plugin import (
-    ScannerPluginBase,
-)
-from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.schemas.sarif_schema_model import (
-    ArtifactLocation,
-    Invocation,
-    SarifReport,
-)
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.sarif_utils import attach_scanner_details
-from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.download_utils import (
     create_url_download_command,
     get_opengrep_url,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 
@@ -55,9 +52,7 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
 
     exclude_rule: Annotated[
         List[str],
-        Field(
-            description="Skip any rule with the given id.",
-        ),
+        Field(description="Skip any rule with the given id."),
     ] = []
 
     severity: Annotated[
@@ -84,16 +79,12 @@ class OpengrepScannerConfigOptions(ScannerOptionsBase):
 
     patterns: Annotated[
         List[str],
-        Field(
-            description="Patterns to search for with OpenGrep.",
-        ),
+        Field(description="Patterns to search for with OpenGrep."),
     ] = []
 
     version: Annotated[
         str,
-        Field(
-            description="Version of OpenGrep to use.",
-        ),
+        Field(description="Version of OpenGrep to use."),
     ] = "v1.15.1"
 
 
@@ -106,10 +97,8 @@ class OpengrepScannerConfig(ScannerPluginConfigBase):
 
 
 @ash_scanner_plugin
-class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
+class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     """OpengrepScanner implements code scanning using Opengrep."""
-
-    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     def model_post_init(self, context):
         if self.config is None:
@@ -129,15 +118,12 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "OpengrepScanner":
         """Set up custom installation commands for opengrep."""
-        # Get version and linux_type from config
         version = self.config.options.version
-        # TODO - Check if linux and determine whether manylinux or musllinux is needed
+        # TODO: detect manylinux vs musllinux
         linux_type = "manylinux"
 
-        # Linux
         if "linux" not in self.custom_install_commands:
             self.custom_install_commands["linux"] = {}
-
         self.custom_install_commands["linux"]["amd64"] = [
             create_url_download_command(
                 url=get_opengrep_url(
@@ -146,7 +132,6 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 rename_to="opengrep",
             )
         ]
-
         self.custom_install_commands["linux"]["arm64"] = [
             create_url_download_command(
                 url=get_opengrep_url(
@@ -156,17 +141,14 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             )
         ]
 
-        # macOS
         if "darwin" not in self.custom_install_commands:
             self.custom_install_commands["darwin"] = {}
-
         self.custom_install_commands["darwin"]["amd64"] = [
             create_url_download_command(
                 url=get_opengrep_url("darwin", "amd64", version=version),
                 rename_to="opengrep",
             )
         ]
-
         self.custom_install_commands["darwin"]["arm64"] = [
             create_url_download_command(
                 url=get_opengrep_url("darwin", "arm64", version=version),
@@ -174,51 +156,55 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
             )
         ]
 
-        # Windows
         if "windows" not in self.custom_install_commands:
             self.custom_install_commands["windows"] = {}
-
         self.custom_install_commands["windows"]["amd64"] = [
             create_url_download_command(
                 url=get_opengrep_url("windows", "amd64", version=version),
                 rename_to="opengrep.exe",
             )
         ]
-
         return self
 
+    # ---------------------------------------------------------------
+    # GrepScannerBase hooks
+    # ---------------------------------------------------------------
+
+    def cache_dir_env_var(self) -> str:
+        return "OPENGREP_RULES_CACHE_DIR"
+
+    def cache_dir_name(self) -> str:
+        return "Opengrep"
+
+    def default_rulesets(self) -> List[str]:
+        return ["p/ci"]
+
+    def emit_metrics_flag(self) -> bool:
+        """`--metrics` was removed in opengrep 1.7.0; only emit on older versions."""
+        return self._should_use_metrics_flag()
+
+    # ---------------------------------------------------------------
+    # Dependency resolution
+    # ---------------------------------------------------------------
+
     def validate_plugin_dependencies(self) -> bool:
-        """Validate the scanner configuration and requirements.
-
-        Returns:
-            True if validation passes, False otherwise
-
-        Raises:
-            ScannerError: If validation fails
-        """
         found = find_executable(self.command)
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
         return found is not None
 
     def _has_install_commands(self) -> bool:
-        """Check if scanner has non-empty custom install commands."""
-        import platform
-        import struct
-
         system = platform.system().lower()
         arch = "amd64" if struct.calcsize("P") * 8 == 64 else "arm64"
-
         if system in self.custom_install_commands:
             if arch in self.custom_install_commands[system]:
                 return len(self.custom_install_commands[system][arch]) > 0
         return False
 
-    def _get_opengrep_version(self) -> tuple[int, int, int] | None:
-        """Get the installed Opengrep version.
+    # ---------------------------------------------------------------
+    # Version detection (used to gate --metrics)
+    # ---------------------------------------------------------------
 
-        Returns:
-            Tuple of (major, minor, patch) version numbers, or None if unable to determine
-        """
+    def _get_opengrep_version(self) -> tuple[int, int, int] | None:
         try:
             result = subprocess.run(  # nosec B603 — list args, executable from find_executable()
                 [self.command, "--version"],
@@ -227,334 +213,59 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 timeout=5,
             )
             if result.returncode == 0:
-                # Parse version from output like "opengrep 1.6.0" or "v1.6.0"
                 version_str = result.stdout.strip().split()[-1].lstrip("v")
                 parts = version_str.split(".")
                 if len(parts) >= 3:
                     return (int(parts[0]), int(parts[1]), int(parts[2]))
         except FileNotFoundError:
-            # Command not found - opengrep not installed yet
             return None
         except Exception as e:
             ASH_LOGGER.verbose(f"Unable to determine Opengrep version: {e}")
         return None
 
     def _should_use_metrics_flag(self) -> bool:
-        """Determine if --metrics flag should be used based on version.
-
-        Returns:
-            True if --metrics flag should be used (version < 1.7.0), False otherwise
-        """
         version = self._get_opengrep_version()
         if version is None:
-            # Unable to determine version - default version (v1.15.1) doesn't support --metrics
             ASH_LOGGER.verbose(
                 "Unable to determine Opengrep version, assuming --metrics is NOT supported (default version >= 1.7.0)"
             )
             return False
-
-        # --metrics deprecated in v1.7.0+
         if version >= (1, 7, 0):
             ASH_LOGGER.verbose(
                 f"Opengrep version {'.'.join(map(str, version))} detected, skipping --metrics flag"
             )
             return False
-
         ASH_LOGGER.verbose(
             f"Opengrep version {'.'.join(map(str, version))} detected, using --metrics flag"
         )
         return True
 
+    # ---------------------------------------------------------------
+    # Patterns mode — opengrep-only override
+    # ---------------------------------------------------------------
+
     def _process_config_options(self):
-        # Remove any existing metrics flags to ensure clean state
-        self.args.extra_args = [
-            arg for arg in self.args.extra_args if arg.key != "--metrics"
-        ]
+        result = super()._process_config_options()
 
-        ash_stargrep_rules = [
-            item
-            for item in ASH_ASSETS_DIR.joinpath("ash_stargrep_rules").glob("*")
-            if (item.as_posix().endswith(".yaml") or item.as_posix().endswith(".yml"))
-        ]
-        if ash_stargrep_rules:
-            ASH_LOGGER.verbose(f"Found ASH *grep rulesets: {ash_stargrep_rules}")
-            self.args.extra_args.extend(
-                [
-                    ToolExtraArg(
-                        key="--config",
-                        value=item.as_posix(),
-                    )
-                    for item in ash_stargrep_rules
-                ]
-            )
-        if self.config.options.offline:
-            # In offline mode, use metrics=off (only if version supports it)
-            if self._should_use_metrics_flag():
-                self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--metrics",
-                        value="off",
-                    )
-                )
-            # Validate offline mode requirements
-            from automated_security_helper.utils.offline_mode_validator import (
-                OfflineModeValidator,
-            )
-
-            offline_valid, offline_messages = OfflineModeValidator.validate_cache_directory(
-                cache_dir=os.environ.get("OPENGREP_RULES_CACHE_DIR", ""),
-                file_extensions=[".yaml", ".yml"],
-                scanner_name="Opengrep",
-            )
-            if not offline_valid:
-                raise ScannerError(
-                    "Opengrep is running in offline mode but no rule cache was found. "
-                    "Set $OPENGREP_RULES_CACHE_DIR to a directory containing .yaml/.yml rule files. "
-                    "Run `ash build-image --offline` to pre-warm the cache via Dockerfile, "
-                    "or download rulesets manually with `semgrep --config p/ci --dryrun` "
-                    "while online and copy to cache."
-                )
-
-            # Use cached rules directory with --no-rewrite-rule-ids to produce
-            # clean rule IDs (the rule's own id field, no path-derived prefix).
-            opengrep_rules_cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
-            ASH_LOGGER.info(
-                f"Opengrep offline mode: using cached rules from {opengrep_rules_cache_dir}"
-            )
-            self.args.extra_args.append(
-                ToolExtraArg(key="--config", value=opengrep_rules_cache_dir)
-            )
-            self.args.extra_args.append(
-                ToolExtraArg(key="--no-rewrite-rule-ids", value="")
-            )
-        else:
-            # In online mode, use config=auto
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--config",
-                    value=self.config.options.config,
-                )
-            )
-            # Only add metrics flag if version supports it
-            if self._should_use_metrics_flag():
-                self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--metrics",
-                        value=self.config.options.metrics,
-                    )
-                )
-
-        # Add exclude patterns
-        for exclude_pattern in self.config.options.exclude:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--exclude",
-                    value=exclude_pattern,
-                )
-            )
-
-        # Add exclude rules
-        for exclude_rule in self.config.options.exclude_rule:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--exclude-rule",
-                    value=exclude_rule,
-                )
-            )
-
-        # Add severity filters
-        for severity in self.config.options.severity:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--severity",
-                    value=severity,
-                )
-            )
-
-        # Add SARIF output format
-        self.args.extra_args.append(
-            ToolExtraArg(
-                key="--sarif",
-                value="",
-            )
-        )
-
-        # Add patterns if using direct pattern search mode
+        # Patterns mode: switch to JSON output and replace extra_args with
+        # only --json + --pattern entries (matches pre-refactor behaviour).
         if self.config.options.patterns:
-            # Switch to pattern search mode
             self.args.extra_args = [ToolExtraArg(key="--json", value="")]
-
-            # Add patterns
             for pattern in self.config.options.patterns:
                 self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--pattern",
-                        value=pattern,
-                    )
+                    ToolExtraArg(key="--pattern", value=pattern)
                 )
 
-        return super()._process_config_options()
+        return result
 
-    def scan(
+    def _execute_grep_scan(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: OpengrepScannerConfig | None = None,
-    ) -> SarifReport | bool | None:
-        """Execute Opengrep scan and return results.
-
-        Args:
-            target: Path to scan
-            target_type: Type of target (source or converted)
-            global_ignore_paths: List of paths to ignore
-            config: Scanner configuration
-
-        Returns:
-            SarifReport containing the scan findings and metadata
-
-        Raises:
-            ScannerError: If the scan fails or results cannot be parsed
-        """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-        # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
-            message = (
-                f"Target directory {target} is empty or doesn't exist. Skipping scan."
-            )
-            self._plugin_log(
-                message,
-                target_type=target_type,
-                level=logging.INFO,
-                append_to_stream="stderr",
-            )
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return True
-
-        validated = self._pre_scan(
-            target=target,
-            target_type=target_type,
-            config=config,
-        )
-        if not validated:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-
-        if not self.dependencies_satisfied:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-        try:
-            target_results_dir = self.results_dir.joinpath(target_type)
-            results_file = target_results_dir.joinpath("results_sarif.sarif")
-            target_results_dir.mkdir(exist_ok=True, parents=True)
-
-            # If using pattern search mode, use a different results file
-            if self.config.options.patterns:
-                results_file = target_results_dir.joinpath("opengrep_results.json")
-
-            final_args = self._resolve_arguments(
-                target=target,
-                results_file=results_file,
-            )
-
-            self._plugin_log(
-                f"Running command: {' '.join(final_args)}",
-                target_type=target_type,
-                level=logging.VERBOSE,
-            )
-
-            # No extra env vars needed — --config points to the cache directory
-            subprocess_env = None
-            self._run_subprocess(
-                command=final_args,
-                results_dir=target_results_dir,
-                env=subprocess_env,
-            )
-
-            # SARIF mode - parse SARIF results
-            if Path(results_file).exists():
-                with open(results_file, mode="r", encoding="utf-8") as f:
-                    opengrep_results = json.load(f)
-                try:
-                    sarif_report: SarifReport = SarifReport.model_validate(
-                        opengrep_results
-                    )
-
-                    # Attach scanner details for proper identification
-                    sarif_report = attach_scanner_details(
-                        sarif_report=sarif_report,
-                        scanner_name=self.config.name,
-                        scanner_version=getattr(self, "tool_version", None),
-                        invocation_details={
-                            "command_line": " ".join(final_args),
-                            "arguments": final_args[1:],
-                            "working_directory": get_shortest_name(input=target),
-                            "start_time": self.start_time.isoformat()
-                            if self.start_time
-                            else None,
-                            "end_time": self.end_time.isoformat()
-                            if self.end_time
-                            else None,
-                            "exit_code": self.exit_code,
-                        },
-                    )
-
-                    if sarif_report.runs:
-                        sarif_report.runs[0].invocations = [
-                            Invocation(
-                                commandLine=" ".join(final_args),
-                                arguments=final_args[1:],
-                                startTimeUtc=self.start_time,
-                                endTimeUtc=self.end_time,
-                                executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
-                                exitCode=self.exit_code,
-                                exitCodeDescription="\n".join(self.errors),
-                                workingDirectory=ArtifactLocation(
-                                    uri=get_shortest_name(input=target),
-                                ),
-                            )
-                        ]
-                    self._post_scan(
-                        target=target,
-                        target_type=target_type,
-                    )
-                    return sarif_report
-                except Exception as e:
-                    self._plugin_log(
-                        f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
-                        target_type=target_type,
-                        level=logging.ERROR,
-                        append_to_stream="stderr",
-                    )
-                    self._post_scan(
-                        target=target,
-                        target_type=target_type,
-                    )
-                    return
-            else:
-                self._plugin_log(
-                    f"No results file found at {results_file}",
-                    target_type=target_type,
-                    level=logging.WARNING,
-                    append_to_stream="stderr",
-                )
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-
-        except Exception as e:
-            # Check if there are useful error details
-            raise ScannerError(f"Opengrep scan failed: {str(e)}")
+    ) -> Tuple[List[str], Path, Optional[dict]]:
+        final_args, results_file, env = super()._execute_grep_scan(target, target_type)
+        if self.config.options.patterns:
+            results_file = results_file.parent / "opengrep_results.json"
+            # Re-resolve final_args so output_arg uses the json path.
+            final_args = self._resolve_arguments(target=target, results_file=results_file)
+        return final_args, results_file, env
