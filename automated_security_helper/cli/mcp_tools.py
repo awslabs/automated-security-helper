@@ -1051,3 +1051,136 @@ def mcp_suggest_suppression(
         "yaml": suppression_yaml,
         "json": suppression_dict,
     }
+
+
+# ---------------------------------------------------------------------------
+# Source delivery (Track 10.2): git-ref clone + chunked zip upload.
+# ---------------------------------------------------------------------------
+
+
+def mcp_set_source_git(
+    url: str,
+    ref: Optional[str] = None,
+    *,
+    ssh_key_id: Optional[str] = None,
+    depth: int = 1,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Clone ``url`` at ``ref`` into the per-session workspace.
+
+    Args:
+        url: Remote URL to clone (https or ssh).
+        ref: Optional branch/tag/commit. ``None`` uses the remote default.
+        ssh_key_id: Opaque, server-side keyring identifier. Raw private keys
+            are not accepted over the wire.
+        depth: Shallow-clone depth. Defaults to 1.
+        session_id: MCP session identifier scoping the workspace.
+
+    Returns:
+        ``{"success": True, "source_dir": str}`` on success;
+        ``{"success": False, "error": str}`` on git failure.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import set_source_git
+
+    try:
+        source_dir = set_source_git(
+            url=url,
+            ref=ref,
+            ssh_key_id=ssh_key_id,
+            depth=depth,
+            session_id=session_id,
+        )
+    except (RuntimeError, ValueError) as e:
+        return {"success": False, "error": str(e)}
+
+    return {"success": True, "source_dir": str(source_dir)}
+
+
+def mcp_set_source_zip_chunk(
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Append one base64-encoded chunk to an in-flight zipped-source upload.
+
+    Args:
+        upload_id: Caller-chosen identifier for this single upload.
+        sequence: Zero-based ordinal; chunks must arrive in order.
+        data_b64: Base64-encoded chunk payload (≤ 1 MiB decoded).
+        last: ``True`` on the final chunk.
+        session_id: MCP session identifier scoping the upload.
+
+    Returns:
+        ``{"success": True, "received": int, "next_sequence": int, "last": bool}``
+        on success; ``{"success": False, "error": str}`` on validation
+        failure (out-of-order, oversize, malformed b64).
+    """
+    from automated_security_helper.cli.mcp.source_delivery import set_source_zip_chunk
+
+    try:
+        result = set_source_zip_chunk(
+            upload_id=upload_id,
+            sequence=sequence,
+            data_b64=data_b64,
+            last=last,
+            session_id=session_id,
+        )
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    return {"success": True, **result}
+
+
+def mcp_set_source_zip_finalize(
+    upload_id: str,
+    expected_sha256: str,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Finalize a chunked upload: verify checksum and extract.
+
+    Args:
+        upload_id: Identifier matching the prior chunk calls.
+        expected_sha256: Hex sha256 the assembled zip must match.
+        session_id: MCP session identifier.
+
+    Returns:
+        ``{"success": True, "source_dir": str}`` on success;
+        ``{"success": False, "error": str}`` on checksum mismatch,
+        oversize zip, oversize extraction, too-many-files, or any
+        path-traversal/symlink-out-of-tree entry.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import (
+        set_source_zip_finalize,
+    )
+
+    try:
+        source_dir = set_source_zip_finalize(
+            upload_id=upload_id,
+            expected_sha256=expected_sha256,
+            session_id=session_id,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        return {"success": False, "error": str(e)}
+
+    return {"success": True, "source_dir": str(source_dir)}
+
+
+def mcp_clear_source(session_id: str) -> Dict[str, Any]:
+    """Wipe the session workspace and forget any recorded ``source_dir``.
+
+    Idempotent: missing workspaces succeed.
+
+    Args:
+        session_id: MCP session identifier.
+
+    Returns:
+        ``{"success": True}``.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import clear_source
+
+    clear_source(session_id=session_id)
+    return {"success": True}
