@@ -1,14 +1,15 @@
-"""opencode backend.
+"""OpenCode backend.
 
-Emits an opencode-compatible layout with an embedded MCP block in opencode.json,
-plus per-plugin skills, commands, and agents under .opencode/. opencode reads
-AGENTS.md natively, so no instruction file is generated here.
+Emits opencode.json + .opencode/ directory of skills, commands, agents.
 """
 from __future__ import annotations
+
+import json
 
 from ...core import (
     AgentsConfig,
     BaseBackend,
+    BuildContext,
     CommandsConfig,
     MCPConfig,
     SkillConfig,
@@ -44,3 +45,18 @@ class OpencodeBackend(BaseBackend):
         frontmatter_fields=("description", "mode"),
         tools_kind="none",
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate opencode.json parses + declares mcp servers."""
+        cfg_path = ctx.out / "opencode.json"
+
+        if not cfg_path.exists():
+            return {"ok": False, "reason": "opencode.json missing"}
+        try:
+            cfg = json.loads(cfg_path.read_text())
+        except json.JSONDecodeError as e:
+            return {"ok": False, "reason": f"opencode.json invalid JSON: {e}"}
+        if "mcp" not in cfg:
+            return {"ok": False, "reason": "opencode.json missing `mcp` block"}
+
+        return self._invoke_cli(["opencode", "--version"])

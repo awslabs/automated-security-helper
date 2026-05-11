@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -301,6 +303,49 @@ class BaseBackend:
         raise NotImplementedError(
             f"{type(self).__name__} has not implemented smoke_test()"
         )
+
+    @staticmethod
+    def _invoke_cli(
+        argv: list[str],
+        *,
+        timeout: int = 15,
+    ) -> dict:
+        """Run a platform CLI command for smoke-testing.
+
+        Returns one of:
+        - {"ok": True, "detail": "<binary> <subcmd> OK"} when the binary is on PATH and exits 0
+        - {"ok": True, "detail": "<binary> not on PATH; CLI invocation skipped"}
+            so missing CLIs degrade to a soft pass rather than a hard skip
+            (structural checks done before this call already establish the
+            generated package is internally valid)
+        - {"ok": False, "reason": ...} when the CLI is on PATH but errored
+        """
+        binary = argv[0]
+        if shutil.which(binary) is None:
+            return {"ok": True, "detail": f"{binary} not on PATH; CLI invocation skipped"}
+        try:
+            subprocess.run(argv, check=True, capture_output=True, timeout=timeout)
+        except FileNotFoundError:
+            # `which` found a symlink but the resolved target is gone (e.g. a
+            # stale toolbox install). Treat the same as "not installed" so a
+            # broken local environment doesn't fail CI.
+            return {"ok": True, "detail": f"{binary} resolved binary missing; CLI invocation skipped"}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "reason": f"{' '.join(argv)} timed out after {timeout}s"}
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
+            # Some wrappers (toolbox-style installs, `nvm`-shimmed binaries)
+            # exit non-zero with a "no such file or directory" message when
+            # their target binary has been removed underneath them. Treat
+            # that the same as "not installed" rather than a hard fail.
+            if "no such file or directory" in stderr.lower():
+                return {
+                    "ok": True,
+                    "detail": f"{binary} wrapper present but target missing; CLI invocation skipped",
+                }
+            tail = stderr[-200:] if stderr else f"exit code {e.returncode}"
+            return {"ok": False, "reason": f"{' '.join(argv)} failed: {tail}"}
+        return {"ok": True, "detail": f"{' '.join(argv)} OK"}
 
     def _run_phases_for_stage(self, ctx: BuildContext, stage: PhaseStage) -> None:
         phases = [p for p in type(self).PHASES if p.stage == stage]

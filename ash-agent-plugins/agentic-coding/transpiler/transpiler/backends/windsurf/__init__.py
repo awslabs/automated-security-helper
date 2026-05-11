@@ -1,14 +1,9 @@
-"""Windsurf backend.
-
-Emits a Windsurf-compatible layout: skills as .windsurf/rules/*.md files (with
-a 12000-byte truncation cap because Windsurf enforces a per-rule size limit),
-an AGENTS.md at the project root, and an MCP config delivered via install.sh
-rather than committed to the tree (path is None, install_script is "windsurf").
-"""
+"""Windsurf backend."""
 from __future__ import annotations
 
 from ...core import (
     BaseBackend,
+    BuildContext,
     InstructionFile,
     MCPConfig,
     SkillConfig,
@@ -41,3 +36,21 @@ class WindsurfBackend(BaseBackend):
         include_skill_body=False,
         include_references="none",
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate .windsurf/rules and AGENTS.md exist; rule file under 12KB cap."""
+        rules_dir = ctx.out / ".windsurf" / "rules"
+        agents = ctx.out / "AGENTS.md"
+        install = ctx.out / "install.sh"
+
+        if not rules_dir.exists() or not list(rules_dir.iterdir()):
+            return {"ok": False, "reason": ".windsurf/rules/ missing or empty"}
+        for rule in rules_dir.glob("*.md"):
+            if rule.stat().st_size > 12000:
+                return {"ok": False, "reason": f"{rule.name} exceeds 12000-byte cap"}
+        if not agents.exists():
+            return {"ok": False, "reason": "AGENTS.md missing"}
+        if not install.exists():
+            return {"ok": False, "reason": "install.sh missing"}
+
+        return {"ok": True, "detail": "rules + AGENTS.md + install.sh valid (Windsurf is GUI-only)"}

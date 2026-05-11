@@ -1,15 +1,9 @@
-"""Cline plugin backend.
-
-Emits a Cline layout: a `.clinerules` directory holding the skill body and
-its references as separately-numbered files, an AGENTS.md instruction file
-shared with the other AGENTS.md-aware platforms, and an MCP config delivered
-via Cline's install script (the MCP file itself is not committed; the
-`install_script` hook wires it up at install time).
-"""
+"""Cline backend."""
 from __future__ import annotations
 
 from ...core import (
     BaseBackend,
+    BuildContext,
     InstructionFile,
     MCPConfig,
     RulesDir,
@@ -42,3 +36,20 @@ class ClineBackend(BaseBackend):
         include_skill_body=False,
         include_references="none",
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate .clinerules/ + install.sh + AGENTS.md exist."""
+        rules_dir = ctx.out / ".clinerules"
+        agents = ctx.out / "AGENTS.md"
+        install = ctx.out / "install.sh"
+
+        if not rules_dir.exists() or not list(rules_dir.iterdir()):
+            return {"ok": False, "reason": ".clinerules/ missing or empty"}
+        if not (rules_dir / "01-skill.md").exists():
+            return {"ok": False, "reason": ".clinerules/01-skill.md missing"}
+        if not agents.exists():
+            return {"ok": False, "reason": "AGENTS.md missing"}
+        if not install.exists():
+            return {"ok": False, "reason": "install.sh missing"}
+
+        return {"ok": True, "detail": "rules + AGENTS.md + install.sh valid (Cline is VS Code-only)"}

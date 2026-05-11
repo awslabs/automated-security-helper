@@ -1,13 +1,13 @@
-"""Amazon Q Developer CLI plugin backend.
+"""Amazon Q Dev CLI agent backend.
 
-Emits the minimal layout Amazon Q expects: just an agent.json describing the
-MCP server. Amazon Q has no skill, command, agent, or instruction-file slots
-in this transpiler — the agent.json is the entire deliverable, registered
-via an install script.
+Emits agent.json (Amazon Q agent definition) and an install.sh that copies
+it into ~/.aws/amazonq/cli-agents/.
 """
 from __future__ import annotations
 
-from ...core import BaseBackend, MCPConfig
+import json
+
+from ...core import BaseBackend, BuildContext, MCPConfig
 from ...registry import register_backend
 
 
@@ -21,3 +21,20 @@ class AmazonqBackend(BaseBackend):
         path="agent.json",
         install_script="amazonq",
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate agent.json parses + has required Amazon Q shape."""
+        agent_path = ctx.out / "agent.json"
+
+        if not agent_path.exists():
+            return {"ok": False, "reason": "agent.json missing"}
+        try:
+            agent = json.loads(agent_path.read_text())
+        except json.JSONDecodeError as e:
+            return {"ok": False, "reason": f"agent.json invalid JSON: {e}"}
+        if not agent.get("name"):
+            return {"ok": False, "reason": "agent.json missing `name`"}
+        if "mcpServers" not in agent:
+            return {"ok": False, "reason": "agent.json missing `mcpServers` block"}
+
+        return self._invoke_cli(["q", "--version"])

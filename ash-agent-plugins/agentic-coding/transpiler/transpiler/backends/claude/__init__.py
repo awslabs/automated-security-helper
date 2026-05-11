@@ -8,9 +8,12 @@ the same content as the AGENTS.md-aware platforms.
 """
 from __future__ import annotations
 
+import json
+
 from ...core import (
     AgentsConfig,
     BaseBackend,
+    BuildContext,
     CommandsConfig,
     InstructionFile,
     MCPConfig,
@@ -60,3 +63,33 @@ class ClaudeBackend(BaseBackend):
         include_skill_body=False,
         include_references="none",
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate plugin.json + .mcp.json parse and have the expected shape.
+
+        Claude Code's load semantics for `--plugin-dir` are:
+        plugin.json must have `name`, and `.mcp.json` (if present) must have
+        an `mcpServers` object. The CLI itself doesn't expose a `--validate`
+        mode, so structural parity is the most we can check without a live
+        Claude session."""
+        manifest = ctx.out / ".claude-plugin" / "plugin.json"
+        mcp = ctx.out / ".mcp.json"
+
+        if not manifest.exists():
+            return {"ok": False, "reason": ".claude-plugin/plugin.json missing"}
+        try:
+            m = json.loads(manifest.read_text())
+        except json.JSONDecodeError as e:
+            return {"ok": False, "reason": f"plugin.json invalid JSON: {e}"}
+        if not m.get("name"):
+            return {"ok": False, "reason": "plugin.json missing required `name`"}
+
+        if mcp.exists():
+            try:
+                mcp_cfg = json.loads(mcp.read_text())
+            except json.JSONDecodeError as e:
+                return {"ok": False, "reason": f".mcp.json invalid JSON: {e}"}
+            if not isinstance(mcp_cfg.get("mcpServers"), dict):
+                return {"ok": False, "reason": ".mcp.json missing `mcpServers` object"}
+
+        return self._invoke_cli(["claude", "--version"])

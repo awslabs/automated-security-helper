@@ -1,17 +1,16 @@
 """GitHub Copilot backend.
 
-Emits the GitHub Copilot layout: a .vscode/mcp.json using the `servers` format,
-a .github/copilot-instructions.md rendered from a Jinja template (with the
-skill body inlined and truncated at 4000 characters), prompt files under
-.github/prompts/, and agent files under .github/agents/. Command and agent
-frontmatter is serialized with single-quoted strings to match Copilot's
-expected YAML style.
+Emits .vscode/mcp.json (servers format) + .github/copilot-instructions.md +
+.github/prompts/*.prompt.md + .github/agents/*.agent.md.
 """
 from __future__ import annotations
+
+import json
 
 from ...core import (
     AgentsConfig,
     BaseBackend,
+    BuildContext,
     CommandsConfig,
     InstructionFile,
     MCPConfig,
@@ -51,3 +50,24 @@ class CopilotBackend(BaseBackend):
         tools_kind="none",
         single_quote_strings=True,
     )
+
+    def smoke_test(self, ctx: BuildContext) -> dict | None:
+        """Validate .vscode/mcp.json + copilot-instructions.md."""
+        mcp = ctx.out / ".vscode" / "mcp.json"
+        instructions = ctx.out / ".github" / "copilot-instructions.md"
+
+        if not mcp.exists():
+            return {"ok": False, "reason": ".vscode/mcp.json missing"}
+        try:
+            cfg = json.loads(mcp.read_text())
+        except json.JSONDecodeError as e:
+            return {"ok": False, "reason": f".vscode/mcp.json invalid JSON: {e}"}
+        if "servers" not in cfg:
+            return {"ok": False, "reason": ".vscode/mcp.json missing `servers` block"}
+        if not instructions.exists():
+            return {"ok": False, "reason": ".github/copilot-instructions.md missing"}
+        char_count = len(instructions.read_text())
+        if char_count > 4000:
+            return {"ok": False, "reason": f"copilot-instructions.md exceeds 4000-char cap ({char_count} chars)"}
+
+        return {"ok": True, "detail": "mcp.json + copilot-instructions valid (no CLI to invoke)"}
