@@ -236,7 +236,7 @@ reporters:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v1.3.3
+    rev: v{{VERSION}}
     hooks:
       - id: ash
 ```
@@ -248,7 +248,7 @@ repos:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v{{VERSION}}
     hooks:
       - id: ash-simple-scan
 ```

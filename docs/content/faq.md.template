@@ -165,7 +165,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v{{VERSION}}
     hooks:
       - id: ash-simple-scan
 ```
@@ -260,7 +260,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
        "ash": {
          "command": "uvx",
          "args": [
-           "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+           "--from=git+https://github.com/awslabs/automated-security-helper@v{{VERSION}}",
            "ash",
            "mcp"
          ],
@@ -278,7 +278,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
        "ash-security": {
          "command": "uvx",
          "args": [
-           "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+           "--from=git+https://github.com/awslabs/automated-security-helper@v{{VERSION}}",
            "ash",
            "mcp"
          ]
@@ -294,7 +294,7 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
        "ash": {
          "command": "uvx",
          "args": [
-           "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+           "--from=git+https://github.com/awslabs/automated-security-helper@v{{VERSION}}",
            "ash",
            "mcp"
          ],
@@ -355,16 +355,16 @@ MCP dependencies are included by default in ASH v3. If you're still getting erro
 2. **Check Python version**: Ensure Python 3.10+ is available: `uv python list`
 3. **Test the MCP server**: Try running the server directly:
    ```bash
-   uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash mcp --help
+   uvx --from=git+https://github.com/awslabs/automated-security-helper@v{{VERSION}} ash mcp --help
    ```
 
 ### How do I test the ASH MCP server?
 ```bash
 # Test MCP server startup
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash mcp --debug
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v{{VERSION}} ash mcp --debug
 
 # Check ASH version
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash --version
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v{{VERSION}} ash --version
 ```
 
 ### How do I monitor MCP server performance?

@@ -225,7 +225,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.1",
         "ash",
         "mcp"
       ],
@@ -243,7 +243,7 @@ The ASH MCP server provides:
     "ash-security": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.1",
         "ash",
         "mcp"
       ]
@@ -259,7 +259,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.0.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.1",
         "ash",
         "mcp"
       ],
@@ -359,7 +359,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v3.4.1
     hooks:
       - id: ash-simple-scan
 ```
