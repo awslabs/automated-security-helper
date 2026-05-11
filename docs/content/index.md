@@ -1,8 +1,7 @@
 # Home
 
-[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan.yml)
-[![ASH - Unified CI](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-unified-ci.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-unified-ci.yml)
-[![ASH - Install Methods](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-install-methods.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-install-methods.yml)
+[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml)
+[![ASH - Matrix Unit Tests](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml)
 
 ## Overview
 
@@ -56,13 +55,13 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 
 ```bash
 # Install with pipx (isolated environment)
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.5.0
 
 # Use as normal
 ash --help
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.4.0` to stay up to date automatically. Pin a specific version when you need reproducible builds.
+> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.5.0` to stay up to date automatically. Pin a specific version when you need reproducible builds.
 
 ### Other Installation Methods
 
@@ -74,23 +73,23 @@ ash --help
 ```bash
 # Linux/macOS
 curl -sSf https://astral.sh/uv/install.sh | sh
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.0"
 
 # Windows PowerShell
 irm https://astral.sh/uv/install.ps1 | iex
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.0 $args }
 ```
 
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.5.0
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.5.0
 cd automated-security-helper
 pip install .
 ```

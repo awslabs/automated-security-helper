@@ -1,8 +1,7 @@
 # ASH - Automated Security Helper
 
-[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-repo-scan.yml)
-[![ASH - Unified CI](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-unified-ci.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-unified-ci.yml)
-[![ASH - Install Methods](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-install-methods.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-install-methods.yml)
+[![ASH - Core Pipeline](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/ash-build-and-scan.yml)
+[![ASH - Matrix Unit Tests](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/awslabs/automated-security-helper/actions/workflows/unit-tests.yml)
 
 ## Table of Contents
 - [Table of Contents](#table-of-contents)
@@ -92,7 +91,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.0"
 ```
 
 ```powershell
@@ -100,22 +99,15 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.0 $args }
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.4.1` to stay up to date automatically. Pin a specific version (e.g., `@v3.4.1`) when you need reproducible builds.
+> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.5.0` to stay up to date automatically. Pin a specific version (e.g., `@v3.5.0`) when you need reproducible builds.
 
 ### Other Installation Methods
 
 <details>
 <summary>Click to expand other installation options</summary>
-
-#### Using Homebrew (macOS/Linux)
-
-```bash
-brew tap awslabs/automated-security-helper https://github.com/awslabs/automated-security-helper.git
-brew install ash
-```
 
 #### Using `pipx`
 
@@ -130,13 +122,13 @@ ash --help
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.5.0
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.4.1
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.5.0
 cd automated-security-helper
 pip install .
 ```
@@ -375,14 +367,10 @@ pre-commit run ash-simple-scan --all-files
 ASH v3 produces several output files in the `.ash/ash_output/` directory:
 
 - `ash_aggregated_results.json`: Complete machine-readable results including validation checkpoints
-- `reports/ash.flat.json`: Flattened JSON array of findings for scripts and dashboards
-- `reports/ash.sarif`: SARIF 2.1.0 report for IDE and CI/CD integration
 - `reports/ash.summary.txt`: Human-readable text summary
 - `reports/ash.summary.md`: Markdown summary for GitHub PRs and other platforms
 - `reports/ash.html`: Interactive HTML report
 - `reports/ash.csv`: CSV report for filtering and sorting findings
-
-ASH also supports CycloneDX, SPDX, OCSF, GitLab SAST, JUnit XML, and YAML output. Enable any combination of reporters in your `.ash/ash.yaml` configuration. For the complete schema reference, consumption examples, and format details, see [Output Formats](https://awslabs.github.io/automated-security-helper/docs/output-formats/).
 
 The `ash_aggregated_results.json` file includes comprehensive validation information that tracks scanner registration, enablement, execution, and result inclusion throughout the scan process. The Scanner Validation System can also generate detailed validation reports that provide comprehensive analysis of scanner states, validation checkpoints, dependency issues, and actionable recommendations for troubleshooting scan issues.
 
