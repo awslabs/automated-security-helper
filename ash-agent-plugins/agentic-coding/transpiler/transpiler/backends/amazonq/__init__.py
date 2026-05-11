@@ -23,7 +23,17 @@ class AmazonqBackend(BaseBackend):
     )
 
     def smoke_test(self, ctx: BuildContext) -> dict | None:
-        """Validate agent.json parses + has required Amazon Q shape."""
+        """Validate agent.json + run `q agent validate --path`.
+
+        Per github.com/aws/amazon-q-developer-cli crates/chat-cli/src/cli/
+        agent/root_command_args.rs: `q agent validate --path <p>` runs
+        Agent::load + jsonschema::validate against the schemars-derived
+        Draft-07 schema. No LLM call, no auth required.
+
+        CRITICAL: `q agent validate` always exits 0 regardless of validation
+        outcome — failures print to stderr/stdout with `WARNING ` (schema
+        mismatch) or `Error: ` (parse/IO) prefix. We must scan output for
+        those prefixes, not rely on exit code."""
         agent_path = ctx.out / "agent.json"
 
         if not agent_path.exists():
@@ -37,4 +47,28 @@ class AmazonqBackend(BaseBackend):
         if "mcpServers" not in agent:
             return {"ok": False, "reason": "agent.json missing `mcpServers` block"}
 
-        return self._invoke_cli(["q", "--version"])
+        pins = self._load_cli_pins(ctx.base_dir)
+        if "q" in pins:
+            ver = self._assert_version_pin("q", ["q", "--version"], pins["q"])
+            if ver and ver.get("ok") is False:
+                # Don't hard-fail on q version mismatch — Q is in maintenance
+                # mode and Kiro is the active path; just record the mismatch.
+                pass
+
+        result = self._invoke_validator(
+            ["q", "agent", "validate", "--path", str(agent_path.resolve())],
+        )
+        if not result.get("ok"):
+            return result
+        if result.get("skipped"):
+            return result
+        # `q agent validate` always exits 0; scan its stdout/stderr for
+        # WARNING / Error prefixes that indicate validation failure.
+        output = result.get("stdout", "")
+        for line in output.splitlines():
+            if line.startswith("WARNING ") or line.startswith("Error: "):
+                return {
+                    "ok": False,
+                    "reason": f"q agent validate flagged: {line.strip()[:200]}",
+                }
+        return {"ok": True, "detail": "q agent validate clean"}

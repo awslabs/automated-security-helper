@@ -222,6 +222,14 @@ def smoke_test(name: str | None) -> None:
                 f"  [FAIL]   {backend_name}: {result.get('reason', 'unknown')}",
                 err=True,
             )
+        elif result.get("skipped") is True:
+            # _invoke_validator and _probe_cli_present return ok=True alongside
+            # skipped=True when the CLI was unreachable. Surface this as a
+            # distinct state so CI logs distinguish "12 passed, 3 skipped"
+            # from "15 passed" — silently passing skipped backends would hide
+            # the fact that the strongest validator was bypassed.
+            skipped.append(backend_name)
+            click.echo(f"  [skip]   {backend_name}: {result.get('detail', 'OK')}")
         else:
             passed.append(backend_name)
             click.echo(f"  [pass]   {backend_name}: {result.get('detail', 'OK')}")

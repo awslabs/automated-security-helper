@@ -66,15 +66,17 @@ class AiderBackend(BaseBackend):
                 "reason": ".aider.conf.yml is missing `read: CONVENTIONS.md`",
             }
 
-        if shutil.which("aider") is not None:
-            try:
-                subprocess.run(
-                    ["aider", "--help"],
-                    check=True,
-                    capture_output=True,
-                    timeout=15,
-                )
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-                return {"ok": False, "reason": f"aider --help failed: {e}"}
-            return {"ok": True, "detail": "aider --help OK; config + conventions valid"}
-        return {"ok": True, "detail": "config + conventions valid (aider not installed; CLI invocation skipped)"}
+        # `aider --exit --yes-always --config <path>` runs the full startup
+        # config-load path then exits before the chat loop — the de facto
+        # validation idiom per aider/main.py (configargparse parses YAML
+        # before argparse short-circuits help/version). Per
+        # aider.chat/docs/config/aider_conf.html, malformed configs fail
+        # before any chat starts. No LLM call. No provider key required.
+        pins = self._load_cli_pins(ctx.base_dir)
+        if "aider" in pins:
+            ver = self._assert_version_pin("aider", ["aider", "--version"], pins["aider"])
+            if ver and ver.get("ok") is False:
+                return ver
+        return self._invoke_validator(
+            ["aider", "--exit", "--yes-always", "--config", str(conf_path.resolve())],
+        )

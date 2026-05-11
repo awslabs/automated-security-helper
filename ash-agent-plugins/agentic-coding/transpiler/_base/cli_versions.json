@@ -1,0 +1,14 @@
+{
+  "$comment": "Pinned CLI versions for smoke-test version assertions. Update by running smoke-test against newer CLIs and bumping the major.minor here. CI installs these exact versions; local smoke-tests assert major.minor match.",
+  "claude": "2.1",
+  "codex": "0.130",
+  "gemini": "0.41",
+  "goose": "1.33",
+  "opencode": "1.14",
+  "q": "1.19",
+  "kiro-cli": "1.0",
+  "mcpb": "2.1",
+  "aider": "0.78",
+  "cline": "1.0",
+  "code-server": "4.96"
+}
