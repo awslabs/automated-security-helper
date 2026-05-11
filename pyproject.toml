@@ -33,6 +33,7 @@ dependencies = [
  # Transitive via pyjwt[crypto] <- mcp[crypto]; pinned to patch GHSA-g6cj-pr64-35w5
  "cryptography>=50.0.0,<51",
  "uvicorn>=0.27,<1",
+ "jsonpatch>=1.33,<2",
 ]
 [project.optional-dependencies]
 cdk = [
