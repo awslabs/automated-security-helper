@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import re
+import shlex
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
@@ -314,7 +315,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         extras = self._invocation_extras(sarif_report, final_args, target)
         sarif_report.runs[0].invocations = [
             Invocation(  # type: ignore[call-arg]
-                commandLine=" ".join(str(a) for a in final_args) if final_args else "",
+                commandLine=shlex.join(str(a) for a in final_args) if final_args else "",
                 arguments=final_args[1:],
                 startTimeUtc=self.start_time,
                 endTimeUtc=self.end_time,

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import shlex
 import logging
 import os
 from pathlib import Path
@@ -277,7 +278,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     if sarif_report.runs:
                         sarif_report.runs[0].invocations = [
                             Invocation(
-                                commandLine=" ".join(final_args),
+                                commandLine=shlex.join(final_args),
                                 arguments=final_args[1:],
                                 startTimeUtc=self.start_time,
                                 endTimeUtc=self.end_time,
