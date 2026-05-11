@@ -25,7 +25,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Pattern
 
 import jsonpatch
 from pydantic import ValidationError
@@ -49,14 +49,26 @@ class RuntimePatchDeniedError(Exception):
         super().__init__(f"Patch op {op!r} denied by rule: {rule}")
 
 
+def _unescape_pointer_segment(seg: str) -> str:
+    """Unescape an RFC 6901 JSON-Pointer segment.
+
+    Order matters: `~1` must decode to `/` and `~0` to `~`. Decoding `~0` first
+    would turn the literal `~01` into `/` instead of the correct `~1`.
+    """
+    return seg.replace("~1", "/").replace("~0", "~")
+
+
 def _path_segments(path: str) -> List[str]:
-    """Split a JSON-Pointer path into segments. Empty string means root."""
+    """Split a JSON-Pointer path into segments and unescape per RFC 6901.
+
+    Empty string means root.
+    """
     if not path:
         return []
     if path[0] != "/":
         # JSON-Pointer paths must start with '/' (or be empty for root).
-        return [path]
-    return path[1:].split("/")
+        return [_unescape_pointer_segment(path)]
+    return [_unescape_pointer_segment(s) for s in path[1:].split("/")]
 
 
 def _match_segments(pattern_segs: List[str], path_segs: List[str]) -> bool:
@@ -101,12 +113,15 @@ def _match_segments(pattern_segs: List[str], path_segs: List[str]) -> bool:
 
 
 def _path_matches(pattern: str, path: str) -> bool:
-    """Test whether `path` matches a glob `pattern` under JSON-Pointer rules."""
+    """Test whether `path` matches a glob `pattern` under JSON-Pointer rules.
+
+    Both pattern and path go through RFC 6901 unescape via `_path_segments`, so
+    a pattern segment of `~1foo` correctly matches a path segment of `~1foo`
+    (decoded to `/foo`), and `**` handles the `/-` array-append marker as a
+    plain literal segment.
+    """
     if pattern == path:
         return True
-    # Treat the trailing "/-" array-append marker as equivalent to a concrete
-    # index for matching purposes (so an allowed_paths entry of
-    # "/external_reports_to_include/-" matches a patch op against "/.../-").
     return _match_segments(_path_segments(pattern), _path_segments(path))
 
 
@@ -128,28 +143,58 @@ def _check_op_paths(
             )
 
 
+def _walk_string_leaves(value: Any, compiled: Pattern[str]) -> bool:
+    """Recursively scan str leaves of a JSON-like value for a regex match.
+
+    Returns True if any string leaf matches `compiled`. Lists and dicts are
+    traversed; non-string scalars (None, bool, int, float) are skipped because
+    the regex is defined over text.
+
+    Walking the structure (instead of `json.dumps`-and-search) prevents an
+    attacker from hiding a forbidden token in a list/dict value when the regex
+    was intended for a flat string field.
+    """
+    if isinstance(value, str):
+        return compiled.search(value) is not None
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if isinstance(k, str) and compiled.search(k) is not None:
+                return True
+            if _walk_string_leaves(v, compiled):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_walk_string_leaves(item, compiled) for item in value)
+    return False
+
+
 def _check_value_pattern(
     op: Dict[str, Any],
     *,
     allowlist: RuntimeOverridesConfig,
 ) -> None:
-    if op.get("op") not in {"add", "replace", "test"}:
+    # `test` is read-only — it neither leaks data nor mutates state, so the
+    # value-pattern denylist (which exists to block writing forbidden values)
+    # does not apply.
+    if op.get("op") not in {"add", "replace"}:
         return
     path = op.get("path", "")
     pattern = allowlist.denied_value_patterns.get(path)
     if pattern is None:
         return
-    value = op.get("value")
-    if value is None:
+    # Distinguish "value key missing" from "value: null". A missing key is
+    # invalid for add/replace and will be rejected by jsonpatch later; an
+    # explicit None can be a legitimate value to clear a field.
+    if "value" not in op:
         return
+    value = op["value"]
     try:
         compiled = re.compile(pattern)
     except re.error as exc:
         raise RuntimePatchDeniedError(
             op, f"denied_value_patterns regex for {path!r} is invalid: {exc}"
         ) from exc
-    serialized = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
-    if compiled.search(serialized):
+    if _walk_string_leaves(value, compiled):
         raise RuntimePatchDeniedError(
             op,
             f"value at {path!r} matches denied_value_patterns regex {pattern!r}",
@@ -172,6 +217,11 @@ def apply_runtime_patch(
             None, "runtime overrides disabled (allowlist.enabled is False)"
         )
 
+    # Defense-in-depth size cap. The PRIMARY limit on patch size must be
+    # enforced upstream at HTTP-body-parse time (the transport should refuse
+    # oversized bodies before they ever reach this function). This check
+    # exists so a misconfigured transport, an in-process caller, or a future
+    # alternate transport can never bypass the bound.
     serialized = json.dumps(patch_ops).encode("utf-8")
     if len(serialized) > _MAX_PATCH_BYTES:
         raise RuntimePatchDeniedError(
