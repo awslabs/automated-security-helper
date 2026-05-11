@@ -88,7 +88,31 @@ uv run --project agentic-coding/transpiler transpile --check
 git commit -am "feat: improve scan workflow"
 ```
 
-CI runs `uv run --project agentic-coding/transpiler transpile --check` on every push and PR. If a contributor edits a generated file under `agentic-coding/plugins/` directly, CI fails with a per-file diff showing what would change if the transpiler ran. Drift is architecturally impossible to merge.
+CI runs `uv run --project agentic-coding/transpiler transpile --check` on every push and PR. `--check` runs two passes: drift detection (do generated files match what the transpiler would produce?) followed by output validation (do generated files conform to each platform's spec?). Either failure surfaces details and exits non-zero. Drift is architecturally impossible to merge; spec violations are caught before they reach users.
+
+## Output validation
+
+The transpiler validates every generated file against its platform's spec via three tiers:
+
+1. **External JSON Schemas** — `mcpb/manifest.json` validates against the official [MCPB Draft 07 schema](https://github.com/modelcontextprotocol/mcpb), and `opencode/opencode.json` validates against the [OpenCode Draft 2020-12 schema](https://opencode.ai/config.json). Both schemas are vendored at `agentic-coding/transpiler/schemas/`.
+2. **Structural sanity** — every generated `.json` parses as JSON, every `.yaml`/`.yml` parses as YAML, every markdown file with `---` frontmatter has parseable YAML, and every path declared in `configs.yaml` exists in the output tree.
+3. **Known platform constraints** — Claude plugin name kebab-case, Roo customMode slug regex, Windsurf `trigger` enum, Copilot 4000-char `copilot-instructions.md` cap, Windsurf 12000-byte rule cap, MCPB archive integrity (must contain `manifest.json` at root, manifest must validate against the MCPB schema).
+
+To refresh the cached external schemas after upstream changes:
+
+```bash
+bash agentic-coding/transpiler/schemas/refresh.sh
+git diff agentic-coding/transpiler/schemas/   # review what changed
+uv run --project agentic-coding/transpiler transpile --check  # confirm we still validate
+```
+
+You can run validation independently of drift detection:
+
+```bash
+uv run --project agentic-coding/transpiler transpile --check          # drift + validation (CI gate)
+uv run --project agentic-coding/transpiler transpile --validate-only  # validation alone
+uv run --project agentic-coding/transpiler transpile --drift-only     # drift alone
+```
 
 ## MCPB / Claude Desktop one-click install
 
