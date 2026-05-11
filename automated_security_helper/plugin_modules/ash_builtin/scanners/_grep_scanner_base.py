@@ -17,6 +17,7 @@ patterns mode, version-gated `--metrics`). Everything else lives here.
 from __future__ import annotations
 
 import json
+import shlex
 import logging
 import os
 from pathlib import Path
@@ -293,7 +294,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                 if sarif_report.runs:
                     sarif_report.runs[0].invocations = [
                         Invocation(  # type: ignore[call-arg]
-                            commandLine=" ".join(final_args),
+                            commandLine=shlex.join(final_args),
                             arguments=final_args[1:],
                             startTimeUtc=self.start_time,
                             endTimeUtc=self.end_time,
