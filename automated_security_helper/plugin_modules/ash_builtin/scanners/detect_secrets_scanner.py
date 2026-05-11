@@ -302,6 +302,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # Already set — this is fine
                 pass
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — DetectSecrets overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
+
     def scan(
         self,
         target: Path,
