@@ -18,6 +18,7 @@ from ...core import (
     BuildPhase,
     MCPBBundle,
 )
+from ...formats import MCPB_BUNDLE
 from ...registry import register_backend
 
 
@@ -25,6 +26,7 @@ from ...registry import register_backend
 class MCPBBackend(BaseBackend):
     NAME = "mcpb"
     OUTPUT_DIR = "mcpb"
+    FORMAT = MCPB_BUNDLE
 
     MCPB_BUNDLE = MCPBBundle(
         archive_path="ash.mcpb",

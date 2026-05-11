@@ -14,6 +14,7 @@ from ...core import (
     MCPConfig,
     SkillConfig,
 )
+from ...formats import OPENCODE_CONFIG
 from ...registry import register_backend
 
 
@@ -21,6 +22,7 @@ from ...registry import register_backend
 class OpencodeBackend(BaseBackend):
     NAME = "opencode"
     OUTPUT_DIR = "opencode"
+    FORMAT = OPENCODE_CONFIG
 
     MCP = MCPConfig(
         format="opencode_embedded",

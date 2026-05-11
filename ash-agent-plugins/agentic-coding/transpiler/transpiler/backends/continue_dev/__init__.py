@@ -9,6 +9,7 @@ from ...core import (
     MCPConfig,
     SkillConfig,
 )
+from ...formats import CONTINUE_CONFIG
 from ...registry import register_backend
 
 
@@ -16,6 +17,7 @@ from ...registry import register_backend
 class ContinueBackend(BaseBackend):
     NAME = "continue"
     OUTPUT_DIR = "continue"
+    FORMAT = CONTINUE_CONFIG
 
     MCP = MCPConfig(
         format="continue_yaml",
