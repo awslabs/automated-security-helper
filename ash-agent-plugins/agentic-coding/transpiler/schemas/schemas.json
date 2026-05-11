@@ -1,0 +1,31 @@
+{
+  "$comment": "External JSON Schemas vendored under this directory. Refresh by running `uv run --project agentic-coding/transpiler refresh-schemas`. Each entry declares: filename (local), source URL, kind ('direct' or 'zod-converted'), and an optional source_subpath used for zod-converted entries to identify which TypeScript schema to convert.",
+  "schemas": [
+    {
+      "filename": "mcpb-manifest.schema.json",
+      "source_url": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/schemas/mcpb-manifest-latest.schema.json",
+      "kind": "direct",
+      "description": "Anthropic MCPB / Desktop Extensions manifest schema (Draft 07). Used to validate mcpb/manifest.json and the manifest embedded in mcpb/ash.mcpb."
+    },
+    {
+      "filename": "opencode-config.schema.json",
+      "source_url": "https://opencode.ai/config.json",
+      "kind": "direct",
+      "description": "OpenCode (sst/opencode) config schema (Draft 2020-12). Used to validate opencode/opencode.json."
+    },
+    {
+      "filename": "amazonq-agent.schema.json",
+      "source_url": "https://raw.githubusercontent.com/aws/amazon-q-developer-cli/main/schemas/agent-v1.json",
+      "kind": "direct",
+      "description": "Amazon Q Developer CLI agent.json schema (Draft 07). Used to validate amazonq/agent.json."
+    },
+    {
+      "filename": "continue-config.schema.json",
+      "source_url": "https://github.com/continuedev/continue.git",
+      "kind": "zod-converted",
+      "source_subpath": "packages/config-yaml/src/schemas/index.ts",
+      "zod_export": "configYamlSchema",
+      "description": "Continue.dev config.yaml schema, converted from the canonical Zod schema in the continuedev/continue repo. Used to validate continue/.continue/mcpServers/*.yaml and continue/.continue/rules/*.md (the latter only structurally — Continue's rule frontmatter is not Zod-typed)."
+    }
+  ]
+}

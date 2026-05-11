@@ -11,10 +11,20 @@ dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "jsonschema>=4.0",
+    "python-frontmatter>=1.1",
 ]
 
 [project.scripts]
 transpile = "transpile:main"
+refresh-schemas = "tools.refresh_schemas:main"
+generate-models = "tools.generate_models:main"
+
+[project.optional-dependencies]
+# Refresh-time tooling — only needed when running refresh-schemas or generate-models.
+# CI normally just runs `transpile --check` against vendored schemas + models.
+refresh = [
+    "datamodel-code-generator[http]>=0.25",
+]
 
 [build-system]
 requires = ["hatchling"]
