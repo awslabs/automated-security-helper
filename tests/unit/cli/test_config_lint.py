@@ -582,6 +582,157 @@ scanners:
         assert len(info_issues) == 1
         assert info_issues[0].severity == LintSeverity.INFO
 
+    # ------------------------------------------------------------------
+    # Legacy snake/kebab name variants on built-in plugins (#82).
+    # ------------------------------------------------------------------
+
+    def test_lint_detects_snake_form_of_kebab_alias(self, tmp_path):
+        """`scanners.cdk_nag` should be flagged — alias is `cdk-nag`."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "project_name: t\n"
+            "scanners:\n"
+            "  cdk_nag:\n"
+            "    enabled: true\n"
+        )
+
+        result = ConfigLinter.lint(config_path)
+
+        legacy_issues = [
+            i
+            for i in result.issues
+            if i.category == LintCategory.LEGACY_NAME_VARIANT
+        ]
+        assert len(legacy_issues) == 1
+        assert "cdk_nag" in legacy_issues[0].message
+        assert "cdk-nag" in legacy_issues[0].message
+        assert legacy_issues[0].fixable is True
+        assert legacy_issues[0].severity == LintSeverity.WARNING
+
+    def test_lint_passes_kebab_alias_form(self, tmp_path):
+        """`scanners.cdk-nag` (canonical) should NOT be flagged."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "project_name: t\n"
+            "scanners:\n"
+            "  cdk-nag:\n"
+            "    enabled: true\n"
+        )
+
+        result = ConfigLinter.lint(config_path)
+
+        legacy_issues = [
+            i
+            for i in result.issues
+            if i.category == LintCategory.LEGACY_NAME_VARIANT
+        ]
+        assert legacy_issues == []
+
+    def test_lint_passes_third_party_plugin_name(self, tmp_path):
+        """Third-party scanner names (no built-in collision) pass through."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "project_name: t\n"
+            "scanners:\n"
+            "  my-org-custom-scanner:\n"
+            "    enabled: true\n"
+        )
+
+        result = ConfigLinter.lint(config_path)
+
+        legacy_issues = [
+            i
+            for i in result.issues
+            if i.category == LintCategory.LEGACY_NAME_VARIANT
+        ]
+        assert legacy_issues == []
+
+    def test_lint_detects_multiple_legacy_variants(self, tmp_path):
+        """All snake-form variants of kebab built-ins flagged."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "project_name: t\n"
+            "scanners:\n"
+            "  cdk_nag:\n"
+            "    enabled: true\n"
+            "  cfn_nag:\n"
+            "    enabled: true\n"
+            "  npm_audit:\n"
+            "    enabled: true\n"
+        )
+
+        result = ConfigLinter.lint(config_path)
+
+        flagged = {
+            (i.path, i.message)
+            for i in result.issues
+            if i.category == LintCategory.LEGACY_NAME_VARIANT
+        }
+        # Three issues: cdk_nag, cfn_nag, npm_audit
+        assert len(flagged) == 3
+        flagged_msgs = "\n".join(m for _, m in flagged)
+        assert "cdk-nag" in flagged_msgs
+        assert "cfn-nag" in flagged_msgs
+        assert "npm-audit" in flagged_msgs
+
+    def test_lint_detects_legacy_variants_in_reporters(self, tmp_path):
+        """Reporter snake-form variants also flagged."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "project_name: t\n"
+            "reporters:\n"
+            "  gitlab_cyclonedx:\n"
+            "    enabled: true\n"
+        )
+
+        result = ConfigLinter.lint(config_path)
+
+        legacy_issues = [
+            i
+            for i in result.issues
+            if i.category == LintCategory.LEGACY_NAME_VARIANT
+        ]
+        assert len(legacy_issues) == 1
+        assert "gitlab_cyclonedx" in legacy_issues[0].message
+        assert "gitlab-cyclonedx" in legacy_issues[0].message
+
+    def test_fix_renames_snake_to_kebab(self, tmp_path):
+        """--fix renames `cdk_nag` → `cdk-nag` preserving the value."""
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "project_name: t\n"
+            "scanners:\n"
+            "  cdk_nag:\n"
+            "    enabled: true\n"
+            "    options:\n"
+            "      severity_threshold: MEDIUM\n"
+        )
+
+        fixed_content, fixed_issues = ConfigLinter.fix(config_path)
+
+        # Parse fixed content (strip leading schema-comment line)
+        yaml_content = "\n".join(
+            line for line in fixed_content.split("\n") if not line.startswith("#")
+        )
+        fixed_data = yaml.safe_load(yaml_content)
+
+        scanners = fixed_data.get("scanners", {})
+        assert "cdk_nag" not in scanners
+        assert "cdk-nag" in scanners
+        # Value preserved
+        assert scanners["cdk-nag"]["enabled"] is True
+        assert scanners["cdk-nag"]["options"]["severity_threshold"] == "MEDIUM"
+        # Issue was reported as fixed
+        assert any(
+            i.category == LintCategory.LEGACY_NAME_VARIANT for i in fixed_issues
+        )
+
 
 class TestConfigLintCLI:
     """Integration tests for the `ash config lint` CLI command."""

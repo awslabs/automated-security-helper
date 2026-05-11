@@ -45,6 +45,7 @@ class LintCategory(str, Enum):
     SUPPRESSION_LINE_RANGE = "suppression-line-range"
     SUPPRESSION_EXPIRED = "suppression-expired"
     SUPPRESSION_UNUSED = "suppression-unused"
+    LEGACY_NAME_VARIANT = "legacy-name-variant"
     SYNTAX_ERROR = "syntax-error"
 
 
@@ -150,6 +151,9 @@ class ConfigLinter:
         # Run suppression-specific lint checks
         cls._check_suppression_issues(config_data, result)
 
+        # Snake/kebab built-in name variant check (#82)
+        cls._check_legacy_name_variants(config_data, result)
+
         # Check for unused suppressions if requested
         if check_unused:
             cls._check_unused_suppressions(config_path, config_data, output_dir, result)
@@ -205,6 +209,10 @@ class ConfigLinter:
 
             elif issue.category == LintCategory.SUPPRESSION_LINE_RANGE:
                 if cls._fix_suppression_line_range(config_data, issue):
+                    fixed_issues.append(issue)
+
+            elif issue.category == LintCategory.LEGACY_NAME_VARIANT:
+                if cls._fix_legacy_name_variant(config_data, issue):
                     fixed_issues.append(issue)
 
         # Apply removals in reverse index order to preserve indices
@@ -738,6 +746,109 @@ class ConfigLinter:
             str(line_end_val) if line_end_val is not None else "*",
         ]
         return "|".join(parts)
+
+    @classmethod
+    def _check_legacy_name_variants(
+        cls, config_data: Dict[str, Any], result: LintResult
+    ) -> None:
+        """Detect snake/kebab variants of built-in plugin names.
+
+        Operators sometimes type the snake_case Python field name when the
+        canonical input form for a built-in plugin is the kebab-case alias
+        (e.g. ``cdk_nag:`` instead of ``cdk-nag:``). The snake form silently
+        lands in ``__pydantic_extra__`` and the real built-in keeps its
+        default config — silent mis-configuration.
+
+        Walks the ``scanners``, ``reporters``, and ``converters`` segments,
+        compares each key against the segment's declared canonical input
+        forms (alias if present, else Python field name), and flags any
+        key whose snake/kebab swap-form matches a different canonical
+        input form. Third-party plugin names (no built-in collision) pass
+        through silently.
+
+        Each issue is :class:`LintSeverity.WARNING` and ``fixable=True``;
+        ``ash config lint --fix`` renames the key in-place.
+        """
+        # Lazy import to avoid pulling the full config-segment graph on
+        # module import.
+        from automated_security_helper.config.ash_config import (
+            ConverterConfigSegment,
+            ReporterConfigSegment,
+            ScannerConfigSegment,
+        )
+
+        segment_specs = (
+            ("scanners", ScannerConfigSegment),
+            ("reporters", ReporterConfigSegment),
+            ("converters", ConverterConfigSegment),
+        )
+
+        for segment_name, segment_cls in segment_specs:
+            segment_data = config_data.get(segment_name)
+            if not isinstance(segment_data, dict):
+                continue
+
+            # Canonical input form for each declared field: alias if set,
+            # else Python field name.
+            canonical_input_forms: set[str] = set()
+            for fname, finfo in segment_cls.model_fields.items():
+                alias = getattr(finfo, "alias", None)
+                canonical_input_forms.add(alias if alias else fname)
+
+            for key in list(segment_data):
+                if key in canonical_input_forms:
+                    continue  # already canonical; not a typo
+                if "-" in key:
+                    swapped = key.replace("-", "_")
+                elif "_" in key:
+                    swapped = key.replace("_", "-")
+                else:
+                    continue  # no separator; not a snake/kebab variant
+                if swapped in canonical_input_forms:
+                    result.issues.append(
+                        LintIssue(
+                            severity=LintSeverity.WARNING,
+                            category=LintCategory.LEGACY_NAME_VARIANT,
+                            path=f"{segment_name}.{key}",
+                            message=(
+                                f"{segment_name}.{key!r} uses the legacy "
+                                f"snake/kebab variant; canonical form is "
+                                f"{swapped!r}. The legacy form lands in "
+                                f"__pydantic_extra__ and the real built-in "
+                                f"keeps its default config."
+                            ),
+                            fixable=True,
+                        )
+                    )
+
+    @classmethod
+    def _fix_legacy_name_variant(
+        cls, config_data: Dict[str, Any], issue: LintIssue
+    ) -> bool:
+        """Rename a legacy snake/kebab variant to its canonical form.
+
+        ``issue.path`` is ``"<segment>.<legacy-key>"``. The corresponding
+        canonical form is the kebab↔snake swap of ``<legacy-key>``.
+        """
+        if not issue.path or "." not in issue.path:
+            return False
+        segment_name, legacy_key = issue.path.split(".", 1)
+        segment_data = config_data.get(segment_name)
+        if not isinstance(segment_data, dict) or legacy_key not in segment_data:
+            return False
+        if "-" in legacy_key:
+            canonical_key = legacy_key.replace("-", "_")
+        elif "_" in legacy_key:
+            canonical_key = legacy_key.replace("_", "-")
+        else:
+            return False
+        # Preserve insertion order: rebuild dict with the new key in place
+        # of the legacy key, copying every other entry as-is.
+        new_segment: Dict[str, Any] = {}
+        for k, v in segment_data.items():
+            new_segment[canonical_key if k == legacy_key else k] = v
+        config_data[segment_name] = new_segment
+        return True
 
     @classmethod
     def _fix_internal_field(cls, config_data: Dict[str, Any], issue: LintIssue) -> bool:
