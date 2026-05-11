@@ -1053,6 +1053,174 @@ def mcp_suggest_suppression(
     }
 
 
+def mcp_list_profiles() -> Dict[str, Any]:
+    """List registered MCP config profiles by name + path SHA256.
+
+    The path itself is intentionally not exposed — operators may register
+    profiles with sensitive filesystem paths, and the SHA is sufficient for
+    a client to detect "is this the same profile as before".
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        get_profile_registry,
+    )
+
+    registry = get_profile_registry()
+    profiles = sorted(
+        ({"name": name, "path_sha256": entry.path_sha256} for name, entry in registry.items()),
+        key=lambda e: e["name"],
+    )
+    return {"profiles": profiles, "count": len(profiles)}
+
+
+def mcp_select_profile(
+    profile_name: str,
+    *,
+    patch_ops: Optional[list] = None,
+    override_yaml: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Bind a registered profile to the calling session.
+
+    Three modes:
+        * **static** — `patch_ops` and `override_yaml` are both None; the
+          profile's resolved config is bound as-is.
+        * **inherit-and-patch** — `patch_ops` is provided; the profile's
+          config is patched through `apply_runtime_patch` (which enforces the
+          MCP allowlist).
+        * **override** — `override_yaml` is provided; the profile is
+          replaced wholesale by the YAML, validated through `AshConfig`.
+
+    `patch_ops` and `override_yaml` are mutually exclusive.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        bind_session_config,
+        get_profile_registry,
+    )
+    from automated_security_helper.config.runtime_patch import (
+        RuntimePatchDeniedError,
+        apply_runtime_patch,
+    )
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        AshMcpConfig,
+        RuntimeOverridesConfig,
+    )
+    import yaml as _yaml
+    from pydantic import ValidationError as _ValidationError
+
+    if patch_ops is not None and override_yaml is not None:
+        return {
+            "success": False,
+            "error": "patch_ops and override_yaml are mutually exclusive",
+        }
+
+    registry = get_profile_registry()
+    if profile_name not in registry:
+        if not registry:
+            return {
+                "success": False,
+                "error": f"unknown profile {profile_name!r} (none registered)",
+            }
+        known = sorted(registry)
+        return {
+            "success": False,
+            "error": f"unknown profile {profile_name!r}; known: {', '.join(known)}",
+        }
+
+    entry = registry[profile_name]
+    base_cfg: AshConfig = entry.config
+
+    if override_yaml is not None:
+        try:
+            raw = _yaml.safe_load(override_yaml)
+        except _yaml.YAMLError as exc:
+            return {"success": False, "error": f"override_yaml parse error: {exc}"}
+        # Strict-extra gate: AshConfig.model_config has extra='ignore' for
+        # back-compat with end-user configs, but profiles are operator-
+        # controlled deployment artifacts and should fail on typos.
+        allowed = set(AshConfig.model_fields.keys())
+        for finfo in AshConfig.model_fields.values():
+            if finfo.alias:
+                allowed.add(finfo.alias)
+        unknown = sorted(set(raw or {}) - allowed)
+        if unknown:
+            return {
+                "success": False,
+                "error": (
+                    f"override_yaml validation error: unknown top-level "
+                    f"field(s): {', '.join(unknown)}"
+                ),
+            }
+        try:
+            new_cfg = AshConfig.model_validate(raw or {}, strict=True)
+        except _ValidationError as exc:
+            return {
+                "success": False,
+                "error": f"override_yaml validation error: {exc.errors()}",
+            }
+        bind_session_config(
+            session_id,
+            config=new_cfg,
+            profile_name=profile_name,
+            override_yaml=override_yaml,
+        )
+        return {
+            "success": True,
+            "mode": "override",
+            "profile_name": profile_name,
+            "session_id": session_id or _default_session_id(),
+        }
+
+    if patch_ops is not None:
+        mcp_cfg: Optional[AshMcpConfig] = getattr(
+            base_cfg.global_settings, "mcp", None
+        )
+        allowlist = (
+            mcp_cfg.runtime_overrides
+            if mcp_cfg is not None
+            else RuntimeOverridesConfig()
+        )
+        try:
+            patched = apply_runtime_patch(
+                base_cfg, patch_ops, allowlist=allowlist
+            )
+        except RuntimePatchDeniedError as exc:
+            return {"success": False, "error": f"patch denied: {exc}"}
+        bind_session_config(
+            session_id,
+            config=patched,
+            profile_name=profile_name,
+            patch_ops=patch_ops,
+        )
+        return {
+            "success": True,
+            "mode": "inherit_and_patch",
+            "profile_name": profile_name,
+            "session_id": session_id or _default_session_id(),
+        }
+
+    bind_session_config(
+        session_id,
+        config=base_cfg,
+        profile_name=profile_name,
+    )
+    return {
+        "success": True,
+        "mode": "static",
+        "profile_name": profile_name,
+        "session_id": session_id or _default_session_id(),
+    }
+
+
+def _default_session_id() -> str:
+    """Return the profile_registry DEFAULT_SESSION_ID without circular import."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+
+    return DEFAULT_SESSION_ID
+
+
 # ---------------------------------------------------------------------------
 # Source delivery (Track 10.2): git-ref clone + chunked zip upload.
 # ---------------------------------------------------------------------------
