@@ -65,13 +65,13 @@ class ClaudeBackend(BaseBackend):
     )
 
     def smoke_test(self, ctx: BuildContext) -> dict | None:
-        """Validate plugin.json + .mcp.json parse and have the expected shape.
+        """Validate plugin.json + .mcp.json parse, then run `claude plugin validate`.
 
-        Claude Code's load semantics for `--plugin-dir` are:
-        plugin.json must have `name`, and `.mcp.json` (if present) must have
-        an `mcpServers` object. The CLI itself doesn't expose a `--validate`
-        mode, so structural parity is the most we can check without a live
-        Claude session."""
+        Per code.claude.com/docs/en/plugins-reference, `claude plugin validate`
+        is a no-LLM schema check: parses plugin.json, skill/agent/command
+        frontmatter, hooks/hooks.json. Exits non-zero on any malformed file.
+        We also assert the CLI version matches the pinned major.minor so
+        upstream subcommand-shape changes surface early."""
         manifest = ctx.out / ".claude-plugin" / "plugin.json"
         mcp = ctx.out / ".mcp.json"
 
@@ -92,4 +92,9 @@ class ClaudeBackend(BaseBackend):
             if not isinstance(mcp_cfg.get("mcpServers"), dict):
                 return {"ok": False, "reason": ".mcp.json missing `mcpServers` object"}
 
-        return self._invoke_cli(["claude", "--version"])
+        pins = self._load_cli_pins(ctx.base_dir)
+        if "claude" in pins:
+            ver = self._assert_version_pin("claude", ["claude", "--version"], pins["claude"])
+            if ver and ver.get("ok") is False:
+                return ver
+        return self._invoke_validator(["claude", "plugin", "validate", str(ctx.out.resolve())])

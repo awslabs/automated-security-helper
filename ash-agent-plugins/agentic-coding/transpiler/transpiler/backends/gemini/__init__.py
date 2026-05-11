@@ -42,11 +42,12 @@ class GeminiBackend(BaseBackend):
     )
 
     def smoke_test(self, ctx: BuildContext) -> dict | None:
-        """Validate gemini-extension.json parses + GEMINI.md exists.
+        """Validate gemini-extension.json + run `gemini extensions validate`.
 
-        Gemini CLI loads the extension by reading gemini-extension.json. We
-        verify the manifest is valid JSON with the required `name` field,
-        then invoke `gemini --version` if the CLI is on PATH."""
+        Per github.com/google-gemini/gemini-cli packages/cli/src/commands/
+        extensions/validate.ts: this is a purpose-built no-LLM, no-auth,
+        exit-coded validator. It loads through the same ExtensionManager
+        the runtime uses, so any drift fails at this gate."""
         manifest = ctx.out / "gemini-extension.json"
         instructions = ctx.out / "GEMINI.md"
 
@@ -61,4 +62,9 @@ class GeminiBackend(BaseBackend):
         if not instructions.exists():
             return {"ok": False, "reason": "GEMINI.md missing"}
 
-        return self._invoke_cli(["gemini", "--version"])
+        pins = self._load_cli_pins(ctx.base_dir)
+        if "gemini" in pins:
+            ver = self._assert_version_pin("gemini", ["gemini", "--version"], pins["gemini"])
+            if ver and ver.get("ok") is False:
+                return ver
+        return self._invoke_validator(["gemini", "extensions", "validate", str(ctx.out.resolve())])

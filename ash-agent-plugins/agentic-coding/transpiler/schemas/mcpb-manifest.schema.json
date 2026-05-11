@@ -6,12 +6,12 @@
     },
     "dxt_version": {
       "type": "string",
-      "const": "0.3",
+      "const": "0.4",
       "description": "@deprecated Use manifest_version instead"
     },
     "manifest_version": {
       "type": "string",
-      "const": "0.3"
+      "const": "0.4"
     },
     "name": {
       "type": "string"
@@ -136,7 +136,8 @@
           "enum": [
             "python",
             "node",
-            "binary"
+            "binary",
+            "uv"
           ]
         },
         "entry_point": {

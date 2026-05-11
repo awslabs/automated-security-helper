@@ -305,47 +305,169 @@ class BaseBackend:
         )
 
     @staticmethod
-    def _invoke_cli(
+    def _load_cli_pins(base_dir: Path) -> dict[str, str]:
+        """Load _base/cli_versions.json (single source of truth for pins)."""
+        path = base_dir / "cli_versions.json"
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text())
+        return {k: v for k, v in data.items() if not k.startswith("$")}
+
+    @staticmethod
+    def _assert_version_pin(
+        binary: str,
+        version_argv: list[str],
+        pinned: str,
+        *,
+        timeout: int = 15,
+    ) -> dict | None:
+        """Run `<binary> <version_argv...>` and assert the major.minor matches `pinned`.
+
+        Returns None if the binary is not on PATH (caller decides what to do
+        with that), {"ok": True, "detail": "..."} on match, or
+        {"ok": False, "reason": "..."} on mismatch.
+
+        Pin format is "major.minor" (patch drift is allowed). A pin of "1.0"
+        will match "1.0.0", "1.0.5", but not "1.1.0".
+        """
+        if shutil.which(binary) is None:
+            return None
+        try:
+            r = subprocess.run(version_argv, check=True, capture_output=True, timeout=timeout)
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            return {"ok": False, "reason": f"{' '.join(version_argv)} failed: {e}"}
+        out = (r.stdout or b"").decode("utf-8", errors="replace") + (r.stderr or b"").decode("utf-8", errors="replace")
+        m = re.search(r"\b(\d+)\.(\d+)(?:\.(\d+))?\b", out)
+        if not m:
+            return {"ok": False, "reason": f"{binary} version output unparseable: {out[:120]!r}"}
+        actual = f"{m.group(1)}.{m.group(2)}"
+        if actual != pinned:
+            return {
+                "ok": False,
+                "reason": f"{binary} version mismatch: pinned {pinned!r}, found {actual!r} (full: {m.group(0)!r})",
+            }
+        return {"ok": True, "detail": f"{binary} {m.group(0)} matches pin {pinned}"}
+
+    @staticmethod
+    def _probe_cli_present(
         argv: list[str],
         *,
         timeout: int = 15,
     ) -> dict:
-        """Run a platform CLI command for smoke-testing.
+        """Liveness probe — is the binary on PATH and runnable?
 
-        Returns one of:
-        - {"ok": True, "detail": "<binary> <subcmd> OK"} when the binary is on PATH and exits 0
-        - {"ok": True, "detail": "<binary> not on PATH; CLI invocation skipped"}
-            so missing CLIs degrade to a soft pass rather than a hard skip
-            (structural checks done before this call already establish the
-            generated package is internally valid)
-        - {"ok": False, "reason": ...} when the CLI is on PATH but errored
+        Use for `--version`-class commands whose only purpose is to confirm
+        the CLI is callable. Designed to be lenient: missing binaries and
+        broken wrappers (stale toolbox symlinks, nvm shims pointing at
+        deleted targets) all soft-pass with a "skipped" detail string.
+
+        Returns:
+        - {"ok": True, "detail": "<argv> OK"} on exit 0
+        - {"ok": True, "skipped": True, "detail": "<binary> not on PATH ..."}
+          when the binary is missing or its wrapper points at a removed target
+        - {"ok": False, "reason": ...} only when the CLI is on PATH and
+          actually failed (not for environment-quirk failures)
         """
         binary = argv[0]
         if shutil.which(binary) is None:
-            return {"ok": True, "detail": f"{binary} not on PATH; CLI invocation skipped"}
+            return {
+                "ok": True, "skipped": True,
+                "detail": f"{binary} not on PATH; CLI invocation skipped",
+            }
         try:
             subprocess.run(argv, check=True, capture_output=True, timeout=timeout)
         except FileNotFoundError:
-            # `which` found a symlink but the resolved target is gone (e.g. a
-            # stale toolbox install). Treat the same as "not installed" so a
-            # broken local environment doesn't fail CI.
-            return {"ok": True, "detail": f"{binary} resolved binary missing; CLI invocation skipped"}
+            return {
+                "ok": True, "skipped": True,
+                "detail": f"{binary} resolved binary missing; CLI invocation skipped",
+            }
         except subprocess.TimeoutExpired:
             return {"ok": False, "reason": f"{' '.join(argv)} timed out after {timeout}s"}
         except subprocess.CalledProcessError as e:
             stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
-            # Some wrappers (toolbox-style installs, `nvm`-shimmed binaries)
-            # exit non-zero with a "no such file or directory" message when
-            # their target binary has been removed underneath them. Treat
-            # that the same as "not installed" rather than a hard fail.
+            # Stale wrapper detection — narrow this only because we know
+            # the argv is a `--version`-style probe with no file inputs.
             if "no such file or directory" in stderr.lower():
                 return {
-                    "ok": True,
+                    "ok": True, "skipped": True,
                     "detail": f"{binary} wrapper present but target missing; CLI invocation skipped",
                 }
             tail = stderr[-200:] if stderr else f"exit code {e.returncode}"
             return {"ok": False, "reason": f"{' '.join(argv)} failed: {tail}"}
         return {"ok": True, "detail": f"{' '.join(argv)} OK"}
+
+    @staticmethod
+    def _invoke_validator(
+        argv: list[str],
+        *,
+        timeout: int = 60,
+    ) -> dict:
+        """Validation probe — run a real schema validator against an artifact.
+
+        Use for commands like `claude plugin validate <dir>`,
+        `gemini extensions validate <dir>`, `mcpb validate <manifest>`,
+        `q agent validate --path <file>`. These commands consume our
+        generated output and make substantive assertions about it; their
+        failures must NOT be silently swallowed.
+
+        Differences from `_probe_cli_present`:
+        - Missing binary still soft-skips (CI runners without all CLIs
+          installed shouldn't break the build; structural checks already ran).
+        - But "no such file or directory" in stderr does NOT soft-skip — that
+          phrase is the *legitimate* failure signal for these commands when
+          our artifact references a missing path.
+        - Falls back to stdout when stderr is empty (some CLIs write
+          actionable validation output to stdout).
+        - Default 60s timeout (validators traverse files; --version doesn't).
+        """
+        binary = argv[0]
+        if shutil.which(binary) is None:
+            return {
+                "ok": True, "skipped": True,
+                "detail": f"{binary} not on PATH; validator invocation skipped",
+            }
+        try:
+            result = subprocess.run(argv, check=True, capture_output=True, timeout=timeout)
+        except FileNotFoundError:
+            return {
+                "ok": True, "skipped": True,
+                "detail": f"{binary} resolved binary missing; validator invocation skipped",
+            }
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "reason": f"{' '.join(argv)} timed out after {timeout}s"}
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
+            stdout = (e.stdout or b"").decode("utf-8", errors="replace").strip()
+            # Narrow soft-skip: a wrapper script (toolbox-style) exec'ing a
+            # missing macOS .app bundle path. This is identifiable because
+            # the stderr starts with the resolved path and ends with "no
+            # such file or directory", and the path contains ".app/Contents/".
+            # We do NOT soft-skip on the same phrase from the validator
+            # itself because validator messages don't carry .app paths.
+            wrapper_target_missing = (
+                ".app/Contents/" in stderr
+                and "no such file or directory" in stderr.lower()
+                and stderr.startswith("/")  # absolute path indicates exec failure
+            )
+            if wrapper_target_missing:
+                return {
+                    "ok": True, "skipped": True,
+                    "detail": f"{binary} wrapper present but target missing; validator invocation skipped",
+                }
+            # Prefer stderr; some CLIs (notably claude plugin validate)
+            # put actionable error detail on stdout, so fall back there.
+            tail = (stderr or stdout)[-300:] if (stderr or stdout) else f"exit code {e.returncode}"
+            return {"ok": False, "reason": f"{' '.join(argv)} failed: {tail}"}
+        return {
+            "ok": True,
+            "detail": f"{' '.join(argv)} OK",
+            "stdout": result.stdout.decode("utf-8", errors="replace") if result.stdout else "",
+        }
+
+    # Back-compat alias — _invoke_cli used to be the only helper. New code
+    # should pick `_probe_cli_present` for liveness or `_invoke_validator`
+    # for substantive checks.
+    _invoke_cli = _probe_cli_present
 
     def _run_phases_for_stage(self, ctx: BuildContext, stage: PhaseStage) -> None:
         phases = [p for p in type(self).PHASES if p.stage == stage]

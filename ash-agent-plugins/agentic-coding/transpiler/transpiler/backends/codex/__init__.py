@@ -44,16 +44,25 @@ class CodexBackend(BaseBackend):
     )
 
     MARKETPLACE = Marketplace(
-        path="marketplace.json",
+        # Codex requires marketplace.json at one of two canonical paths
+        # (per MARKETPLACE_MANIFEST_RELATIVE_PATHS in core-plugins/marketplace.rs).
+        # We emit at .claude-plugin/marketplace.json to match the path Claude
+        # Code also uses for marketplaces.
+        path=".claude-plugin/marketplace.json",
     )
 
     def smoke_test(self, ctx: BuildContext) -> dict | None:
-        """Validate plugin.json + marketplace.json parse.
+        """Validate plugin.json + marketplace.json + run `codex plugin marketplace add`.
 
-        Codex resolves plugins via marketplace.json. Structural check + an
-        optional `codex --version` invocation is the most we can verify
-        without auth."""
-        marketplace = ctx.out / "marketplace.json"
+        Per github.com/openai/codex codex-rs/cli/src/marketplace_cmd.rs,
+        Codex has no `validate` verb. The CI lever is `codex plugin
+        marketplace add <local-dir>`, which schema-validates marketplace.json
+        + plugin.json synchronously before recording metadata. We point
+        CODEX_HOME at a tempdir to keep the runner clean.
+
+        Codex requires marketplace.json at `.claude-plugin/marketplace.json`
+        (per MARKETPLACE_MANIFEST_RELATIVE_PATHS in core-plugins/marketplace.rs)."""
+        marketplace = ctx.out / ".claude-plugin" / "marketplace.json"
         manifest = ctx.out / ".codex-plugin" / "plugin.json"
 
         if not manifest.exists():
@@ -64,7 +73,7 @@ class CodexBackend(BaseBackend):
             return {"ok": False, "reason": f"plugin.json invalid JSON: {e}"}
 
         if not marketplace.exists():
-            return {"ok": False, "reason": "marketplace.json missing"}
+            return {"ok": False, "reason": ".claude-plugin/marketplace.json missing"}
         try:
             mp = json.loads(marketplace.read_text())
         except json.JSONDecodeError as e:
@@ -72,4 +81,14 @@ class CodexBackend(BaseBackend):
         if not mp.get("plugins"):
             return {"ok": False, "reason": "marketplace.json has no plugins entries"}
 
-        return self._invoke_cli(["codex", "--version"])
+        pins = self._load_cli_pins(ctx.base_dir)
+        if "codex" in pins:
+            ver = self._assert_version_pin("codex", ["codex", "--version"], pins["codex"])
+            if ver and ver.get("ok") is False:
+                return ver
+        # Use isolated CODEX_HOME so CI runs are reproducible.
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as codex_home:
+            env_argv = ["env", f"CODEX_HOME={codex_home}", "codex", "plugin",
+                        "marketplace", "add", str(ctx.out.resolve())]
+            return self._invoke_validator(env_argv)

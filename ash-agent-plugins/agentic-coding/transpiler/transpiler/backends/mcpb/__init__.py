@@ -6,6 +6,8 @@ copies it into dist/ for GitHub release attachment.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 import shutil
 import zipfile
@@ -26,8 +28,9 @@ class MCPBBackend(BaseBackend):
 
     MCPB_BUNDLE = MCPBBundle(
         archive_path="ash.mcpb",
-        manifest_version="0.3",
+        manifest_version="0.4",
         server_type="binary",
+        server_entry_point="uvx",
         long_description=(
             "Run ASH (Automated Security Helper) security scans directly in Claude\n"
             "Desktop. Bundles uvx-based ASH MCP server invocation; no separate\n"
@@ -87,4 +90,32 @@ class MCPBBackend(BaseBackend):
             if required not in manifest:
                 return {"ok": False, "reason": f"manifest.json missing `{required}`"}
 
-        return {"ok": True, "detail": f"ash.mcpb OK ({len(names)} entries, manifest_version={manifest['manifest_version']})"}
+        structural = {
+            "ok": True,
+            "detail": f"ash.mcpb OK ({len(names)} entries, manifest_version={manifest['manifest_version']})",
+        }
+        # Upgrade to the official validator when @anthropic-ai/mcpb is present.
+        # Per github.com/modelcontextprotocol/mcpb/blob/main/CLI.md, `mcpb
+        # validate` accepts a manifest path or directory. We extract the
+        # manifest from the archive and validate it directly — `mcpb
+        # validate` does not accept .mcpb archives.
+        import tempfile
+        pins = self._load_cli_pins(ctx.base_dir)
+        if "mcpb" in pins:
+            ver = self._assert_version_pin("mcpb", ["mcpb", "--version"], pins["mcpb"])
+            if ver and ver.get("ok") is False:
+                return ver
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_out = Path(tmp) / "manifest.json"
+            manifest_out.write_text(json.dumps(manifest, indent=2))
+            cli_result = self._invoke_validator(
+                ["mcpb", "validate", str(manifest_out)],
+            )
+        if cli_result.get("ok") is False:
+            return cli_result
+        if cli_result.get("skipped"):
+            return structural
+        return {
+            "ok": True,
+            "detail": f"{structural['detail']}; mcpb validate OK",
+        }
