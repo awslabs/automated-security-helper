@@ -258,12 +258,15 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
 
         return result
 
-    def _execute_grep_scan(
+    def _execute_scan(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
+        global_ignore_paths,
     ) -> Tuple[List[str], Path, Optional[dict]]:
-        final_args, results_file, env = super()._execute_grep_scan(target, target_type)
+        final_args, results_file, env = super()._execute_scan(
+            target, target_type, global_ignore_paths
+        )
         if self.config.options.patterns:
             results_file = results_file.parent / "opengrep_results.json"
             # Re-resolve final_args so output_arg uses the json path.

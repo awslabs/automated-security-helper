@@ -16,9 +16,6 @@ patterns mode, version-gated `--metrics`). Everything else lives here.
 
 from __future__ import annotations
 
-import json
-import shlex
-import logging
 import os
 from pathlib import Path
 from typing import ClassVar, Generic, List, Literal, Optional, Tuple, TypeVar
@@ -31,17 +28,9 @@ from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
-    IgnorePathWithReason,
     ToolExtraArg,
 )
-from automated_security_helper.schemas.sarif_schema_model import (
-    ArtifactLocation,
-    Invocation,
-    SarifReport,
-)
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sarif_utils import attach_scanner_details
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
 
@@ -205,131 +194,29 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             )
 
     # ---------------------------------------------------------------
-    # Shared scan() — preserves attach_scanner_details + Invocation
-    # construction so SARIF output is byte-identical to the pre-refactor
-    # implementation.
+    # Template-method scan(): inherited from ScannerPluginBase.
+    #
+    # We only override _execute_scan to resolve argv + results path + env.
+    # All SARIF parsing, invocation injection, and error handling lives in
+    # the base class — keeping this scanner family aligned with checkov,
+    # grype, and the rest of the migrated tools.
+    #
+    # success_exit_codes defaults to {0, 1} on the base class, which matches
+    # semgrep/opengrep behaviour (exit 1 = findings present), so no override
+    # is required here.
     # ---------------------------------------------------------------
 
-    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
-        """Abstract stub — GrepScannerBase overrides scan() and uses _execute_grep_scan instead."""
-        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
-
-    def scan(
+    def _execute_scan(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: Optional[ScannerPluginConfigBase] = None,
-    ) -> SarifReport | bool | None:
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-
-        if not target.exists() or not any(target.iterdir()):
-            self._plugin_log(
-                f"Target directory {target} is empty or doesn't exist. Skipping scan.",
-                target_type=target_type,
-                level=logging.INFO,
-                append_to_stream="stderr",
-            )
-            self._post_scan(target=target, target_type=target_type)
-            return True
-
-        validated = self._pre_scan(
-            target=target, target_type=target_type, config=config
-        )
-        if not validated or not self.dependencies_satisfied:
-            self._post_scan(target=target, target_type=target_type)
-            return False
-
-        try:
-            final_args, results_file, subprocess_env = self._execute_grep_scan(
-                target=target, target_type=target_type
-            )
-
-            self._plugin_log(
-                f"Running command: {' '.join(final_args)}",
-                target_type=target_type,
-                level=logging.VERBOSE,  # type: ignore[attr-defined]
-            )
-
-            self._run_subprocess(
-                command=final_args,
-                results_dir=results_file.parent,
-                env=subprocess_env,
-            )
-
-            if not Path(results_file).exists():
-                self._plugin_log(
-                    f"No results file found at {results_file}",
-                    target_type=target_type,
-                    level=logging.WARNING,
-                    append_to_stream="stderr",
-                )
-                self._post_scan(target=target, target_type=target_type)
-                return None
-
-            with open(results_file, mode="r", encoding="utf-8") as fh:
-                raw_results = json.load(fh)
-
-            try:
-                sarif_report: SarifReport = SarifReport.model_validate(raw_results)
-                sarif_report = attach_scanner_details(
-                    sarif_report=sarif_report,
-                    scanner_name=self.config.name,  # type: ignore[union-attr]
-                    scanner_version=getattr(self, "tool_version", None),
-                    invocation_details={
-                        "command_line": " ".join(final_args),
-                        "arguments": final_args[1:],
-                        "working_directory": get_shortest_name(input=target),
-                        "start_time": self.start_time.isoformat()
-                        if self.start_time
-                        else None,
-                        "end_time": self.end_time.isoformat()
-                        if self.end_time
-                        else None,
-                        "exit_code": self.exit_code,
-                    },
-                )
-
-                if sarif_report.runs:
-                    sarif_report.runs[0].invocations = [
-                        Invocation(  # type: ignore[call-arg]
-                            commandLine=shlex.join(final_args),
-                            arguments=final_args[1:],
-                            startTimeUtc=self.start_time,
-                            endTimeUtc=self.end_time,
-                            executionSuccessful=(
-                                self.exit_code == 0 or self.exit_code == 1
-                            ),
-                            exitCode=self.exit_code,
-                            exitCodeDescription="\n".join(self.errors),
-                            workingDirectory=ArtifactLocation(  # type: ignore[call-arg]
-                                uri=get_shortest_name(input=target),
-                            ),
-                        )
-                    ]
-                self._post_scan(target=target, target_type=target_type)
-                return sarif_report
-            except Exception as e:
-                self._plugin_log(
-                    f"Failed to parse {self.__class__.__name__} results as SARIF: {e}",
-                    target_type=target_type,
-                    level=logging.ERROR,
-                    append_to_stream="stderr",
-                )
-                self._post_scan(target=target, target_type=target_type)
-                return None
-
-        except Exception as e:
-            raise ScannerError(f"{self.cache_dir_name()} scan failed: {e}")
-
-    def _execute_grep_scan(
-        self,
-        target: Path,
-        target_type: Literal["source", "converted"],
+        global_ignore_paths,
     ) -> Tuple[List[str], Path, Optional[dict]]:
-        """Resolve final argv + results path + env. Subclasses may override
-        for bespoke result-file locations (opengrep patterns mode)."""
+        """Resolve final argv + results path + subprocess env.
+
+        Subclasses may override for bespoke result-file locations (e.g.
+        opengrep patterns mode, which writes opengrep_results.json).
+        """
         assert self.results_dir is not None, "results_dir must be set by model_post_init"
         target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("results_sarif.sarif")
