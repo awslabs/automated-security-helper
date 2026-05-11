@@ -75,7 +75,9 @@ class SuppressDialog(ModalScreen[bool]):
             yield Label(f"File: {self.finding.get('file', 'N/A')}")
             yield Label(f"Line: {self.finding.get('line', 'N/A')}")
             yield Label("Reason (required):")
-            yield Input(placeholder="Why is this finding suppressed?", id="reason_input")
+            yield Input(
+                placeholder="Why is this finding suppressed?", id="reason_input"
+            )
             yield Label("Expiration date (optional, YYYY-MM-DD):")
             yield Input(placeholder="e.g. 2025-12-31", id="expiration_input")
             with HorizontalGroup(classes="button-row"):
@@ -103,8 +105,12 @@ class SuppressDialog(ModalScreen[bool]):
                     path=self.finding.get("file") or "*",
                     reason=reason,
                     expiration=expiration,
-                    line_start=int(self.finding["line"]) if self.finding.get("line") else None,
-                    line_end=int(self.finding["line"]) if self.finding.get("line") else None,
+                    line_start=int(self.finding["line"])
+                    if self.finding.get("line")
+                    else None,
+                    line_end=int(self.finding["line"])
+                    if self.finding.get("line")
+                    else None,
                 )
                 add_suppression_to_config(self.config_path, suppression)
                 self.dismiss(True)
@@ -986,7 +992,31 @@ def findings_command(
     """Interactively explore security findings."""
     # Try to load the model from the output directory
     try:
-        report_file_actual = Path(output_dir).joinpath(report_file)
+        # Resolve cwd-based default at call time (not import time).
+        if output_dir is None:
+            output_dir = Path.cwd().joinpath(".ash", "ash_output")
+
+        output_dir_path = Path(output_dir)
+
+        # Search multiple candidate paths for the report file
+        candidate_paths = [
+            output_dir_path.joinpath(".ash", "ash_output", report_file),
+            output_dir_path.joinpath("ash_output", report_file),
+            output_dir_path.joinpath(report_file),
+        ]
+
+        report_file_actual = None
+        for candidate in candidate_paths:
+            if candidate.exists():
+                report_file_actual = candidate
+                break
+
+        if report_file_actual is None:
+            typer.echo(
+                "No model or report file available. Please run a scan first or provide a report file."
+            )
+            return
+
         model = AshAggregatedResults.load_model(Path(report_file_actual))
         if model is None:
             typer.echo(
