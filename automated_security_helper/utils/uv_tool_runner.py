@@ -578,3 +578,103 @@ def reset_uv_tool_runner() -> None:
     """Reset the global UV tool runner instance (mainly for testing)."""
     global _uv_tool_runner
     _uv_tool_runner = UVToolRunner()
+
+
+# ---------------------------------------------------------------------------
+# Module-level fallback helpers
+#
+# Small, dependency-free API that scanners can use to resolve how to invoke a
+# tool: prefer ``uv tool run <tool>`` when both ``uv`` and the tool are
+# reachable, otherwise fall back to the directly installed binary.  Results
+# are memoized per process so the version probe runs only once.
+# ---------------------------------------------------------------------------
+
+
+_uv_command_cache: Dict[str, Optional[List[str]]] = {}
+_uv_executable_cache: Dict[str, Optional[str]] = {}
+_executable_cache: Dict[str, Optional[str]] = {}
+
+
+def _reset_uv_tool_runner_caches() -> None:
+    """Reset module-level caches (mainly for testing)."""
+    _uv_command_cache.clear()
+    _uv_executable_cache.clear()
+    _executable_cache.clear()
+
+
+def find_uv_or_none() -> Optional[str]:
+    """Return the path to the ``uv`` binary, or ``None`` if it is missing."""
+    if "uv" in _uv_executable_cache:
+        return _uv_executable_cache["uv"]
+
+    from automated_security_helper.utils.subprocess_utils import (
+        find_executable as _find_executable,
+    )
+
+    resolved = _find_executable("uv")
+    _uv_executable_cache["uv"] = resolved
+    return resolved
+
+
+def find_executable(name: str) -> Optional[str]:
+    """Find an executable by direct path, then PATH lookup."""
+    if name in _executable_cache:
+        return _executable_cache[name]
+
+    from automated_security_helper.utils.subprocess_utils import (
+        find_executable as _find_executable,
+    )
+
+    resolved = _find_executable(name)
+    _executable_cache[name] = resolved
+    return resolved
+
+
+def get_uv_tool_command(
+    tool_name: str,
+    *,
+    fallback_binary: Optional[str] = None,
+) -> Optional[List[str]]:
+    """Resolve the command list to invoke ``tool_name``.
+
+    Resolution order:
+
+    1. If ``uv`` exists and ``uv tool run <tool_name> --version`` succeeds,
+       return ``["uv", "tool", "run", tool_name]``.
+    2. Else if ``fallback_binary`` (default: ``tool_name``) is found on PATH,
+       return ``[<fallback_path>]``.
+    3. Else return ``None`` (caller marks deps unsatisfied).
+
+    Memoized per process so the version probe runs only once per
+    ``(tool_name, fallback_binary)`` pair.
+    """
+    binary = fallback_binary or tool_name
+    cache_key = f"{tool_name}::{binary}"
+    if cache_key in _uv_command_cache:
+        return _uv_command_cache[cache_key]
+
+    uv_path = find_uv_or_none()
+    if uv_path is not None:
+        try:
+            probe = subprocess.run(  # nosec B603 — fixed list of trusted strings
+                [uv_path, "tool", "run", tool_name, "--version"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            if probe.returncode == 0:
+                command: Optional[List[str]] = ["uv", "tool", "run", tool_name]
+                _uv_command_cache[cache_key] = command
+                return command
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+    direct = find_executable(binary)
+    if direct is not None:
+        command = [direct]
+        _uv_command_cache[cache_key] = command
+        return command
+
+    _uv_command_cache[cache_key] = None
+    return None

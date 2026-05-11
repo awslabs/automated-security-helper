@@ -30,6 +30,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import mask_secrets_in_sarif
+from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
 class BanditScannerConfigOptions(ScannerOptionsBase):
@@ -174,17 +175,27 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def validate_plugin_dependencies(self) -> bool:
         """Enhanced validation with explicit tool installation.
 
-        This method implements the enhanced validation workflow that:
-        1. Checks if UV tool is available when required
-        2. Attempts explicit tool installation if tool is not found
-        3. Falls back to base class validation if installation fails
-        4. Provides detailed logging for all validation steps
+        Workflow:
+
+        1. If UV tool execution is required but UV is not on PATH, defer to
+           :func:`get_uv_tool_command` to see whether a direct binary fallback
+           still satisfies the dependency.
+        2. If UV is available and the tool is already reachable, succeed.
+        3. Otherwise attempt explicit ``uv tool install`` with retry/timeout.
+        4. As a last resort, ask :func:`get_uv_tool_command` to resolve the
+           command — this consolidates the "uv missing → direct binary → None"
+           fallback that used to be open-coded across scanners.
 
         Returns:
             True if validation passes, False otherwise
         """
-        # First validate UV tool availability if required
         if not self._validate_uv_tool_availability():
+            # UV is required but not present.  Defer to consolidated resolver:
+            # if the tool is on PATH directly we can still run it.
+            if get_uv_tool_command(self.command) is not None:
+                self.use_uv_tool = False
+                self.dependencies_satisfied = True
+                return True
             self._plugin_log(
                 "UV tool validation failed - UV is not available but required",
                 level=logging.ERROR,
@@ -231,16 +242,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 )
                 self.dependencies_satisfied = True
                 return True
-            else:
-                self._plugin_log(
-                    "UV tool installation failed for bandit, falling back to base validation",
-                    level=logging.WARNING,
-                )
-                # Fall back to base class validation which includes pre-installed tool detection
-                return super().validate_plugin_dependencies()
 
-        # Fall back to base class validation for non-UV tool scenarios
-        return super().validate_plugin_dependencies()
+            self._plugin_log(
+                "UV tool installation failed for bandit, falling back to consolidated resolver",
+                level=logging.WARNING,
+            )
+
+        # Final fallback: consolidated UV-or-direct-binary resolver.
+        return get_uv_tool_command(self.command) is not None
 
     def _process_config_options(self):
         # Bandit config path
