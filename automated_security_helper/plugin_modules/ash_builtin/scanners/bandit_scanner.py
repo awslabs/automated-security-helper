@@ -1,6 +1,5 @@
 """Module containing the Bandit security scanner implementation."""
 
-import json
 import logging
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
@@ -23,11 +22,8 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
-    ArtifactLocation,
-    Invocation,
     SarifReport,
 )
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import mask_secrets_in_sarif
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
@@ -341,133 +337,51 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         return super()._process_config_options()
 
-    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
-        """Abstract stub — Bandit overrides scan() directly; this is unreachable."""
-        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
+    # Bandit emits exit code 1 when findings are present; treat that as success
+    # alongside 0. (Same as base default, but spelled out for clarity.)
+    success_exit_codes: ClassVar[set] = {0, 1}
 
-    def scan(
+    # Python-only repos commonly have empty target dirs after conversion;
+    # log at VERBOSE rather than INFO to keep the user-facing output clean.
+    empty_target_log_level: ClassVar[int] = logging.VERBOSE
+
+    def _execute_scan(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: BanditScannerConfig | None = None,
-    ) -> SarifReport | bool:
-        """Execute Bandit scan and return results.
+        global_ignore_paths: List[IgnorePathWithReason],
+    ):
+        """Resolve final argv and results path for Bandit.
 
-        Args:
-            target: Path to scan
-
-        Returns:
-            StaticAnalysisReport containing the scan findings and metadata
-
-        Raises:
-            ScannerError: If the scan fails or results cannot be parsed
+        Merges global ignore paths into the configured excluded_paths for the
+        duration of argument resolution, then restores the original list to
+        avoid accumulation across repeated scan() calls.
         """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-        # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
-            message = (
-                f"Target directory {target} is empty or doesn't exist. Skipping scan."
-            )
-            self._plugin_log(
-                message,
-                target_type=target_type,
-                level=logging.VERBOSE,
-                append_to_stream="stderr",
-            )
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return True
-
-        validated = self._pre_scan(
-            target=target,
-            target_type=target_type,
-            config=config,
-        )
-        if not validated:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-
-        if not self.dependencies_satisfied:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-        target_results_dir = Path(self.results_dir).joinpath(target_type)
+        target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("bandit.sarif")
-        Path(results_file).parent.mkdir(exist_ok=True, parents=True)
-        # Save original excluded_paths and restore after _resolve_arguments
-        # to avoid accumulating paths across repeated scan() calls.
+        results_file.parent.mkdir(exist_ok=True, parents=True)
+
         original_excluded_paths = self.config.options.excluded_paths
-        self.config.options.excluded_paths = list(original_excluded_paths) + list(global_ignore_paths)
-
-        final_args = self._resolve_arguments(target=target, results_file=results_file)
-        self.config.options.excluded_paths = original_excluded_paths
-        command_str = " ".join(str(arg) for arg in final_args)
-        ASH_LOGGER.info(f"Executing bandit command: {command_str}")
-        self._run_subprocess(
-            command=final_args,
-            results_dir=target_results_dir,
+        self.config.options.excluded_paths = list(original_excluded_paths) + list(
+            global_ignore_paths
         )
-
-        self._post_scan(
-            target=target,
-            target_type=target_type,
-        )
-
-        bandit_results = {}
-        with open(results_file, mode="r", encoding="utf-8") as f:
-            content = f.read()
-            if not content or content.strip() == "":
-                error_msg = (
-                    f"Bandit SARIF file is empty (exit code: {self.exit_code}). "
-                )
-                if self.errors:
-                    error_msg += f"Stderr: {' '.join(self.errors)}"
-                else:
-                    error_msg += "No stderr output captured."
-                ASH_LOGGER.warning(error_msg)
-                # Return empty SARIF report instead of failing
-                return SarifReport(
-                    version="2.1.0",
-                    runs=[],
-                )
-            bandit_results = json.loads(content)
         try:
-            sarif_report: SarifReport = SarifReport.model_validate(bandit_results)
-            if sarif_report.runs:
-                sarif_report.runs[0].invocations = [
-                    Invocation(
-                        commandLine=final_args[0],
-                        arguments=final_args[1:],
-                        startTimeUtc=self.start_time,
-                        endTimeUtc=self.end_time,
-                        executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
-                        exitCode=self.exit_code,
-                        exitCodeDescription="\n".join(self.errors),
-                        workingDirectory=ArtifactLocation(
-                            uri=get_shortest_name(input=target),
-                        ),
-                    )
-                ]
+            final_args = self._resolve_arguments(
+                target=target, results_file=results_file
+            )
+        finally:
+            self.config.options.excluded_paths = original_excluded_paths
 
-            # Mask secrets in the SARIF report before returning
-            sarif_report = mask_secrets_in_sarif(sarif_report)
+        return final_args, results_file, None
 
-        except Exception as e:
-            ASH_LOGGER.warning(f"Failed to parse Bandit results as SARIF: {str(e)}")
-            sarif_report = bandit_results
-
-        return sarif_report
+    def _post_process_sarif(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: Path,
+    ) -> SarifReport:
+        """Mask any secret-shaped strings in the Bandit SARIF report."""
+        return mask_secrets_in_sarif(sarif_report)
 
 
 if __name__ == "__main__":
