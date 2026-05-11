@@ -636,7 +636,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             ASH_LOGGER.info("No SARIF runs found in model - returning empty array")
             return json.dumps([], indent=2)
 
-        all_results = [r for run in model.sarif.runs for r in (run.results or [])]
+        all_results = model.sarif.get_all_results()
 
         if not all_results:
             ASH_LOGGER.info(

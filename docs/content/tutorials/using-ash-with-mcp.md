@@ -8,7 +8,7 @@ ASH's MCP server implementation uses a file-based approach to track scan progres
 
 ## Prerequisites
 
-- ASH v3.0.0 or later installed
+- ASH v3.4.1 or later installed
 - Basic understanding of ASH security scanning
 - An AI assistant that supports MCP tools
 
@@ -270,7 +270,7 @@ Example response:
   "installed": true,
   "version": "3.0.0",
   "ash_command_available": true,
-  "ash_command_output": "ASH v3.0.0",
+  "ash_command_output": "ASH v3.4.1",
   "ash_dir_exists": true,
   "timestamp": "2025-07-16T12:37:12.345678"
 }

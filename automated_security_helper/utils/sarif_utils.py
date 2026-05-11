@@ -29,33 +29,7 @@ from automated_security_helper.utils.suppression_matcher import (
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
-from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.utils.suppression_matcher import file_path_matches
-
-
-def _get_suppression_id(suppression: AshSuppression) -> str:
-    """Generate a unique identifier for a suppression rule.
-
-    Args:
-        suppression: The suppression rule
-
-    Returns:
-        A unique string identifier for the suppression
-    """
-    # If line_start is specified but line_end is not, use line_start for both
-    line_end_val = (
-        suppression.line_end
-        if suppression.line_end is not None
-        else suppression.line_start
-    )
-
-    parts = [
-        suppression.path,
-        suppression.rule_id or "*",
-        str(suppression.line_start) if suppression.line_start is not None else "*",
-        str(line_end_val) if line_end_val is not None else "*",
-    ]
-    return "|".join(parts)
 
 
 def get_finding_id(
@@ -264,69 +238,42 @@ def attach_scanner_details(
     return sarif_report
 
 
+def _resolve_result_severity(result) -> str:
+    """Resolve a SARIF result to a normalized severity name."""
+    if result.properties:
+        props = result.properties
+        if isinstance(props, PropertyBag):
+            props = props.model_dump(
+                mode="json", exclude_unset=True, exclude_none=True
+            )
+        issue_sev = props.get("issue_severity", "").upper() if isinstance(props, dict) else ""
+        if issue_sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+            return issue_sev.lower()
+
+    if result.level:
+        match str(result.level).lower():
+            case "error":
+                return "critical"
+            case "warning":
+                return "medium"
+            case "note":
+                return "low"
+    return "info"
+
+
 def get_severity_metrics_from_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
 ) -> ScannerSeverityCount:
-    scanner_severity_count = ScannerSeverityCount(
-        suppressed=0,
-        critical=0,
-        high=0,
-        medium=0,
-        low=0,
-        info=0,
-    )
-    all_results = [r for run in sarif_report.runs for r in (run.results or [])]
-    for result in all_results:
+    counts = ScannerSeverityCount()
+    for result in sarif_report.get_all_results():
         if result.suppressions and len(result.suppressions) > 0:
-            scanner_severity_count.suppressed = 1 + scanner_severity_count.suppressed
+            counts.increment("suppressed")
         elif result.level:
-            has_severity_in_properties = False
-            if result.properties:
-                props: PropertyBag | dict | None = result.properties
-                if isinstance(props, PropertyBag):
-                    props = props.model_dump(
-                        mode="json",
-                        exclude_unset=True,
-                        exclude_none=True,
-                    )
-
-                if (
-                    "issue_severity" in props
-                    and props["issue_severity"].upper()
-                    in [
-                        "INFO",
-                        "LOW",
-                        "MEDIUM",
-                        "HIGH",
-                        "CRITICAL",
-                    ]
-                ):
-                    match props["issue_severity"].upper():
-                        case "CRITICAL":
-                            scanner_severity_count.critical += 1
-                        case "HIGH":
-                            scanner_severity_count.high += 1
-                        case "MEDIUM":
-                            scanner_severity_count.medium += 1
-                        case "LOW":
-                            scanner_severity_count.low += 1
-                        case _:
-                            scanner_severity_count.info += 1
-                    has_severity_in_properties = True
-
-            if not has_severity_in_properties:
-                match str(result.level).lower():
-                    case "error":
-                        scanner_severity_count.critical += 1
-                    case "warning":
-                        scanner_severity_count.medium += 1
-                    case "note":
-                        scanner_severity_count.low += 1
-                    case _:
-                        scanner_severity_count.info += 1
-
-    return scanner_severity_count
+            counts.increment(_resolve_result_severity(result))
+        else:
+            counts.increment("info")
+    return counts
 
 
 def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:
@@ -548,7 +495,7 @@ def apply_suppressions_to_sarif(
                     if should_suppress:
                         # Track the used suppression
                         if used_suppressions is not None and matching_suppression:
-                            suppression_id = _get_suppression_id(matching_suppression)
+                            suppression_id = matching_suppression.id
                             used_suppressions.add(suppression_id)
 
                         # Initialize suppressions list if it doesn't exist

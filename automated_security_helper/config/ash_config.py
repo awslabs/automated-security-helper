@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 import re
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 from typing import Annotated, Any, List, Dict, Literal
 
 import yaml
@@ -464,7 +464,7 @@ class AshConfig(BaseModel):
     )
 
     # Internal field to track config resolution warnings (not serialized)
-    _resolution_warnings: List[str] = []
+    _resolution_warnings: List[str] = PrivateAttr(default_factory=list)
 
     # Project information
     project_name: Annotated[

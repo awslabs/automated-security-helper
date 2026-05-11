@@ -96,7 +96,7 @@ Tool installation timed out after 300 seconds for bandit
 
 **Option A: Increase timeout**
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 scanners:
   bandit:
     options:
@@ -570,7 +570,7 @@ ash --version
 ash --list-scanners
 
 # Configuration
-cat .ash/ash.yaml
+cat .ash/.ash.yaml
 
 # Recent logs (sanitize sensitive information)
 tail -100 ash.log

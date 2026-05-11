@@ -309,7 +309,7 @@ result = await mcp_check_installation()
   "installed": true,
   "version": "3.0.0",
   "ash_command_available": true,
-  "ash_command_output": "ASH v3.0.0",
+  "ash_command_output": "ASH v3.4.1",
   "ash_dir_exists": true,
   "timestamp": "2025-07-16T12:37:12.345678"
 }
@@ -369,7 +369,7 @@ The following error categories are used:
 The ASH MCP server can be configured using the `mcp-resource-management` section in the ASH configuration file:
 
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 mcp-resource-management:
   # Concurrent operations
   max_concurrent_scans: 5

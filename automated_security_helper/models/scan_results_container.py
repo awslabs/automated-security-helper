@@ -1,12 +1,15 @@
 """Module containing the ScanResultsContainer class for wrapping scanner results."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Dict, Literal, List
+from typing import Annotated, Any, Dict, Literal, List, Optional
 
 from pydantic import BaseModel, Field
 
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.asharp_model import ScannerSeverityCount
 
 
 class ScanResultsContainer(BaseModel):
@@ -45,17 +48,7 @@ class ScanResultsContainer(BaseModel):
     duration: float | None = 0
     metadata: Dict[str, Any] = {}
     raw_results: Any | None = None
-    severity_counts: Dict[str, int] = Field(
-        default_factory=lambda: {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 0,
-            "suppressed": 0,
-            "total": 0,
-        }
-    )
+    severity_counts: ScannerSeverityCount = Field(default_factory=ScannerSeverityCount)
     scanner_severity_threshold: (
         Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"] | None
     ) = None
@@ -96,3 +89,73 @@ class ScanResultsContainer(BaseModel):
         self.stack_trace = traceback.format_exc()
         self.add_error(str(exception))
         self.status = ScannerStatus.FAILED
+
+    # ---- Factory methods ------------------------------------------------
+
+    @classmethod
+    def for_excluded(cls, scanner_name: str) -> "ScanResultsContainer":
+        """Build a container for a scanner that was excluded via configuration."""
+        return cls(
+            scanner_name=scanner_name,
+            excluded=True,
+            status=ScannerStatus.SKIPPED,
+            duration=None,
+        )
+
+    @classmethod
+    def for_missing_deps(cls, scanner_name: str) -> "ScanResultsContainer":
+        """Build a container for a scanner whose dependencies were not satisfied."""
+        return cls(
+            scanner_name=scanner_name,
+            dependencies_satisfied=False,
+            status=ScannerStatus.MISSING,
+            duration=None,
+        )
+
+    @classmethod
+    def for_failure(
+        cls,
+        scanner_name: str,
+        errors: Optional[List[str]] = None,
+        exception: Optional[BaseException] = None,
+    ) -> "ScanResultsContainer":
+        """Build a container for a scanner that failed to execute cleanly."""
+        container = cls(
+            scanner_name=scanner_name,
+            status=ScannerStatus.FAILED,
+        )
+        if errors:
+            for err in errors:
+                container.add_error(err)
+        if exception is not None:
+            container.set_exception(exception)
+            # set_exception already sets status to FAILED
+        return container
+
+    # ---- Threshold evaluation ------------------------------------------
+
+    def determine_status(self, threshold: str | None) -> ScannerStatus:
+        """Determine PASSED/FAILED status by comparing severity_counts to threshold.
+
+        Mirrors the cascade that previously lived in scan_phase.py: any finding at
+        or above the configured severity threshold fails the scanner. Does not
+        mutate the container's current status — the caller assigns the result.
+        """
+        # Treat a None/empty threshold the same as the most permissive level
+        # so severity counts are only ignored when configured to ignore.
+        if not threshold:
+            return ScannerStatus.PASSED
+
+        counts = self.severity_counts
+
+        if counts.critical > 0:
+            return ScannerStatus.FAILED
+        if counts.high > 0 and threshold in ("ALL", "LOW", "MEDIUM", "HIGH"):
+            return ScannerStatus.FAILED
+        if counts.medium > 0 and threshold in ("ALL", "LOW", "MEDIUM"):
+            return ScannerStatus.FAILED
+        if counts.low > 0 and threshold in ("ALL", "LOW"):
+            return ScannerStatus.FAILED
+        if counts.info > 0 and threshold == "ALL":
+            return ScannerStatus.FAILED
+        return ScannerStatus.PASSED

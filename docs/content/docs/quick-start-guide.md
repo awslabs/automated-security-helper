@@ -25,7 +25,7 @@ Prerequisites: Python 3.10+, [uv](https://docs.astral.sh/uv/getting-started/inst
 curl -sSf https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1"
 ```
 
 #### Windows PowerShell
@@ -34,17 +34,17 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1 $args }
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of a specific version to stay up to date automatically. Pin a specific version (e.g., `@v3.4.0`) when you need reproducible builds.
+> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of a specific version to stay up to date automatically. Pin a specific version (e.g., `@v3.4.1`) when you need reproducible builds.
 
 ### Option 2: Using pipx
 
 Prerequisites: Python 3.10+, [pipx](https://pipx.pypa.io/stable/installation/)
 
 ```bash
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 ```
 
 ### Option 3: Using pip
@@ -52,7 +52,7 @@ pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
 Prerequisites: Python 3.10+
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 ```
 
 ## Basic Usage
@@ -127,13 +127,13 @@ global_settings:
       reason: 'Test data only'
   suppressions:
     - rule_id: 'RULE-123'
-      file_path: 'src/example.py'
+      path: 'src/example.py'
       line_start: 10
       line_end: 15
       reason: 'False positive due to test mock'
       expiration: '2025-12-31'
     - rule_id: 'RULE-456'
-      file_path: 'src/*.js'
+      path: 'src/*.js'
       reason: 'Known issue, planned for fix in v2.0'
 scanners:
   bandit:
@@ -189,7 +189,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v3.4.1
     hooks:
       - id: ash-simple-scan
 ```

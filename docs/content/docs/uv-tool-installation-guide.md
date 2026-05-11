@@ -332,7 +332,7 @@ The enhanced installation system maintains full backward compatibility:
 ### Basic Configuration
 
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 scanners:
   bandit:
     enabled: true
@@ -345,7 +345,7 @@ scanners:
 ### Advanced Configuration with Version Control
 
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 scanners:
   bandit:
     enabled: true
@@ -372,7 +372,7 @@ scanners:
 ### Offline Mode Configuration
 
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 scanners:
   checkov:
     enabled: true

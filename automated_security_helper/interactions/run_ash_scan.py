@@ -29,23 +29,9 @@ from automated_security_helper.interactions.run_ash_container import (
 )
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.core.unified_metrics import (
+    format_duration,
     get_unified_scanner_metrics,
 )
-
-
-def format_duration(seconds):
-    """Format duration in seconds to a human-readable string."""
-    # Extract hours, minutes, seconds
-    hours, remainder = divmod(int(seconds), 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    # Format the duration string
-    if hours > 0:
-        return f"{hours}h {minutes}m {seconds}s"
-    elif minutes > 0:
-        return f"{minutes}m {seconds}s"
-    else:
-        return f"{seconds}s"
 
 
 def _filter_results_to_changed_files(

@@ -19,7 +19,7 @@ This guide helps users migrate from ASH v2 to ASH v3.
    - **Recommendation**: Add `ash report` to your script after `ash` has completed to pretty-print the summary report in the terminal or job stdout.
 4. **Update Pre-commit Configuration**:
    - Change hook ID from `ash` to `ash-simple-scan`
-   - Update the revision to `v3.0.0` or later
+   - Update the revision to `v3.4.1` or later
 5. **Test Your Migration**:
    ```bash
    ash --mode local
@@ -48,13 +48,13 @@ export PATH="${PATH}:/path/to/automated-security-helper"
 
 ```bash
 # Option 1: Using uvx (recommended) -- add to shell profile
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.4.1"
 
 # Option 2: Using pipx
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 
 # Option 3: Using pip
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.4.1
 ```
 
 > **Tip**: You can also use the `v3` floating tag (`@v3`) instead of a specific version to always get the latest stable v3.x release. Pin a specific version for CI/CD or reproducible environments.
@@ -248,7 +248,7 @@ repos:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v3.4.1
     hooks:
       - id: ash-simple-scan
 ```

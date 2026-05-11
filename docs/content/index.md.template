@@ -150,7 +150,7 @@ ERROR (2) Exiting due to 122 actionable findings found in ASH scan
 
 ## Configuration
 
-ASH v3 uses a YAML configuration file (`.ash/ash.yaml`) with support for JSON Schema validation:
+ASH v3 uses a YAML configuration file (`.ash/.ash.yaml`) with support for JSON Schema validation:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
@@ -179,7 +179,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v3.4.1
     hooks:
       - id: ash-simple-scan
 ```
@@ -217,7 +217,7 @@ ASH can be run in container mode in any CI/CD environment that supports containe
 <details>
 <summary>How do I exclude files from scanning?</summary>
 
-ASH respects `.gitignore` files. You can also configure ignore paths in your `.ash/ash.yaml` configuration file.
+ASH respects `.gitignore` files. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file.
 </details>
 
 <details>

@@ -31,7 +31,10 @@ from typing import Dict, Any, Optional, Tuple
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ScannerSeverityCount,
+)
 from automated_security_helper.schemas.sarif_schema_model import PropertyBag
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -332,97 +335,24 @@ class ScannerStatisticsCalculator:
             - none -> info
             - (default) -> info
         """
-        # Initialize counters
-        suppressed = 0
-        critical = 0
-        high = 0
-        medium = 0
-        low = 0
-        info = 0
+        from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 
-        # Process the main SARIF report
-        if asharp_model.sarif and asharp_model.sarif.runs:
-            for run in asharp_model.sarif.runs:
-                if not run.results:
+        counts = ScannerSeverityCount()
+
+        if asharp_model.sarif:
+            for result in asharp_model.sarif.get_all_results():
+                result_scanner = (
+                    ScannerStatisticsCalculator._get_scanner_name_from_result(result)
+                )
+                if not (result_scanner and result_scanner.lower() == scanner_name.lower()):
                     continue
 
-                # Process each result in the run
-                for result in run.results:
-                    # Check if this result belongs to the scanner we're interested in
-                    result_scanner = (
-                        ScannerStatisticsCalculator._get_scanner_name_from_result(
-                            result
-                        )
-                    )
+                if result.suppressions and len(result.suppressions) > 0:
+                    counts.increment("suppressed")
+                else:
+                    counts.increment(_resolve_result_severity(result))
 
-                    if (
-                        result_scanner
-                        and result_scanner.lower() == scanner_name.lower()
-                    ):
-                        # Check if finding is suppressed (either native or ASH-applied)
-                        is_suppressed = False
-                        if result.suppressions and len(result.suppressions) > 0:
-                            is_suppressed = True
-                            suppressed += 1
-
-                        # Only count in severity bucket if not suppressed
-                        if not is_suppressed:
-                            # Check if scanner provides issue_severity in properties (e.g., Bandit)
-                            properties = result.properties or {}
-                            if isinstance(properties, PropertyBag):
-                                properties = properties.model_dump(
-                                    mode="json",
-                                    exclude_unset=True,
-                                    exclude_none=True,
-                                )
-                            issue_severity = (
-                                properties.get("issue_severity", "").upper()
-                                if isinstance(properties, dict)
-                                else ""
-                            )
-
-                            # If issue_severity is provided, use it as the primary severity indicator
-                            if issue_severity and issue_severity in [
-                                "CRITICAL",
-                                "HIGH",
-                                "MEDIUM",
-                                "LOW",
-                                "INFO",
-                            ]:
-                                if issue_severity == "CRITICAL":
-                                    critical += 1
-                                elif issue_severity == "HIGH":
-                                    high += 1
-                                elif issue_severity == "MEDIUM":
-                                    medium += 1
-                                elif issue_severity == "LOW":
-                                    low += 1
-                                elif issue_severity == "INFO":
-                                    info += 1
-                            else:
-                                # Fall back to SARIF level mapping for scanners that don't use issue_severity
-                                if result.level:
-                                    level = str(result.level).lower()
-                                    if level == "error":
-                                        critical += 1
-                                    elif level == "warning":
-                                        medium += (
-                                            1  # Most scanners map warning to medium
-                                        )
-                                    elif level == "note":
-                                        low += 1
-                                    elif level == "none":
-                                        info += 1
-                                    else:
-                                        info += 1
-                                else:
-                                    # Default to info if no level specified
-                                    info += 1
-
-        # # Verify that the total number of findings matches what we expect
-        # total_findings = critical + high + medium + low + info + suppressed
-
-        return suppressed, critical, high, medium, low, info
+        return counts.suppressed, counts.critical, counts.high, counts.medium, counts.low, counts.info
 
     @staticmethod
     def _get_scanner_name_from_result(result: Any) -> Optional[str]:
@@ -788,29 +718,21 @@ class ScannerStatisticsCalculator:
             asharp_model
         )
 
-        # Initialize counters
-        total_suppressed = 0
-        total_critical = 0
-        total_high = 0
-        total_medium = 0
-        total_low = 0
-        total_info = 0
+        totals = ScannerSeverityCount()
         total_findings = 0
         total_actionable = 0
-
         passed_count = 0
         failed_count = 0
         skipped_count = 0
         missing_count = 0
 
-        # Aggregate statistics
         for scanner_name, stats in scanner_stats.items():
-            total_suppressed += stats["suppressed"]
-            total_critical += stats["critical"]
-            total_high += stats["high"]
-            total_medium += stats["medium"]
-            total_low += stats["low"]
-            total_info += stats["info"]
+            totals.suppressed += stats["suppressed"]
+            totals.critical += stats["critical"]
+            totals.high += stats["high"]
+            totals.medium += stats["medium"]
+            totals.low += stats["low"]
+            totals.info += stats["info"]
             total_findings += stats["total"]
             total_actionable += stats["actionable"]
 
@@ -829,12 +751,12 @@ class ScannerStatisticsCalculator:
             "failed_scanners": failed_count,
             "skipped_scanners": skipped_count,
             "missing_scanners": missing_count,
-            "total_suppressed": total_suppressed,
-            "total_critical": total_critical,
-            "total_high": total_high,
-            "total_medium": total_medium,
-            "total_low": total_low,
-            "total_info": total_info,
+            "total_suppressed": totals.suppressed,
+            "total_critical": totals.critical,
+            "total_high": totals.high,
+            "total_medium": totals.medium,
+            "total_low": totals.low,
+            "total_info": totals.info,
             "total_findings": total_findings,
             "total_actionable": total_actionable,
         }
@@ -861,10 +783,8 @@ class ScannerStatisticsCalculator:
         """
         # Count findings in SARIF
         sarif_finding_count = 0
-        if asharp_model.sarif and asharp_model.sarif.runs:
-            for run in asharp_model.sarif.runs:
-                if run.results:
-                    sarif_finding_count += len(run.results)
+        if asharp_model.sarif:
+            sarif_finding_count = len(asharp_model.sarif.get_all_results())
 
         # Count findings from scanner statistics
         scanner_stats = ScannerStatisticsCalculator.extract_scanner_statistics(
