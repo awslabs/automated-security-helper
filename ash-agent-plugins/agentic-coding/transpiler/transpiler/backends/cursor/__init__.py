@@ -11,6 +11,7 @@ from ...core import (
     SkillConfig,
 )
 from ...formats import CURSOR_RULES
+from ...cli_tools import CLI_CURSOR, CLI_SKILLS_REF
 from ...registry import register_backend
 
 
@@ -19,6 +20,7 @@ class CursorBackend(BaseBackend):
     NAME = "cursor"
     OUTPUT_DIR = "cursor"
     FORMAT = CURSOR_RULES
+    CLI_TOOLS = (CLI_CURSOR, CLI_SKILLS_REF)
 
     MCP = MCPConfig(
         format="mcpServers",

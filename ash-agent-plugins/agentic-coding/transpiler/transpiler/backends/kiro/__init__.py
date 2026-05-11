@@ -9,6 +9,7 @@ from ...core import (
     InstructionFile,
     MCPConfig,
 )
+from ...cli_tools import CLI_KIRO_IDE
 from ...registry import register_backend
 
 
@@ -16,6 +17,8 @@ from ...registry import register_backend
 class KiroBackend(BaseBackend):
     NAME = "kiro"
     OUTPUT_DIR = "kiro"
+    SUPPORTS_GENERIC_SKILL = True
+    CLI_TOOLS = (CLI_KIRO_IDE,)
 
     MCP = MCPConfig(
         format="mcpServers",

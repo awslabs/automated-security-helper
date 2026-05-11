@@ -1,6 +1,6 @@
 # Agentic Coding Plugins for ASH
 
-A unified source-of-truth (`agentic-coding/transpiler/_base/`) plus a config-driven Python transpiler that emits plugin packages for **15 AI coding agent platforms** from one canonical content set. Wraps the [ASH (Automated Security Helper)](https://github.com/awslabs/automated-security-helper) MCP server so any agent can run security scans through the same backing service.
+A unified source-of-truth (`agentic-coding/transpiler/_base/`) plus a config-driven Python transpiler that emits plugin packages for **15 AI coding agent platforms** plus the **agentskills.io generic-skill release** from one canonical content set. Wraps the [ASH (Automated Security Helper)](https://github.com/awslabs/automated-security-helper) MCP server so any agent can run security scans through the same backing service.
 
 ## What this gets you
 
@@ -21,8 +21,15 @@ A unified source-of-truth (`agentic-coding/transpiler/_base/`) plus a config-dri
 | 13 | **Amazon Q Dev CLI** | `agentic-coding/plugins/amazonq/` | `bash install.sh` then `q --agent ash` |
 | 14 | **Aider** | `agentic-coding/plugins/aider/` | Copy `.aider.conf.yml` and `CONVENTIONS.md` (no MCP support in Aider) |
 | 15 | **MCPB / Claude Desktop** | `agentic-coding/plugins/mcpb/` | Double-click `ash.mcpb` for one-click install in Claude Desktop |
+| 16 | **Generic Skill ([agentskills.io](https://agentskills.io/specification))** | `agentic-coding/plugins/generic-skill/` | Drop `skills/<name>/` into any agentskills-compatible agent's skills directory. Natively consumed by Claude Code, Codex, OpenCode, Cline, Kiro. |
 
-Plus a **universal `AGENTS.md`** at `agentic-coding/plugins/AGENTS.md`, read natively by Codex, Cursor, Windsurf, OpenCode, Copilot (1.104+), Cline, Roo Code, Kiro, and Factory CLI.
+Plus a **universal `AGENTS.md`** at `agentic-coding/plugins/AGENTS.md`, read natively by Codex, Cursor, Windsurf, OpenCode, Copilot (1.104+), Cline, Roo, Kiro, Goose, Aider, and Factory CLI.
+
+## Format-only release: generic-skill
+
+The generic-skill output at `agentic-coding/plugins/generic-skill/` ships the same skill content as a standalone agentskills.io artifact — no plugin manifest, no MCP wrapper, just `skills/ash-mcp/SKILL.md` + references. Agents that natively consume the format (claude, codex, opencode, cline, kiro per `SUPPORTS_GENERIC_SKILL = True`) can drop it directly into their skills directory without translation.
+
+This complements (does NOT replace) the per-platform plugin trees. The per-platform backends remain primary — they include MCP config, commands, custom rules, and platform-specific enrichment that plain SKILL.md doesn't cover. Use the generic-skill release when you want the bare skill content for a custom integration; use the platform-specific tree for full ASH MCP installation.
 
 ## Architecture
 

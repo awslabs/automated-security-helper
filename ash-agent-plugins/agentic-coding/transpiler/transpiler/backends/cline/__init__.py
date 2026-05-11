@@ -9,6 +9,7 @@ from ...core import (
     RulesDir,
 )
 from ...formats import CLINE_RULES
+from ...cli_tools import CLI_CLINE
 from ...registry import register_backend
 
 
@@ -17,6 +18,8 @@ class ClineBackend(BaseBackend):
     NAME = "cline"
     OUTPUT_DIR = "cline"
     FORMAT = CLINE_RULES
+    SUPPORTS_GENERIC_SKILL = True
+    CLI_TOOLS = (CLI_CLINE,)
 
     MCP = MCPConfig(
         format="mcpServers",

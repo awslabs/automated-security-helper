@@ -21,3 +21,4 @@ from . import goose  # noqa: F401
 from . import amazonq  # noqa: F401
 from . import aider  # noqa: F401
 from . import mcpb  # noqa: F401
+from . import generic_skill  # noqa: F401  -- format-only release of agentskills

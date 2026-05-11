@@ -9,6 +9,7 @@ import json
 
 from ...core import BaseBackend, BuildContext, MCPConfig
 from ...formats import AMAZONQ_AGENT
+from ...cli_tools import CLI_Q, CLI_KIRO_CLI
 from ...registry import register_backend
 
 
@@ -17,6 +18,7 @@ class AmazonqBackend(BaseBackend):
     NAME = "amazonq"
     OUTPUT_DIR = "amazonq"
     FORMAT = AMAZONQ_AGENT
+    CLI_TOOLS = (CLI_Q, CLI_KIRO_CLI)
 
     MCP = MCPConfig(
         format="amazonq",

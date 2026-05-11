@@ -16,6 +16,7 @@ from ...core import (
     MCPConfig,
 )
 from ...formats import GEMINI_EXTENSION
+from ...cli_tools import CLI_GEMINI
 from ...registry import register_backend
 
 
@@ -24,6 +25,7 @@ class GeminiBackend(BaseBackend):
     NAME = "gemini"
     OUTPUT_DIR = "gemini"
     FORMAT = GEMINI_EXTENSION
+    CLI_TOOLS = (CLI_GEMINI,)
 
     MCP = MCPConfig(
         format="mcpServers",

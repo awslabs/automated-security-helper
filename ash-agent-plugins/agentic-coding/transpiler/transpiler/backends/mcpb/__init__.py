@@ -19,6 +19,7 @@ from ...core import (
     MCPBBundle,
 )
 from ...formats import MCPB_BUNDLE
+from ...cli_tools import CLI_MCPB
 from ...registry import register_backend
 
 
@@ -27,6 +28,7 @@ class MCPBBackend(BaseBackend):
     NAME = "mcpb"
     OUTPUT_DIR = "mcpb"
     FORMAT = MCPB_BUNDLE
+    CLI_TOOLS = (CLI_MCPB,)
 
     MCPB_BUNDLE = MCPBBundle(
         archive_path="ash.mcpb",

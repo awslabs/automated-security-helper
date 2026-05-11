@@ -19,6 +19,7 @@ from ...core import (
     SkillConfig,
 )
 from ...formats import CLAUDE_MARKETPLACE
+from ...cli_tools import CLI_CODEX, CLI_CLAUDE, CLI_SKILLS_REF
 from ...registry import register_backend
 
 
@@ -27,6 +28,8 @@ class CodexBackend(BaseBackend):
     NAME = "codex"
     OUTPUT_DIR = "codex"
     FORMAT = CLAUDE_MARKETPLACE
+    SUPPORTS_GENERIC_SKILL = True
+    CLI_TOOLS = (CLI_CODEX, CLI_CLAUDE, CLI_SKILLS_REF)
 
     PLUGIN_MANIFEST = PluginManifest(
         # Codex's plugin loader searches both .codex-plugin/plugin.json AND
