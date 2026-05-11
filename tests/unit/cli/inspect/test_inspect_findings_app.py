@@ -6,7 +6,7 @@ Textual rendering internals are not tested.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from automated_security_helper.cli.inspect.inspect_findings_app import (
@@ -569,7 +569,7 @@ class TestFindingDetailScreen:
             "line": 1,
             "message": "test",
         }
-        screen = FindingDetailScreen(finding)
+        screen = FindingDetailScreen(finding)  # noqa: F841
         # Compose would use file_ext = "yaml" for .yml files
         # We verify the logic by checking the path suffix handling
         snippet_path = Path(finding["file"])
@@ -587,7 +587,7 @@ class TestFindingDetailScreen:
             "line": 1,
             "message": "test",
         }
-        screen = FindingDetailScreen(finding)
+        screen = FindingDetailScreen(finding)  # noqa: F841
         snippet_path = Path(finding["file"])
         file_ext = (
             snippet_path.suffix.lstrip(".")
@@ -785,42 +785,98 @@ class TestExtractFindings:
 
 
 class TestFindingsCommand:
-    @patch("automated_security_helper.cli.inspect.inspect_findings_app.AshAggregatedResults")
+    @patch(
+        "automated_security_helper.cli.inspect.inspect_findings_app.AshAggregatedResults"
+    )
     @patch("typer.secho")
     def test_command_handles_load_error(self, mock_secho, mock_model_cls):
-        from automated_security_helper.cli.inspect.inspect_findings_app import findings_command
+        from automated_security_helper.cli.inspect.inspect_findings_app import (
+            findings_command,
+        )
 
         mock_model_cls.load_model.side_effect = FileNotFoundError("not found")
 
-        # Call through typer callback simulation
-        findings_command(output_dir=Path("/nonexistent"), report_file="report.json")
+        # Use a temp directory with a real file so candidate path check passes
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_path = Path(tmpdir) / "report.json"
+            report_path.write_text("{}")
+            findings_command(output_dir=Path(tmpdir), report_file="report.json")
+
         mock_secho.assert_called_once()
         call_args = mock_secho.call_args
         assert "Error loading model or report" in call_args[0][0]
 
-    @patch("automated_security_helper.cli.inspect.inspect_findings_app.AshAggregatedResults")
+    @patch(
+        "automated_security_helper.cli.inspect.inspect_findings_app.AshAggregatedResults"
+    )
     @patch("typer.echo")
     def test_command_handles_none_model(self, mock_echo, mock_model_cls):
-        from automated_security_helper.cli.inspect.inspect_findings_app import findings_command
+        from automated_security_helper.cli.inspect.inspect_findings_app import (
+            findings_command,
+        )
 
         mock_model_cls.load_model.return_value = None
 
-        findings_command(output_dir=Path("/tmp"), report_file="report.json")  # nosec B108
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_path = Path(tmpdir) / "report.json"
+            report_path.write_text("{}")
+            findings_command(output_dir=Path(tmpdir), report_file="report.json")
+
         mock_echo.assert_called_once()
         assert "No model" in mock_echo.call_args[0][0]
 
-    @patch("automated_security_helper.cli.inspect.inspect_findings_app.AshAggregatedResults")
-    @patch("automated_security_helper.cli.inspect.inspect_findings_app.extract_findings")
+    @patch(
+        "automated_security_helper.cli.inspect.inspect_findings_app.AshAggregatedResults"
+    )
+    @patch(
+        "automated_security_helper.cli.inspect.inspect_findings_app.extract_findings"
+    )
     @patch("typer.echo")
     def test_command_handles_no_findings(self, mock_echo, mock_extract, mock_model_cls):
-        from automated_security_helper.cli.inspect.inspect_findings_app import findings_command
+        from automated_security_helper.cli.inspect.inspect_findings_app import (
+            findings_command,
+        )
 
         mock_model_cls.load_model.return_value = MagicMock()
         mock_extract.return_value = []
 
-        findings_command(output_dir=Path("/tmp"), report_file="report.json")  # nosec B108
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_path = Path(tmpdir) / "report.json"
+            report_path.write_text("{}")
+            findings_command(output_dir=Path(tmpdir), report_file="report.json")
+
         mock_echo.assert_called_once()
         assert "No findings" in mock_echo.call_args[0][0]
+
+    @patch("typer.echo")
+    def test_command_handles_none_output_dir(self, mock_echo):
+        """Test that findings_command handles None output_dir gracefully."""
+        from automated_security_helper.cli.inspect.inspect_findings_app import (
+            findings_command,
+        )
+
+        import tempfile
+        import os
+
+        # Run from a temp directory with no .ash/ash_output
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                findings_command(
+                    output_dir=None, report_file="ash_aggregated_results.json"
+                )
+            finally:
+                os.chdir(original_cwd)
+
+        mock_echo.assert_called_once()
+        assert "No model" in mock_echo.call_args[0][0]
 
 
 # ---------------------------------------------------------------------------
