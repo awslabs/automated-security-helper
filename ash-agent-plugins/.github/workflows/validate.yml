@@ -7,49 +7,59 @@ on:
     branches: [main]
 
 jobs:
-  validate:
+  # Drift + structural validation runs once on the full output tree.
+  # Cheap, deterministic, catches the byte-identical-output regressions.
+  drift-and-validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-
-      - name: Setup Node.js (for npm-installed CLIs)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # Install platform CLIs at pinned major.minor versions matching
-      # transpiler/_base/cli_versions.json. Each CLI's smoke_test() asserts
-      # `<cli> --version` reports the same major.minor before invoking the
-      # validator, so a CI image with a drift-from-pin install hard-fails
-      # at the assertion rather than silently running against an
-      # unsupported CLI version.
-      - name: Install platform CLIs (pinned)
-        run: |
-          npm install -g @anthropic-ai/claude-code@2.1
-          npm install -g @openai/codex@0.130
-          npm install -g @google/gemini-cli@0.41
-          npm install -g @anthropic-ai/mcpb@2.1
-          npm install -g opencode-ai@1.14
-          # Aider via pipx (Python).
-          pipx install aider-chat==0.86.2
-          # Goose via release tarball — no npm package.
-          curl -fsSL https://github.com/aaif-goose/goose/releases/download/v1.33.1/download_cli.sh | CONFIGURE=false bash || true
-          # kiro-cli via release zip.
-          curl --proto '=https' --tlsv1.2 -sSf 'https://desktop-release.q.us-east-1.amazonaws.com/latest/kirocli-x86_64-linux.zip' -o /tmp/kirocli.zip
-          unzip -q /tmp/kirocli.zip -d /tmp/
-          /tmp/kirocli/install.sh </dev/null || true
-
-      - name: Verify drift + validation
+      - name: Run drift + structural validation
         run: uv run --project agentic-coding/transpiler agentic-plugins check
-
       - name: Run pytest regression suite
         run: uv run --project agentic-coding/transpiler --extra test pytest agentic-coding/transpiler/tests/
 
-      - name: Smoke-test that platform CLIs load each plugin
-        run: uv run --project agentic-coding/transpiler agentic-plugins smoke-test
+  # Generate the (backend, validator-CLI) matrix from the transpiler so
+  # adding a new backend or CLI declaration auto-expands the CI surface.
+  matrix-config:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - id: generate
+        name: Generate matrix from `agentic-plugins matrix --validators-only`
+        run: |
+          MATRIX=$(uv run --project agentic-coding/transpiler agentic-plugins matrix --validators-only | jq -c .)
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  # One job per (backend, validator-CLI) pair. Each cell installs only
+  # the CLI it needs at the pinned version (matching cli_versions.json),
+  # then runs `agentic-plugins smoke-test <backend>`. Fail-fast disabled
+  # so a single broken pair doesn't mask other regressions.
+  smoke-test:
+    needs: [drift-and-validate, matrix-config]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix-config.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install ${{ matrix.cli }} (pinned)
+        if: matrix.install_cmd != '' && matrix.headless
+        run: ${{ matrix.install_cmd }}
+
+      - name: Smoke-test ${{ matrix.backend }} (validator=${{ matrix.cli }})
+        run: uv run --project agentic-coding/transpiler agentic-plugins smoke-test ${{ matrix.backend }}

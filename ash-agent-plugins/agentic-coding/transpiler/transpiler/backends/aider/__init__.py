@@ -18,6 +18,7 @@ import yaml
 
 from ...core import BaseBackend, BuildContext, ConfigFile, InstructionFile
 from ...formats import AIDER_CONFIG
+from ...cli_tools import CLI_AIDER
 from ...registry import register_backend
 
 
@@ -26,6 +27,7 @@ class AiderBackend(BaseBackend):
     NAME = "aider"
     OUTPUT_DIR = "aider"
     FORMAT = AIDER_CONFIG
+    CLI_TOOLS = (CLI_AIDER,)
 
     INSTRUCTION_FILE = InstructionFile(
         path="CONVENTIONS.md",

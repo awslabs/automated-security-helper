@@ -60,10 +60,13 @@ AGENTSKILLS = Format(
         "optional `license`/`compatibility`/`metadata`. Body is markdown, "
         "subdirectories `references/`, `scripts/`, `assets/` are spec-defined. "
         "Read natively by Claude Code, Codex CLI, OpenCode, Cline, Kiro — "
-        "OpenCode and Cline also accept the SKILL.md from `.claude/skills/<name>/`."
+        "OpenCode and Cline also accept the SKILL.md from `.claude/skills/<name>/`. "
+        "Released as a standalone artifact at `agentic-coding/plugins/generic-skill/`; "
+        "agents that consume it are marked SUPPORTS_GENERIC_SKILL = True."
     ),
     schema_url=None,
     spec_url="https://agentskills.io/specification",
+    is_format_only_release=True,
 )
 
 # ---------------------------------------------------------------------------

@@ -204,6 +204,63 @@ class Format:
     spec_url: str | None = None
     """Canonical specification page URL for the README / docs."""
 
+    is_format_only_release: bool = False
+    """True when this format is published as a standalone artifact (not
+    embedded in a per-platform output tree) — the user can drop it into any
+    consuming agent's expected path. Today only `agentskills` is released
+    this way (at `agentic-coding/plugins/generic-skill/`)."""
+
+
+# ---------------------------------------------------------------------------
+# CliTool — declarative metadata about a CLI that installs/validates a backend
+# ---------------------------------------------------------------------------
+
+
+CliRole = Literal["installer", "validator", "both"]
+
+
+@dataclass(frozen=True)
+class CliTool:
+    """A CLI tool that can install or validate a backend's output.
+
+    Each backend declares `CLI_TOOLS = (CLI_X, CLI_Y, ...)` listing every
+    CLI it supports. The matrix CI workflow generates one job per
+    (backend, validator-cli) pair, installing only the CLIs that backend
+    needs. Today's smoke_test() bodies are explicit; over time they can
+    collapse into a default that iterates CLI_TOOLS and dispatches to
+    each tool's `validate_argv_template`.
+
+    `pin_key` is the key in `_base/cli_versions.json` (defaults to `name`).
+    `validate_argv_template` accepts `{out}` for the backend's output dir
+    path resolved at smoke-test time.
+    """
+
+    name: str
+    role: CliRole
+    install_cmd: str = ""
+    """Shell command to install at the pinned version. Empty when the tool
+    is pre-installed (e.g., system Python for aider — pip install handled
+    elsewhere) or has no published install path (Cursor's GUI-only forks)."""
+
+    validate_argv_template: tuple[str, ...] = ()
+    """argv template for the validator command. Empty for installer-only
+    tools (e.g., `code --install-extension` is install, not validate)."""
+
+    version_argv: tuple[str, ...] = ("--version",)
+    """argv for asking the binary its version. Almost always `--version`."""
+
+    pin_key: str = ""
+    """Key in `_base/cli_versions.json` for version pinning. Empty means
+    use `name` as the key. Set explicitly when a CLI is published under
+    multiple names (e.g., kiro-cli archive name vs binary name)."""
+
+    headless: bool = True
+    """Whether the CLI runs in a headless CI runner (no GUI/Electron). Set
+    False for IDE-only tools (Cursor, Windsurf, Kiro IDE proper)."""
+
+    def resolved_pin_key(self) -> str:
+        return self.pin_key or self.name
+
 
 # ---------------------------------------------------------------------------
 # Manifest — _base/manifest.json content
@@ -303,6 +360,23 @@ class BaseBackend:
     'claude-marketplace' make the shared-format relationship visible.
     Future: section-emitter dispatch will pull layout from FORMAT,
     eliminating per-backend duplication of PLUGIN_MANIFEST/MCP/etc."""
+
+    SUPPORTS_GENERIC_SKILL: ClassVar[bool] = False
+    """True when this agent natively consumes the agentskills SKILL.md format
+    at any documented path. Today: claude (.claude/skills/), codex (plugin
+    skills/), opencode (.claude/skills/ fallback), cline (.claude/skills/
+    fallback), kiro (.kiro/skills/). Surfaces in `agentic-plugins formats`
+    so users know which agents can drop the standalone generic-skill
+    artifact in directly."""
+
+    CLI_TOOLS: ClassVar[tuple[CliTool, ...]] = ()
+    """CLIs that install or validate this backend's output. The matrix CI
+    workflow generates one job per (backend, validator-cli) pair from this
+    list. Empty tuple means the backend has no CLI dependency (validation
+    is structural only). Multi-CLI backends declare all of them — e.g.,
+    codex declares both `codex` (its native CLI) AND `claude` (since the
+    Codex artifact is at `.claude-plugin/plugin.json` which Claude Code's
+    plugin loader also reads)."""
 
     PLUGIN_MANIFEST: ClassVar[PluginManifest | None] = None
     EXTENSION_MANIFEST: ClassVar[ExtensionManifest | None] = None

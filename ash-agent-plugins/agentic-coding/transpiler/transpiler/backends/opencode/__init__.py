@@ -15,6 +15,7 @@ from ...core import (
     SkillConfig,
 )
 from ...formats import OPENCODE_CONFIG
+from ...cli_tools import CLI_OPENCODE, CLI_SKILLS_REF
 from ...registry import register_backend
 
 
@@ -23,6 +24,8 @@ class OpencodeBackend(BaseBackend):
     NAME = "opencode"
     OUTPUT_DIR = "opencode"
     FORMAT = OPENCODE_CONFIG
+    SUPPORTS_GENERIC_SKILL = True
+    CLI_TOOLS = (CLI_OPENCODE, CLI_SKILLS_REF)
 
     MCP = MCPConfig(
         format="opencode_embedded",

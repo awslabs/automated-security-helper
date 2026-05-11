@@ -13,6 +13,7 @@ from ...core import (
     MCPConfig,
 )
 from ...formats import GOOSE_CONFIG
+from ...cli_tools import CLI_GOOSE
 from ...registry import register_backend
 
 
@@ -21,6 +22,7 @@ class GooseBackend(BaseBackend):
     NAME = "goose"
     OUTPUT_DIR = "goose"
     FORMAT = GOOSE_CONFIG
+    CLI_TOOLS = (CLI_GOOSE,)
 
     MCP = MCPConfig(
         format="goose_yaml",

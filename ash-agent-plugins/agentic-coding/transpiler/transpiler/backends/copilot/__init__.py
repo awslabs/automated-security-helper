@@ -16,6 +16,7 @@ from ...core import (
     MCPConfig,
 )
 from ...formats import VSCODE_MCP
+from ...cli_tools import CLI_VSCODE
 from ...registry import register_backend
 
 
@@ -24,6 +25,7 @@ class CopilotBackend(BaseBackend):
     NAME = "copilot"
     OUTPUT_DIR = "copilot"
     FORMAT = VSCODE_MCP
+    CLI_TOOLS = (CLI_VSCODE,)
 
     MCP = MCPConfig(
         format="servers",

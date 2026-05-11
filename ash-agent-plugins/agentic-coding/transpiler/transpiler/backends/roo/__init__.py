@@ -12,6 +12,7 @@ from ...core import (
     RulesDir,
 )
 from ...formats import ROO_RULES
+from ...cli_tools import CLI_ROO
 from ...registry import register_backend
 
 
@@ -20,6 +21,7 @@ class RooBackend(BaseBackend):
     NAME = "roo"
     OUTPUT_DIR = "roo"
     FORMAT = ROO_RULES
+    CLI_TOOLS = (CLI_ROO,)
 
     MCP = MCPConfig(
         format="mcpServers",
