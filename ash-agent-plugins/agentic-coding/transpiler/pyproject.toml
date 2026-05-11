@@ -27,6 +27,14 @@ generate-models = "tools.generate_models:main"
 refresh = [
     "datamodel-code-generator[http]>=0.25",
 ]
+# Test-time tooling.
+test = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
 
 [build-system]
 requires = ["hatchling"]

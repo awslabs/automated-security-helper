@@ -30,7 +30,12 @@ class GooseBackend(BaseBackend):
     )
 
     INSTRUCTION_FILE = InstructionFile(
-        path=".goosehints",
+        # Goose's default context-file list per goose-docs.ai/docs/guides/
+        # context-engineering/using-goosehints is ["AGENTS.md", ".goosehints"].
+        # Emitting AGENTS.md aligns with the shared instruction-file format
+        # already adopted by Codex, Cursor, Windsurf, Roo, Copilot, Kiro,
+        # OpenCode, Aider, and Cline.
+        path="AGENTS.md",
         template="goose/goosehints.j2",
         include_skill_body=True,
         include_references="appended",
@@ -39,7 +44,7 @@ class GooseBackend(BaseBackend):
     def smoke_test(self, ctx: BuildContext) -> dict | None:
         """Validate extension.yaml parses + has the required Goose shape."""
         ext_path = ctx.out / "extension.yaml"
-        hints = ctx.out / ".goosehints"
+        hints = ctx.out / "AGENTS.md"
 
         if not ext_path.exists():
             return {"ok": False, "reason": "extension.yaml missing"}
@@ -50,6 +55,6 @@ class GooseBackend(BaseBackend):
         if not isinstance(ext, dict) or "extensions" not in ext:
             return {"ok": False, "reason": "extension.yaml missing `extensions` key"}
         if not hints.exists():
-            return {"ok": False, "reason": ".goosehints missing"}
+            return {"ok": False, "reason": "AGENTS.md missing"}
 
         return self._invoke_cli(["goose", "--version"])
