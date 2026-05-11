@@ -8,14 +8,14 @@ layout, so those sections are intentionally absent.
 """
 from __future__ import annotations
 
-from ..core import (
+from ...core import (
     BaseBackend,
     Marketplace,
     MCPConfig,
     PluginManifest,
     SkillConfig,
 )
-from ..registry import register_backend
+from ...registry import register_backend
 
 
 @register_backend

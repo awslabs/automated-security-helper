@@ -6,14 +6,14 @@ AGENTS.md natively, so no instruction file is generated here.
 """
 from __future__ import annotations
 
-from ..core import (
+from ...core import (
     AgentsConfig,
     BaseBackend,
     CommandsConfig,
     MCPConfig,
     SkillConfig,
 )
-from ..registry import register_backend
+from ...registry import register_backend
 
 
 @register_backend

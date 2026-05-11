@@ -8,7 +8,7 @@ the same content as the AGENTS.md-aware platforms.
 """
 from __future__ import annotations
 
-from ..core import (
+from ...core import (
     AgentsConfig,
     BaseBackend,
     CommandsConfig,
@@ -17,7 +17,7 @@ from ..core import (
     PluginManifest,
     SkillConfig,
 )
-from ..registry import register_backend
+from ...registry import register_backend
 
 
 @register_backend
