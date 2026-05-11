@@ -50,6 +50,12 @@ class ExampleScanner(ScannerPluginBase[ExampleScannerConfig]):
         ASH_LOGGER.info("ExampleScanner: Validating configuration")
         return True
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — ExampleScanner overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
+
     def scan(
         self,
         target: Path,
