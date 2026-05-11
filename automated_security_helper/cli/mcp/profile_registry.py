@@ -123,11 +123,16 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
             raise ProfileRegistryError(
                 f"--profile {name!r} failed to load {path}: {exc}"
             ) from exc
-        # Re-validate the *raw* YAML/JSON against AshConfig with extra='forbid'
+        # Re-validate the *raw* YAML/JSON top-level keys against AshConfig
         # so operator typos in profile YAML fail at MCP boot rather than at
         # silently-ignored runtime. AshConfig.model_config has extra='ignore'
         # for end-user-config back-compat — operator-controlled profiles are
         # deployment artifacts and should be strict.
+        #
+        # Nested-segment typos (e.g. `scanners: { cdk_nag_typo: {...} }`)
+        # are handled by Issue #82 — discriminated-union plugin config
+        # validation — once that lands. Until then, a top-level gate
+        # catches the common case (typos at the AshConfig root).
         try:
             with open(path, mode="r", encoding="utf-8") as f:
                 if str(path).endswith(".json"):
@@ -137,7 +142,7 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
                 else:
                     raw = yaml.safe_load(f)
             allowed = set(AshConfig.model_fields.keys())
-            for fname, finfo in AshConfig.model_fields.items():
+            for finfo in AshConfig.model_fields.values():
                 if finfo.alias:
                     allowed.add(finfo.alias)
             unknown = sorted(set(raw or {}) - allowed)

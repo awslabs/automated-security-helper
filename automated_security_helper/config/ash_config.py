@@ -542,6 +542,13 @@ class AshConfig(BaseModel):
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
         extra="ignore",
+        # Accept BOTH the alias (e.g., 'mcp-resource-management') and the
+        # Python field name (e.g., 'mcp_resource_management') as input.
+        # Pydantic v2 default is alias-only when an alias is declared,
+        # which surfaced as an MCP-profile-loading error: the strict-extra
+        # gate accepted both spellings but model_validate(strict=True)
+        # accepted only the alias. See DA r6 #3.
+        populate_by_name=True,
     )
 
     # Internal field to track config resolution warnings (not serialized)

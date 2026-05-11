@@ -93,10 +93,12 @@ def _build_auth_middleware(header_name: str, header_value: str):
     side channels: a naive ``!=`` leaks per-byte equality timing, which an
     attacker can exploit to recover the expected token one byte at a time.
 
-    Rejects all CORS preflight (``OPTIONS``) bypass attempts with the same
-    401 path: a permissive preflight handler in front would otherwise let
-    a browser-origin scan around the auth boundary without ever sending
-    the protected header.
+    Method handling is uniform: there is no special case for OPTIONS,
+    HEAD, PROPFIND, TRACE, or any other method. Every request that
+    reaches the middleware must carry the expected header — a permissive
+    front-proxy that strips the header for preflight, or a future bug
+    that adds method-specific short-circuit handling, would have to be
+    introduced inside this dispatch to weaken the boundary.
     """
     import hmac
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -104,13 +106,18 @@ def _build_auth_middleware(header_name: str, header_value: str):
     from starlette.responses import JSONResponse
 
     expected_name = header_name.lower()
-    expected_value_bytes = header_value.encode("utf-8")
+    # Encode with latin-1 to match Starlette's wire-byte semantics.
+    # Per RFC 7230 (and Starlette's implementation), HTTP header values
+    # are decoded as latin-1; encoding back as utf-8 here would mutate
+    # any byte ≥ 0x80 and silently fail-auth for non-ASCII tokens.
+    # See DA r6 #7.
+    expected_value_bytes = header_value.encode("latin-1", errors="replace")
 
     class _StaticHeaderAuth(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
             received = request.headers.get(expected_name)
             if received is None or not hmac.compare_digest(
-                received.encode("utf-8"), expected_value_bytes
+                received.encode("latin-1", errors="replace"), expected_value_bytes
             ):
                 return JSONResponse(
                     {"error": "unauthorized", "detail": "missing or invalid auth header"},

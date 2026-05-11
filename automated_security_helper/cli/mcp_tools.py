@@ -47,6 +47,7 @@ async def mcp_scan_directory(
     directory_path: str,
     severity_threshold: str = "MEDIUM",
     config_path: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Start a security scan with file-based progress tracking.
@@ -61,6 +62,10 @@ async def mcp_scan_directory(
         directory_path: Path to the directory to scan
         severity_threshold: Minimum severity threshold (LOW, MEDIUM, HIGH, CRITICAL)
         config_path: Optional path to ASH configuration file
+        session_id: Optional MCP session id. When set, the scan acquires the
+            per-session lock (Track 10.5 #63) so two concurrent scans on the
+            same session serialize instead of racing on the shared output
+            dir. Distinct sessions never contend.
 
     Returns:
         Dictionary with scan ID and status information
@@ -137,6 +142,7 @@ async def mcp_scan_directory(
                 output_dir=str(output_dir),
                 severity_threshold=severity_threshold,
                 config_path=config_path,
+                session_id=session_id,
             )
         )
 
@@ -188,6 +194,7 @@ async def _run_scan_async(
     output_dir: str,
     severity_threshold: str,
     config_path: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """
     Run an ASH scan asynchronously.
@@ -195,12 +202,19 @@ async def _run_scan_async(
     This function runs the scan using direct Python calls to the ASH functionality
     and updates the scan registry with the scan status.
 
+    When ``session_id`` is provided, the scan acquires the per-session
+    lock from :class:`MCPSessionRegistry` for the duration of the
+    underlying ``run_ash_scan`` call. Two concurrent scans on the same
+    session serialize on this lock; distinct sessions never contend.
+
     Args:
         scan_id: ID of the scan
         directory_path: Path to the directory to scan
         output_dir: Path to the output directory
         severity_threshold: Minimum severity threshold
         config_path: Optional path to ASH configuration file
+        session_id: Optional MCP session id whose per-session lock guards
+            the scan. None means no session — equivalent to legacy behavior.
     """
     from automated_security_helper.core.enums import AshLogLevel, RunMode
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
@@ -219,21 +233,49 @@ async def _run_scan_async(
         f"Starting scan process for scan {scan_id} in directory {directory_path}"
     )
 
-    try:
-        # Create a task to run the scan in a separate thread to avoid blocking
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: run_ash_scan(
+    # Resolve the per-session lock if a session_id was supplied. The lock is
+    # acquired inside the executor wrapper below — we MUST NOT hold it on the
+    # event-loop thread, since the underlying ``run_ash_scan`` blocks for the
+    # full scan duration.
+    session_lock = None
+    if session_id is not None:
+        from automated_security_helper.cli.mcp.sessions import (
+            get_default_registry as _get_session_registry,
+        )
+
+        session_lock = _get_session_registry().get_or_create(session_id).lock
+
+    def _scan_under_session_lock() -> None:
+        """Acquire the session lock (if any) and run the scan synchronously.
+
+        Wrapped in a function so the lock is acquired on the executor
+        worker thread, not the asyncio event-loop thread.
+        """
+        if session_lock is not None:
+            with session_lock:
+                run_ash_scan(
+                    source_dir=directory_path,
+                    output_dir=output_dir,
+                    config=config_path,
+                    mode=RunMode.local,
+                    log_level=AshLogLevel.INFO,
+                    fail_on_findings=False,
+                    show_summary=False,
+                )
+        else:
+            run_ash_scan(
                 source_dir=directory_path,
                 output_dir=output_dir,
                 config=config_path,
                 mode=RunMode.local,
                 log_level=AshLogLevel.INFO,
-                fail_on_findings=False,  # Don't exit on findings
-                show_summary=False,  # Don't show summary
-            ),
-        )
+                fail_on_findings=False,
+                show_summary=False,
+            )
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _scan_under_session_lock)
 
         # Update scan status based on result
         registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)

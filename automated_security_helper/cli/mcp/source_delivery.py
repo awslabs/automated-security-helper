@@ -478,7 +478,6 @@ def set_source_zip_finalize(
     if target.exists():
         shutil.rmtree(target, ignore_errors=True)
     _ensure_dir(target)
-    target_resolved = target.resolve()
 
     with zipfile.ZipFile(final) as zf:
         infos = zf.infolist()
@@ -497,21 +496,23 @@ def set_source_zip_finalize(
                     f"(at entry {info.filename!r})"
                 )
             if _is_symlink_zipinfo(info):
-                # The symlink target lives in the entry's data. Read and
-                # resolve relative to the would-be link path; reject
-                # anything escaping the session sandbox.
+                # Reject ALL symlink entries — not just those whose target
+                # resolves outside the sandbox. Pre-extraction resolve()
+                # of a link under (target/info.filename).parent races
+                # extraction: an earlier zip entry that materializes a
+                # directory which is itself a symlink (or a leftover-from-
+                # prior-upload directory that resolves elsewhere) would
+                # let a later symlink entry pass validation but still
+                # escape once extractall() runs.
+                #
+                # Source tree shipping over MCP does not need symlinks.
+                # Refusing them outright eliminates the pre/post-write
+                # divergence. See DA r6 #5.
                 link_target = zf.read(info).decode("utf-8", errors="replace")
-                # The link itself will be created at target / info.filename.
-                link_path = (target / info.filename).parent
-                resolved = (link_path / link_target).resolve()
-                # Ensure resolved stays under target_resolved.
-                try:
-                    resolved.relative_to(target_resolved)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"symlink {info.filename!r} -> {link_target!r} "
-                        f"resolves outside session workspace"
-                    ) from exc
+                raise ValueError(
+                    f"symlink {info.filename!r} -> {link_target!r}: "
+                    f"symlinks are not allowed in MCP source delivery zips"
+                )
 
         # Validation passed; extract.
         zf.extractall(target)
