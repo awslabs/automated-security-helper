@@ -189,7 +189,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.0.0
+    rev: v{{VERSION}}
     hooks:
       - id: ash-simple-scan
 ```

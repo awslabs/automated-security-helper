@@ -44,34 +44,41 @@ class VersionTemplateManager:
         """
         Find all version references in content.
 
+        Matches ANY v3.x.y version string (not just the current version) so that
+        templates stay correct even when docs are edited between releases.
+
         Returns list of (old_pattern, new_pattern) tuples.
         """
-        current_version = get_version()
+        # Use a generic semver pattern to match any v3.x.y reference
+        semver = r"\d+\.\d+\.\d+"
         patterns = []
 
-        # Pattern 1: git+...@v3.0.1
-        git_pattern = rf"git\+https://github\.com/awslabs/automated-security-helper\.git@v{re.escape(current_version)}"
-        git_replacement = f"git+https://github.com/awslabs/automated-security-helper.git@v{self.version_placeholder}"
+        # Pattern 1: git+...@v3.x.y (also without .git suffix)
+        git_pattern = rf"(git\+https://github\.com/awslabs/automated-security-helper(?:\.git)?@v){semver}"
+        git_replacement = rf"\g<1>{self.version_placeholder}"
         if re.search(git_pattern, content):
             patterns.append((git_pattern, git_replacement))
 
-        # Pattern 2: --branch v3.0.1
-        branch_pattern = rf"--branch v{re.escape(current_version)}"
-        branch_replacement = f"--branch v{self.version_placeholder}"
+        # Pattern 2: --branch v3.x.y
+        branch_pattern = rf"(--branch v){semver}"
+        branch_replacement = rf"\g<1>{self.version_placeholder}"
         if re.search(branch_pattern, content):
             patterns.append((branch_pattern, branch_replacement))
 
-        # Pattern 3: version 3.0.1 (in various contexts)
-        version_pattern = rf"version {re.escape(current_version)}"
-        version_replacement = f"version {self.version_placeholder}"
-        if re.search(version_pattern, content, re.IGNORECASE):
-            patterns.append((version_pattern, version_replacement))
+        # Pattern 3: @v3.x.y in inline text (e.g., "pinned versions (`@v3.4.0`)")
+        at_version_pattern = rf"(@v){semver}"
+        at_version_replacement = rf"\g<1>{self.version_placeholder}"
+        if re.search(at_version_pattern, content):
+            patterns.append((at_version_pattern, at_version_replacement))
 
-        # Pattern 4: ASH version 3.0.1
-        ash_version_pattern = rf"ASH version {re.escape(current_version)}"
-        ash_version_replacement = f"ASH version {self.version_placeholder}"
-        if re.search(ash_version_pattern, content):
-            patterns.append((ash_version_pattern, ash_version_replacement))
+        # Pattern 4: rev: v3.x.y (pre-commit config)
+        rev_pattern = rf"(rev: v){semver}"
+        rev_replacement = rf"\g<1>{self.version_placeholder}"
+        if re.search(rev_pattern, content):
+            patterns.append((rev_pattern, rev_replacement))
+
+        # Pattern 5: "e.g., `@v3.x.y`" or "(e.g., `@v3.x.y`)"
+        # Already covered by Pattern 3
 
         return patterns
 
