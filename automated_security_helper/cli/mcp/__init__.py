@@ -5,17 +5,19 @@
 MCP (Model Context Protocol) CLI command for ASH.
 
 This package provides a CLI command to start an MCP server that exposes ASH
-security scanning capabilities through the Model Context Protocol. The MCP
-server allows LLMs and other tools to interact with ASH programmatically.
+security scanning capabilities through the Model Context Protocol. The server
+supports multiple transports:
 
-This is a package (rather than a single ``cli/mcp.py`` module) so that
-sibling modules — ``progress_monitor``, ``mcp_tools``, etc. — can live
-alongside the typer command without colliding with Python's import
-resolution. The legacy single-file module previously shadowed the package
-and broke imports when both were present in the tree.
+- ``stdio`` (default): legacy in-process transport, no network
+- ``streamable-http``: FastMCP streamable-HTTP app served via uvicorn, with
+  optional single-tenant header auth
+- ``sse``: legacy FastMCP SSE app served via uvicorn (best-effort; the SSE
+  transport is deprecated upstream)
 """
 
-from typing import Annotated
+from __future__ import annotations
+
+from typing import Annotated, Optional
 import typer
 from rich import print
 
@@ -23,31 +25,26 @@ from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 
-# Import MCP dependencies directly
+# Import MCP dependencies directly. We capture both the FastMCP class and the
+# Starlette type so the streamable-HTTP path can build a typed ASGI app.
 try:
     from mcp.server.fastmcp import FastMCP, Context
-except ImportError:
-    FastMCP = None
-    Context = None
+except ImportError:  # pragma: no cover - exercised only when MCP missing
+    FastMCP = None  # type: ignore[assignment]
+    Context = None  # type: ignore[assignment]
 
 # Configure module logger
 _logger = ASH_LOGGER
+
+# Valid --transport values. Kept as a tuple so typer can render help cleanly
+# without forcing an Enum class on the public CLI surface.
+_VALID_TRANSPORTS = ("stdio", "streamable-http", "sse")
 
 
 def validate_log_options(
     verbose: bool, debug: bool, log_level: AshLogLevel
 ) -> AshLogLevel:
-    """Validate and resolve log level options.
-
-    Args:
-        verbose: Whether verbose logging is enabled
-        debug: Whether debug logging is enabled
-        log_level: The specified log level
-
-    Returns:
-        The resolved log level
-    """
-    # Resolve log level based on options
+    """Resolve the effective log level given verbose/debug flags."""
     if debug:
         return AshLogLevel.DEBUG
     elif verbose:
@@ -57,27 +54,149 @@ def validate_log_options(
 
 
 def validate_mcp_dependencies() -> bool:
-    """Validate that MCP dependencies are available.
-
-    Returns:
-        True if dependencies are available, False otherwise
-    """
+    """Return True when FastMCP and Context are importable."""
     return FastMCP is not None and Context is not None
 
 
 def validate_command_options(verbose: bool, debug: bool, quiet: bool) -> None:
     """Validate command options for consistency.
 
-    Args:
-        verbose: Whether verbose logging is enabled
-        debug: Whether debug logging is enabled
-        quiet: Whether to hide all log output
-
     Raises:
-        ASHValidationError: If options are inconsistent
+        ASHValidationError: if --quiet is combined with --verbose or --debug.
     """
     if quiet and (verbose or debug):
         raise ASHValidationError("Cannot use --quiet with --verbose or --debug options")
+
+
+def _validate_auth_options(
+    auth_header_name: Optional[str], auth_header_value: Optional[str]
+) -> None:
+    """Reject partial auth configuration: both or neither.
+
+    Raises:
+        ASHValidationError: if exactly one of the two auth options is set.
+    """
+    if bool(auth_header_name) != bool(auth_header_value):
+        raise ASHValidationError(
+            "--auth-header-name and --auth-header-value must be set together"
+        )
+
+
+def _build_auth_middleware(header_name: str, header_value: str):
+    """Build a Starlette middleware class that enforces a static header.
+
+    Returns a class suitable for ``Starlette.add_middleware``. Requests missing
+    the header — or carrying a different value — receive ``401 Unauthorized``.
+    The header name is matched case-insensitively, mirroring HTTP semantics.
+    """
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+
+    expected_name = header_name.lower()
+    expected_value = header_value
+
+    class _StaticHeaderAuth(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            received = request.headers.get(expected_name)
+            if received != expected_value:
+                return JSONResponse(
+                    {"error": "unauthorized", "detail": "missing or invalid auth header"},
+                    status_code=401,
+                )
+            return await call_next(request)
+
+    return _StaticHeaderAuth
+
+
+def build_streamable_http_app(
+    mount_path: str = "/mcp",
+    auth_header_name: Optional[str] = None,
+    auth_header_value: Optional[str] = None,
+):
+    """Build the FastMCP streamable-HTTP ASGI app, optionally guarded by auth.
+
+    Args:
+        mount_path: HTTP path the streamable transport listens on.
+        auth_header_name: When set with ``auth_header_value``, requests
+            missing the header (or carrying a different value) get 401.
+        auth_header_value: Expected value for ``auth_header_name``.
+
+    Returns:
+        A Starlette application ready to hand to uvicorn.
+
+    Raises:
+        RuntimeError: if FastMCP is not installed.
+    """
+    if FastMCP is None:
+        raise RuntimeError(
+            "FastMCP is not installed. The 'mcp' package is required for "
+            "the streamable-http transport."
+        )
+    # Import here to keep the stdio path zero-cost when the streamable-HTTP
+    # transport is not used.
+    from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
+
+    # Configure the FastMCP routing on its settings before materializing the
+    # app so the path matches what the user requested.
+    _mcp_instance.settings.streamable_http_path = mount_path
+    app = _mcp_instance.streamable_http_app()
+
+    if auth_header_name and auth_header_value:
+        middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
+        app.add_middleware(middleware_cls)
+
+    return app
+
+
+def build_sse_app(
+    mount_path: str = "/sse",
+    auth_header_name: Optional[str] = None,
+    auth_header_value: Optional[str] = None,
+):
+    """Build the FastMCP SSE ASGI app (legacy)."""
+    if FastMCP is None:
+        raise RuntimeError(
+            "FastMCP is not installed. The 'mcp' package is required for "
+            "the sse transport."
+        )
+    from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
+
+    _mcp_instance.settings.sse_path = mount_path
+    app = _mcp_instance.sse_app()
+
+    if auth_header_name and auth_header_value:
+        middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
+        app.add_middleware(middleware_cls)
+
+    return app
+
+
+def _ash_log_level_to_uvicorn(level: AshLogLevel) -> str:
+    """Map AshLogLevel onto uvicorn's accepted log level names."""
+    # uvicorn accepts: critical, error, warning, info, debug, trace.
+    # AshLogLevel.VERBOSE is treated as debug for HTTP transport noise.
+    name = level.value.lower() if hasattr(level, "value") else str(level).lower()
+    if name in {"critical", "error", "warning", "info", "debug", "trace"}:
+        return name
+    if name == "verbose":
+        return "debug"
+    return "info"
+
+
+def _run_uvicorn(app, host: str, port: int, log_level: AshLogLevel) -> None:
+    """Run an ASGI app via uvicorn, blocking until shutdown."""
+    import uvicorn
+
+    config = uvicorn.Config(
+        app=app,
+        host=host,
+        port=port,
+        log_level=_ash_log_level_to_uvicorn(log_level),
+        access_log=False,
+    )
+    server = uvicorn.Server(config)
+    server.run()
 
 
 def mcp_command(
@@ -97,24 +216,48 @@ def mcp_command(
     ] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
     quiet: Annotated[bool, typer.Option(help="Hide all log output")] = True,
+    transport: Annotated[
+        str,
+        typer.Option(
+            "--transport",
+            help="Transport: 'stdio' (default), 'streamable-http', or 'sse'.",
+        ),
+    ] = "stdio",
+    host: Annotated[
+        str,
+        typer.Option("--host", help="Host to bind for HTTP transports."),
+    ] = "127.0.0.1",
+    port: Annotated[
+        int,
+        typer.Option("--port", help="Port to bind for HTTP transports."),
+    ] = 8000,
+    mount_path: Annotated[
+        str,
+        typer.Option(
+            "--mount-path",
+            help="HTTP path the transport listens on (default: /mcp for streamable-http, /sse for sse).",
+        ),
+    ] = "/mcp",
+    auth_header_name: Annotated[
+        Optional[str],
+        typer.Option(
+            "--auth-header-name",
+            help="Required HTTP header name for single-tenant auth (HTTP transports only).",
+        ),
+    ] = None,
+    auth_header_value: Annotated[
+        Optional[str],
+        typer.Option(
+            "--auth-header-value",
+            help="Expected value of --auth-header-name.",
+        ),
+    ] = None,
 ) -> None:
-    """Start the ASH MCP server for Model Context Protocol integration.
+    """Start the ASH MCP server.
 
-    The MCP server exposes ASH security scanning capabilities through the Model Context Protocol,
-    allowing LLMs and other tools to perform security scans and analyze results programmatically.
-
-    MCP support is included by default in ASH v3. If you encounter dependency issues, please
-    check your ASH installation.
-
-    The MCP server provides the following capabilities:
-    - scan_directory: Start security scans with progress tracking
-    - get_scan_progress: Monitor running scan progress
-    - get_scan_results: Retrieve completed scan results
-    - list_active_scans: View all active and recent scans
-    - cancel_scan: Stop running scans
-    - check_installation: Verify ASH installation and version
-    - Resources for status and help information
-    - Prompts for analyzing security findings
+    Default transport is ``stdio`` — identical to prior behavior. Pass
+    ``--transport streamable-http`` to expose the server over HTTP via
+    uvicorn, optionally guarded by a single static auth header.
     """
     # Handle resilient parsing for command discovery
     if ctx.resilient_parsing:
@@ -140,22 +283,61 @@ def mcp_command(
     # Validate command options for consistency
     try:
         validate_command_options(verbose, debug, quiet)
+        _validate_auth_options(auth_header_name, auth_header_value)
     except ASHValidationError as e:
         print(f"[red]Validation Error: {str(e)}[/red]")
+        raise typer.Exit(3)
+
+    if transport not in _VALID_TRANSPORTS:
+        print(
+            f"[red]Validation Error: --transport must be one of {_VALID_TRANSPORTS}, got '{transport}'.[/red]"
+        )
         raise typer.Exit(3)
 
     # Validate and configure logging options
     log_level_value = validate_log_options(verbose, debug, log_level)
 
     # Log the command execution
-    _logger.info(f"Starting MCP server with log level: {log_level_value}")
+    _logger.info(
+        f"Starting MCP server with transport={transport}, log level={log_level_value}"
+    )
 
     # Initialize and start the MCP server with comprehensive error handling
     try:
-        # Import and run the MCP server implementation here to avoid circular imports
-        from automated_security_helper.cli.mcp_server import run_mcp_server
+        if transport == "stdio":
+            # Import and run the stdio MCP server implementation here to avoid
+            # circular imports.
+            from automated_security_helper.cli.mcp_server import run_mcp_server
 
-        run_mcp_server()
+            run_mcp_server()
+        elif transport == "streamable-http":
+            app = build_streamable_http_app(
+                mount_path=mount_path,
+                auth_header_name=auth_header_name,
+                auth_header_value=auth_header_value,
+            )
+            if not quiet:
+                print(
+                    f"[green]Streamable-HTTP MCP server listening on "
+                    f"http://{host}:{port}{mount_path}[/green]"
+                )
+            _run_uvicorn(app, host=host, port=port, log_level=log_level_value)
+        elif transport == "sse":
+            # The mount-path default is /mcp, but SSE conventionally lives at
+            # /sse. Honor whatever the user passed; only override if they kept
+            # the streamable-HTTP default.
+            sse_path = mount_path if mount_path != "/mcp" else "/sse"
+            app = build_sse_app(
+                mount_path=sse_path,
+                auth_header_name=auth_header_name,
+                auth_header_value=auth_header_value,
+            )
+            if not quiet:
+                print(
+                    f"[green]SSE MCP server listening on "
+                    f"http://{host}:{port}{sse_path}[/green]"
+                )
+            _run_uvicorn(app, host=host, port=port, log_level=log_level_value)
     except KeyboardInterrupt:
         _logger.info("MCP server shutdown requested by user")
         if not quiet:
