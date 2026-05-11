@@ -65,6 +65,7 @@ from schema import (
 HERE = Path(__file__).resolve().parent              # agentic-coding/transpiler/
 BASE = HERE / "_base"                               # source-of-truth
 TEMPLATES = HERE / "templates"
+SCHEMAS_DIR = HERE / "schemas"                      # cached external JSON Schemas
 CONFIGS_PATH = HERE / "configs.yaml"
 OUTPUT_ROOT = HERE.parent / "plugins"               # agentic-coding/plugins/
 
@@ -922,6 +923,30 @@ def check_drift() -> int:
     return 0
 
 
+def run_validation() -> int:
+    """Validate generated outputs against external schemas, structural sanity,
+    and known platform constraints. Imports validate.py lazily so the module
+    only loads when --check or --validate is requested."""
+    from validate import validate_all
+
+    m = Manifest.load(BASE / "manifest.json")
+    configs = load_configs()
+    errors = validate_all(
+        plugins_root=OUTPUT_ROOT,
+        schemas_dir=SCHEMAS_DIR,
+        configs=configs,
+        plugin_name=m.name,
+        skill_name=m.skill_name,
+    )
+    if errors:
+        print(f"ERROR: {len(errors)} validation issue(s):")
+        for path, msg in errors:
+            print(f"  [{path}] {msg}")
+        return 1
+    print(f"OK: validation passed for {len(configs)} platforms + AGENTS.md.")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -932,11 +957,35 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Verify outputs match _base/ without writing (exits 1 on drift)",
+        help="Verify drift AND run output validation against schemas + constraints "
+             "(exits 1 on any failure). This is the canonical CI gate.",
+    )
+    parser.add_argument(
+        "--drift-only",
+        action="store_true",
+        help="Run only the drift check, skip schema validation. Useful when "
+             "iterating on _base/ content without a final correctness pass.",
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Run only the validation pass (skip drift detection).",
     )
     args = parser.parse_args()
-    if args.check:
+
+    if args.validate_only:
+        return run_validation()
+    if args.drift_only:
         return check_drift()
+    if args.check:
+        # Both passes; either failure surfaces details and returns 1.
+        # We run drift first because if outputs differ from _base/, validating
+        # the on-disk files would just re-prove the drift indirectly.
+        rc = check_drift()
+        if rc != 0:
+            return rc
+        return run_validation()
+
     transpile_all()
     configs = load_configs()
     print(
