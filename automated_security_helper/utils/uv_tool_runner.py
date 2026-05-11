@@ -594,40 +594,60 @@ _uv_command_cache: Dict[str, Optional[List[str]]] = {}
 _uv_executable_cache: Dict[str, Optional[str]] = {}
 _executable_cache: Dict[str, Optional[str]] = {}
 
+# Single shared lock guarding all three module-level caches above. The dicts
+# are tiny and contention is rare (only on cold-cache misses), so a single
+# lock is simpler and adequate. Holding the lock across the version probe is
+# intentional: it ensures the 5s ``uv tool run <tool> --version`` subprocess
+# runs exactly once per ``(tool, fallback)`` pair even when many threads race,
+# and that no thread observes a half-populated key. See DA r4 #3.
+#
+# RLock (reentrant) so ``get_uv_tool_command`` can call ``find_uv_or_none``
+# and ``find_executable`` while still holding the lock, without deadlock.
+_uv_tool_runner_cache_lock = threading.RLock()
+
+# Timeout (seconds) for the ``uv tool run <tool> --version`` probe. Five
+# seconds is plenty for ``--version`` on any reasonable host; the previous
+# 30s value could stack to ~150s of phase blockage across five cold-cache
+# scanners with no progress reporting (DA r4 #5).
+_UV_VERSION_PROBE_TIMEOUT = 5
+
 
 def _reset_uv_tool_runner_caches() -> None:
     """Reset module-level caches (mainly for testing)."""
-    _uv_command_cache.clear()
-    _uv_executable_cache.clear()
-    _executable_cache.clear()
+    with _uv_tool_runner_cache_lock:
+        _uv_command_cache.clear()
+        _uv_executable_cache.clear()
+        _executable_cache.clear()
 
 
 def find_uv_or_none() -> Optional[str]:
     """Return the path to the ``uv`` binary, or ``None`` if it is missing."""
-    if "uv" in _uv_executable_cache:
-        return _uv_executable_cache["uv"]
+    with _uv_tool_runner_cache_lock:
+        if "uv" in _uv_executable_cache:
+            return _uv_executable_cache["uv"]
 
-    from automated_security_helper.utils.subprocess_utils import (
-        find_executable as _find_executable,
-    )
+        from automated_security_helper.utils.subprocess_utils import (
+            find_executable as _find_executable,
+        )
 
-    resolved = _find_executable("uv")
-    _uv_executable_cache["uv"] = resolved
-    return resolved
+        resolved = _find_executable("uv")
+        _uv_executable_cache["uv"] = resolved
+        return resolved
 
 
 def find_executable(name: str) -> Optional[str]:
     """Find an executable by direct path, then PATH lookup."""
-    if name in _executable_cache:
-        return _executable_cache[name]
+    with _uv_tool_runner_cache_lock:
+        if name in _executable_cache:
+            return _executable_cache[name]
 
-    from automated_security_helper.utils.subprocess_utils import (
-        find_executable as _find_executable,
-    )
+        from automated_security_helper.utils.subprocess_utils import (
+            find_executable as _find_executable,
+        )
 
-    resolved = _find_executable(name)
-    _executable_cache[name] = resolved
-    return resolved
+        resolved = _find_executable(name)
+        _executable_cache[name] = resolved
+        return resolved
 
 
 def get_uv_tool_command(
@@ -646,35 +666,44 @@ def get_uv_tool_command(
     3. Else return ``None`` (caller marks deps unsatisfied).
 
     Memoized per process so the version probe runs only once per
-    ``(tool_name, fallback_binary)`` pair.
+    ``(tool_name, fallback_binary)`` pair. Thread-safe: a single shared
+    lock guards reads, writes, and the underlying probe so concurrent
+    threads racing on the same cache key see exactly one probe and a
+    consistent result.
     """
     binary = fallback_binary or tool_name
     cache_key = f"{tool_name}::{binary}"
-    if cache_key in _uv_command_cache:
-        return _uv_command_cache[cache_key]
 
-    uv_path = find_uv_or_none()
-    if uv_path is not None:
-        try:
-            probe = subprocess.run(  # nosec B603 — fixed list of trusted strings
-                [uv_path, "tool", "run", tool_name, "--version"],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30,
-            )
-            if probe.returncode == 0:
-                command: Optional[List[str]] = ["uv", "tool", "run", tool_name]
-                _uv_command_cache[cache_key] = command
-                return command
-        except (subprocess.SubprocessError, OSError):
-            pass
+    # Hold the (reentrant) cache lock across the entire resolve-or-probe path
+    # so that a second thread arriving on a cold cache key blocks until the
+    # first thread has populated it, rather than launching a duplicate probe
+    # or observing a partially-populated entry.
+    with _uv_tool_runner_cache_lock:
+        if cache_key in _uv_command_cache:
+            return _uv_command_cache[cache_key]
 
-    direct = find_executable(binary)
-    if direct is not None:
-        command = [direct]
-        _uv_command_cache[cache_key] = command
-        return command
+        uv_path = find_uv_or_none()
+        if uv_path is not None:
+            try:
+                probe = subprocess.run(  # nosec B603 — fixed list of trusted strings
+                    [uv_path, "tool", "run", tool_name, "--version"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=_UV_VERSION_PROBE_TIMEOUT,
+                )
+                if probe.returncode == 0:
+                    command: Optional[List[str]] = ["uv", "tool", "run", tool_name]
+                    _uv_command_cache[cache_key] = command
+                    return command
+            except (subprocess.SubprocessError, OSError):
+                pass
 
-    _uv_command_cache[cache_key] = None
-    return None
+        direct = find_executable(binary)
+        if direct is not None:
+            command = [direct]
+            _uv_command_cache[cache_key] = command
+            return command
+
+        _uv_command_cache[cache_key] = None
+        return None
