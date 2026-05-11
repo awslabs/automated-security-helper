@@ -262,7 +262,7 @@ runs:
       uses: actions/upload-artifact@v7
       if: success() || failure()
       with:
-        name: ash_output-${{ inputs.os }}-${{ inputs.method }}-${{ inputs.config-file }}
+        name: ash_output-${{ inputs.os }}-${{ inputs.method }}-${{ inputs.config-file }}${{ inputs.oci-runner && format('-{0}', inputs.oci-runner) || '' }}${{ inputs.offline == 'true' && '-offline' || '' }}
         path: .ash/ash_output
         retention-days: 7
         if-no-files-found: warn
