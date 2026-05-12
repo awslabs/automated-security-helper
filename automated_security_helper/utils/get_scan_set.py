@@ -88,9 +88,14 @@ def _collect_ignorefiles_and_all_files(
     if root_gitignore.is_file():
         try:
             root_ignore_parser.parse_rule_file(root_gitignore, base_dir=root_path)
-        except Exception:
-            # If parsing fails, proceed without pruning
-            pass
+        except (OSError, ValueError, TypeError, IndexError, re.error):
+            # If the root .gitignore can't be parsed (malformed patterns,
+            # encoding issues, etc.), proceed without directory pruning.
+            # All files will still be filtered by the full ignore spec later.
+            debug_echo(
+                f"Could not parse root .gitignore for directory pruning: {root_gitignore}",
+                debug=debug,
+            )
 
     for root, dirs, files in os.walk(path):
         # Prune directories that are ignored by the root .gitignore.
@@ -105,10 +110,10 @@ def _collect_ignorefiles_and_all_files(
             try:
                 if root_ignore_parser.match(dir_path / "placeholder"):
                     dirs_to_remove.append(d)
-                    debug_echo(
-                        f"Skipping ignored directory: {dir_path}", debug=debug
-                    )
-            except Exception:
+                    debug_echo(f"Skipping ignored directory: {dir_path}", debug=debug)
+            except (ValueError, TypeError, IndexError, re.error):
+                # If matching fails for a specific directory (e.g. due to a
+                # malformed pattern), skip pruning for that directory only.
                 pass
         for d in dirs_to_remove:
             dirs.remove(d)
@@ -187,12 +192,16 @@ def get_ash_ignorespec(
             # or:     "######### START CONTENTS: ${SOURCE_DIR}/.gitignore #########"
             # or:     "######### START CONTENTS: ASH_INCLUSIONS #########"
             try:
-                content_path = stripped.split("START CONTENTS:")[1].strip().rstrip("#").strip()
+                content_path = (
+                    stripped.split("START CONTENTS:")[1].strip().rstrip("#").strip()
+                )
                 if content_path == "ASH_INCLUSIONS":
                     current_base_path = "/"
                 elif "${SOURCE_DIR}" in content_path:
                     # Extract the directory containing the .gitignore/.ignore file
-                    relative_path = content_path.replace("${SOURCE_DIR}", "").lstrip("/")
+                    relative_path = content_path.replace("${SOURCE_DIR}", "").lstrip(
+                        "/"
+                    )
                     # Get the parent directory of the ignore file
                     parent_dir = str(Path(relative_path).parent)
                     if parent_dir == ".":
@@ -238,7 +247,9 @@ def get_files_not_matching_spec(
     return included
 
 
-def get_changed_files(base_ref: str = "origin/main", cwd: Optional[Path] = None) -> Optional[List[Path]]:
+def get_changed_files(
+    base_ref: str = "origin/main", cwd: Optional[Path] = None
+) -> Optional[List[Path]]:
     """Return files changed between *base_ref* and HEAD using ``git diff``.
 
     Falls back to ``None`` (meaning "scan everything") when:
@@ -255,9 +266,7 @@ def get_changed_files(base_ref: str = "origin/main", cwd: Optional[Path] = None)
         or ``None`` if the diff could not be computed.
     """
     if not re.match(r"^[a-zA-Z0-9._/~^@{}\-]+$", base_ref):
-        ASH_LOGGER.warning(
-            f"Invalid base_ref '{base_ref}'; falling back to full scan"
-        )
+        ASH_LOGGER.warning(f"Invalid base_ref '{base_ref}'; falling back to full scan")
         return None
 
     try:
@@ -269,9 +278,7 @@ def get_changed_files(base_ref: str = "origin/main", cwd: Optional[Path] = None)
             cwd=cwd,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        ASH_LOGGER.warning(
-            "git not available or timed out; falling back to full scan"
-        )
+        ASH_LOGGER.warning("git not available or timed out; falling back to full scan")
         return None
 
     if result.returncode != 0:
@@ -382,14 +389,19 @@ def scan_set(
 
     if not ashignore_content:
         ashignore_content = get_ash_ignorespec_lines(
-            source, ignorefile, debug=debug,
+            source,
+            ignorefile,
+            debug=debug,
             _discovered_ignore_files=discovered_ignores,
         )
 
     if not ashscanset_list:
         spec = get_ash_ignorespec(ashignore_content, debug=debug)
         ashscanset_list = get_files_not_matching_spec(
-            source, spec, debug=debug, _all_files=all_files,
+            source,
+            spec,
+            debug=debug,
+            _all_files=all_files,
         )
 
     if output:
