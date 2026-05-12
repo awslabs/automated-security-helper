@@ -305,6 +305,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     ) -> None:
         """Populate runs[0].invocations with timing, exit-code, and command info.
 
+        Also attaches per-result and tool-driver ``scanner_details`` via
+        :func:`attach_scanner_details` so consumers that read
+        ``result.properties.scanner_details.tool_invocation`` continue to
+        see the command line, arguments, working directory, and exit code
+        for migrated scanners. Without this, the un-migrated scanners
+        (ferret/snyk/trivy) populate per-result details inside their own
+        ``scan()`` while migrated scanners would only have the run-level
+        ``invocations[0]`` — see DA r7 #3.
+
         No-op when sarif_report.runs is empty (avoids IndexError on empty reports).
         """
         if success_codes is None:
@@ -313,9 +322,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return
         working_dir = ArtifactLocation(uri=get_shortest_name(input=target))  # type: ignore[call-arg]
         extras = self._invocation_extras(sarif_report, final_args, target)
+        command_line = (
+            shlex.join(str(a) for a in final_args) if final_args else ""
+        )
         sarif_report.runs[0].invocations = [
             Invocation(  # type: ignore[call-arg]
-                commandLine=shlex.join(str(a) for a in final_args) if final_args else "",
+                commandLine=command_line,
                 arguments=final_args[1:],
                 startTimeUtc=self.start_time,
                 endTimeUtc=self.end_time,
@@ -326,6 +338,36 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 **extras,
             )
         ]
+        # Mirror the un-migrated scanner pattern: attach per-result and
+        # tool-driver scanner_details so downstream consumers (and the
+        # ScanResultProcessor's own attach pass) see the same shape they
+        # saw before the template-method refactor (DA r7 #3).
+        from automated_security_helper.utils.sarif_utils import (
+            attach_scanner_details as _attach_scanner_details,
+        )
+
+        scanner_name = (
+            str(self.config.name)
+            if self.config is not None and getattr(self.config, "name", None)
+            else self.__class__.__name__
+        )
+        _attach_scanner_details(
+            sarif_report=sarif_report,
+            scanner_name=scanner_name,
+            scanner_version=getattr(self, "tool_version", None),
+            invocation_details={
+                "command_line": command_line,
+                "arguments": final_args[1:] if final_args else [],
+                "working_directory": get_shortest_name(input=target),
+                "exit_code": self.exit_code,
+                "start_time": self.start_time.isoformat()
+                if self.start_time is not None
+                else None,
+                "end_time": self.end_time.isoformat()
+                if self.end_time is not None
+                else None,
+            },
+        )
 
     def _read_results_file(self, results_file: "Path") -> Optional[dict]:
         """Read and parse the scanner results file as JSON.
