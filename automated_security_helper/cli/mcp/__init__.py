@@ -4,9 +4,15 @@
 """
 MCP (Model Context Protocol) CLI command for ASH.
 
-This module provides a CLI command to start an MCP server that exposes ASH security
-scanning capabilities through the Model Context Protocol. The MCP server allows
-LLMs and other tools to interact with ASH programmatically.
+This package provides a CLI command to start an MCP server that exposes ASH
+security scanning capabilities through the Model Context Protocol. The MCP
+server allows LLMs and other tools to interact with ASH programmatically.
+
+This is a package (rather than a single ``cli/mcp.py`` module) so that
+sibling modules — ``progress_monitor``, ``mcp_tools``, etc. — can live
+alongside the typer command without colliding with Python's import
+resolution. The legacy single-file module previously shadowed the package
+and broke imports when both were present in the tree.
 """
 
 from typing import Annotated
