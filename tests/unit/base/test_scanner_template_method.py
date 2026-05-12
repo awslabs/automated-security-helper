@@ -347,6 +347,73 @@ class TestTemplateScanCallsPostScan:
 
 
 class TestInjectInvocationHelper:
+    def test_attaches_per_result_scanner_details(self, plugin_context, scanner_config):
+        """DA r7 #3 — migrated scanners must populate per-result scanner_details.
+
+        Before this fix, the template-method path only injected
+        runs[0].invocations[0]; per-result properties.scanner_details and
+        tool.driver.properties.scanner_details were left empty for
+        bandit/semgrep/opengrep. Downstream consumers reading
+        ``result.properties.scanner_details.tool_invocation`` would see
+        an empty dict.
+        """
+        scanner = _make_scanner(plugin_context, scanner_config)
+        # Build a SARIF report with one result so we can verify per-result
+        # attach reaches it.
+        from datetime import datetime, timezone
+        from automated_security_helper.schemas.sarif_schema_model import (
+            ArtifactLocation,
+            Location,
+            Message,
+            PhysicalLocation,
+            Result,
+        )
+
+        location = Location(
+            physicalLocation=PhysicalLocation(
+                artifactLocation=ArtifactLocation(uri="src/foo.py"),
+            )
+        )
+        result = Result(message=Message(text="finding"), locations=[location])
+        report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name="stub")),
+                    results=[result],
+                )
+            ],
+        )
+        scanner.start_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        scanner.end_time = datetime(2025, 1, 1, 12, 0, 5, tzinfo=timezone.utc)
+        scanner.exit_code = 0
+        scanner.errors = []
+
+        final_args = ["stub-tool", "--flag", "val", "src"]
+        target = plugin_context.source_dir
+        scanner._inject_invocation(report, final_args, target)
+
+        # Tool driver gets scanner_details.tool_invocation populated
+        driver_props = report.runs[0].tool.driver.properties
+        assert driver_props is not None
+        sd = getattr(driver_props, "scanner_details", None)
+        assert sd is not None, "tool.driver.properties.scanner_details missing"
+        invocation = sd.get("tool_invocation")
+        assert invocation is not None, "tool_invocation missing on tool driver"
+        assert invocation["command_line"] == "stub-tool --flag val src"
+        assert invocation["exit_code"] == 0
+
+        # Per-result properties.scanner_details also populated
+        first_result = report.runs[0].results[0]
+        assert first_result.properties is not None
+        per_result_sd = getattr(first_result.properties, "scanner_details", None)
+        assert per_result_sd is not None, (
+            "result.properties.scanner_details missing — DA r7 #3 regression"
+        )
+        per_result_invocation = per_result_sd.get("tool_invocation")
+        assert per_result_invocation is not None
+        assert per_result_invocation["command_line"] == "stub-tool --flag val src"
+
     def test_populates_command_line(self, plugin_context, scanner_config):
         scanner = _make_scanner(plugin_context, scanner_config)
         report = SarifReport(
