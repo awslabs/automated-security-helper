@@ -647,6 +647,10 @@ async def get_scan_results(
         if scanners or severities:
             results = _apply_content_filters(results, scanners, severities)
 
+        # When actionable_only is requested, extract a flat findings list for easy consumption
+        if actionable_only:
+            results = _add_findings_list(results)
+
         # Apply response size filter based on parameter
         if filter_level == "full":
             # Return full results for backward compatibility
@@ -773,18 +777,58 @@ def _filter_minimal(results: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _get_finding_severity(result: Dict[str, Any]) -> str:
+    """
+    Determine the severity of a SARIF finding.
+
+    Checks explicit issue_severity in properties first, then falls back to
+    mapping the SARIF level to a severity string.
+
+    Args:
+        result: A single SARIF result dict
+
+    Returns:
+        Uppercase severity string (CRITICAL, HIGH, MEDIUM, LOW, INFO)
+    """
+    # SARIF level -> severity mapping
+    _SARIF_LEVEL_TO_SEVERITY = {
+        "error": "CRITICAL",
+        "warning": "MEDIUM",
+        "note": "LOW",
+        "none": "INFO",
+    }
+
+    # Check explicit issue_severity in properties first
+    props = result.get("properties", {}) or {}
+    issue_severity = (props.get("issue_severity") or "").upper()
+    if issue_severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+        return issue_severity
+
+    # Fall back to SARIF level mapping
+    level = (result.get("level") or "note").lower()
+    return _SARIF_LEVEL_TO_SEVERITY.get(level, "LOW")
+
+
+def _is_finding_suppressed(result: Dict[str, Any]) -> bool:
+    """Check if a SARIF finding is suppressed."""
+    suppressions = result.get("suppressions")
+    return bool(suppressions and len(suppressions) > 0)
+
+
 def _filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Filter results to exclude suppressed findings.
+    Filter results to exclude suppressed findings and return only actionable findings.
 
     This removes findings that have been marked as false positives or accepted risks,
-    returning only actionable findings that require attention.
+    returning only actionable findings that require attention. The SARIF results are
+    filtered to contain only non-suppressed findings.
 
     Args:
         results: The full scan results
 
     Returns:
-        Filtered results with suppressed findings excluded
+        Filtered results with suppressed findings excluded and SARIF results
+        containing only actionable findings
     """
     import copy
 
@@ -801,10 +845,7 @@ def _filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
                     run["results"] = [
                         result
                         for result in run["results"]
-                        if not (
-                            result.get("suppressions")
-                            and len(result.get("suppressions", [])) > 0
-                        )
+                        if not _is_finding_suppressed(result)
                     ]
 
     # Update summary stats to reflect only actionable findings
@@ -839,11 +880,75 @@ def _filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
     return filtered_results
 
 
+def _add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract a flat list of actionable findings from SARIF results and add it
+    to the top level of the response for easy consumption.
+
+    This provides a clear, focused list of findings that require attention,
+    rather than requiring consumers to navigate the nested SARIF structure.
+
+    Args:
+        results: The filtered scan results (after actionable_only and severity filters)
+
+    Returns:
+        Results with an added top-level 'findings' list
+    """
+    findings_list = []
+
+    # Extract findings from SARIF runs
+    sarif = results.get("raw_results", {}).get("sarif", {})
+    if "runs" in sarif:
+        for run in sarif["runs"]:
+            for result in run.get("results", []):
+                props = result.get("properties", {}) or {}
+                locations = result.get("locations", [])
+
+                # Extract location info
+                file_path = None
+                line_start = None
+                line_end = None
+                if locations:
+                    phys_loc = (
+                        locations[0].get("physicalLocation", {}) if locations else {}
+                    )
+                    artifact_loc = phys_loc.get("artifactLocation", {})
+                    file_path = artifact_loc.get("uri")
+                    region = phys_loc.get("region", {})
+                    line_start = region.get("startLine")
+                    line_end = region.get("endLine")
+
+                finding = {
+                    "rule_id": result.get("ruleId"),
+                    "severity": _get_finding_severity(result),
+                    "message": (
+                        result.get("message", {}).get("text")
+                        or result.get("message", {}).get("markdown")
+                    ),
+                    "scanner": props.get("scanner_name"),
+                    "file_path": file_path,
+                    "line_start": line_start,
+                    "line_end": line_end,
+                }
+
+                # Only include non-None values
+                finding = {k: v for k, v in finding.items() if v is not None}
+                findings_list.append(finding)
+
+    results["findings"] = findings_list
+    results["findings_count"] = len(findings_list)
+
+    return results
+
+
 def _apply_content_filters(
     results: Dict[str, Any], scanners: str = None, severities: str = None
 ) -> Dict[str, Any]:
     """
     Filter results by scanner names and/or severity levels.
+
+    This filters both the metadata (severity_counts, scanner_results) AND the actual
+    SARIF findings to only include results matching the specified criteria.
 
     Args:
         results: The full scan results
@@ -865,6 +970,30 @@ def _apply_content_filters(
 
     # Create a deep copy to avoid modifying the original
     filtered_results = copy.deepcopy(results)
+
+    # Filter SARIF findings by scanner and/or severity
+    if "raw_results" in filtered_results and "sarif" in filtered_results["raw_results"]:
+        sarif = filtered_results["raw_results"]["sarif"]
+        if "runs" in sarif:
+            for run in sarif["runs"]:
+                if "results" in run and run["results"]:
+                    filtered_sarif_results = []
+                    for result in run["results"]:
+                        # Filter by scanner name if specified
+                        if scanner_list:
+                            props = result.get("properties", {}) or {}
+                            result_scanner = (props.get("scanner_name") or "").lower()
+                            if result_scanner and result_scanner not in scanner_list:
+                                continue
+
+                        # Filter by severity if specified
+                        if severity_list:
+                            finding_severity = _get_finding_severity(result).lower()
+                            if finding_severity not in severity_list:
+                                continue
+
+                        filtered_sarif_results.append(result)
+                    run["results"] = filtered_sarif_results
 
     # Filter scanner_reports
     if "scanner_reports" in filtered_results and scanner_list:
@@ -955,6 +1084,16 @@ def _apply_content_filters(
                 "suppressed",
             ]:
                 filtered_summary_stats[key] = 0
+        # Recalculate actionable based on filtered severity counts if it existed
+        if "actionable" in filtered_summary_stats:
+            severity_keys = ["critical", "high", "medium", "low", "info"]
+            new_actionable = sum(
+                filtered_summary_stats.get(k, 0) for k in severity_keys
+            )
+            filtered_summary_stats["actionable"] = new_actionable
+            filtered_summary_stats["total"] = (
+                new_actionable + filtered_summary_stats.get("suppressed", 0)
+            )
         filtered_results["summary_stats"] = filtered_summary_stats
 
     # Add filter metadata
