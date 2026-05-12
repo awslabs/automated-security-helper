@@ -9,6 +9,10 @@ from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     UVToolRunnerError,
     UVToolRetryConfig,
+    _reset_uv_tool_runner_caches,
+    find_executable,
+    find_uv_or_none,
+    get_uv_tool_command,
     get_uv_tool_runner,
 )
 
@@ -306,3 +310,270 @@ class TestGetInstalledToolVersion:
             ]
             result = runner.get_installed_tool_version("bandit")
             assert result == "1.7.0"
+
+
+# ---------------------------------------------------------------------------
+# Module-level fallback helpers: find_uv_or_none / find_executable /
+# get_uv_tool_command.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def reset_module_caches():
+    _reset_uv_tool_runner_caches()
+    yield
+    _reset_uv_tool_runner_caches()
+
+
+class TestFindUvOrNone:
+    """Tests for find_uv_or_none."""
+
+    def test_returns_none_when_uv_not_on_path(self, monkeypatch, reset_module_caches):
+        monkeypatch.setenv("PATH", "")
+        with patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value=None,
+        ):
+            assert find_uv_or_none() is None
+
+    def test_returns_path_when_uv_present(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value="/opt/uv/bin/uv",
+        ):
+            assert find_uv_or_none() == "/opt/uv/bin/uv"
+
+    def test_memoizes_result(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value="/opt/uv/bin/uv",
+        ) as mock_find:
+            find_uv_or_none()
+            find_uv_or_none()
+            assert mock_find.call_count == 1
+
+
+class TestFindExecutable:
+    """Tests for the module-level find_executable wrapper."""
+
+    def test_returns_path_when_found(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value="/usr/local/bin/bandit",
+        ):
+            assert find_executable("bandit") == "/usr/local/bin/bandit"
+
+    def test_returns_none_when_missing(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value=None,
+        ):
+            assert find_executable("nope") is None
+
+    def test_memoizes_result(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value="/usr/local/bin/bandit",
+        ) as mock_find:
+            find_executable("bandit")
+            find_executable("bandit")
+            assert mock_find.call_count == 1
+
+
+class TestGetUvToolCommand:
+    """Tests for get_uv_tool_command."""
+
+    def test_returns_uv_form_when_probe_succeeds(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value="/opt/uv/bin/uv",
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="bandit 1.7\n", stderr=""
+            )
+            cmd = get_uv_tool_command("bandit")
+            assert cmd == ["uv", "tool", "run", "bandit"]
+            assert mock_run.call_count == 1
+
+    def test_falls_back_to_direct_binary_when_uv_probe_fails(
+        self, reset_module_caches
+    ):
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value="/opt/uv/bin/uv",
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run, patch(
+            "automated_security_helper.utils.uv_tool_runner.find_executable",
+            return_value="/usr/local/bin/bandit",
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr="not found"
+            )
+            cmd = get_uv_tool_command("bandit")
+            assert cmd == ["/usr/local/bin/bandit"]
+
+    def test_falls_back_to_direct_binary_when_uv_missing(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value=None,
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.find_executable",
+            return_value="/usr/local/bin/bandit",
+        ):
+            cmd = get_uv_tool_command("bandit")
+            assert cmd == ["/usr/local/bin/bandit"]
+
+    def test_returns_none_when_neither_works(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value=None,
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.find_executable",
+            return_value=None,
+        ):
+            assert get_uv_tool_command("bandit") is None
+
+    def test_handles_uv_probe_subprocess_error(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value="/opt/uv/bin/uv",
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=30),
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.find_executable",
+            return_value="/usr/local/bin/bandit",
+        ):
+            cmd = get_uv_tool_command("bandit")
+            assert cmd == ["/usr/local/bin/bandit"]
+
+    def test_uses_fallback_binary_override(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value=None,
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.find_executable",
+        ) as mock_find:
+            mock_find.return_value = "/usr/local/bin/detect-secrets"
+            cmd = get_uv_tool_command(
+                "detect-secrets", fallback_binary="detect-secrets"
+            )
+            assert cmd == ["/usr/local/bin/detect-secrets"]
+            mock_find.assert_called_once_with("detect-secrets")
+
+    def test_memoizes_result_no_re_probe(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value="/opt/uv/bin/uv",
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="ok\n", stderr=""
+            )
+            first = get_uv_tool_command("bandit")
+            second = get_uv_tool_command("bandit")
+            assert first == second == ["uv", "tool", "run", "bandit"]
+            assert mock_run.call_count == 1
+
+    def test_memoizes_negative_result(self, reset_module_caches):
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value=None,
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.find_executable",
+            return_value=None,
+        ) as mock_find:
+            assert get_uv_tool_command("bandit") is None
+            assert get_uv_tool_command("bandit") is None
+            assert mock_find.call_count == 1
+
+
+class TestGetUvToolCommandThreadSafety:
+    """Concurrency tests for the module-level cache (DA r4 #3).
+
+    Twenty threads race on the same cache key with a slow probe. The single
+    shared lock around the cache guarantees:
+
+    1. The probe subprocess is invoked exactly once.
+    2. Every thread observes the same return value.
+    3. No ``None`` value ever leaks to a caller during the racing window.
+    """
+
+    def test_probe_runs_exactly_once_under_thread_race(self, reset_module_caches):
+        import threading
+        import time
+
+        call_count = {"n": 0}
+        call_lock = threading.Lock()
+
+        def slow_probe(*_args, **_kwargs):
+            # Simulate a real subprocess that takes long enough for other
+            # threads to pile up at the cache. Without the cache lock, all
+            # 20 would launch their own probe.
+            with call_lock:
+                call_count["n"] += 1
+            time.sleep(0.05)
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="bandit 1.7\n", stderr=""
+            )
+
+        results: list = []
+        none_observations: list = []
+        results_lock = threading.Lock()
+        barrier = threading.Barrier(20)
+
+        def worker():
+            barrier.wait()  # Maximize the race window.
+            cmd = get_uv_tool_command("bandit")
+            with results_lock:
+                results.append(cmd)
+                if cmd is None:
+                    none_observations.append(cmd)
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value="/opt/uv/bin/uv",
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            side_effect=slow_probe,
+        ):
+            threads = [threading.Thread(target=worker) for _ in range(20)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+
+        # 1. Probe ran exactly once across the racing window.
+        assert call_count["n"] == 1, (
+            f"expected exactly one probe call, got {call_count['n']}"
+        )
+        # 2. All threads observed the same successful result.
+        assert len(results) == 20
+        expected = ["uv", "tool", "run", "bandit"]
+        assert all(r == expected for r in results), results
+        # 3. No transient ``None`` leak.
+        assert none_observations == [], (
+            f"unexpected None leak during racing window: {none_observations}"
+        )
+
+    def test_probe_uses_5s_timeout(self, reset_module_caches):
+        """The version probe timeout is 5 s, not 30 s (DA r4 #5)."""
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+            return_value="/opt/uv/bin/uv",
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="ok\n", stderr=""
+            )
+            get_uv_tool_command("bandit")
+            assert mock_run.call_count == 1
+            _, kwargs = mock_run.call_args
+            assert kwargs.get("timeout") == 5, (
+                f"expected 5 s probe timeout, got {kwargs.get('timeout')}"
+            )

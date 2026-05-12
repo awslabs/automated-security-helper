@@ -9,7 +9,6 @@ Tests cover server initialization, tool registration, request handling,
 error responses, and helper functions in the mcp_server module.
 """
 
-import asyncio
 import copy
 import json
 from pathlib import Path
@@ -736,7 +735,7 @@ class TestGetScanSummary:
             )
 
         assert result["success"] is True
-        assert result["_source_function"] == "get_scan_summary"
+        assert result["_filter"] == "summary"
         assert "findings_summary" in result
         assert "scanner_summary" in result
         assert "metadata" in result
@@ -1180,136 +1179,6 @@ class TestFilterHelpers:
 # ---------------------------------------------------------------------------
 # _monitor_scan_progress background task
 # ---------------------------------------------------------------------------
-
-
-class TestMonitorScanProgress:
-    """Tests for the _monitor_scan_progress background coroutine."""
-
-    @pytest.mark.asyncio
-    async def test_monitor_completes_when_results_file_appears(
-        self, mock_ctx, tmp_path
-    ):
-        """Monitor exits when aggregated results file is detected."""
-        from automated_security_helper.cli.mcp_server import _monitor_scan_progress
-
-        # Create the output structure with results file present
-        output_dir = tmp_path / ".ash" / "ash_output"
-        output_dir.mkdir(parents=True)
-        results_file = output_dir / "ash_aggregated_results.json"
-        results_file.write_text("{}")
-
-        initial_progress = {
-            "success": True,
-            "directory_path": str(tmp_path),
-        }
-
-        final_results = {"success": True, "findings_count": 0, "severity_counts": {}}
-
-        with (
-            patch(
-                "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
-                new_callable=AsyncMock,
-                return_value=initial_progress,
-            ),
-            patch(
-                "automated_security_helper.cli.mcp_server.mcp_get_scan_results",
-                new_callable=AsyncMock,
-                return_value=final_results,
-            ),
-        ):
-            # Should complete without hanging
-            await asyncio.wait_for(
-                _monitor_scan_progress(mock_ctx, "scan-123"),
-                timeout=5.0,
-            )
-
-        # Should have reported final progress
-        mock_ctx.report_progress.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_monitor_handles_failed_scan(self, mock_ctx, tmp_path):
-        """Monitor exits when scan status becomes failed."""
-        from automated_security_helper.cli.mcp_server import _monitor_scan_progress
-
-        # First call returns directory info, second returns failed status
-        call_count = 0
-
-        async def mock_progress(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return {"success": True, "directory_path": str(tmp_path)}
-            return {
-                "success": True,
-                "status": "failed",
-                "error_message": "Scanner crashed",
-            }
-
-        # Create the output dir (no results file)
-        output_dir = tmp_path / ".ash" / "ash_output"
-        output_dir.mkdir(parents=True)
-
-        with patch(
-            "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
-            new_callable=AsyncMock,
-            side_effect=mock_progress,
-        ):
-            await asyncio.wait_for(
-                _monitor_scan_progress(mock_ctx, "scan-fail"),
-                timeout=10.0,
-            )
-
-        mock_ctx.error.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_monitor_handles_initial_failure(self, mock_ctx):
-        """Monitor exits early when initial progress fetch fails."""
-        from automated_security_helper.cli.mcp_server import _monitor_scan_progress
-
-        with patch(
-            "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
-            new_callable=AsyncMock,
-            return_value={"success": False, "error": "Not found"},
-        ):
-            await asyncio.wait_for(
-                _monitor_scan_progress(mock_ctx, "scan-bad"),
-                timeout=5.0,
-            )
-
-        mock_ctx.error.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_monitor_handles_cancellation(self, mock_ctx, tmp_path):
-        """Monitor handles asyncio.CancelledError gracefully without propagating."""
-        from automated_security_helper.cli.mcp_server import _monitor_scan_progress
-
-        initial_progress = {
-            "success": True,
-            "directory_path": str(tmp_path),
-        }
-
-        # Create output dir but no results file
-        output_dir = tmp_path / ".ash" / "ash_output"
-        output_dir.mkdir(parents=True)
-
-        call_count = 0
-
-        async def mock_progress(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return initial_progress
-            # Raise CancelledError to simulate task cancellation during polling
-            raise asyncio.CancelledError()
-
-        with patch(
-            "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
-            new_callable=AsyncMock,
-            side_effect=mock_progress,
-        ):
-            # The function catches CancelledError internally, so it should
-            # complete without raising.
-            await asyncio.wait_for(
-                _monitor_scan_progress(mock_ctx, "scan-cancel"),
-                timeout=5.0,
-            )
+# Tests for the relocated `monitor_scan_progress` coroutine now live in
+# tests/unit/cli/mcp/test_progress_monitor.py — that file targets the new
+# import path (automated_security_helper.cli.mcp.progress_monitor) directly.

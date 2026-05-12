@@ -4,6 +4,7 @@
 """Module containing the Ferret Scan sensitive data detection scanner implementation."""
 
 import json
+import shlex
 import logging
 import re
 import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked via subprocess
@@ -729,6 +730,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
         return args
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — FerretScanScanner overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
+
     def scan(
         self,
         target: Path,
@@ -871,7 +878,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 if sarif_report.runs:
                     sarif_report.runs[0].invocations = [
                         Invocation(
-                            commandLine=" ".join(final_args),
+                            commandLine=shlex.join(final_args),
                             arguments=final_args[1:],
                             startTimeUtc=self.start_time,
                             endTimeUtc=self.end_time,

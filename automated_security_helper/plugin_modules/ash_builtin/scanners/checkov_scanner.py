@@ -1,6 +1,5 @@
 """Module containing the Checkov security scanner implementation."""
 
-import json
 import logging
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
@@ -19,14 +18,12 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
-    ArtifactLocation,
-    Invocation,
     SarifReport,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
 CheckFrameworks = Literal[
@@ -191,8 +188,12 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # First validate UV tool availability if required
         if not self._validate_uv_tool_availability():
+            # UV missing — defer to consolidated resolver for direct binary.
+            if get_uv_tool_command(self.command) is not None:
+                self.use_uv_tool = False
+                self.dependencies_satisfied = True
+                return True
             return False
 
         # For UV tool-based scanners, attempt explicit installation if needed
@@ -223,16 +224,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 self._plugin_log("Successfully installed checkov via UV tool")
                 self.dependencies_satisfied = True
                 return True
-            else:
-                self._plugin_log(
-                    "UV tool installation failed for checkov, falling back to existing validation",
-                    level=logging.WARNING,
-                )
-                # Fall back to existing validation logic
-                return super().validate_plugin_dependencies()
 
-        # Fall back to base class validation for non-UV tool scenarios
-        return super().validate_plugin_dependencies()
+            self._plugin_log(
+                "UV tool installation failed for checkov, falling back to consolidated resolver",
+                level=logging.WARNING,
+            )
+
+        # Final fallback: consolidated UV-or-direct-binary resolver.
+        return get_uv_tool_command(self.command) is not None
 
     def _process_config_options(self):
         # Checkov config path
@@ -297,109 +296,26 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         return super()._process_config_options()
 
-    def scan(
+    def _execute_scan(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: CheckovScannerConfig | None = None,
-    ) -> SarifReport | bool:
-        """Execute Checkov scan and return results.
+        global_ignore_paths: List[IgnorePathWithReason],
+    ):
+        """Resolve final argv and results path for Checkov.
 
-        Args:
-            target: Path to scan
-
-        Returns:
-            SarifReport containing the scan findings and metadata
-
-        Raises:
-            ScannerError: If the scan fails or results cannot be parsed
+        Checkov writes results into a directory and chooses the filename;
+        we point ``--output-file-path`` at the parent dir but read
+        ``results_sarif.sarif`` from inside it.
         """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-        # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
-            message = (
-                f"Target directory {target} is empty or doesn't exist. Skipping scan."
-            )
-            self._plugin_log(
-                message,
-                target_type=target_type,
-                level=logging.INFO,
-                append_to_stream="stderr",
-            )
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return True
+        target_results_dir = self.results_dir.joinpath(target_type)
+        results_file = target_results_dir.joinpath("results_sarif.sarif")
+        results_file.parent.mkdir(exist_ok=True, parents=True)
 
-        validated = self._pre_scan(
+        final_args = self._resolve_arguments(
             target=target,
-            target_type=target_type,
-            config=config,
+            # We want to use the parent here, not the results_file, as Checkov is expecting the output
+            # directory and not the file name.
+            results_file=target_results_dir,
         )
-        if not validated:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-
-        if not self.dependencies_satisfied:
-            return False
-
-        try:
-            target_results_dir = self.results_dir.joinpath(target_type)
-            results_file = target_results_dir.joinpath("results_sarif.sarif")
-            results_file.parent.mkdir(exist_ok=True, parents=True)
-
-            final_args = self._resolve_arguments(
-                target=target,
-                # We want to use the parent here, not the results_file, as Checkov is expecting the output
-                # directory and not the file name.
-                results_file=target_results_dir,
-            )
-            self._run_subprocess(
-                command=final_args,
-                results_dir=target_results_dir,
-            )
-
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-
-            checkov_results = {}
-            Path(results_file).parent.mkdir(exist_ok=True, parents=True)
-            with open(results_file, mode="r", encoding="utf-8") as f:
-                checkov_results = json.load(f)
-            try:
-                sarif_report: SarifReport = SarifReport.model_validate(checkov_results)
-                if sarif_report.runs:
-                    sarif_report.runs[0].invocations = [
-                        Invocation(
-                            commandLine=final_args[0],
-                            arguments=final_args[1:],
-                            startTimeUtc=self.start_time,
-                            endTimeUtc=self.end_time,
-                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
-                            exitCode=self.exit_code,
-                            exitCodeDescription="\n".join(self.errors),
-                            workingDirectory=ArtifactLocation(
-                                uri=get_shortest_name(input=target),
-                            ),
-                        )
-                    ]
-            except Exception as e:
-                ASH_LOGGER.warning(
-                    f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}"
-                )
-                sarif_report = checkov_results
-
-            return sarif_report
-
-        except Exception as e:
-            # Check if there are useful error details
-            raise ScannerError(f"Checkov scan failed: {str(e)}")
+        return final_args, results_file, None

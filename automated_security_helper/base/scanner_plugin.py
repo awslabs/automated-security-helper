@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+import json
 import logging
 import re
+import shlex
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.plugin_config import PluginConfigBase
@@ -8,12 +10,13 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
-from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.schemas.sarif_schema_model import ArtifactLocation, Invocation, SarifReport
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 from pydantic import Field
-from typing import Annotated, Any, ClassVar, Generic, List, Literal, Optional, TypeVar
+from typing import Annotated, Any, ClassVar, Generic, List, Literal, Optional, Set, Tuple, TypeVar
 from abc import abstractmethod
 
 # Pattern for valid CLI flag keys: one or two leading dashes followed by
@@ -271,6 +274,262 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             level=logging.INFO,
         )
 
+    # Exit codes considered "successful". Grype uses {0, 2}; the default set
+    # works for bandit/checkov/etc. Override on subclasses where the scanner
+    # has a different convention.
+    success_exit_codes: ClassVar[Set[int]] = {0, 1}
+
+    # Log level used for the empty-target preamble message. Defaults to INFO;
+    # bandit overrides to VERBOSE since python-only repos commonly trip it.
+    empty_target_log_level: ClassVar[int] = logging.INFO
+
+    def _invocation_extras(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: "Path",
+    ) -> dict:
+        """Return additional Invocation kwargs (e.g. ``properties``).
+
+        Default returns an empty dict. Override to attach scanner-specific
+        Invocation fields like a PropertyBag. Called from ``_inject_invocation``.
+        """
+        return {}
+
+    def _inject_invocation(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: "Path",
+        success_codes: Optional[Set[int]] = None,
+    ) -> None:
+        """Populate runs[0].invocations with timing, exit-code, and command info.
+
+        Also attaches per-result and tool-driver ``scanner_details`` via
+        :func:`attach_scanner_details` so consumers that read
+        ``result.properties.scanner_details.tool_invocation`` continue to
+        see the command line, arguments, working directory, and exit code
+        for migrated scanners. Without this, the un-migrated scanners
+        (ferret/snyk/trivy) populate per-result details inside their own
+        ``scan()`` while migrated scanners would only have the run-level
+        ``invocations[0]`` — see DA r7 #3.
+
+        No-op when sarif_report.runs is empty (avoids IndexError on empty reports).
+        """
+        if success_codes is None:
+            success_codes = self.success_exit_codes
+        if not sarif_report.runs:
+            return
+        working_dir = ArtifactLocation(uri=get_shortest_name(input=target))  # type: ignore[call-arg]
+        extras = self._invocation_extras(sarif_report, final_args, target)
+        command_line = (
+            shlex.join(str(a) for a in final_args) if final_args else ""
+        )
+        sarif_report.runs[0].invocations = [
+            Invocation(  # type: ignore[call-arg]
+                commandLine=command_line,
+                arguments=final_args[1:],
+                startTimeUtc=self.start_time,
+                endTimeUtc=self.end_time,
+                executionSuccessful=(self.exit_code in success_codes),
+                exitCode=self.exit_code,
+                exitCodeDescription="\n".join(self.errors) if self.errors else "",
+                workingDirectory=working_dir,
+                **extras,
+            )
+        ]
+        # Mirror the un-migrated scanner pattern: attach per-result and
+        # tool-driver scanner_details so downstream consumers (and the
+        # ScanResultProcessor's own attach pass) see the same shape they
+        # saw before the template-method refactor (DA r7 #3).
+        from automated_security_helper.utils.sarif_utils import (
+            attach_scanner_details as _attach_scanner_details,
+        )
+
+        scanner_name = (
+            str(self.config.name)
+            if self.config is not None and getattr(self.config, "name", None)
+            else self.__class__.__name__
+        )
+        _attach_scanner_details(
+            sarif_report=sarif_report,
+            scanner_name=scanner_name,
+            scanner_version=getattr(self, "tool_version", None),
+            invocation_details={
+                "command_line": command_line,
+                "arguments": final_args[1:] if final_args else [],
+                "working_directory": get_shortest_name(input=target),
+                "exit_code": self.exit_code,
+                "start_time": self.start_time.isoformat()
+                if self.start_time is not None
+                else None,
+                "end_time": self.end_time.isoformat()
+                if self.end_time is not None
+                else None,
+            },
+        )
+
+    def _read_results_file(self, results_file: "Path") -> Optional[dict]:
+        """Read and parse the scanner results file as JSON.
+
+        Default reads the file as JSON. Subclasses may override to add
+        empty-file detection or alternative parsing. Return None to signal
+        an empty/missing result that should be replaced with the default
+        empty SARIF report (see ``_handle_empty_results``).
+        """
+        with open(results_file, mode="r", encoding="utf-8") as fh:
+            content = fh.read()
+        if not content or content.strip() == "":
+            return None
+        return json.loads(content)
+
+    def _handle_empty_results(self) -> SarifReport:
+        """Return a SARIF report representing an empty/missing scanner result.
+
+        Default returns an empty SARIF 2.1.0 report with no runs. Override
+        if a scanner needs richer empty-state handling.
+        """
+        return SarifReport(  # type: ignore[call-arg]
+            version="2.1.0",
+            runs=[],
+        )
+
+    def _ensure_runs(self, sarif_report: SarifReport) -> None:
+        """Ensure ``sarif_report.runs`` is non-empty before invocation injection.
+
+        Default no-op. Override (e.g. Grype) to synthesize a fallback Run
+        when the scanner produces a SARIF report with zero runs but the
+        template still needs to attach an invocation.
+        """
+        return None
+
+    def _post_process_sarif(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: "Path",
+    ) -> SarifReport:
+        """Apply scanner-specific tweaks to a SARIF report after invocation injection.
+
+        Default returns the report unchanged. Override to normalize URIs,
+        mask secrets, attach scanner details, etc.
+        """
+        return sarif_report
+
+    @abstractmethod
+    def _execute_scan(
+        self,
+        target: "Path",
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], "Path", Optional[dict]]:
+        """Run the scanner tool and return (final_args, results_file, subprocess_env).
+
+        Abstract template-method hook. Subclasses that use the default
+        `scan()` template MUST implement this with real tool-invocation
+        logic. Subclasses that override `scan()` directly (e.g. Python-API
+        scanners, file-iterating scanners) must still satisfy the abstract
+        contract — provide a one-line stub that raises NotImplementedError
+        so ABC can verify the interface at class-definition time and the
+        stub is never reached at runtime.
+
+        Returns:
+            (final_args, results_file, subprocess_env) where subprocess_env is
+            a dict merged with os.environ (or None to inherit the parent env).
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement _execute_scan() "
+            "or override scan() directly."
+        )
+
+    def scan(
+        self,
+        target: "Path",
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
+        config: "T | ScannerPluginConfigBase | None" = None,
+        *args,
+        **kwargs,
+    ) -> Any | SarifReport | CycloneDXReport:
+        """Template scan: preamble → _execute_scan → read result → inject invocation → postamble.
+
+        Subclasses with bespoke logic (file-iteration, Python-API scanners) should
+        override this method directly and leave _execute_scan unimplemented.
+        """
+        if global_ignore_paths is None:
+            global_ignore_paths = []
+
+        if not target.exists() or not any(target.iterdir()):
+            self._plugin_log(
+                f"Target directory {target} is empty or doesn't exist. Skipping scan.",
+                target_type=target_type,
+                level=self.empty_target_log_level,
+                append_to_stream="stderr",
+            )
+            self._post_scan(target=target, target_type=target_type)
+            return True
+
+        validated = self._pre_scan(
+            target=target,
+            target_type=target_type,
+            config=config,
+        )
+        if not validated:
+            self._post_scan(target=target, target_type=target_type)
+            return False
+
+        if not self.dependencies_satisfied:
+            self._post_scan(target=target, target_type=target_type)
+            return False
+
+        try:
+            final_args, results_file, subprocess_env = self._execute_scan(
+                target=target,
+                target_type=target_type,
+                global_ignore_paths=global_ignore_paths,
+            )
+
+            self._run_subprocess(
+                command=final_args,
+                results_dir=results_file.parent,
+                env=subprocess_env,
+            )
+
+            self._post_scan(target=target, target_type=target_type)
+
+            raw = self._read_results_file(results_file)
+            if raw is None:
+                # Empty result file: defer to _handle_empty_results so
+                # subclasses can log or build a richer fallback report.
+                error_msg = (
+                    f"{self.__class__.__name__} results file is empty "
+                    f"(exit code: {self.exit_code}). "
+                )
+                if self.errors:
+                    error_msg += f"Stderr: {' '.join(self.errors)}"
+                else:
+                    error_msg += "No stderr output captured."
+                ASH_LOGGER.warning(error_msg)
+                return self._handle_empty_results()
+
+            try:
+                sarif_report: SarifReport = SarifReport.model_validate(raw)
+                self._ensure_runs(sarif_report)
+                self._inject_invocation(sarif_report, final_args, target)
+                sarif_report = self._post_process_sarif(
+                    sarif_report, final_args, target
+                )
+            except Exception as e:
+                ASH_LOGGER.warning(
+                    f"Failed to parse {self.__class__.__name__} results as SARIF: {e}"
+                )
+                sarif_report = raw  # type: ignore[assignment]
+
+            return sarif_report
+
+        except Exception as e:
+            raise ScannerError(f"{self.__class__.__name__} scan failed: {e}")
+
     ### Methods that require implementation by plugins.
     def validate_plugin(self) -> bool:
         """Validate scanner configuration and requirements."""
@@ -305,30 +564,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
             self.dependencies_satisfied = False
             return False
-
-    @abstractmethod
-    def scan(
-        self,
-        target: Path,
-        target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: T | ScannerPluginConfigBase | None = None,
-        *args,
-        **kwargs,
-    ) -> Any | SarifReport | CycloneDXReport:
-        """Execute scanner against a target.
-
-        Args:
-            *args: Variable length argument list
-            **kwargs: Arbitrary keyword arguments
-
-        Returns:
-            Any | SarifReport | CycloneDxReport: Full scan results
-
-        Raises:
-            ScannerError: if scanning failed for any reason
-        """
-        pass
 
     def safe_scan(
         self,
