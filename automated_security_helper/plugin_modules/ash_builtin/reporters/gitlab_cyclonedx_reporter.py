@@ -82,6 +82,24 @@ PURL_TYPE_TO_GITLAB: dict[str, tuple[str, str]] = {
     "rpm": ("yum", ""),
 }
 
+# Default lockfile/manifest names per ecosystem, used as a last-resort fallback
+# for the metadata-level ``input_file:path`` when Syft doesn't report a location.
+_DEFAULT_LOCKFILES: dict[str, str] = {
+    "npm": "package-lock.json",
+    "pypi": "requirements.txt",
+    "gem": "Gemfile.lock",
+    "golang": "go.sum",
+    "maven": "pom.xml",
+    "cargo": "Cargo.lock",
+    "composer": "composer.lock",
+    "nuget": "packages.lock.json",
+    "pub": "pubspec.lock",
+    "cocoapods": "Podfile.lock",
+    "hex": "mix.lock",
+    "python": "requirements.txt",
+    "go-module": "go.sum",
+}
+
 
 # ---------------------------------------------------------------------------
 # Config
@@ -312,6 +330,53 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
             self.config = GitLabCycloneDXReporterConfig()
         return super().model_post_init(context)
 
+    def _resolve_dominant_type(
+        self,
+        components: list[dict],
+        options: GitLabCycloneDXReporterConfigOptions,
+    ) -> str | None:
+        """Determine the dominant ecosystem type across all components.
+
+        Uses config override if set, otherwise counts PURL types and
+        syft:package:type values to find the most common one.
+        """
+        if options.package_manager_override:
+            # Find the matching type key for the override
+            for purl_type, (pm, _) in PURL_TYPE_TO_GITLAB.items():
+                if pm == options.package_manager_override:
+                    return purl_type
+            for syft_type, (pm, _) in SYFT_TYPE_TO_GITLAB.items():
+                if pm == options.package_manager_override:
+                    return syft_type
+
+        from collections import Counter
+
+        types: Counter[str] = Counter()
+        for component in components:
+            # Try syft:package:type first
+            syft_type = _get_component_property(component, "syft:package:type")
+            if syft_type and syft_type in SYFT_TYPE_TO_GITLAB:
+                types[syft_type] += 1
+                continue
+            # Fallback to PURL type
+            purl_type = _extract_purl_type(component.get("purl"))
+            if purl_type and purl_type in PURL_TYPE_TO_GITLAB:
+                types[purl_type] += 1
+
+        return types.most_common(1)[0][0] if types else None
+
+    def _dominant_input_file(self, components: list[dict]) -> str | None:
+        """Find the most common input file path across components."""
+        from collections import Counter
+
+        files: Counter[str] = Counter()
+        for component in components:
+            raw_path = _get_component_property(component, "syft:location:0:path")
+            normalized = _normalize_input_file_path(raw_path)
+            if normalized:
+                files[normalized] += 1
+        return files.most_common(1)[0][0] if files else None
+
     def report(self, model: "AshAggregatedResults") -> str | None:
         """Enrich CycloneDX with GitLab properties and serialize."""
 
@@ -342,8 +407,54 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
             {"name": "gitlab:meta:schema_version", "value": GITLAB_SCHEMA_VERSION}
         )
 
-        # --- Inject per-component properties ---
+        # --- Inject metadata-level dependency_scanning source properties ---
+        # GitLab's CycloneDX parser resolves the report-level source from
+        # metadata.properties ONLY. Without these, the parser returns nil for
+        # the source and fires "Required GitLab CycloneDX properties are missing".
         options = self.config.options
+        dominant_type = self._resolve_dominant_type(components, options)
+        if dominant_type:
+            pm, lang = (None, None)
+            if dominant_type in PURL_TYPE_TO_GITLAB:
+                pm, lang = PURL_TYPE_TO_GITLAB[dominant_type]
+            elif dominant_type in SYFT_TYPE_TO_GITLAB:
+                pm, lang = SYFT_TYPE_TO_GITLAB[dominant_type]
+
+            input_file = (
+                options.input_file_path_override
+                or self._dominant_input_file(components)
+                or _DEFAULT_LOCKFILES.get(dominant_type)
+            )
+
+            metadata_props.append(
+                {
+                    "name": "gitlab:dependency_scanning:category",
+                    "value": options.category,
+                }
+            )
+            if options.package_manager_override or pm:
+                metadata_props.append(
+                    {
+                        "name": "gitlab:dependency_scanning:package_manager:name",
+                        "value": options.package_manager_override or pm,
+                    }
+                )
+            if options.language_override or lang:
+                metadata_props.append(
+                    {
+                        "name": "gitlab:dependency_scanning:language:name",
+                        "value": options.language_override or lang,
+                    }
+                )
+            if input_file:
+                metadata_props.append(
+                    {
+                        "name": "gitlab:dependency_scanning:input_file:path",
+                        "value": input_file,
+                    }
+                )
+
+        # --- Inject per-component properties ---
         enriched_count = 0
 
         for component in components:
