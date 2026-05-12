@@ -17,8 +17,9 @@ from typing import Annotated, Any, Generic, List, Literal, Optional, TypeVar
 from abc import abstractmethod
 
 # Pattern for valid CLI flag keys: one or two leading dashes followed by
-# a letter, then alphanumerics/underscores/hyphens.
-_VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*$")
+# a letter, then alphanumerics/underscores/hyphens. Optionally followed by
+# '=' and a value (e.g., --exclude="path1,path2" or --skip-path=".venv/").
+_VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*(=.*)?$")
 from pathlib import Path
 
 
