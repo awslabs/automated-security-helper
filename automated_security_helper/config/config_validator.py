@@ -5,7 +5,7 @@
 
 import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import yaml
 
@@ -62,11 +62,15 @@ class ConfigValidator:
     }
 
     @classmethod
-    def validate_config_file(cls, config_path: Path) -> Tuple[bool, List[str]]:
+    def validate_config_file(
+        cls, config_path: Path, source_dir: Optional[Path] = None
+    ) -> Tuple[bool, List[str]]:
         """Validate a configuration file and return validation results.
 
         Args:
             config_path: Path to the configuration file
+            source_dir: Path to the source directory (for resolving ignore_path patterns).
+                        If None, inferred from config_path location.
 
         Returns:
             Tuple of (is_valid, list_of_errors)
@@ -162,6 +166,10 @@ class ConfigValidator:
                                     f"this should not be in user configs"
                                 )
 
+            # Validate ignore_paths and suppression paths for directory-without-glob issues
+            warnings = cls._check_path_patterns(config_path, config_data, source_dir)
+            errors.extend(warnings)
+
             return len(errors) == 0, errors
 
         except yaml.YAMLError as e:
@@ -173,6 +181,94 @@ class ConfigValidator:
         except Exception as e:
             errors.append(f"Unexpected error during validation: {str(e)}")
             return False, errors
+
+    @classmethod
+    def _check_path_patterns(
+        cls,
+        config_path: Path,
+        config_data: dict,
+        source_dir: Optional[Path] = None,
+    ) -> List[str]:
+        """Check ignore_paths and suppression paths for directory-without-glob issues.
+
+        Returns a list of warning messages for paths that point to existing directories
+        but lack a '**' glob suffix (meaning they won't match files inside).
+        Only warns when the path actually exists as a directory in the repo.
+        """
+        warnings = []
+
+        # Determine the project root for resolving relative paths
+        if source_dir is not None:
+            project_root = source_dir.resolve()
+        else:
+            config_parent = config_path.resolve().parent
+            if config_parent.name == ".ash":
+                project_root = config_parent.parent
+            else:
+                project_root = config_parent
+
+        global_settings = config_data.get("global_settings", {})
+        if not isinstance(global_settings, dict):
+            return warnings
+
+        # Check ignore_paths
+        ignore_paths = global_settings.get("ignore_paths", [])
+        if isinstance(ignore_paths, list):
+            for entry in ignore_paths:
+                if not isinstance(entry, dict):
+                    continue
+                path_pattern = entry.get("path", "")
+                warning = cls._check_single_path(path_pattern, project_root)
+                if warning:
+                    warnings.append(warning)
+
+        # Check suppression paths
+        suppressions = global_settings.get("suppressions", [])
+        if isinstance(suppressions, list):
+            for entry in suppressions:
+                if not isinstance(entry, dict):
+                    continue
+                path_pattern = entry.get("path", "")
+                warning = cls._check_single_path(path_pattern, project_root)
+                if warning:
+                    warnings.append(warning)
+
+        return warnings
+
+    @classmethod
+    def _check_single_path(cls, path_pattern: str, project_root: Path) -> Optional[str]:
+        """Check a single path pattern for directory-without-glob issues.
+
+        Returns a warning message if the path points to an existing directory
+        without a '**' glob suffix, or None if the path is fine.
+        """
+        if not path_pattern:
+            return None
+
+        # Skip patterns that already contain ** (recursive glob)
+        if "**" in path_pattern:
+            return None
+
+        # Strip trailing slash for directory check
+        clean_path = path_pattern.rstrip("/")
+
+        # Skip patterns with wildcards in the filename portion
+        from pathlib import PurePosixPath
+
+        basename = PurePosixPath(clean_path).name
+        if "*" in basename or "?" in basename or "[" in basename:
+            return None
+
+        # Check if this path resolves to an existing directory
+        candidate = project_root / clean_path
+        if candidate.is_dir():
+            return (
+                f"Path '{path_pattern}' points to a directory but lacks a '**' glob suffix — "
+                f"it will not match files inside the directory. "
+                f"Use '{clean_path}/**' to ignore all files recursively."
+            )
+
+        return None
 
     @classmethod
     def validate_and_raise(cls, config_path: Path) -> None:

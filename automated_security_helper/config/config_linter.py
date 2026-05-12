@@ -45,6 +45,7 @@ class LintCategory(str, Enum):
     SUPPRESSION_LINE_RANGE = "suppression-line-range"
     SUPPRESSION_EXPIRED = "suppression-expired"
     SUPPRESSION_UNUSED = "suppression-unused"
+    IGNORE_PATH_ISSUE = "ignore-path-issue"
     SYNTAX_ERROR = "syntax-error"
 
 
@@ -118,6 +119,7 @@ class ConfigLinter:
         config_path: Path,
         output_dir: Optional[Path] = None,
         check_unused: bool = False,
+        source_dir: Optional[Path] = None,
     ) -> LintResult:
         """Lint a configuration file and return all issues found.
 
@@ -125,6 +127,8 @@ class ConfigLinter:
             config_path: Path to the configuration file
             output_dir: Path to the ASH output directory (for unused suppressions check)
             check_unused: Whether to check for unused suppressions
+            source_dir: Path to the source directory (for resolving ignore_path patterns).
+                        If None, inferred from config_path location.
 
         Returns:
             LintResult with all issues found
@@ -149,6 +153,9 @@ class ConfigLinter:
 
         # Run suppression-specific lint checks
         cls._check_suppression_issues(config_data, result)
+
+        # Run ignore_path and suppression path checks
+        cls._check_ignore_path_issues(config_path, config_data, result, source_dir)
 
         # Check for unused suppressions if requested
         if check_unused:
@@ -624,6 +631,113 @@ class ConfigLinter:
                             path=path_prefix,
                         )
                     )
+
+    @classmethod
+    def _check_ignore_path_issues(
+        cls,
+        config_path: Path,
+        config_data: Dict[str, Any],
+        result: LintResult,
+        source_dir: Optional[Path] = None,
+    ) -> None:
+        """Check ignore_paths and suppression paths for common issues.
+
+        Detects:
+        - Paths that point to existing directories but lack a '**' glob suffix,
+          which means they won't match any files inside the directory.
+        - Only warns when the path actually exists as a directory in the repo
+          (avoids false positives for virtual environments that may not be initialized).
+        """
+        # Determine the project root for resolving relative paths
+        if source_dir is not None:
+            project_root = source_dir.resolve()
+        else:
+            config_parent = config_path.resolve().parent
+            # If config is in .ash/, go up one level to project root
+            if config_parent.name == ".ash":
+                project_root = config_parent.parent
+            else:
+                project_root = config_parent
+
+        global_settings = config_data.get("global_settings", {})
+        if not isinstance(global_settings, dict):
+            return
+
+        # Check ignore_paths
+        ignore_paths = global_settings.get("ignore_paths", [])
+        if isinstance(ignore_paths, list):
+            for i, entry in enumerate(ignore_paths):
+                if not isinstance(entry, dict):
+                    continue
+                path_pattern = entry.get("path", "")
+                if path_pattern:
+                    cls._check_single_path_pattern(
+                        path_pattern=path_pattern,
+                        path_prefix=f"global_settings.ignore_paths[{i}].path",
+                        project_root=project_root,
+                        result=result,
+                    )
+
+        # Check suppression paths
+        suppressions = global_settings.get("suppressions", [])
+        if isinstance(suppressions, list):
+            for i, entry in enumerate(suppressions):
+                if not isinstance(entry, dict):
+                    continue
+                path_pattern = entry.get("path", "")
+                if path_pattern:
+                    cls._check_single_path_pattern(
+                        path_pattern=path_pattern,
+                        path_prefix=f"global_settings.suppressions[{i}].path",
+                        project_root=project_root,
+                        result=result,
+                    )
+
+    @classmethod
+    def _check_single_path_pattern(
+        cls,
+        path_pattern: str,
+        path_prefix: str,
+        project_root: Path,
+        result: LintResult,
+    ) -> None:
+        """Check a single path pattern for directory-without-glob issues.
+
+        A path like 'tests/test_data' or 'tests/test_data/' that points to an
+        existing directory will silently fail to match any files inside it.
+        The user likely intended 'tests/test_data/**'.
+        """
+        # Skip patterns that already contain glob characters that would match files
+        # Patterns with ** already handle recursive matching
+        if "**" in path_pattern:
+            return
+
+        # Strip trailing slash for directory check
+        clean_path = path_pattern.rstrip("/")
+
+        # Skip patterns with wildcards in the filename portion (e.g., "src/*.py")
+        # These are valid file-matching patterns
+        basename = Path(clean_path).name
+        if "*" in basename or "?" in basename or "[" in basename:
+            return
+
+        # Check if this path resolves to an existing directory
+        # We strip leading **/ patterns that won't exist as literal paths
+        candidate = project_root / clean_path
+        if candidate.is_dir():
+            # The path exists as a directory — warn that it needs /**
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.WARNING,
+                    category=LintCategory.IGNORE_PATH_ISSUE,
+                    message=(
+                        f"Path '{path_pattern}' points to a directory but lacks a '**' glob suffix. "
+                        f"This pattern will not match files inside the directory. "
+                        f"Use '{clean_path}/**' to ignore all files recursively."
+                    ),
+                    path=path_prefix,
+                )
+            )
 
     @classmethod
     def _check_unused_suppressions(

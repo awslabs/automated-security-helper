@@ -66,6 +66,11 @@ def _collect_ignorefiles_and_all_files(
 ) -> tuple[List[str], List[str]]:
     """Walk the directory tree once to collect ignore files and all file paths.
 
+    Respects .gitignore hierarchy: if a directory is ignored by a parent
+    .gitignore, its contents (including nested .gitignore files) are skipped.
+    This prevents rules like ``*`` inside ``.venv/.gitignore`` from being
+    applied globally and accidentally ignoring all project files.
+
     Returns a tuple of (ignore_file_paths, all_file_paths).
     """
     if extra_ignorefiles is None:
@@ -75,7 +80,44 @@ def _collect_ignorefiles_and_all_files(
     ignore_files: List[str] = []
     all_files: List[str] = []
 
-    for root, _dirs, files in os.walk(path):
+    # Build an initial ignore spec from the root .gitignore (if it exists)
+    # so we can skip walking into ignored directories.
+    root_ignore_parser = IgnoreParser()
+    root_path = Path(path)
+    root_gitignore = root_path / ".gitignore"
+    if root_gitignore.is_file():
+        try:
+            root_ignore_parser.parse_rule_file(root_gitignore, base_dir=root_path)
+        except (OSError, ValueError, TypeError, IndexError, re.error):
+            # If the root .gitignore can't be parsed (malformed patterns,
+            # encoding issues, etc.), proceed without directory pruning.
+            # All files will still be filtered by the full ignore spec later.
+            debug_echo(
+                f"Could not parse root .gitignore for directory pruning: {root_gitignore}",
+                debug=debug,
+            )
+
+    for root, dirs, files in os.walk(path):
+        # Prune directories that are ignored by the root .gitignore.
+        # This prevents descending into .venv/, node_modules/, etc.
+        # and picking up their internal .gitignore files.
+        dirs_to_remove = []
+        for d in dirs:
+            dir_path = Path(root) / d
+            # igittigitt.match expects a Path; directories need trailing separator
+            # to match directory-specific patterns. We check both the dir path
+            # and a fake file inside it.
+            try:
+                if root_ignore_parser.match(dir_path / "placeholder"):
+                    dirs_to_remove.append(d)
+                    debug_echo(f"Skipping ignored directory: {dir_path}", debug=debug)
+            except (ValueError, TypeError, IndexError, re.error):
+                # If matching fails for a specific directory (e.g. due to a
+                # malformed pattern), skip pruning for that directory only.
+                pass
+        for d in dirs_to_remove:
+            dirs.remove(d)
+
         for f in files:
             full_path = os.path.join(root, f)
             if f in _ignore_names:
@@ -132,10 +174,50 @@ def get_ash_ignorespec(
 ) -> IgnoreParser:
     debug_echo("Generating spec from collected ignorespec lines", debug=debug)
     parser = IgnoreParser()
+
+    # Track the current base directory from section markers.
+    # Lines like "######### START CONTENTS: ${SOURCE_DIR}/.ruff_cache/.gitignore #########"
+    # indicate that subsequent rules should be scoped to that directory.
+    current_base_path = "/"
+
     for line in lines:
         stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            parser.add_rule(stripped, base_path="/")
+        if not stripped:
+            continue
+
+        # Detect section markers to determine the base path for rules
+        if stripped.startswith("#########") and "START CONTENTS:" in stripped:
+            # Extract the path from the marker
+            # Format: "######### START CONTENTS: ${SOURCE_DIR}/subdir/.gitignore #########"
+            # or:     "######### START CONTENTS: ${SOURCE_DIR}/.gitignore #########"
+            # or:     "######### START CONTENTS: ASH_INCLUSIONS #########"
+            try:
+                content_path = (
+                    stripped.split("START CONTENTS:")[1].strip().rstrip("#").strip()
+                )
+                if content_path == "ASH_INCLUSIONS":
+                    current_base_path = "/"
+                elif "${SOURCE_DIR}" in content_path:
+                    # Extract the directory containing the .gitignore/.ignore file
+                    relative_path = content_path.replace("${SOURCE_DIR}", "").lstrip(
+                        "/"
+                    )
+                    # Get the parent directory of the ignore file
+                    parent_dir = str(Path(relative_path).parent)
+                    if parent_dir == ".":
+                        current_base_path = "/"
+                    else:
+                        current_base_path = "/" + parent_dir
+                else:
+                    current_base_path = "/"
+            except (IndexError, ValueError):
+                current_base_path = "/"
+            continue
+
+        if stripped.startswith("#"):
+            continue
+
+        parser.add_rule(stripped, base_path=current_base_path)
     return parser
 
 
@@ -165,7 +247,9 @@ def get_files_not_matching_spec(
     return included
 
 
-def get_changed_files(base_ref: str = "origin/main", cwd: Optional[Path] = None) -> Optional[List[Path]]:
+def get_changed_files(
+    base_ref: str = "origin/main", cwd: Optional[Path] = None
+) -> Optional[List[Path]]:
     """Return files changed between *base_ref* and HEAD using ``git diff``.
 
     Falls back to ``None`` (meaning "scan everything") when:
@@ -182,9 +266,7 @@ def get_changed_files(base_ref: str = "origin/main", cwd: Optional[Path] = None)
         or ``None`` if the diff could not be computed.
     """
     if not re.match(r"^[a-zA-Z0-9._/~^@{}\-]+$", base_ref):
-        ASH_LOGGER.warning(
-            f"Invalid base_ref '{base_ref}'; falling back to full scan"
-        )
+        ASH_LOGGER.warning(f"Invalid base_ref '{base_ref}'; falling back to full scan")
         return None
 
     try:
@@ -196,9 +278,7 @@ def get_changed_files(base_ref: str = "origin/main", cwd: Optional[Path] = None)
             cwd=cwd,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        ASH_LOGGER.warning(
-            "git not available or timed out; falling back to full scan"
-        )
+        ASH_LOGGER.warning("git not available or timed out; falling back to full scan")
         return None
 
     if result.returncode != 0:
@@ -309,14 +389,19 @@ def scan_set(
 
     if not ashignore_content:
         ashignore_content = get_ash_ignorespec_lines(
-            source, ignorefile, debug=debug,
+            source,
+            ignorefile,
+            debug=debug,
             _discovered_ignore_files=discovered_ignores,
         )
 
     if not ashscanset_list:
         spec = get_ash_ignorespec(ashignore_content, debug=debug)
         ashscanset_list = get_files_not_matching_spec(
-            source, spec, debug=debug, _all_files=all_files,
+            source,
+            spec,
+            debug=debug,
+            _all_files=all_files,
         )
 
     if output:
