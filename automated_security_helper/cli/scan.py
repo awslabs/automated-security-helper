@@ -339,7 +339,10 @@ def run_ash_scan_cli_command(
     if source_dir is None:
         source_dir = Path.cwd().as_posix()
     if output_dir is None:
-        output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
+        # Default output_dir is relative to source_dir, not CWD.
+        # This ensures that when --source-dir points to a different project,
+        # the output (and config resolution) happens in the correct location.
+        output_dir = Path(source_dir).joinpath(".ash", "ash_output").as_posix()
 
     if Path(source_dir).absolute().as_posix() == Path(output_dir).absolute().as_posix():
         output_dir = Path(output_dir).joinpath(".ash", "ash_output")

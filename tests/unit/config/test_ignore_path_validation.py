@@ -10,7 +10,6 @@ Covers two bugs:
 
 import pytest
 import yaml
-from pathlib import Path
 
 from automated_security_helper.config.config_linter import (
     ConfigLinter,
@@ -146,7 +145,9 @@ def config_with_suppression_dir_path(project_with_dirs):
 class TestIgnorePathLinting:
     """Tests for ignore_path validation in the config linter."""
 
-    def test_warns_on_directory_without_glob(self, config_with_dir_ignore_path, project_with_dirs):
+    def test_warns_on_directory_without_glob(
+        self, config_with_dir_ignore_path, project_with_dirs
+    ):
         """A path pointing to an existing directory without ** should produce a warning."""
         result = ConfigLinter.lint(config_with_dir_ignore_path)
 
@@ -158,7 +159,9 @@ class TestIgnorePathLinting:
         assert "tests/test_data" in ignore_path_issues[0].message
         assert "/**" in ignore_path_issues[0].message
 
-    def test_warns_on_directory_with_trailing_slash(self, config_with_trailing_slash_ignore_path):
+    def test_warns_on_directory_with_trailing_slash(
+        self, config_with_trailing_slash_ignore_path
+    ):
         """A path with trailing slash pointing to an existing directory should also warn."""
         result = ConfigLinter.lint(config_with_trailing_slash_ignore_path)
 
@@ -178,7 +181,9 @@ class TestIgnorePathLinting:
         ]
         assert len(ignore_path_issues) == 0
 
-    def test_no_warning_for_nonexistent_directory(self, config_with_nonexistent_dir_path):
+    def test_no_warning_for_nonexistent_directory(
+        self, config_with_nonexistent_dir_path
+    ):
         """Paths that don't exist as directories should not produce warnings.
 
         This handles the case of virtual environments that haven't been initialized,
@@ -191,7 +196,9 @@ class TestIgnorePathLinting:
         ]
         assert len(ignore_path_issues) == 0
 
-    def test_warns_on_suppression_directory_path(self, config_with_suppression_dir_path):
+    def test_warns_on_suppression_directory_path(
+        self, config_with_suppression_dir_path
+    ):
         """Suppression paths pointing to existing directories without ** should also warn."""
         result = ConfigLinter.lint(config_with_suppression_dir_path)
 
@@ -227,14 +234,20 @@ class TestIgnorePathLinting:
         # Without source_dir, 'lib' won't resolve (config_dir has no 'lib')
         result_no_source = ConfigLinter.lint(config_path)
         issues_no_source = [
-            i for i in result_no_source.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
+            i
+            for i in result_no_source.issues
+            if i.category == LintCategory.IGNORE_PATH_ISSUE
         ]
-        assert len(issues_no_source) == 0  # No warning because dir doesn't exist relative to config
+        assert (
+            len(issues_no_source) == 0
+        )  # No warning because dir doesn't exist relative to config
 
         # With source_dir, 'lib' resolves to an existing directory
         result_with_source = ConfigLinter.lint(config_path, source_dir=source_dir)
         issues_with_source = [
-            i for i in result_with_source.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
+            i
+            for i in result_with_source.issues
+            if i.category == LintCategory.IGNORE_PATH_ISSUE
         ]
         assert len(issues_with_source) == 1
         assert "lib" in issues_with_source[0].message
@@ -274,9 +287,13 @@ class TestIgnorePathLinting:
 class TestIgnorePathValidation:
     """Tests for ignore_path validation in the config validator (ash config validate)."""
 
-    def test_validate_warns_on_directory_without_glob(self, config_with_dir_ignore_path):
+    def test_validate_warns_on_directory_without_glob(
+        self, config_with_dir_ignore_path
+    ):
         """ash config validate should flag directory paths without **."""
-        is_valid, errors = ConfigValidator.validate_config_file(config_with_dir_ignore_path)
+        is_valid, errors = ConfigValidator.validate_config_file(
+            config_with_dir_ignore_path
+        )
 
         # Should not be valid because of the path warning
         assert not is_valid
@@ -284,22 +301,32 @@ class TestIgnorePathValidation:
 
     def test_validate_passes_with_valid_paths(self, config_with_valid_ignore_paths):
         """ash config validate should pass with properly formed paths."""
-        is_valid, errors = ConfigValidator.validate_config_file(config_with_valid_ignore_paths)
+        is_valid, errors = ConfigValidator.validate_config_file(
+            config_with_valid_ignore_paths
+        )
 
         # Should be valid (no path-related errors)
         path_errors = [e for e in errors if "directory" in e.lower() and "/**" in e]
         assert len(path_errors) == 0
 
-    def test_validate_no_warning_for_nonexistent_path(self, config_with_nonexistent_dir_path):
+    def test_validate_no_warning_for_nonexistent_path(
+        self, config_with_nonexistent_dir_path
+    ):
         """ash config validate should not warn about paths that don't exist as directories."""
-        is_valid, errors = ConfigValidator.validate_config_file(config_with_nonexistent_dir_path)
+        is_valid, errors = ConfigValidator.validate_config_file(
+            config_with_nonexistent_dir_path
+        )
 
         path_errors = [e for e in errors if "directory" in e.lower() and "/**" in e]
         assert len(path_errors) == 0
 
-    def test_validate_warns_on_suppression_directory_path(self, config_with_suppression_dir_path):
+    def test_validate_warns_on_suppression_directory_path(
+        self, config_with_suppression_dir_path
+    ):
         """ash config validate should also flag suppression paths pointing to directories."""
-        is_valid, errors = ConfigValidator.validate_config_file(config_with_suppression_dir_path)
+        is_valid, errors = ConfigValidator.validate_config_file(
+            config_with_suppression_dir_path
+        )
 
         assert not is_valid
         assert any("docs" in e and "/**" in e for e in errors)
