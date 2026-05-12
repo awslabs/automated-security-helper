@@ -701,6 +701,80 @@ scanners:
         assert "gitlab_cyclonedx" in legacy_issues[0].message
         assert "gitlab-cyclonedx" in legacy_issues[0].message
 
+    def test_lint_detects_legacy_canonical_collision(self, tmp_path):
+        """When BOTH legacy and canonical forms are present, flag as ERROR.
+
+        DA r7 #1/#2 — silent ambiguity: which config wins? The fixer must
+        refuse to touch the file in this case (data loss otherwise), and
+        the linter must surface a separate non-fixable issue.
+        """
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "project_name: t\n"
+            "scanners:\n"
+            "  cdk_nag:\n"
+            "    enabled: true\n"
+            "    options:\n"
+            "      severity_threshold: HIGH\n"
+            "  cdk-nag:\n"
+            "    enabled: false\n"
+        )
+
+        result = ConfigLinter.lint(config_path)
+
+        # A LEGACY_NAME_CONFLICT issue must be emitted (ERROR-severity, not fixable)
+        conflict_issues = [
+            i
+            for i in result.issues
+            if i.category == LintCategory.LEGACY_NAME_CONFLICT
+        ]
+        assert len(conflict_issues) == 1
+        assert conflict_issues[0].severity == LintSeverity.ERROR
+        assert conflict_issues[0].fixable is False
+        assert "cdk_nag" in conflict_issues[0].message
+        assert "cdk-nag" in conflict_issues[0].message
+
+    def test_fix_refuses_to_overwrite_on_collision(self, tmp_path):
+        """`--fix` must not silently overwrite when both forms exist.
+
+        DA r7 #1 — pre-fix verification: data loss prevention.
+        """
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "project_name: t\n"
+            "scanners:\n"
+            "  cdk_nag:\n"
+            "    enabled: true\n"
+            "    options:\n"
+            "      severity_threshold: HIGH\n"
+            "  cdk-nag:\n"
+            "    enabled: false\n"
+        )
+
+        fixed_content, fixed_issues = ConfigLinter.fix(config_path)
+
+        # No legacy-variant fix should have been applied
+        legacy_fixes = [
+            i
+            for i in fixed_issues
+            if i.category == LintCategory.LEGACY_NAME_VARIANT
+        ]
+        assert legacy_fixes == []
+
+        # Both keys must still be present in the output (no silent overwrite)
+        yaml_content = "\n".join(
+            line for line in fixed_content.split("\n") if not line.startswith("#")
+        )
+        fixed_data = yaml.safe_load(yaml_content)
+        scanners = fixed_data.get("scanners", {})
+        assert "cdk_nag" in scanners
+        assert "cdk-nag" in scanners
+        # Distinct values preserved — not collapsed/overwritten
+        assert scanners["cdk_nag"]["enabled"] is True
+        assert scanners["cdk-nag"]["enabled"] is False
+
     def test_fix_renames_snake_to_kebab(self, tmp_path):
         """--fix renames `cdk_nag` → `cdk-nag` preserving the value."""
         config_path = tmp_path / ".ash" / ".ash.yaml"
