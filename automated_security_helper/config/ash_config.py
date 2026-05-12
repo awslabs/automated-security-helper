@@ -427,6 +427,80 @@ class MCPResourceManagementConfig(BaseModel):
     ] = False
 
 
+class RuntimeOverridesConfig(BaseModel):
+    """Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.
+
+    The MCP server's streamable-HTTP transport lets clients apply JSON-Patch ops
+    to a profile-resolved config at session-bind time. This object is the security
+    boundary: by default, runtime overrides are disabled. When enabled, only ops
+    whose `path` matches `allowed_paths` AND does not match `denied_paths` are
+    accepted. `denied_value_patterns` blocks values that match a regex on a
+    per-path basis (e.g. shell metacharacters in extra_args).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Annotated[
+        bool,
+        Field(
+            description="Master switch — runtime patches are rejected unless True."
+        ),
+    ] = False
+
+    allowed_paths: Annotated[
+        List[str],
+        Field(
+            description=(
+                "JSON-Pointer glob patterns the client may target. `*` matches one segment, "
+                "`**` matches any subtree. Example: '/scanners/*/options/severity_threshold'."
+            )
+        ),
+    ] = []
+
+    denied_paths: Annotated[
+        List[str],
+        Field(
+            description=(
+                "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). "
+                "Defaults block the most dangerous fields on the real AshConfig schema."
+            )
+        ),
+    ] = [
+        # Top-level safety: never let a runtime patch flip the failure semantics.
+        "/fail_on_findings",
+        # Suppressions and ignore paths can hide findings outright.
+        "/global_settings/ignore_paths",
+        "/global_settings/suppressions",
+        # AWS-credential-bearing reporter options (plugin-provided, hyphenated names).
+        "/reporters/bedrock-summary-reporter/options/aws_*",
+        "/reporters/cloudwatch-logs/**",
+    ]
+
+    denied_value_patterns: Annotated[
+        Dict[str, str],
+        Field(
+            description=(
+                "Map of JSON-Pointer pattern → regex. add/replace ops are rejected when "
+                "any string leaf reachable from the op's value matches the regex; lists "
+                "and dicts are walked recursively so a forbidden token cannot be hidden "
+                "inside a nested structure. The `test` op is exempt because it is "
+                "read-only."
+            )
+        ),
+    ] = {}
+
+
+class AshMcpConfig(BaseModel):
+    """MCP-server-specific config bundle (transport-agnostic)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime_overrides: Annotated[
+        RuntimeOverridesConfig,
+        Field(description="Allowlist for runtime JSON-Patch overrides."),
+    ] = RuntimeOverridesConfig()
+
+
 class AshConfigGlobalSettingsSection(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -452,6 +526,13 @@ class AshConfigGlobalSettingsSection(BaseModel):
             description="Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers."
         ),
     ] = []
+
+    mcp: Annotated[
+        AshMcpConfig,
+        Field(
+            description="MCP-server-specific configuration (runtime override allowlist, etc.)."
+        ),
+    ] = AshMcpConfig()
 
 
 class AshConfig(BaseModel):

@@ -49,6 +49,36 @@ def _mcp_wrapper(
     debug: bool = typer.Option(False, help="Debug output"),
     color: bool = typer.Option(True, help="Enable color output"),
     quiet: bool = typer.Option(False, help="Quiet output"),
+    transport: str = typer.Option(
+        "stdio",
+        "--transport",
+        help="Transport: 'stdio' (default), 'streamable-http', or 'sse'.",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Host to bind for HTTP transports.",
+    ),
+    port: int = typer.Option(
+        8000,
+        "--port",
+        help="Port to bind for HTTP transports.",
+    ),
+    mount_path: str = typer.Option(
+        "/mcp",
+        "--mount-path",
+        help="HTTP path the transport listens on (default: /mcp for streamable-http, /sse for sse).",
+    ),
+    auth_header_name: str = typer.Option(
+        None,
+        "--auth-header-name",
+        help="Required HTTP header name for single-tenant auth (HTTP transports only).",
+    ),
+    auth_header_value: str = typer.Option(
+        None,
+        "--auth-header-value",
+        help="Expected value of --auth-header-name.",
+    ),
 ):
     """Lazy wrapper that imports and delegates to the real MCP command."""
     from automated_security_helper.cli.mcp import mcp_command
@@ -60,6 +90,12 @@ def _mcp_wrapper(
         debug=debug,
         color=color,
         quiet=quiet,
+        transport=transport,
+        host=host,
+        port=port,
+        mount_path=mount_path,
+        auth_header_name=auth_header_name,
+        auth_header_value=auth_header_value,
     )
 
 
