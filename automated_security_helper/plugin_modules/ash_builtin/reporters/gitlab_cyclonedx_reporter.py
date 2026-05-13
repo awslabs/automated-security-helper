@@ -377,13 +377,48 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
                 files[normalized] += 1
         return files.most_common(1)[0][0] if files else None
 
-    def report(self, model: "AshAggregatedResults") -> str | None:
-        """Enrich CycloneDX with GitLab properties and serialize."""
+    def _build_minimal_empty_sbom(self) -> dict:
+        """Build a minimal valid GitLab-flavored CycloneDX document.
 
-        # Guard: nothing to enrich if there's no CycloneDX data
+        Used when no components are detected (e.g., infrastructure-only repos).
+        Always emitting an artifact ensures GitLab pipelines that require the
+        ``gl-dependency-scanning-report.cdx.json`` artifact don't fail when a
+        repo legitimately has no software dependencies.
+
+        The minimal document includes the CycloneDX envelope and the GitLab
+        schema version metadata property required by GitLab's parser.
+        """
+        return {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.4",
+            "version": 1,
+            "metadata": {
+                "properties": [
+                    {
+                        "name": "gitlab:meta:schema_version",
+                        "value": GITLAB_SCHEMA_VERSION,
+                    }
+                ],
+            },
+            "components": [],
+        }
+
+    def report(self, model: "AshAggregatedResults") -> str | None:
+        """Enrich CycloneDX with GitLab properties and serialize.
+
+        When no CycloneDX data or components are present, emit a minimal valid
+        GitLab-compatible CycloneDX document instead of skipping. This ensures
+        downstream GitLab pipelines that require the artifact to exist (e.g.,
+        for policy validation) don't fail on repos with no dependencies.
+        """
+
+        # Guard: emit a minimal empty SBOM when no CycloneDX data is present
         if not model.cyclonedx:
-            ASH_LOGGER.debug("gitlab-cyclonedx: No CycloneDX model present, skipping.")
-            return None
+            ASH_LOGGER.debug(
+                "gitlab-cyclonedx: No CycloneDX model present, "
+                "emitting minimal empty SBOM."
+            )
+            return json.dumps(self._build_minimal_empty_sbom(), separators=(",", ":"))
 
         # Serialize to dict for manipulation
         doc = model.cyclonedx.model_dump(
@@ -396,9 +431,10 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
         components = doc.get("components")
         if not components:
             ASH_LOGGER.debug(
-                "gitlab-cyclonedx: CycloneDX model has no components, skipping."
+                "gitlab-cyclonedx: CycloneDX model has no components, "
+                "emitting minimal empty SBOM."
             )
-            return None
+            return json.dumps(self._build_minimal_empty_sbom(), separators=(",", ":"))
 
         # --- Inject metadata-level schema version property ---
         metadata = doc.setdefault("metadata", {})
