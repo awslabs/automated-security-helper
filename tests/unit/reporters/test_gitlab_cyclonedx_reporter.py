@@ -87,10 +87,50 @@ def test_components_have_input_file_path(reporter, model):
     assert paths[0]["value"] == "yarn.lock"
 
 
-def test_returns_none_when_no_components(reporter):
+def test_emits_minimal_empty_sbom_when_no_components(reporter):
+    """When the model has no CycloneDX data, emit a minimal valid SBOM
+    rather than skipping. This ensures GitLab pipelines that require the
+    artifact to exist don't fail on repos with no dependencies.
+    """
     model = AshAggregatedResults()
+    # Force-clear cyclonedx to simulate a scan that produced no SBOM
+    model.cyclonedx = None
     result = reporter.report(model)
-    assert result is None
+    assert result is not None
+    doc = json.loads(result)
+    assert doc["bomFormat"] == "CycloneDX"
+    assert doc["specVersion"] == "1.4"
+    assert doc["version"] == 1
+    assert doc["components"] == []
+    schema_props = [
+        p
+        for p in doc["metadata"]["properties"]
+        if p["name"] == "gitlab:meta:schema_version"
+    ]
+    assert len(schema_props) == 1
+    assert schema_props[0]["value"] == "1"
+
+
+def test_emits_minimal_empty_sbom_when_components_list_empty(reporter):
+    """When CycloneDX is present but contains no components, still emit
+    a minimal valid SBOM. This is the common case for infrastructure-only
+    or no-code repos where Syft finds no packages.
+    """
+    model = AshAggregatedResults()  # default CycloneDXReport() has no components
+    result = reporter.report(model)
+    assert result is not None
+    doc = json.loads(result)
+    assert doc["bomFormat"] == "CycloneDX"
+    assert doc["specVersion"] == "1.4"
+    assert doc["version"] == 1
+    assert doc["components"] == []
+    schema_props = [
+        p
+        for p in doc["metadata"]["properties"]
+        if p["name"] == "gitlab:meta:schema_version"
+    ]
+    assert len(schema_props) == 1
+    assert schema_props[0]["value"] == "1"
 
 
 def test_extract_purl_type():
