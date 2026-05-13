@@ -44,6 +44,12 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.3 (2026-05-13)
+
+### Fix
+
+- **gitlab-cyclonedx**: emit minimal empty SBOM when no components found (#343)
+
 ## v3.5.2 (2026-05-12)
 
 ### Fix
