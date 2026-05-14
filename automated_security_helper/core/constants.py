@@ -3,6 +3,7 @@
 
 import os
 from pathlib import Path
+from typing import Dict
 
 ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
 ASH_INSTALLED_REVISION_PATH = ASH_ASSETS_DIR.joinpath("ASH_INSTALLED_REVISION")
@@ -168,6 +169,13 @@ KNOWN_SCANNABLE_EXTENSIONS = [
     # "sqlite3db",
 ]
 VALID_SEVERITY_VALUES = frozenset({"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"})
+
+ASH_EXIT_CODES: Dict[int, str] = {
+    0: "success",
+    1: "scan errors / scanner failures",
+    2: "actionable findings above threshold",
+    3: "invalid config",
+}
 
 
 def is_offline_mode() -> bool:
