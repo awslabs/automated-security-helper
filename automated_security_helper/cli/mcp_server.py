@@ -25,7 +25,13 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_cancel_scan,
     mcp_check_installation,
     mcp_get_config,
+    mcp_list_scanners,
+    mcp_diff_scan_results,
+    mcp_validate_config,
+    mcp_explain_finding,
+    mcp_suggest_suppression,
 )
+from automated_security_helper.core.constants import ASH_EXIT_CODES
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
@@ -573,6 +579,41 @@ async def check_installation(ctx: Context) -> Dict[str, Any]:
 
 
 @mcp.tool()
+async def explain_finding(
+    finding_id: str,
+    results_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return structured details for a single finding by ID.
+
+    Performs a pure structured lookup against already-emitted SARIF results.
+    No LLM calls are made.
+
+    Args:
+        finding_id: The FlatVulnerability ID to look up (e.g. "bandit-B601-deadbeef").
+        results_path: Optional path to the output directory containing
+                      ash_aggregated_results.json. Defaults to
+                      <cwd>/.ash/ash_output.
+
+    Returns:
+        Dict with ``success`` and ``finding`` keys containing title, description,
+        severity, severity_rationale, cwe_id, cve_id, references, scanner,
+        and scanner_metadata.
+    """
+    try:
+        return mcp_explain_finding(
+            finding_id=finding_id,
+            results_path=results_path,
+        )
+    except Exception as e:
+        logger.exception(f"Error in explain_finding: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error explaining finding: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+
+@mcp.tool()
 async def get_config(
     config_path: Optional[str] = None,
     raw: bool = False,
@@ -594,6 +635,79 @@ async def get_config(
         }
 
 
+@mcp.tool()
+def list_scanners() -> list:
+    """List all registered ASH scanners with their metadata.
+
+    Returns one entry per scanner with:
+      name: scanner config name (e.g. "bandit", "checkov")
+      version: detected version string, or null if unavailable
+      dependencies_satisfied: whether the scanner's runtime dependencies are met
+      offline_strategy: one of "bundled", "cache_flags", "skip_offline", "unknown"
+      enabled: whether the scanner is enabled in the default ASH config
+    """
+    try:
+        return mcp_list_scanners()
+    except Exception as e:
+        logger.exception(f"Error in list_scanners: {str(e)}")
+        return [{"success": False, "error": f"Error listing scanners: {str(e)}", "error_type": type(e).__name__}]
+
+
+@mcp.tool()
+async def diff_scan_results(
+    before_path: str,
+    after_path: str,
+) -> Dict[str, Any]:
+    """Compare two ash_aggregated_results.json files and return a structured diff.
+
+    Args:
+        before_path: Path to the baseline ash_aggregated_results.json file.
+        after_path: Path to the comparison ash_aggregated_results.json file.
+
+    Returns:
+        Dict with keys new, resolved, and severity_changed.
+    """
+    try:
+        return mcp_diff_scan_results(before_path=before_path, after_path=after_path)
+    except Exception as e:
+        logger.exception(f"Error in diff_scan_results: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error diffing scan results: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+
+@mcp.tool()
+def validate_config(
+    config_content: Optional[str] = None,
+    config_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Validate an ASH configuration file or content string.
+
+    Args:
+        config_content: YAML/JSON string to validate.
+        config_path: Path to the config file to validate.
+
+    Returns:
+        Dict with valid (bool) and errors (list of {field, message, type}).
+    """
+    try:
+        return mcp_validate_config(config_content=config_content, config_path=config_path)
+    except Exception as e:
+        logger.exception(f"Error in validate_config: {str(e)}")
+        return {
+            "valid": False,
+            "errors": [
+                {
+                    "field": "",
+                    "message": f"Unexpected error: {str(e)}",
+                    "type": type(e).__name__,
+                }
+            ],
+        }
+
+
 def _read_ash_config_schema() -> str:
     """Read the AshConfig JSON schema from disk."""
     schema_path = Path(__file__).parent.parent / "schemas" / "AshConfig.json"
@@ -604,6 +718,62 @@ def _read_ash_config_schema() -> str:
 def get_ash_config_schema() -> str:
     """Return the AshConfig JSON schema."""
     return _read_ash_config_schema()
+
+
+def _read_ash_suppression_schema() -> str:
+    """Return the AshSuppression JSON schema as a string."""
+    from automated_security_helper.models.core import AshSuppression
+    import json as _json
+    return _json.dumps(AshSuppression.model_json_schema(), indent=2)
+
+
+@mcp.resource("ash://schema/suppression")
+def get_ash_suppression_schema() -> str:
+    """Return the AshSuppression JSON schema."""
+    return _read_ash_suppression_schema()
+
+
+@mcp.tool()
+async def suggest_suppression(
+    finding_id: str,
+    results_path: Optional[str] = None,
+    expiration: Optional[str] = None,
+    justification: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build a paste-ready AshSuppression entry for a specific finding.
+
+    Args:
+        finding_id: Stable hash ID of the finding (from get_scan_results or explain_finding).
+        results_path: Path to ash_aggregated_results.json. Defaults to
+                      .ash/ash_output/ash_aggregated_results.json in cwd.
+        expiration: Expiration date in YYYY-MM-DD format. Defaults to 90 days from today.
+        justification: Human-readable reason for the suppression.
+    """
+    try:
+        return mcp_suggest_suppression(
+            finding_id=finding_id,
+            results_path=results_path,
+            expiration=expiration,
+            justification=justification,
+        )
+    except Exception as e:
+        logger.exception(f"Error in suggest_suppression: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error suggesting suppression: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+
+def _build_ash_exit_codes() -> str:
+    """Build JSON string of ASH exit codes from the canonical constant."""
+    return json.dumps({str(k): v for k, v in ASH_EXIT_CODES.items()})
+
+
+@mcp.resource("ash://exit-codes")
+def get_ash_exit_codes() -> str:
+    """Return the meaning of each ASH exit code as JSON."""
+    return _build_ash_exit_codes()
 
 
 @mcp.resource("ash://status")
