@@ -280,7 +280,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         for item in KNOWN_IGNORE_PATHS:
             self.args.extra_args.append(
-                ToolExtraArg(key=f'--skip-path="{item}"', value=None)
+                ToolExtraArg(key=f"--skip-path={item}", value=None)
             )
 
         for item in self.config.options.skip_path:
@@ -289,7 +289,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
             self.args.extra_args.append(
                 ToolExtraArg(
-                    key=f'--skip-path="{item.path}"',
+                    key=f"--skip-path={item.path}",
                     value=None,
                 )
             )
