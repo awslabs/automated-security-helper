@@ -104,7 +104,9 @@ def test_process_config_options_exclusions(test_plugin_context):
 
     # Check that exclusion arguments were added
     exclusion_args = [arg.key for arg in scanner.args.extra_args]
-    # The exclusion args are now in the format '--exclude="tests/*"'
+    # The exclusion args are in the format '--exclude=tests/*' (no embedded
+    # quotes — quoting values here would pass '"' as part of the argv since
+    # ASH invokes scanners via subprocess without a shell).
     assert any("--exclude=" in arg and "tests/*" in arg for arg in exclusion_args)
 
 
