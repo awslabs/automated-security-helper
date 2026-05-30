@@ -6,6 +6,8 @@ This guide covers performance optimization and scalability considerations for th
 
 The ASH MCP server in v3 includes comprehensive resource management designed to handle concurrent operations efficiently while preventing memory leaks and resource exhaustion. This guide helps you optimize performance for your specific use case.
 
+The tuning described here applies to both transports the server supports. For the deployable streamable-HTTP transport — which adds per-session workspaces and cross-session parallelism on top of the primitives covered here — see [Streamable-HTTP MCP Deployment Guide](mcp/streamable-http.md).
+
 ## Performance Features
 
 ### Resource Management
