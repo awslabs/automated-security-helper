@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import shlex
 import logging
 import os
 from pathlib import Path
@@ -154,6 +155,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         return args
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — SnykCodeScanner overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
+
     def scan(
         self,
         target: Path,
@@ -271,7 +278,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     if sarif_report.runs:
                         sarif_report.runs[0].invocations = [
                             Invocation(
-                                commandLine=" ".join(final_args),
+                                commandLine=shlex.join(final_args),
                                 arguments=final_args[1:],
                                 startTimeUtc=self.start_time,
                                 endTimeUtc=self.end_time,

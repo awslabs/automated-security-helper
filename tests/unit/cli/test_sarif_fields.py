@@ -128,7 +128,7 @@ class TestFlattenObject:
         result = {}
         excluded = {}
         with patch(
-            "automated_security_helper.cli.inspect.sarif_fields.should_include_field",
+            "automated_security_helper.utils.sarif_field_analysis.should_include_field",
             return_value=True,
         ):
             _flatten_object({"key": "value", "num": 42}, "prefix", result, excluded)
@@ -138,7 +138,7 @@ class TestFlattenObject:
     def test_nested_dict(self):
         result = {}
         with patch(
-            "automated_security_helper.cli.inspect.sarif_fields.should_include_field",
+            "automated_security_helper.utils.sarif_field_analysis.should_include_field",
             return_value=True,
         ):
             _flatten_object({"outer": {"inner": "val"}}, "prefix", result, None)
@@ -147,7 +147,7 @@ class TestFlattenObject:
     def test_list_uses_bracket_notation(self):
         result = {}
         with patch(
-            "automated_security_helper.cli.inspect.sarif_fields.should_include_field",
+            "automated_security_helper.utils.sarif_field_analysis.should_include_field",
             return_value=True,
         ):
             _flatten_object(
@@ -163,7 +163,7 @@ class TestFlattenObject:
     def test_properties_stops_expansion(self):
         result = {}
         with patch(
-            "automated_security_helper.cli.inspect.sarif_fields.should_include_field",
+            "automated_security_helper.utils.sarif_field_analysis.should_include_field",
             return_value=True,
         ):
             _flatten_object(
@@ -179,7 +179,7 @@ class TestFlattenObject:
         result = {}
         excluded = {}
         with patch(
-            "automated_security_helper.cli.inspect.sarif_fields.should_include_field",
+            "automated_security_helper.utils.sarif_field_analysis.should_include_field",
             side_effect=lambda path: "excluded_key" not in path,
         ):
             _flatten_object(

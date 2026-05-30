@@ -1,6 +1,5 @@
 """Module containing the Bandit security scanner implementation."""
 
-import json
 import logging
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
@@ -23,13 +22,11 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
-    ArtifactLocation,
-    Invocation,
     SarifReport,
 )
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import mask_secrets_in_sarif
+from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
 class BanditScannerConfigOptions(ScannerOptionsBase):
@@ -174,17 +171,27 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     def validate_plugin_dependencies(self) -> bool:
         """Enhanced validation with explicit tool installation.
 
-        This method implements the enhanced validation workflow that:
-        1. Checks if UV tool is available when required
-        2. Attempts explicit tool installation if tool is not found
-        3. Falls back to base class validation if installation fails
-        4. Provides detailed logging for all validation steps
+        Workflow:
+
+        1. If UV tool execution is required but UV is not on PATH, defer to
+           :func:`get_uv_tool_command` to see whether a direct binary fallback
+           still satisfies the dependency.
+        2. If UV is available and the tool is already reachable, succeed.
+        3. Otherwise attempt explicit ``uv tool install`` with retry/timeout.
+        4. As a last resort, ask :func:`get_uv_tool_command` to resolve the
+           command — this consolidates the "uv missing → direct binary → None"
+           fallback that used to be open-coded across scanners.
 
         Returns:
             True if validation passes, False otherwise
         """
-        # First validate UV tool availability if required
         if not self._validate_uv_tool_availability():
+            # UV is required but not present.  Defer to consolidated resolver:
+            # if the tool is on PATH directly we can still run it.
+            if get_uv_tool_command(self.command) is not None:
+                self.use_uv_tool = False
+                self.dependencies_satisfied = True
+                return True
             self._plugin_log(
                 "UV tool validation failed - UV is not available but required",
                 level=logging.ERROR,
@@ -231,16 +238,14 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 )
                 self.dependencies_satisfied = True
                 return True
-            else:
-                self._plugin_log(
-                    "UV tool installation failed for bandit, falling back to base validation",
-                    level=logging.WARNING,
-                )
-                # Fall back to base class validation which includes pre-installed tool detection
-                return super().validate_plugin_dependencies()
 
-        # Fall back to base class validation for non-UV tool scenarios
-        return super().validate_plugin_dependencies()
+            self._plugin_log(
+                "UV tool installation failed for bandit, falling back to consolidated resolver",
+                level=logging.WARNING,
+            )
+
+        # Final fallback: consolidated UV-or-direct-binary resolver.
+        return get_uv_tool_command(self.command) is not None
 
     def _process_config_options(self):
         # Bandit config path
@@ -332,129 +337,51 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
         return super()._process_config_options()
 
-    def scan(
+    # Bandit emits exit code 1 when findings are present; treat that as success
+    # alongside 0. (Same as base default, but spelled out for clarity.)
+    success_exit_codes: ClassVar[set] = {0, 1}
+
+    # Python-only repos commonly have empty target dirs after conversion;
+    # log at VERBOSE rather than INFO to keep the user-facing output clean.
+    empty_target_log_level: ClassVar[int] = logging.VERBOSE
+
+    def _execute_scan(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: BanditScannerConfig | None = None,
-    ) -> SarifReport | bool:
-        """Execute Bandit scan and return results.
+        global_ignore_paths: List[IgnorePathWithReason],
+    ):
+        """Resolve final argv and results path for Bandit.
 
-        Args:
-            target: Path to scan
-
-        Returns:
-            StaticAnalysisReport containing the scan findings and metadata
-
-        Raises:
-            ScannerError: If the scan fails or results cannot be parsed
+        Merges global ignore paths into the configured excluded_paths for the
+        duration of argument resolution, then restores the original list to
+        avoid accumulation across repeated scan() calls.
         """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-        # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
-            message = (
-                f"Target directory {target} is empty or doesn't exist. Skipping scan."
-            )
-            self._plugin_log(
-                message,
-                target_type=target_type,
-                level=logging.VERBOSE,
-                append_to_stream="stderr",
-            )
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return True
-
-        validated = self._pre_scan(
-            target=target,
-            target_type=target_type,
-            config=config,
-        )
-        if not validated:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-
-        if not self.dependencies_satisfied:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-        target_results_dir = Path(self.results_dir).joinpath(target_type)
+        target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("bandit.sarif")
-        Path(results_file).parent.mkdir(exist_ok=True, parents=True)
-        # Save original excluded_paths and restore after _resolve_arguments
-        # to avoid accumulating paths across repeated scan() calls.
+        results_file.parent.mkdir(exist_ok=True, parents=True)
+
         original_excluded_paths = self.config.options.excluded_paths
-        self.config.options.excluded_paths = list(original_excluded_paths) + list(global_ignore_paths)
-
-        final_args = self._resolve_arguments(target=target, results_file=results_file)
-        self.config.options.excluded_paths = original_excluded_paths
-        command_str = " ".join(str(arg) for arg in final_args)
-        ASH_LOGGER.info(f"Executing bandit command: {command_str}")
-        self._run_subprocess(
-            command=final_args,
-            results_dir=target_results_dir,
+        self.config.options.excluded_paths = list(original_excluded_paths) + list(
+            global_ignore_paths
         )
-
-        self._post_scan(
-            target=target,
-            target_type=target_type,
-        )
-
-        bandit_results = {}
-        with open(results_file, mode="r", encoding="utf-8") as f:
-            content = f.read()
-            if not content or content.strip() == "":
-                error_msg = (
-                    f"Bandit SARIF file is empty (exit code: {self.exit_code}). "
-                )
-                if self.errors:
-                    error_msg += f"Stderr: {' '.join(self.errors)}"
-                else:
-                    error_msg += "No stderr output captured."
-                ASH_LOGGER.warning(error_msg)
-                # Return empty SARIF report instead of failing
-                return SarifReport(
-                    version="2.1.0",
-                    runs=[],
-                )
-            bandit_results = json.loads(content)
         try:
-            sarif_report: SarifReport = SarifReport.model_validate(bandit_results)
-            if sarif_report.runs:
-                sarif_report.runs[0].invocations = [
-                    Invocation(
-                        commandLine=final_args[0],
-                        arguments=final_args[1:],
-                        startTimeUtc=self.start_time,
-                        endTimeUtc=self.end_time,
-                        executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
-                        exitCode=self.exit_code,
-                        exitCodeDescription="\n".join(self.errors),
-                        workingDirectory=ArtifactLocation(
-                            uri=get_shortest_name(input=target),
-                        ),
-                    )
-                ]
+            final_args = self._resolve_arguments(
+                target=target, results_file=results_file
+            )
+        finally:
+            self.config.options.excluded_paths = original_excluded_paths
 
-            # Mask secrets in the SARIF report before returning
-            sarif_report = mask_secrets_in_sarif(sarif_report)
+        return final_args, results_file, None
 
-        except Exception as e:
-            ASH_LOGGER.warning(f"Failed to parse Bandit results as SARIF: {str(e)}")
-            sarif_report = bandit_results
-
-        return sarif_report
+    def _post_process_sarif(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: Path,
+    ) -> SarifReport:
+        """Mask any secret-shaped strings in the Bandit SARIF report."""
+        return mask_secrets_in_sarif(sarif_report)
 
 
 if __name__ == "__main__":

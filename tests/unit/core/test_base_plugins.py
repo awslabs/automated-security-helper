@@ -272,6 +272,12 @@ class TestScannerPlugin:
         def validate_plugin_dependencies(self) -> bool:
             return True
 
+        def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+            """Abstract stub — DummyScanner overrides scan() directly."""
+            raise NotImplementedError(
+                f"{self.__class__.__name__} overrides scan() directly."
+            )
+
         def scan(
             self,
             target: Path,
