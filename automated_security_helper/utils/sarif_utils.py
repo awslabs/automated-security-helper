@@ -423,7 +423,18 @@ def apply_suppressions_to_sarif(
         _source_dir_prefix[2:] if len(_source_dir_prefix) > 2 and _source_dir_prefix[1] == ":" else None
     )
     # Offline opengrep produces relative paths with source_dir basename prefix (e.g., "src/.github/...")
-    _source_dir_basename = PurePosixPath(plugin_context.source_dir.resolve().name)
+    # However, skip basename stripping when source_dir contains a subdirectory with the same name
+    # as its own basename — this means the basename is a real project directory, not a scanner artifact.
+    # Example: source_dir="/src" with /src/src/ existing → skip (user's real src/ dir)
+    # Example: source_dir="/src" scanning ASH itself → no /src/src/ → strip is safe
+    _resolved_source = plugin_context.source_dir.resolve()
+    _source_dir_basename_str = _resolved_source.name
+    _source_dir_basename: PurePosixPath | None = None
+    if _source_dir_basename_str:
+        # Only enable basename stripping if there's NO subdirectory collision
+        _child_with_same_name = _resolved_source / _source_dir_basename_str
+        if not _child_with_same_name.exists():
+            _source_dir_basename = PurePosixPath(_source_dir_basename_str)
 
     # Cache inline suppressions per file to avoid re-scanning the same file.
     _inline_suppression_cache: dict[str, list] = {}
@@ -454,8 +465,9 @@ def apply_suppressions_to_sarif(
                             elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
                                 uri = uri_normalized[len(_source_dir_prefix_no_drive):]
                             else:
-                                with suppress(ValueError):
-                                    uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
+                                if _source_dir_basename is not None:
+                                    with suppress(ValueError):
+                                        uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
                         if uri:
                             if uri not in _uri_resolve_cache:
                                 _uri_resolve_cache[uri] = Path(uri).resolve()
@@ -505,8 +517,9 @@ def apply_suppressions_to_sarif(
                             elif _source_dir_prefix_no_drive and uri_normalized.startswith(_source_dir_prefix_no_drive):
                                 uri = uri_normalized[len(_source_dir_prefix_no_drive):]
                             else:
-                                with suppress(ValueError):
-                                    uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
+                                if _source_dir_basename is not None:
+                                    with suppress(ValueError):
+                                        uri = str(PurePosixPath(uri_normalized).relative_to(_source_dir_basename))
                         line_start = None
                         line_end = None
                         if (
