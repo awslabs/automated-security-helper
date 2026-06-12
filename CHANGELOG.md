@@ -44,6 +44,13 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.4 (2026-06-12)
+
+### Fix
+
+- prevent source_dir basename stripping when it collides with real project dirs (#361)
+- update vulnerable dependencies in uv.lock (#362)
+
 ## v3.5.3 (2026-05-13)
 
 ### Fix
