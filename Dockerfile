@@ -1,7 +1,7 @@
 #checkov:skip=CKV_DOCKER_7:Base image uses pinned tag via ARG, Checkov cannot parse ARG references
 #checkov:skip=CKV_DOCKER_3:ASH container runs as root — scanners require root for package installs and system tool access
 #checkov:skip=CKV_DOCKER_8:Same as CKV_DOCKER_3 — root is intentional for scanner tool execution
-ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-bookworm
+ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-slim-bookworm
 
 # First stage: Build UV requirements
 FROM ${BASE_IMAGE} AS uv-reqs
@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends python3-venv git tree curl && \
+    apt-get install -y --no-install-recommends ca-certificates python3-venv git tree curl && \
     rm -rf /var/lib/apt/lists/*
 
 ARG INSTALL_ASH_REVISION="LOCAL"
@@ -89,9 +89,12 @@ RUN mkdir -p ${HOME}/.ssh && \
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
     curl \
-    python3-venv \
     git \
+    gnupg \
+    python3-venv \
     ripgrep \
     ruby-dev \
     tree && \
@@ -101,15 +104,13 @@ RUN apt-get update && \
 # Install nodejs@20 using latest recommended method
 #
 RUN set -uex; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
     mkdir -p /etc/apt/keyrings; \
     with-retry 'curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg'; \
     NODE_MAJOR=20; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
-    apt-get -qy install nodejs;
+    apt-get -qy install --no-install-recommends nodejs;
 #
 # Install UV in the core stage
 #
