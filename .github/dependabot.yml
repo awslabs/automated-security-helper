@@ -4,6 +4,9 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    cooldown:
+      default: 3
+      semver-major: 7
     commit-message:
       prefix: "ci"
     labels:
@@ -17,6 +20,9 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    cooldown:
+      default: 3
+      semver-major: 7
     commit-message:
       prefix: "build"
     labels:
@@ -26,6 +32,9 @@ updates:
     directory: "/automated_security_helper/assets"
     schedule:
       interval: "daily"
+    cooldown:
+      default: 3
+      semver-major: 7
     commit-message:
       prefix: "build"
     labels:
@@ -35,6 +44,9 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    cooldown:
+      default: 3
+      semver-major: 7
     commit-message:
       prefix: "build"
     labels:
