@@ -131,6 +131,28 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         found = find_executable("node")
         return found is not None
 
+    def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
+        """Install CDK dependencies via pip extra.
+
+        The CDK dependencies (aws-cdk-lib, cdk-nag, constructs) are Python packages
+        defined as optional extras in pyproject.toml under [cdk]. This method ensures
+        they are installed when `ash dependencies install` is run.
+        """
+        import sys
+
+        commands = super().get_installation_commands(platform, arch)
+        if not _CDK_AVAILABLE:
+            commands.append(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "automated-security-helper[cdk]",
+                ]
+            )
+        return commands
+
     def scan(
         self,
         target: Path,
