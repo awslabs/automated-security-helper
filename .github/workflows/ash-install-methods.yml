@@ -81,7 +81,7 @@ jobs:
           - { os: windows-latest, python-version: "3.11", method: uvx }
           - { os: windows-latest, python-version: "3.13", method: uvx }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Python setup (skip for uvx which bundles its own)
       - uses: actions/setup-python@v6

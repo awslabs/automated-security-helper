@@ -26,7 +26,7 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - uses: actions/setup-python@v6
         with:
@@ -68,7 +68,7 @@ jobs:
           - { os: windows-latest, arch: x86_64 }
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -133,7 +133,7 @@ jobs:
           - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: community, oci-runner: "" }
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -227,7 +227,7 @@ jobs:
           - { os: windows-latest, python-version: "3.11", method: uvx }
           - { os: windows-latest, python-version: "3.13", method: uvx }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Python setup (skip for uvx which bundles its own)
       - uses: actions/setup-python@v6
