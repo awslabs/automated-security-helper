@@ -44,6 +44,14 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.5 (2026-06-30)
+
+### Fix
+
+- **windows**: document Git prerequisite, persist alias, shorten long paths (#375)
+- install CDK dependencies in container mode (#373) (#374)
+- update vulnerable dependencies and switch to slim base image (#368)
+
 ## v3.5.4 (2026-06-12)
 
 ### Fix

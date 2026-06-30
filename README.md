@@ -79,9 +79,9 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 
 | Mode      | Requirements                                                                                                                                                         | Notes                                                    |
 |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|
-| Local     | Python 3.10+, UV package manager, [Git](https://git-scm.com/downloads)                                                                                              | Some scanners require additional tools (see table above) |
+| Local     | Python 3.10+, UV package manager                                                                                                                                     | Some scanners require additional tools (see table above) |
 | Container | Any OCI-compatible container runtime ([Finch](https://github.com/runfinch/finch), [Docker](https://docs.docker.com/get-docker/), [Podman](https://podman.io/), etc.) | On Windows: WSL2 is typically required                   |
-| Precommit | Python 3.10+, UV package manager, [Git](https://git-scm.com/downloads)                                                                                              | Subset of scanners, optimized for speed                  |
+| Precommit | Python 3.10+, UV package manager                                                                                                                                     | Subset of scanners, optimized for speed                  |
 
 ## Installation Options
 
@@ -92,25 +92,18 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.4"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.5"
 ```
 
 ```powershell
-# Install Git for Windows if not already installed
-winget install --id Git.Git -e --source winget
-
 # Install uv on Windows with PowerShell if it isn't installed already
 irm https://astral.sh/uv/install.ps1 | iex
 
-# Create a function for ASH (current session)
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.4 $args }
-
-# Persist the function for new terminals by adding it to your PowerShell profile
-if (!(Test-Path -Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force }
-Add-Content -Path $PROFILE -Value "`nfunction ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.4 `$args }"
+# Create a function for ASH
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.5 $args }
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.5.4` to stay up to date automatically. Pin a specific version (e.g., `@v3.5.4`) when you need reproducible builds.
+> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.5.5` to stay up to date automatically. Pin a specific version (e.g., `@v3.5.5`) when you need reproducible builds.
 
 ### Other Installation Methods
 
@@ -137,13 +130,13 @@ ash --help
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.5.4
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.5.5
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.5.4
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.5.5
 cd automated-security-helper
 pip install .
 ```
@@ -232,7 +225,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.5.4",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.5.5",
         "ash",
         "mcp"
       ],
@@ -250,7 +243,7 @@ The ASH MCP server provides:
     "ash-security": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.5.4",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.5.5",
         "ash",
         "mcp"
       ]
@@ -266,7 +259,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.5.4",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.5.5",
         "ash",
         "mcp"
       ],
@@ -366,7 +359,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.5.4
+    rev: v3.5.5
     hooks:
       - id: ash-simple-scan
 ```
@@ -399,24 +392,6 @@ The `ash_aggregated_results.json` file includes comprehensive validation informa
 <summary>How do I run ASH on Windows?</summary>
 
 ASH v3 can run directly on Windows in local mode with Python 3.10+. Simply install ASH using pip, pipx, or uvx and run with `--mode local`. For container mode, you'll need WSL2 and a container runtime like Docker Desktop, Rancher Desktop, or Podman Desktop.
-
-**Prerequisites for Windows:**
-- [Git for Windows](https://git-scm.com/downloads/win) — required for `uvx` and `pip` git-based installs
-- Python 3.10+ and UV (`irm https://astral.sh/uv/install.ps1 | iex`)
-
-**Long path errors:** If you see `path too long` or `filename too long` errors during installation, enable Windows long path support:
-
-```powershell
-# Run PowerShell as Administrator
-New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
-```
-
-Then configure Git to use long paths:
-```powershell
-git config --system core.longpaths true
-```
-
-Restart your terminal after making these changes.
 </details>
 
 <details>
