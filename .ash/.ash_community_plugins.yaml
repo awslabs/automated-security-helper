@@ -51,6 +51,11 @@ global_settings:
       line_start: 175
       line_end: 177
       reason: False positive — runtime-generated synthetic credit card numbers from seeded random for test data.
+    - path: scripts/generate_test_docx.py
+      rule_id: PASSPORT
+      line_start: 198
+      line_end: 199
+      reason: Intentional test data — MRZ-format passport strings used to generate sample documents for ferret-scan integration testing.
     - path: tests/integration/cli/test_mcp_file_tracking_integration.py
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive.
