@@ -5,8 +5,7 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default: 3
-      semver-major: 7
+      default-days: 7
     commit-message:
       prefix: "ci"
     labels:
@@ -21,8 +20,7 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default: 3
-      semver-major: 7
+      default-days: 7
     commit-message:
       prefix: "build"
     labels:
@@ -33,8 +31,7 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default: 3
-      semver-major: 7
+      default-days: 7
     commit-message:
       prefix: "build"
     labels:
@@ -45,8 +42,8 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default: 3
-      semver-major: 7
+      default-days: 7
+      semver-major-days: 7
     commit-message:
       prefix: "build"
     labels:
