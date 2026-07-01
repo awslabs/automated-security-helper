@@ -44,6 +44,12 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.6 (2026-06-30)
+
+### Fix
+
+- **deps**: trigger patch release for dependency updates (v3.5.5 -> v3.5.6)
+
 ## v3.5.5 (2026-06-30)
 
 ### Fix
