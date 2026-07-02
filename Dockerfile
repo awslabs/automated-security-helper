@@ -153,7 +153,8 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
-RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
+RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
+    chmod 777 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 ARG SYFT_VERSION="v1.42.4"
@@ -171,7 +172,8 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
         cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
-    done \
+    done && \
+    chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 
 ARG TRIVY_VERSION="v0.69.3"
@@ -203,7 +205,7 @@ RUN uv pip install --system "$(ls *.whl)[cdk]" && rm -rf *.whl
 #
 # Make sure the ash script is executable
 #
-RUN chmod -R 755 /ash && chmod -R 777 /src /out /deps ${ASH_BIN_PATH}
+RUN chmod -R 755 /ash && chmod -R 777 /src /out ${ASH_BIN_PATH}
 
 #
 # Flag ASH as local execution mode since we are running in a container already
@@ -260,8 +262,8 @@ RUN adduser --disabled-password --disabled-login \
 
 # Change ownership and permissions now that we are running with a non-root
 # user by default.
-RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out /deps && \
-    chmod 750 -R ${ASHUSER_HOME} /src /out /deps
+RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
+    chmod 750 -R ${ASHUSER_HOME} /src /out
 
 USER ${UID}:${GID}
 
