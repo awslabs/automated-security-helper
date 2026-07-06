@@ -44,6 +44,12 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.7 (2026-07-06)
+
+### Fix
+
+- **scanners**: do not embed literal quotes in checkov/bandit exclusion args (#350)
+
 ## v3.5.6 (2026-06-30)
 
 ### Fix
