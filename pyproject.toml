@@ -27,7 +27,7 @@ dependencies = [
  "detect-secrets>=1.5.0,<2",
  "boto3>=1.34.0,<1.44",
  "cfn-flip>=1.3.0,<2",
- "mcp>=1.23.3,<2",
+ "mcp>=1.28.1,<2",
  "toml>=0.10.2,<1.0.0",
  "python-multipart>=0.0.28,<0.1",
 ]
@@ -87,7 +87,7 @@ dev = [
  "pytest-xdist>=3.7.0,<4.0.0",
  "toml>=0.10.2",
  "hatchling>=1.29.0",
- "mcp>=1.23.3",
+ "mcp>=1.28.1",
  "commitizen>=4.13.10",
 ]
 
