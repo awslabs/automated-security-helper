@@ -44,6 +44,13 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.8 (2026-07-24)
+
+### Fix
+
+- **deps**: patch GitPython argument-injection vulnerabilities (#397)
+- **deps**: patch vulnerable mcp, setuptools, and soupsieve (#394)
+
 ## v3.5.7 (2026-07-06)
 
 ### Fix
