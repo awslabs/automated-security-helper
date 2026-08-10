@@ -44,6 +44,12 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.9 (2026-08-10)
+
+### Fix
+
+- **deps**: patch grype CVEs in gitpython, cryptography, pymdown-extensions (#407)
+
 ## v3.5.8 (2026-07-24)
 
 ### Fix
