@@ -84,7 +84,7 @@ jobs:
       - uses: actions/checkout@v7
 
       # Python setup (skip for uvx which bundles its own)
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: matrix.method != 'uvx'
         with:
           python-version: ${{ matrix.python-version }}
