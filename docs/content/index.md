@@ -12,7 +12,7 @@ ASH (Automated Security Helper) is a security scanning tool designed to help you
 - It leverages lightweight, open-source tools for flexibility and portability
 - ASH v3 has been completely rewritten in Python with significant improvements to usability and functionality
 
-[![Star History Chart](https://api.star-history.com/svg?repos=awslabs/automated-security-helper&type=Date)](https://www.star-history.com/#awslabs/automated-security-helper&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=awslabs/automated-security-helper&type=Date)](https://star-history.dera.page/#awslabs/automated-security-helper&Date)
 
 ## Key Features in ASH v3
 

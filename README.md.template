@@ -483,4 +483,4 @@ This library is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=awslabs/automated-security-helper&type=Date)](https://www.star-history.com/#awslabs/automated-security-helper&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=awslabs/automated-security-helper&type=Date)](https://star-history.dera.page/#awslabs/automated-security-helper&Date)
