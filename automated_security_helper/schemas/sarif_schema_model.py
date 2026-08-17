@@ -7,10 +7,12 @@
 
 from __future__ import annotations
 
+import re
+
 from datetime import datetime
 from enum import Enum
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, RootModel
@@ -2326,6 +2328,12 @@ class Run(BaseModel):
     )
 
 
+# Windows drive-root shapes seen in SARIF URIs: "/C:/x" (from file:///C:/x)
+# and "C:/x". Matched lexically so behaviour does not depend on the host OS.
+_DRIVE_PREFIXED_ROOT = re.compile(r"^/[A-Za-z]:")
+_DRIVE_ROOT = re.compile(r"^[A-Za-z]:/")
+
+
 class SarifReport(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -2405,7 +2413,7 @@ class SarifReport(BaseModel):
         """
         if not self.runs:
             return
-        source_dir_path = Path(source_dir)
+        source_posix = PurePosixPath(str(source_dir).replace("\\", "/"))
         for run in self.runs:
             if not run.results:
                 continue
@@ -2422,19 +2430,24 @@ class SarifReport(BaseModel):
                     filtered.append(result)
                     continue
                 uri = loc.physicalLocation.root.artifactLocation.uri or ""
-                # Strip file:// prefix variants emitted by some scanners.
-                if uri.startswith("file://"):
-                    uri = uri[7:]
-                    if uri.startswith("///"):
-                        uri = uri[2:]
-                # Normalize to a path relative to source_dir for comparison.
-                candidate = Path(uri)
-                if candidate.is_absolute():
+                # SARIF artifact URIs are POSIX-style by spec, so all comparison
+                # happens in PurePosixPath space. Using pathlib.Path here makes the
+                # result host-dependent: on Windows, Path("/tmp/src/x.py").is_absolute()
+                # is False (no drive), so a Linux-produced SARIF processed on Windows
+                # would skip normalisation entirely and drop every result.
+                candidate_str = uri.replace("\\", "/")
+                if candidate_str.startswith("file://"):
+                    candidate_str = candidate_str[len("file://") :]
+                    # file:///C:/x -> /C:/x ; drop the slash that precedes a drive.
+                    if _DRIVE_PREFIXED_ROOT.match(candidate_str):
+                        candidate_str = candidate_str[1:]
+                candidate = PurePosixPath(candidate_str)
+                is_rooted = candidate_str.startswith("/") or bool(
+                    _DRIVE_ROOT.match(candidate_str)
+                )
+                if is_rooted:
                     try:
-                        rel = candidate.resolve().relative_to(
-                            source_dir_path.resolve()
-                        )
-                        rel_str = rel.as_posix()
+                        rel_str = candidate.relative_to(source_posix).as_posix()
                     except ValueError:
                         rel_str = candidate.as_posix()
                 else:

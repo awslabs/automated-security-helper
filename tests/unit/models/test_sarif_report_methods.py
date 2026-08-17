@@ -158,6 +158,39 @@ class TestFilterResultsByFiles:
         uri = kept[0].locations[0].physicalLocation.root.artifactLocation.uri
         assert uri == "/tmp/src/src/keep.py"
 
+    def test_handles_windows_drive_file_uri(self):
+        """file:///C:/... must normalise on every host, not just Windows.
+
+        Regression: the comparison previously used pathlib.Path, so a
+        Linux-produced SARIF processed on Windows (or the reverse) skipped
+        normalisation and dropped every result.
+        """
+        report = _make_report(
+            _make_run("bandit", ["file:///C:/src/src/keep.py"]),
+        )
+        report.filter_results_by_files({"src/keep.py"}, source_dir="C:/src")
+        assert len(report.get_all_results()) == 1
+
+    def test_handles_windows_backslash_paths(self):
+        report = _make_report(
+            _make_run("bandit", ["C:\\src\\src\\keep.py", "C:\\src\\src\\drop.py"]),
+        )
+        report.filter_results_by_files({"src/keep.py"}, source_dir="C:/src")
+        assert len(report.get_all_results()) == 1
+
+    def test_posix_uri_normalises_regardless_of_host(self):
+        """A POSIX SARIF URI must resolve the same on Linux and Windows hosts."""
+        report = _make_report(
+            _make_run("bandit", ["/tmp/src/src/keep.py", "/tmp/src/other/drop.py"]),
+        )
+        report.filter_results_by_files({"src/keep.py"}, source_dir="/tmp/src")
+        kept = report.get_all_results()
+        assert len(kept) == 1
+        assert (
+            kept[0].locations[0].physicalLocation.root.artifactLocation.uri
+            == "/tmp/src/src/keep.py"
+        )
+
     def test_result_with_no_locations_is_kept(self):
         """Results without locations cannot be filtered — keep them."""
         run = Run(
