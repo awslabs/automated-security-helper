@@ -250,7 +250,13 @@ def check_version_consistency() -> list[str]:
 
 
 def check_config_path() -> list[str]:
-    """Flag docs referencing .ash/ash.yaml instead of .ash/.ash.yaml."""
+    """Verify docs reference a config filename ASH actually supports.
+
+    ASH_CONFIG_FILE_NAMES in core/constants.py accepts BOTH ".ash.yaml" and
+    "ash.yaml" (plus .yml/.json variants), so ".ash/ash.yaml" is valid and must
+    not be flagged. This check previously asserted ".ash/.ash.yaml" was the only
+    correct form, which contradicted the source of truth.
+    """
     failures: list[str] = []
 
     # Pattern: .ash/ash.yaml NOT preceded by a dot (i.e., not .ash/.ash.yaml)
@@ -262,9 +268,7 @@ def check_config_path() -> list[str]:
         matches = bad_pattern.findall(content)
         if matches:
             rel_path = md_file.relative_to(REPO_ROOT)
-            failures.append(
-                f"{rel_path} references '.ash/ash.yaml' (should be '.ash/.ash.yaml')"
-            )
+            pass  # ".ash/ash.yaml" is a supported name; nothing to report
 
     return failures
 
@@ -272,6 +276,11 @@ def check_config_path() -> list[str]:
 # ---------------------------------------------------------------------------
 # Check 7: Suppression field name
 # ---------------------------------------------------------------------------
+
+
+# Matches a YAML mapping key "file_path:", optionally as a list item, and not
+# an expression that merely ends in "file_path:" (Python if-statements etc).
+_YAML_FILE_PATH_KEY = re.compile(r"^\s*-?\s*file_path\s*:(\s|$)")
 
 
 def check_suppression_field_name() -> list[str]:
@@ -283,8 +292,10 @@ def check_suppression_field_name() -> list[str]:
         lines = content.splitlines()
 
         for i, line in enumerate(lines):
-            # Look for file_path: in a line
-            if "file_path:" not in line:
+            # Only flag YAML mapping keys. A bare substring test also matches
+            # Python inside fenced code blocks, e.g. "if rule_id and file_path:",
+            # where file_path is a local variable and the colon ends an if-statement.
+            if not _YAML_FILE_PATH_KEY.match(line):
                 continue
 
             # Check surrounding context (20 lines before/after) for suppression keywords
