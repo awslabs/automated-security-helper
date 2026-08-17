@@ -25,7 +25,7 @@ generate-models = "tools.generate_models:main"
 # Refresh-time tooling — only needed when running refresh-schemas or generate-models.
 # CI normally just runs `transpile --check` against vendored schemas + models.
 refresh = [
-    "datamodel-code-generator[http]>=0.25",
+    "datamodel-code-generator[http]>=0.64",
 ]
 # Test-time tooling.
 test = [
