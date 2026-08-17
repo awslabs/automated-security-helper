@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jinja2 import ChoiceLoader, Environment, FileSystemLoader, StrictUndefined
+from jinja2 import ChoiceLoader, Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 # Shared templates directory (sibling to the transpiler package)
 _SHARED_TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -51,8 +51,17 @@ def _discover_backend_template_dirs() -> list[str]:
 _loaders = [FileSystemLoader(d) for d in _discover_backend_template_dirs()]
 _loaders.append(FileSystemLoader(str(_SHARED_TEMPLATES)))
 
+# Autoescape is selected by extension rather than left at Jinja's default of
+# False. These templates emit Markdown, YAML and JSON for AI-agent plugin
+# packages, where HTML-escaping would corrupt the output (&, <, > are literal
+# content). Any .html/.xml template added later is escaped automatically.
 ENV = Environment(
     loader=ChoiceLoader(_loaders),
+    autoescape=select_autoescape(
+        enabled_extensions=("html", "htm", "xml"),
+        default_for_string=False,
+        default=False,
+    ),
     undefined=StrictUndefined,
     keep_trailing_newline=True,
     trim_blocks=False,

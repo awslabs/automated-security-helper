@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -48,11 +49,18 @@ def _fetch_direct(url: str, dest: Path) -> None:
     Sets a User-Agent header because some hosts (notably opencode.ai) reject
     the default urllib UA with 403 Forbidden."""
     print(f"  fetching {url}")
+    # Reject non-HTTP(S) schemes before opening. urlopen also honours file:// and
+    # custom openers, so a schema URL sourced from config must be constrained or it
+    # becomes a local-file read primitive (bandit B310).
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        sys.stderr.write(f"ERROR: refusing to fetch non-HTTP(S) URL: {url}\n")
+        sys.exit(1)
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "agentic-coding-transpiler/0.1 (schema-refresh)"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310 - scheme checked above
         data = resp.read()
     parsed = json.loads(data)  # raises if not JSON
     if not isinstance(parsed, dict):

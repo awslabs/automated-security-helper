@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: this workflow only reads the repo and runs validation.
+permissions:
+  contents: read
+
 jobs:
   # Drift + structural validation runs once on the full output tree.
   # Cheap, deterministic, catches the byte-identical-output regressions.
