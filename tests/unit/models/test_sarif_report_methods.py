@@ -127,7 +127,7 @@ class TestFilterResultsByFiles:
         report = _make_report(
             _make_run("bandit", ["src/keep.py", "src/drop.py"]),
         )
-        report.filter_results_by_files({"src/keep.py"}, source_dir="/tmp/src")
+        report.filter_results_by_files({"src/keep.py"}, source_dir="/work/src")
         kept = report.get_all_results()
         assert len(kept) == 1
         uri = kept[0].locations[0].physicalLocation.root.artifactLocation.uri
@@ -137,26 +137,26 @@ class TestFilterResultsByFiles:
         report = _make_report(
             _make_run("bandit", ["src/a.py", "src/b.py"]),
         )
-        report.filter_results_by_files(set(), source_dir="/tmp/src")
+        report.filter_results_by_files(set(), source_dir="/work/src")
         assert report.get_all_results() == []
 
     def test_handles_file_uri_prefix(self):
         report = _make_report(
-            _make_run("bandit", ["file:///tmp/src/src/keep.py"]),
+            _make_run("bandit", ["file:///work/src/src/keep.py"]),
         )
-        report.filter_results_by_files({"src/keep.py"}, source_dir="/tmp/src")
+        report.filter_results_by_files({"src/keep.py"}, source_dir="/work/src")
         kept = report.get_all_results()
         assert len(kept) == 1
 
     def test_handles_absolute_paths_relative_to_source_dir(self):
         report = _make_report(
-            _make_run("bandit", ["/tmp/src/src/keep.py", "/tmp/src/src/drop.py"]),
+            _make_run("bandit", ["/work/src/src/keep.py", "/work/src/src/drop.py"]),
         )
-        report.filter_results_by_files({"src/keep.py"}, source_dir="/tmp/src")
+        report.filter_results_by_files({"src/keep.py"}, source_dir="/work/src")
         kept = report.get_all_results()
         assert len(kept) == 1
         uri = kept[0].locations[0].physicalLocation.root.artifactLocation.uri
-        assert uri == "/tmp/src/src/keep.py"
+        assert uri == "/work/src/src/keep.py"
 
     def test_handles_windows_drive_file_uri(self):
         """file:///C:/... must normalise on every host, not just Windows.
@@ -181,14 +181,14 @@ class TestFilterResultsByFiles:
     def test_posix_uri_normalises_regardless_of_host(self):
         """A POSIX SARIF URI must resolve the same on Linux and Windows hosts."""
         report = _make_report(
-            _make_run("bandit", ["/tmp/src/src/keep.py", "/tmp/src/other/drop.py"]),
+            _make_run("bandit", ["/work/src/src/keep.py", "/work/src/other/drop.py"]),
         )
-        report.filter_results_by_files({"src/keep.py"}, source_dir="/tmp/src")
+        report.filter_results_by_files({"src/keep.py"}, source_dir="/work/src")
         kept = report.get_all_results()
         assert len(kept) == 1
         assert (
             kept[0].locations[0].physicalLocation.root.artifactLocation.uri
-            == "/tmp/src/src/keep.py"
+            == "/work/src/src/keep.py"
         )
 
     def test_result_with_no_locations_is_kept(self):
@@ -198,17 +198,17 @@ class TestFilterResultsByFiles:
             results=[Result(message=Message(text="no-loc"))],
         )
         report = _make_report(run)
-        report.filter_results_by_files({"anything.py"}, source_dir="/tmp/src")
+        report.filter_results_by_files({"anything.py"}, source_dir="/work/src")
         assert len(report.get_all_results()) == 1
 
     def test_empty_report_is_noop(self):
         report = SarifReport()
         report.runs = []
-        report.filter_results_by_files({"a.py"}, source_dir="/tmp/src")
+        report.filter_results_by_files({"a.py"}, source_dir="/work/src")
         assert report.runs == []
 
     def test_runs_none_is_noop(self):
         report = SarifReport()
         report.runs = None  # type: ignore[assignment]
         # Must not raise
-        report.filter_results_by_files({"a.py"}, source_dir="/tmp/src")
+        report.filter_results_by_files({"a.py"}, source_dir="/work/src")
