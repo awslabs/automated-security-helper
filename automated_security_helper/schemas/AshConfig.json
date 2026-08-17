@@ -380,6 +380,7 @@
                 ],
                 "config_file": null,
                 "exclude": [],
+                "offline": false,
                 "severity_threshold": null
               }
             }
@@ -2927,6 +2928,7 @@
               ],
               "config_file": null,
               "exclude": [],
+              "offline": false,
               "severity_threshold": null
             }
           },
@@ -3397,6 +3399,7 @@
             ],
             "config_file": null,
             "exclude": [],
+            "offline": false,
             "severity_threshold": null
           },
           "description": "Configure Syft scanner"
@@ -3451,6 +3454,11 @@
           },
           "title": "Exclude",
           "type": "array"
+        },
+        "offline": {
+          "description": "Run in offline mode, disabling update checks",
+          "title": "Offline",
+          "type": "boolean"
         },
         "severity_threshold": {
           "anyOf": [
