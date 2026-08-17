@@ -291,6 +291,10 @@ The ASH MCP server provides these tools:
 | `run_ash_scan` | Run a scan synchronously and return results | Simple blocking scans |
 | `get_scan_summary` | Get a lightweight summary of a completed scan | Cheap status/severity overview without full results |
 | `get_scan_result_paths` | List on-disk paths of generated report files | Locate SARIF/HTML/CSV artefacts after a scan |
+| `explain_finding` | Return structured details for a single finding by ID | Inspect one finding without paging full results (structured lookup, no LLM calls) |
+| `get_config` | Get the resolved ASH config (defaults plus user overrides merged) | Confirm what configuration a scan will actually use |
+| `diff_scan_results` | Compare two `ash_aggregated_results.json` files and return a structured diff | Detect newly introduced or resolved findings between scans |
+| `suggest_suppression` | Build a paste-ready `AshSuppression` entry for a finding | Draft a correctly-shaped suppression without hand-writing YAML |
 
 ### Usage Examples
 
