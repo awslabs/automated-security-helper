@@ -15,6 +15,7 @@ through the official MCP streamable-HTTP client.
 
 from __future__ import annotations
 
+import re
 import socket
 import threading
 import time
@@ -228,8 +229,13 @@ def test_mcp_wrapper_exposes_streamable_http_flags() -> None:
     runner = CliRunner()
     result = runner.invoke(ash_app, ["mcp", "--help"])
     assert result.exit_code == 0, result.output
-    # Strip the help output of line wraps so flag tokens span boundaries.
-    flat = " ".join(result.output.split())
+    # Typer renders help through Rich, which styles each flag segment separately:
+    # "--log-level" arrives as ESC[..m- ESC[..m-log ESC[..m-level. The escape codes
+    # sit *inside* the flag token, so a substring search on the raw output never
+    # matches. Strip ANSI first, then collapse whitespace so a flag that Rich wrapped
+    # across two lines still reads as one token.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    flat = " ".join(plain.split())
     for flag in (
         "--transport",
         "--host",
