@@ -467,7 +467,10 @@ class TestMcpWrappers:
                 session_id=_SESSION,
             )
         assert r["success"] is True
-        assert r["source_dir"].endswith(f"{_SESSION}/source")
+        # Compare path structure, not a slash-joined string: source_dir is
+        # str(Path), so on Windows it ends with "\\session\\source" and a
+        # forward-slash suffix check fails there while passing on POSIX.
+        assert Path(r["source_dir"]).parts[-2:] == (_SESSION, "source"), r["source_dir"]
         sd.clear_source(_SESSION, workspace_root=tmp_path)
 
     def test_mcp_set_source_git_error_returns_dict(self, tmp_path, monkeypatch):

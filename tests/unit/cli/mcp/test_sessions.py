@@ -245,33 +245,63 @@ class TestCrossSessionParallelism:
             "cross-session locks contended — sessions must not share a lock"
         )
 
-    def test_parallel_holds_finish_in_one_hold_time(
-        self, registry: MCPSessionRegistry
-    ):
-        """Two sessions, each holding for ~80ms — wall time must be roughly
-        one hold (~80ms), not two (~160ms). Generous threshold for CI noise."""
+    def test_parallel_holds_overlap_in_time(self, registry: MCPSessionRegistry):
+        """Two sessions' critical sections must overlap, not run back to back.
+
+        The previous version of this test measured total wall time and required
+        it to stay under 1.5x a single 80ms hold. That is a speed assertion, not
+        a concurrency assertion: on a loaded runner two genuinely parallel holds
+        can still take longer than the bound, and it failed on macOS CI with
+        elapsed 0.205s against a 0.170s limit while the locks were behaving
+        correctly.
+
+        This version asserts the property directly. Each thread records when it
+        entered and left its critical section; a barrier inside the lock removes
+        the start-up race, so if the sessions share a lock one thread cannot
+        reach the barrier and the wait breaks. Overlap is then established by
+        the intervals themselves - true regardless of how slow the machine is.
+        """
         s_a = registry.get_or_create("conn-a")
         s_b = registry.get_or_create("conn-b")
-        hold_seconds = 0.08
 
-        def hold(session: MCPSession) -> None:
+        barrier = threading.Barrier(parties=2, timeout=5.0)
+        spans: dict[str, tuple[float, float]] = {}
+        broke: list[str] = []
+        guard = threading.Lock()
+
+        def hold(name: str, session: MCPSession) -> None:
             with session.lock:
-                time.sleep(hold_seconds)
+                entered = time.monotonic()
+                try:
+                    # Both threads are inside their own lock here. Sharing a lock
+                    # would keep the second thread out and break the barrier.
+                    barrier.wait()
+                except threading.BrokenBarrierError:
+                    with guard:
+                        broke.append(name)
+                    return
+                left = time.monotonic()
+                with guard:
+                    spans[name] = (entered, left)
 
-        start = time.monotonic()
-        t_a = threading.Thread(target=hold, args=(s_a,))
-        t_b = threading.Thread(target=hold, args=(s_b,))
+        t_a = threading.Thread(target=hold, args=("a", s_a))
+        t_b = threading.Thread(target=hold, args=("b", s_b))
         t_a.start()
         t_b.start()
-        t_a.join(timeout=3.0)
-        t_b.join(timeout=3.0)
-        elapsed = time.monotonic() - start
+        t_a.join(timeout=10.0)
+        t_b.join(timeout=10.0)
 
-        # If they parallelized, elapsed ~= hold_seconds. Allow 1.5x to dodge
-        # CI jitter — a serialized run would be ~2x and would fail this bound.
-        assert elapsed < 1.5 * hold_seconds + 0.05, (
-            f"Cross-session scans appear to have serialized: elapsed "
-            f"{elapsed:.3f}s vs single-hold {hold_seconds:.3f}s"
+        assert not broke, (
+            f"cross-session locks contended - threads {broke} could not rendezvous "
+            "while each held its own session lock"
+        )
+        assert set(spans) == {"a", "b"}, f"a thread did not finish: {sorted(spans)}"
+
+        (a_in, a_out), (b_in, b_out) = spans["a"], spans["b"]
+        # Overlap exists iff the latest entry precedes the earliest exit.
+        assert max(a_in, b_in) <= min(a_out, b_out), (
+            "Cross-session critical sections did not overlap, so the sessions "
+            f"serialized: a=[{a_in:.4f}, {a_out:.4f}] b=[{b_in:.4f}, {b_out:.4f}]"
         )
 
 
