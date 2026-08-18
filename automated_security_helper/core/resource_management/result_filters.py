@@ -239,6 +239,38 @@ def apply_content_filters(
     return filtered_results
 
 
+def _get_finding_severity(result: Dict[str, Any]) -> str:
+    """
+    Determine the severity of a SARIF finding.
+
+    Checks explicit issue_severity in properties first, then falls back to
+    mapping the SARIF level to a severity string.
+
+    Args:
+        result: A single SARIF result dict
+
+    Returns:
+        Uppercase severity string (CRITICAL, HIGH, MEDIUM, LOW, INFO)
+    """
+    # SARIF level -> severity mapping
+    _SARIF_LEVEL_TO_SEVERITY = {
+        "error": "CRITICAL",
+        "warning": "MEDIUM",
+        "note": "LOW",
+        "none": "INFO",
+    }
+
+    # Check explicit issue_severity in properties first
+    props = result.get("properties", {}) or {}
+    issue_severity = (props.get("issue_severity") or "").upper()
+    if issue_severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+        return issue_severity
+
+    # Fall back to SARIF level mapping
+    level = (result.get("level") or "note").lower()
+    return _SARIF_LEVEL_TO_SEVERITY.get(level, "LOW")
+
+
 def add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract a flat list of actionable findings from SARIF results and add it

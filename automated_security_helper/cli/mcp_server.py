@@ -404,7 +404,17 @@ async def get_scan_summary(
     Args:
         output_dir: Path to the scan output directory (absolute path recommended)
     """
-    return await get_scan_results(ctx, output_dir=output_dir, filter_level="summary")
+    summary = await get_scan_results(
+        ctx, output_dir=output_dir, filter_level="summary"
+    )
+    # Tag the response with the entry point that produced it. get_scan_results
+    # serves several filter levels, so callers use this to tell a summary obtained
+    # via get_scan_summary from one obtained by calling get_scan_results directly.
+    # Preserved from the pre-refactor implementation; asserted by
+    # tests/unit/cli/test_mcp_server.py::TestGetScanSummary.
+    if isinstance(summary, dict) and summary.get("success"):
+        summary["_source_function"] = "get_scan_summary"
+    return summary
 
 
 @mcp.tool()
