@@ -161,22 +161,32 @@ def _base_assemble_kwargs(**overrides):
 
 def test_assemble_run_command_mounts():
     """--mount flags for source and output dirs are present and correct."""
-    cmd = _assemble_run_command(**_base_assemble_kwargs())
+    kwargs = _base_assemble_kwargs()
+    cmd = _assemble_run_command(**kwargs)
     mount_args = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--mount"]
-    assert any("/src/code" in m and "destination=/src" in m for m in mount_args)
-    assert any("destination=/out" in m for m in mount_args)
+    # The mount string is built with an f-string over the Path, so the host side
+    # is str(Path) and uses the host separator: "\\src\\code" on Windows,
+    # "/src/code" elsewhere. Derive the expectation from the same object rather
+    # than hardcoding forward slashes.
+    expected_source = str(kwargs["source_dir"])
+    assert any(
+        expected_source in m and "destination=/src" in m for m in mount_args
+    ), mount_args
+    assert any("destination=/out" in m for m in mount_args), mount_args
 
 
 def test_assemble_run_command_env_vars():
     """ASH_ACTUAL_SOURCE_DIR and ASH_ACTUAL_OUTPUT_DIR are set correctly."""
-    cmd = _assemble_run_command(**_base_assemble_kwargs())
+    kwargs = _base_assemble_kwargs()
+    cmd = _assemble_run_command(**kwargs)
     env_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-e"]
     assert any(v.startswith("ASH_ACTUAL_SOURCE_DIR=") for v in env_values)
     assert any(v.startswith("ASH_ACTUAL_OUTPUT_DIR=") for v in env_values)
     src_val = next(v for v in env_values if v.startswith("ASH_ACTUAL_SOURCE_DIR="))
     out_val = next(v for v in env_values if v.startswith("ASH_ACTUAL_OUTPUT_DIR="))
-    assert "/src/code" in src_val
-    assert "ash_output" in out_val
+    # Host paths, so separator-dependent - compare against str(Path) as above.
+    assert str(kwargs["source_dir"]) in src_val, src_val
+    assert "ash_output" in out_val, out_val
 
 
 def test_assemble_run_command_image_argument_position():

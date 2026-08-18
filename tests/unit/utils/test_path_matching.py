@@ -128,7 +128,17 @@ class TestSingleCanonicalDefinition:
         definitions = []
         for py_file in root.rglob("*.py"):
             try:
-                tree = ast.parse(py_file.read_text())
+                # Python source is UTF-8 by definition (PEP 3120). Without an
+                # explicit encoding, read_text() uses the locale codepage, which
+                # on Windows is cp1252 - and eight files in this package contain
+                # characters cp1252 cannot represent, so this raised
+                # UnicodeDecodeError there. That is not a SyntaxError, so it was
+                # not caught and the whole test failed on Windows only.
+                #
+                # UnicodeDecodeError is deliberately NOT caught: with an explicit
+                # utf-8 read it cannot occur for valid Python, and swallowing it
+                # would let this guard skip files silently rather than fail.
+                tree = ast.parse(py_file.read_text(encoding="utf-8"))
             except SyntaxError:
                 continue
             for node in ast.walk(tree):
