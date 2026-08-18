@@ -241,10 +241,29 @@ class ScannerExecutor:
             ASH_LOGGER.error(f"Failed to execute {scanner_plugin.__class__.__name__} scanner: {e}")
             raise
 
-    def _extract_metrics_from_sarif(self, sarif_report: Any) -> Any:
-        """Extract severity metrics from a SARIF report."""
-        from automated_security_helper.utils.sarif_utils import get_severity_metrics_from_sarif
-        return get_severity_metrics_from_sarif(sarif_report, self.plugin_context)
+    def _extract_metrics_from_sarif(
+        self, sarif_report: Any
+    ) -> Tuple["ScannerSeverityCount", int]:
+        """Return (severity counts, total finding count) for a SARIF report.
+
+        get_severity_metrics_from_sarif returns a single ScannerSeverityCount
+        model, not a tuple. Returning it directly broke the caller: pydantic models
+        are iterable, so "severity_counts, finding_count = ..." tried to unpack the
+        model's six fields into two names and raised
+        "too many values to unpack (expected 2)". Every scanner therefore failed
+        with status ERROR and zero findings.
+
+        The (counts, total) contract here matches ScanPhase._extract_metrics_from_sarif,
+        including counting suppressed findings toward the total.
+        """
+        # Imported lazily, as the original did: sarif_utils pulls in PluginContext,
+        # and a module-level import here would create a cycle through core.phases.
+        from automated_security_helper.utils.sarif_utils import (
+            get_severity_metrics_from_sarif,
+        )
+
+        counts = get_severity_metrics_from_sarif(sarif_report, self.plugin_context)
+        return counts, counts.total + counts.suppressed
 
     def _safe_execute_scanner(
         self,
