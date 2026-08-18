@@ -5,8 +5,12 @@ on:
     branches:
       - "!main"
   pull_request:
+    # "**" not "*": GitHub branch filters treat "*" as matching any character
+    # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting
+    # e.g. pr/scan-decomposition) never matched and silently got no CI at all.
+    # "**" matches nested refs too.
     branches:
-      - "*"
+      - "**"
   merge_group:
     types: [checks_requested]
   workflow_dispatch: {}
