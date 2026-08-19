@@ -1,0 +1,183 @@
+---
+# Measures whether larger GitHub-hosted runners would speed up ASH's CI, and
+# separates that from the cheaper win of letting pytest use more than one core.
+#
+# Why this is a throwaway experiment rather than a change to ash-unified-ci.yml:
+#
+#   1. Linux larger runners have no predefined labels. Unlike macOS
+#      (macos-*-large / -xlarge), a Linux larger runner's label is the name an
+#      org admin gives it at creation, and repo-level access to enterprise
+#      runners is off by default. So no label can be hardcoded here and be
+#      guaranteed to schedule.
+#   2. Larger runners are billed on public repositories. GitHub: "For both
+#      private and public repositories, when larger runners are in use, they
+#      will always be billed at the per-minute rate." This repo is public, so
+#      standard runners are free and larger ones never are. A full
+#      ash-unified-ci run is ~135 jobs / ~246 runner-minutes, so switching the
+#      matrix wholesale is a real recurring cost and wants evidence first.
+#
+# To exercise the larger-runner arms: set a repository (or org) Actions variable
+# ASH_LARGE_RUNNER_LABEL to the label of a provisioned Linux larger runner.
+# Until that variable exists those arms fall back to ubuntu-latest and say so in
+# the summary, rather than sitting unschedulable.
+#
+# The pull_request trigger is scoped to this file, so the experiment only runs on
+# PRs that touch it and never adds load to normal PRs.
+#
+# Note on style: the runner label is passed into shell steps via `env:` rather
+# than interpolated into `run:` directly. Interpolating a workflow_dispatch input
+# straight into a shell command is the GitHub Actions script-injection pattern,
+# and ASH's own semgrep ruleset flags it.
+name: CI Runner Experiment
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-runner-experiment.yml
+  workflow_dispatch:
+    inputs:
+      large_runner_label:
+        description: "Label of a Linux larger runner to test (overrides ASH_LARGE_RUNNER_LABEL)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  LARGE_LABEL: ${{ inputs.large_runner_label || vars.ASH_LARGE_RUNNER_LABEL }}
+
+jobs:
+  # --- unit tests: three arms ------------------------------------------------
+  # Arm A is today's behaviour. pytest.ini pins `-n 1`, so the suite is
+  # single-threaded no matter how many cores the runner has.
+  unit-baseline:
+    name: "unit / ubuntu-latest / -n 1 (baseline)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Install dependencies
+        run: uv sync
+      - name: Run PyTest (as configured, -n 1)
+        run: |
+          start=$(date +%s)
+          uv run pytest || true
+          echo "ELAPSED=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+      - name: Record
+        run: |
+          {
+            echo "| arm | runner | cores | pytest | seconds |"
+            echo "| --- | --- | --- | --- | --- |"
+            echo "| A baseline | ubuntu-latest | $(nproc) | -n 1 | ${ELAPSED} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Arm B isolates the parallelism variable on the free standard runner.
+  # ubuntu-latest is already 4 vCPU, so if this beats arm A substantially the
+  # win is available at zero cost and needs no larger runner at all.
+  unit-xdist-standard:
+    name: "unit / ubuntu-latest / -n auto"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Install dependencies
+        run: uv sync
+      - name: Run PyTest (-n auto; a later -n overrides the -n 1 in pytest.ini)
+        run: |
+          start=$(date +%s)
+          uv run pytest -n auto || true
+          echo "ELAPSED=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+      - name: Record
+        run: |
+          echo "| B xdist | ubuntu-latest | $(nproc) | -n auto | ${ELAPSED} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # Arm C is the actual question: does more CPU beat arm B by enough to justify
+  # per-minute billing? continue-on-error so a misconfigured label cannot block.
+  unit-large:
+    name: "unit / larger runner / -n auto"
+    runs-on: ${{ inputs.large_runner_label || vars.ASH_LARGE_RUNNER_LABEL || 'ubuntu-latest' }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - name: Note whether a larger runner was actually used
+        run: |
+          if [ -z "$LARGE_LABEL" ]; then
+            echo "::warning::ASH_LARGE_RUNNER_LABEL is not set; this arm ran on ubuntu-latest and is NOT a larger-runner measurement."
+          else
+            echo "Using larger runner label: $LARGE_LABEL"
+          fi
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Install dependencies
+        run: uv sync
+      - name: Run PyTest (-n auto)
+        run: |
+          start=$(date +%s)
+          uv run pytest -n auto || true
+          echo "ELAPSED=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+      - name: Record
+        run: |
+          if [ -n "$LARGE_LABEL" ]; then
+            arm="C larger ($LARGE_LABEL)"
+          else
+            arm="C larger (NOT CONFIGURED - ran on ubuntu-latest)"
+          fi
+          echo "| ${arm} | ${LARGE_LABEL:-ubuntu-latest} | $(nproc) | -n auto | ${ELAPSED} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # --- scan: the other 95 runner-minutes ------------------------------------
+  # The twelve slowest jobs in a real run are all ubuntu-latest container-mode
+  # scans (4-9 min each), dominated by image build, grype DB download and
+  # semgrep ruleset fetch. Those are network/IO bound, so extra vCPU may buy
+  # little. These two arms test that instead of assuming it.
+  scan-standard:
+    name: "scan python-local / ubuntu-latest"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "true"
+      - name: Timed scan
+        run: |
+          mkdir -p .ash/ash_output
+          ash dependencies install || true
+          start=$(date +%s)
+          ash --mode local --build-target ci --verbose --no-progress || true
+          echo "ELAPSED=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+      - name: Record
+        run: |
+          echo "| scan standard | ubuntu-latest | $(nproc) | n/a | ${ELAPSED} |" >> "$GITHUB_STEP_SUMMARY"
+
+  scan-large:
+    name: "scan python-local / larger runner"
+    runs-on: ${{ inputs.large_runner_label || vars.ASH_LARGE_RUNNER_LABEL || 'ubuntu-latest' }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "true"
+      - name: Timed scan
+        run: |
+          mkdir -p .ash/ash_output
+          ash dependencies install || true
+          start=$(date +%s)
+          ash --mode local --build-target ci --verbose --no-progress || true
+          echo "ELAPSED=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+      - name: Record
+        run: |
+          if [ -z "$LARGE_LABEL" ]; then
+            echo "::warning::ASH_LARGE_RUNNER_LABEL is not set; this arm ran on ubuntu-latest."
+          fi
+          echo "| scan larger | ${LARGE_LABEL:-ubuntu-latest (NOT CONFIGURED)} | $(nproc) | n/a | ${ELAPSED} |" >> "$GITHUB_STEP_SUMMARY"
