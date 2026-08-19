@@ -270,6 +270,101 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(message_dict, default=str)
 
 
+def configure_windows_safe_logging():
+    """Reconfigure stdout/stderr to UTF-8 on Windows consoles that cannot encode.
+
+    This coexists with _make_message_windows_safe, which substitutes ASCII for
+    emoji in log records. That covers the logging path only. Direct console writes
+    -- typer.secho, typer.echo, print -- bypass the logger entirely, and several
+    carry emoji: cli/config.py, cli/main.py and interactions/run_ash_scan.py hold
+    18 such characters between them, six of which cp1252 cannot represent.
+
+    On a Windows runner those writes raise UnicodeEncodeError. The failure is
+    self-compounding: cli/config.py's validation handler reports errors with
+    typer.secho(f"\u274c ..."), so an encoding error inside validation makes the
+    handler raise a second encoding error while reporting the first, and the
+    process exits 1 with a traceback rather than a message.
+
+    Narrowly gated: returns immediately unless the platform is Windows and either
+    CI is detected or the console encoding cannot represent the characters ASH
+    emits, so it is a no-op on Linux and macOS.
+    """
+    if platform.system().lower() != "windows":
+        return
+
+    # Check if we're in a CI environment where encoding might be problematic
+    ci_indicators = [
+        "CI",
+        "GITHUB_ACTIONS",
+        "AZURE_PIPELINES",
+        "JENKINS_URL",
+        "BUILDKITE",
+        "CIRCLECI",
+        "TRAVIS",
+        "APPVEYOR",
+    ]
+
+    is_ci = any(indicator in os.environ for indicator in ci_indicators)
+
+    # Check console encoding
+    try:
+        console_encoding = sys.stdout.encoding or "unknown"
+        has_encoding_issues = console_encoding.lower() in [
+            "cp1252",
+            "windows-1252",
+            "cp850",
+            "cp437",
+            "ascii",
+        ]
+    except (AttributeError, TypeError):
+        has_encoding_issues = True
+
+    if not (is_ci or has_encoding_issues):
+        return
+
+    # Try to set UTF-8 encoding for stdout/stderr on Windows
+    try:
+        import locale
+        import codecs
+
+        # Try to set console to UTF-8 if possible
+        if (
+            sys.stdout
+            and hasattr(sys.stdout, "reconfigure")
+            and sys.stderr
+            and hasattr(sys.stderr, "reconfigure")
+        ):
+            try:
+                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+                sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError):
+                # Fallback: wrap stdout/stderr with UTF-8 codec
+                try:
+                    sys.stdout = codecs.getwriter("utf-8")(
+                        sys.stdout.detach(), errors="replace"
+                    )
+                    sys.stderr = codecs.getwriter("utf-8")(
+                        sys.stderr.detach(), errors="replace"
+                    )
+                except (AttributeError, OSError):
+                    pass
+
+        # Set locale to UTF-8 if possible
+        try:
+            locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
+        except locale.Error:
+            try:
+                locale.setlocale(locale.LC_ALL, "C.UTF-8")
+            except locale.Error:
+                pass  # Keep default locale
+
+        # Set environment variable for subprocess encoding
+        os.environ.setdefault("PYTHONIOENCODING", "utf-8:replace")
+
+    except ImportError:
+        pass  # codecs/locale not available
+
+
 def get_logger(
     name: str = "ash",
     level: str | int | None = None,
@@ -281,6 +376,9 @@ def get_logger(
     file_log_level: str | int | None = None,
     truncate_log: bool = True,
 ) -> "ASHLogger":
+    # Make the console able to encode what ASH emits before anything is written.
+    configure_windows_safe_logging()
+
     # Disable propagation to the root logger to prevent duplicate messages
     root_logger = logging.getLogger()
     if root_logger.handlers and name != "":
