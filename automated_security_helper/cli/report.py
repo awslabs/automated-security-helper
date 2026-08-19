@@ -120,16 +120,6 @@ def report_command(
             results_file = poss_result_file
             break
 
-    # Ensure results file exists if provided explicitly
-    if results_file is not None and not results_file.exists():
-        print(f"[red]Error: Results file not found: {results_file}[/red]")
-        raise typer.Exit(1)
-
-    # Determine output directory
-    if output_dir is None:
-        output_dir = results_file.parent
-        output_dir_path = Path(output_dir)
-
     # Ensure output directory exists
     output_dir_path.mkdir(parents=True, exist_ok=True)
 

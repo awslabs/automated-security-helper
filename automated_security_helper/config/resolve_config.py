@@ -1,13 +1,29 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from pydantic import ValidationError
 import yaml
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
+
+
+def find_config_file(search_dir: Path | None = None) -> Optional[Path]:
+    """Search for an ASH config file in search_dir, then search_dir/.ash/.
+
+    Iterates ASH_CONFIG_FILE_NAMES in order; checks the directory itself first,
+    then the .ash/ subdirectory. Returns the first match, or None.
+    """
+    if search_dir is None:
+        search_dir = Path.cwd()
+    for name in ASH_CONFIG_FILE_NAMES:
+        for candidate in [search_dir / name, search_dir / ".ash" / name]:
+            if candidate.exists():
+                return candidate
+    return None
 
 
 def _apply_config_override(
@@ -261,24 +277,15 @@ def resolve_config(
 
         except ValidationError as e:
             ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
-            if fallback_to_default:
-                ASH_LOGGER.warning(
-                    "Using default configuration due to validation error"
-                )
-                # Apply overrides to default config if provided
-                if config_overrides and config:
-                    config = apply_config_overrides(config, config_overrides)
-                config._resolution_warnings.append(
-                    f"Configuration validation failed: {str(e)}. "
-                    "Using default configuration — suppressions and custom settings are NOT active. "
-                    "Run 'ash config lint' to identify and fix issues."
-                )
-                return config  # Return default config on validation error
-            else:
-                raise e
+            raise ASHConfigValidationError(
+                f"Configuration validation failed for '{config_path}': {str(e)}. "
+                "Run 'ash config lint' to identify and fix issues."
+            ) from e
 
         return config
 
+    except ASHConfigValidationError:
+        raise
     except Exception as e:
         # Always return a valid config, even in case of unexpected errors
         if fallback_to_default:

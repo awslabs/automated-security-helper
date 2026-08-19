@@ -1183,7 +1183,15 @@ class TestFilterHelpers:
 
 
 class TestMonitorScanProgress:
-    """Tests for the _monitor_scan_progress background coroutine."""
+    """Tests for the _monitor_scan_progress background coroutine.
+
+    mcp_server._monitor_scan_progress is only an alias for
+    cli.mcp.progress_monitor.monitor_scan_progress, and that module imports
+    mcp_get_scan_progress / mcp_get_scan_results into its own namespace. The
+    patch targets below therefore point at progress_monitor, not mcp_server:
+    patching the alias module has no effect on the name the implementation
+    actually reads.
+    """
 
     @pytest.mark.asyncio
     async def test_monitor_completes_when_results_file_appears(
@@ -1207,12 +1215,12 @@ class TestMonitorScanProgress:
 
         with (
             patch(
-                "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
                 new_callable=AsyncMock,
                 return_value=initial_progress,
             ),
             patch(
-                "automated_security_helper.cli.mcp_server.mcp_get_scan_results",
+                "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
                 new_callable=AsyncMock,
                 return_value=final_results,
             ),
@@ -1250,7 +1258,7 @@ class TestMonitorScanProgress:
         output_dir.mkdir(parents=True)
 
         with patch(
-            "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
+            "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
             new_callable=AsyncMock,
             side_effect=mock_progress,
         ):
@@ -1267,7 +1275,7 @@ class TestMonitorScanProgress:
         from automated_security_helper.cli.mcp_server import _monitor_scan_progress
 
         with patch(
-            "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
+            "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
             new_callable=AsyncMock,
             return_value={"success": False, "error": "Not found"},
         ):
@@ -1303,7 +1311,7 @@ class TestMonitorScanProgress:
             raise asyncio.CancelledError()
 
         with patch(
-            "automated_security_helper.cli.mcp_server.mcp_get_scan_progress",
+            "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
             new_callable=AsyncMock,
             side_effect=mock_progress,
         ):
