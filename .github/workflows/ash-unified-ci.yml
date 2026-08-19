@@ -29,6 +29,7 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -51,6 +52,7 @@ jobs:
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: write
@@ -171,6 +173,7 @@ jobs:
   install-validation:
     name: "${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
