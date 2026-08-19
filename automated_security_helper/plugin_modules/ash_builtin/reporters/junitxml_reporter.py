@@ -59,7 +59,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
         # Process SARIF report @ model.sarif
         if model.sarif is not None:
-            all_results = [r for run in (model.sarif.runs or []) for r in (run.results or [])]
+            all_results = model.sarif.get_all_results()
             for result in all_results:
                 # Create test case name from SARIF result details
                 test_name = (

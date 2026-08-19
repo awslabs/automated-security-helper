@@ -9,6 +9,23 @@ These parameters are available across multiple ASH commands:
 | Parameter              | Description                                                | Default           | Environment Variable | Commands                             |
 |------------------------|------------------------------------------------------------|-------------------|----------------------|--------------------------------------|
 | `--source-dir`         | Path to the directory containing code to scan              | Current directory | `ASH_SOURCE_DIR`     | `scan`                               |
+| `--version`            | Print the installed ASH version and exit                   |                   |                      | `scan`                               |
+| `--ash-revision-to-install` | ASH branch or tag to install in the container image for usage during containerized scans | |  | `scan` |
+| `--base-ref` | Git ref to diff against when --changed-files-only is set. | | `ASH_BASE_REF` | `scan` |
+| `--changed-files-only` | Limit the scan to files changed between the base branch and HEAD. | | `ASH_CHANGED_FILES_ONLY` | `scan` |
+| `--color` | Enable/disable colorized output | |  | `scan` |
+| `--compact-report` | Produce a shorter markdown report suitable for PR comments. | |  | `scan` |
+| `--container-gid` | GID to use for the container user | |  | `scan` |
+| `--container-uid` | UID to use for the container user | |  | `scan` |
+| `--custom-build-arg` | Custom build arguments to pass to the container build | |  | `scan` |
+| `--custom-containerfile` | Path to a custom container definition (e.g. | |  | `scan` |
+| `--formats` | The output formats to use (comma-separated). | |  | `scan` |
+| `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
+| `--progress` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
+| `--python-based-plugins-only` | Exclude execution of any plugins or tools that have depencies external to Python. | |  | `scan` |
+| `--runner` | Use the specified OCI runner instead of docker to run the containerized tools | | `OCI_RUNNER` | `scan` |
+| `--show-summary` | Show metrics table and results summary | |  | `scan` |
+| `--simple` | Simplified output mode with minimal logging | |  | `scan` |
 | `--output-dir`         | Path to store scan results                                 | `.ash/ash_output` | `ASH_OUTPUT_DIR`     | `scan`, `report`                     |
 | `--config`, `-c`       | Path to ASH configuration file                             | `.ash/.ash.yaml`  | `ASH_CONFIG`         | `scan`, `config`, `plugin`           |
 | `--config-overrides`   | Override configuration values (can be used multiple times) |                   |                      | `scan`, `config`, `plugin`, `report` |
@@ -657,7 +674,7 @@ For Amazon Q CLI (`~/.aws/amazonq/mcp.json`):
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.2.2",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.1",
         "ash",
         "mcp"
       ],

@@ -3,7 +3,7 @@
 
 import re
 from typing import TYPE_CHECKING, Any, Callable, Dict, Annotated, List, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -69,7 +69,7 @@ class AshPluginManager(BaseModel):
 
     plugin_library: Annotated[AshPluginLibrary, Field()] = AshPluginLibrary()
     context: Any = None
-    _resolved_plugins: dict = {}
+    _resolved_plugins: dict = PrivateAttr(default_factory=dict)
 
     def set_context(self, context: "PluginContext"):
         """Set the plugin context for this plugin manager.

@@ -7,10 +7,12 @@
 
 from __future__ import annotations
 
+import re
+
 from datetime import datetime
 from enum import Enum
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, RootModel
@@ -2326,6 +2328,12 @@ class Run(BaseModel):
     )
 
 
+# Windows drive-root shapes seen in SARIF URIs: "/C:/x" (from file:///C:/x)
+# and "C:/x". Matched lexically so behaviour does not depend on the host OS.
+_DRIVE_PREFIXED_ROOT = re.compile(r"^/[A-Za-z]:")
+_DRIVE_ROOT = re.compile(r"^[A-Za-z]:/")
+
+
 class SarifReport(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -2376,6 +2384,77 @@ class SarifReport(BaseModel):
         from automated_security_helper.utils.sarif_utils import sanitize_sarif_paths
 
         return sanitize_sarif_paths(self, source_dir)
+
+    def get_all_results(self) -> List["Result"]:
+        """Return a flat list of every Result across every Run in this report."""
+        return [r for run in (self.runs or []) for r in (run.results or [])]
+
+    def get_scanner_names(self) -> List[str]:
+        """Return sorted, unique tool driver names across all runs."""
+        names = set()
+        for run in self.runs or []:
+            if run.tool and run.tool.driver and run.tool.driver.name:
+                names.add(run.tool.driver.name)
+        return sorted(names)
+
+    def filter_results_by_files(
+        self, file_set: set, source_dir: str | Path
+    ) -> None:
+        """Remove results whose primary location is not in *file_set*.
+
+        Args:
+            file_set: Set of relative file paths (as strings) to retain.
+                     Results whose first location maps to a path not in this set
+                     are dropped. Results with no location are always retained.
+            source_dir: The source directory used to normalize absolute URIs to
+                     relative paths for comparison.
+
+        Mutates self in place. A no-op if the report has no runs.
+        """
+        if not self.runs:
+            return
+        source_posix = PurePosixPath(str(source_dir).replace("\\", "/"))
+        for run in self.runs:
+            if not run.results:
+                continue
+            filtered = []
+            for result in run.results:
+                if not result.locations:
+                    filtered.append(result)
+                    continue
+                loc = result.locations[0]
+                if (
+                    not loc.physicalLocation
+                    or not loc.physicalLocation.root.artifactLocation
+                ):
+                    filtered.append(result)
+                    continue
+                uri = loc.physicalLocation.root.artifactLocation.uri or ""
+                # SARIF artifact URIs are POSIX-style by spec, so all comparison
+                # happens in PurePosixPath space. Using pathlib.Path here makes the
+                # result host-dependent: on Windows, Path("/tmp/src/x.py").is_absolute()
+                # is False (no drive), so a Linux-produced SARIF processed on Windows
+                # would skip normalisation entirely and drop every result.
+                candidate_str = uri.replace("\\", "/")
+                if candidate_str.startswith("file://"):
+                    candidate_str = candidate_str[len("file://") :]
+                    # file:///C:/x -> /C:/x ; drop the slash that precedes a drive.
+                    if _DRIVE_PREFIXED_ROOT.match(candidate_str):
+                        candidate_str = candidate_str[1:]
+                candidate = PurePosixPath(candidate_str)
+                is_rooted = candidate_str.startswith("/") or bool(
+                    _DRIVE_ROOT.match(candidate_str)
+                )
+                if is_rooted:
+                    try:
+                        rel_str = candidate.relative_to(source_posix).as_posix()
+                    except ValueError:
+                        rel_str = candidate.as_posix()
+                else:
+                    rel_str = candidate.as_posix()
+                if rel_str in file_set:
+                    filtered.append(result)
+            run.results = filtered
 
     def attach_scanner_details(
         self,
