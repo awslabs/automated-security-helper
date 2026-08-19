@@ -20,6 +20,7 @@ jobs:
     name: Build documentation
     needs: []
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
@@ -47,6 +48,7 @@ jobs:
     name: Deploy documentation
     needs: []
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       contents: write
