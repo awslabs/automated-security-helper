@@ -1,7 +1,7 @@
 """Module containing the PluginContext class for sharing context between plugins."""
 
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Annotated, TYPE_CHECKING
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -40,10 +40,15 @@ class PluginContext(BaseModel):
         else:
             return value
 
-    def model_post_init(self, context):
-        if self.work_dir is None:
-            self.work_dir = self.output_dir.joinpath(ASH_WORK_DIR_NAME)
-        return super().model_post_init(context)
+    @model_validator(mode="after")
+    def _derive_work_dir(self) -> "PluginContext":
+        # Guard against re-validation of test mocks / spec'd instances that may
+        # not expose ``work_dir`` or ``output_dir`` as real attributes.
+        if getattr(self, "work_dir", None) is None:
+            output_dir = getattr(self, "output_dir", None)
+            if output_dir is not None:
+                self.work_dir = Path(output_dir).joinpath(ASH_WORK_DIR_NAME)
+        return self
 
 
 AshPluginManager.model_rebuild()
