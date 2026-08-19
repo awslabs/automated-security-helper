@@ -56,11 +56,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             # Extract vulnerabilities from SARIF report
             vulnerabilities = []
 
-            all_results = [
-                r
-                for run in (model.sarif.runs if model.sarif and model.sarif.runs else [])
-                for r in (run.results or [])
-            ]
+            all_results = model.sarif.get_all_results() if model.sarif else []
 
             if all_results:
                 ASH_LOGGER.trace("Creating rule dict")

@@ -12,6 +12,8 @@ ASH produces scan results in multiple formats. Every scan writes an internal agg
 | [SPDX](#spdx) | `.spdx.json` | License compliance, SBOM | [SPDX 2.3](https://spdx.dev/specifications/) |
 | [OCSF](#ocsf) | `.ocsf.json` | Security data lakes, SIEM ingestion | [OCSF 1.0](https://schema.ocsf.io/) |
 | [GitLab SAST](#gitlab-sast) | `.gl-sast-report.json` | GitLab Security Dashboard | [GitLab SAST report](https://docs.gitlab.com/ee/ci/yaml/artifacts_reports.html#artifactsreportssast) |
+| GitLab CycloneDX (`gitlab-cyclonedx`) | `.gl-dependency-scanning-report.json` | GitLab dependency scanning | [GitLab dependency scanning report](https://docs.gitlab.com/ee/ci/yaml/artifacts_reports.html#artifactsreportsdependency_scanning) |
+| GitHub GHAS (`github-ghas`) | `.sarif` | GitHub Advanced Security code scanning upload | [OASIS SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) |
 | [JUnit XML](#junit-xml) | `.junit.xml` | CI/CD test result reporting | [JUnit XML](https://llg.cubic.org/docs/junit/) |
 | [CSV](#csv) | `.csv` | Spreadsheet analysis, filtering | RFC 4180 |
 | [HTML](#html) | `.html` | Interactive browser-based reports | -- |
@@ -24,7 +26,7 @@ ASH produces scan results in multiple formats. Every scan writes an internal agg
 By default, ASH generates flat-json, SARIF, CycloneDX, OCSF, GitLab SAST, JUnit XML, CSV, HTML, Markdown, and Text reports. SPDX and YAML are available but disabled by default. To request a specific set of formats, use the `reporters` section in your configuration file:
 
 ```yaml
-# .ash/ash.yaml
+# .ash/.ash.yaml
 reporters:
   flat-json:
     enabled: true

@@ -51,31 +51,11 @@ class InlineSuppression:
 def matches_suppression(
     finding: FlatVulnerability, suppression: AshSuppression
 ) -> bool:
+    """Thin wrapper around ``AshSuppression.matches`` kept for backward compatibility.
+
+    Prefer ``suppression.matches(finding)`` in new code.
     """
-    Determine if a finding matches a suppression rule.
-
-    Args:
-        finding: The finding to check
-        suppression: The suppression rule to match against
-
-    Returns:
-        True if the finding matches the suppression rule, False otherwise
-    """
-    # Check if rule ID matches
-    if suppression.rule_id and not _rule_id_matches(
-        finding.rule_id, suppression.rule_id
-    ):
-        return False
-
-    # Check if file path matches
-    if not file_path_matches(finding.file_path, suppression.path):
-        return False
-
-    # Check if line range matches (if specified)
-    if not _line_range_matches(finding, suppression):
-        return False
-
-    return True
+    return suppression.matches(finding)
 
 
 def _rule_id_matches(finding_rule_id: Optional[str], suppression_rule_id: str) -> bool:
