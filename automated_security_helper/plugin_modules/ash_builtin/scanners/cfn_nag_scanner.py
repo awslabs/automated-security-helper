@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Annotated, List, Literal
+from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -12,7 +12,7 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -51,6 +51,8 @@ class CfnNagScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     """CfnNagScanner implements SECRET scanning using CFN Nag."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     def model_post_init(self, context):
         if self.config is None:

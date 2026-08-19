@@ -5,8 +5,12 @@ on:
     branches:
       - "!main"
   pull_request:
+    # "**" not "*": GitHub branch filters treat "*" as matching any character
+    # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting
+    # e.g. pr/scan-decomposition) never matched and silently got no CI at all.
+    # "**" matches nested refs too.
     branches:
-      - "*"
+      - "**"
   merge_group:
     types: [checks_requested]
   workflow_dispatch: {}
@@ -25,6 +29,7 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -47,6 +52,7 @@ jobs:
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: write
@@ -88,7 +94,10 @@ jobs:
   scan-validation:
     name: "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.oci-runner && matrix.oci-runner != 'docker' && format(' [{0}]', matrix.oci-runner) || '' }}${{ matrix.offline && ' [offline]' || '' }}${{ matrix.config-file == 'community' && ' - Community Plugins' || '' }}"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Container-runtime cells are far slower than docker/python-local and were
+    # being cancelled at exactly 20.3 min by the previous flat 20. Measured:
+    # docker/python-local peak ~5 min, podman/finch on ubuntu-latest reach 20+.
+    timeout-minutes: ${{ (matrix.oci-runner == 'podman' || matrix.oci-runner == 'finch') && 45 || 20 }}
     strategy:
       fail-fast: false
       matrix:
@@ -167,6 +176,10 @@ jobs:
   install-validation:
     name: "${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
+    # finch has been observed succeeding at 23 min and hanging past 280; podman is
+    # similarly slow. The other six methods peak under 3 min, so they keep a tight
+    # bound while the container runtimes get enough room to pass legitimately.
+    timeout-minutes: ${{ (matrix.method == 'podman' || matrix.method == 'finch') && 45 || 20 }}
     strategy:
       fail-fast: false
       matrix:

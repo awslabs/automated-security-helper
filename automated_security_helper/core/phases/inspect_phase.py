@@ -35,7 +35,7 @@ class InspectPhase(EnginePhase):
         ASH_LOGGER.info("Analyzing SARIF fields...")
 
         try:
-            from automated_security_helper.cli.inspect.sarif_fields import (
+            from automated_security_helper.utils.sarif_field_analysis import (
                 analyze_sarif_fields,
             )
 

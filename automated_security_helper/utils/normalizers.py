@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import fnmatch
 from pathlib import Path
 import re
 
@@ -31,13 +30,3 @@ def get_normalized_filename(str_to_normalize: str | Path) -> str:
     return normalized
 
 
-def path_matches_pattern(path: str, pattern: str) -> bool:
-    """Check if a path matches a pattern.
-
-    .. deprecated::
-        Use ``automated_security_helper.utils.suppression_matcher.file_path_matches``
-        instead. This function uses fnmatch which behaves differently on macOS vs
-        Linux for ``*`` matching across ``/`` separators.
-    """
-    from automated_security_helper.utils.suppression_matcher import file_path_matches
-    return file_path_matches(path, pattern)

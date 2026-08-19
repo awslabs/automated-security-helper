@@ -5,10 +5,29 @@ This module provides utilities to manage version information dynamically
 from pyproject.toml, ensuring a single source of truth.
 """
 
-import toml
+import re
 from pathlib import Path
 from typing import Optional
 import importlib.metadata
+
+# tomllib is stdlib only from Python 3.11. pyproject.toml declares
+# requires-python = ">=3.10", and this module is imported by the package
+# __init__, so an unconditional "import tomllib" makes the whole package
+# unimportable on 3.10. Fall back to the already-declared `toml` dependency.
+try:  # pragma: no cover - branch depends on interpreter version
+    import tomllib
+
+    def _load_toml(path: Path) -> dict:
+        with open(path, "rb") as fh:
+            return tomllib.load(fh)
+
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+    import toml
+
+    def _load_toml(path: Path) -> dict:
+        with open(path, "r", encoding="utf-8") as fh:
+            return toml.load(fh)
+
 
 
 def get_project_root() -> Path:
@@ -30,8 +49,7 @@ def get_version_from_pyproject() -> Optional[str]:
         pyproject_path = project_root / "pyproject.toml"
 
         if pyproject_path.exists():
-            with open(pyproject_path, "r", encoding="utf-8") as f:
-                pyproject_data = toml.load(f)
+            pyproject_data = _load_toml(pyproject_path)
             return pyproject_data.get("project", {}).get("version")
         return None
     except Exception:
@@ -83,8 +101,6 @@ def update_version_in_pyproject(new_version: str) -> bool:
             content = f.read()
 
         # Replace version using regex to preserve formatting
-        import re
-
         pattern = r'(version\s*=\s*")([^"]+)(")'
         match = re.search(pattern, content)
 

@@ -21,11 +21,14 @@ def test_build_ash_image_cli_command_with_all_options(
     mock_run_ash_scan, mock_typer_context
 ):
     """Test build_ash_image_cli_command with all options."""
-    # Call the function with all options
+    # Call the function with all options; no_run=True preserves build-only behavior
     build_ash_image_cli_command(
         mock_typer_context,
+        no_build=False,
+        no_run=True,
         force=True,
         oci_runner="podman",
+        container_network="bridge",
         build_target=BuildTarget.CI,
         offline_semgrep_rulesets="p/custom",
         container_uid="1000",

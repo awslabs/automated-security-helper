@@ -142,25 +142,21 @@ class TestAreValuesEquivalent:
 # PR#274 Bug #32 -- models/core.py:83-98 -- except ValueError rewraps semantic error
 # ---------------------------------------------------------------------------
 class TestExpirationValidatorPreservesMessage:
-    """'expiration must be in the future' must not be rewrapped as format error."""
+    """Past expiration must be stored; malformed dates give a format error."""
 
-    def test_past_date_warns_and_clears(self):
-        """A past date should warn and set expiration to None, not raise."""
-        import warnings
+    def test_past_date_accepted_and_expired(self):
+        """A past date must be stored as-is; is_expired returns True."""
         from automated_security_helper.models.core import AshSuppression
 
         yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            s = AshSuppression(
-                path="test.py",
-                rule_id="R1",
-                reason="test",
-                expiration=yesterday,
-            )
-        assert s.expiration is None
-        assert len(w) >= 1
-        assert "past" in str(w[0].message).lower()
+        s = AshSuppression(
+            path="test.py",
+            rule_id="R1",
+            reason="test",
+            expiration=yesterday,
+        )
+        assert s.expiration == yesterday
+        assert s.is_expired is True
 
     def test_bad_format_gives_format_error(self):
         """A truly malformed date should give the format error."""

@@ -70,6 +70,15 @@ class ExecutionStrategy(str, Enum):
     PARALLEL = "parallel"
 
 
+class OfflineStrategy(str, Enum):
+    """Describes how a scanner behaves when network access is unavailable."""
+
+    BUNDLED = "bundled"
+    CACHE_FLAGS = "cache_flags"
+    SKIP_OFFLINE = "skip_offline"
+    UNKNOWN = "unknown"
+
+
 class BuildTarget(str, Enum):
     NON_ROOT = "non-root"
     CI = "ci"
