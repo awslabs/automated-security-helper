@@ -108,6 +108,7 @@ jobs:
   ash:
     name: SAST, SCA, and IaC Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       COLUMNS: 140
     steps:
