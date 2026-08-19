@@ -618,11 +618,11 @@ class TestInjectInvocationHelper:
         final_args = [
             "checkov",
             "-d",
-            "/tmp/src",
+            "/work/src",
             "--output",
             "sarif",
             "--output-file-path",
-            "/tmp/out",
+            "/work/out",
         ]
         target = plugin_context.source_dir
         scanner._inject_invocation(report, final_args, target)
@@ -630,5 +630,5 @@ class TestInjectInvocationHelper:
         inv = report.runs[0].invocations[0]
         # Hardcoded legacy expectation (matches ``" ".join(final_args)``
         # that the pre-migration per-scanner _post_scan emitted).
-        expected = "checkov -d /tmp/src --output sarif --output-file-path /tmp/out"
+        expected = "checkov -d /work/src --output sarif --output-file-path /work/out"
         assert inv.commandLine == expected
