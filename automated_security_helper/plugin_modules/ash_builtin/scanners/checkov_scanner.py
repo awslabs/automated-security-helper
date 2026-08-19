@@ -248,12 +248,33 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             if item is not None
         ]
 
+        # Resolve config candidates against source_dir, not the process working
+        # directory, and hand checkov an absolute path.
+        #
+        # The subprocess runs with cwd=context.source_dir (see
+        # PluginBase._run_subprocess), so probing with a bare Path(...).exists()
+        # asked a different question than the one checkov would answer: it tested
+        # the directory ASH happens to be invoked from. When that directory was
+        # ASH's own checkout, the probe matched ASH's ".ash/.checkov.yaml" and
+        # passed it through get_shortest_name, which relativises against the
+        # process cwd. checkov then could not open it, wrote no SARIF, and the
+        # scanner reported ERROR with zero findings.
+        #
+        # This used to line up by accident: the pre-decomposition run_ash_scan
+        # chdir'd the whole process into source_dir, so process cwd and subprocess
+        # cwd were the same directory. Resolving explicitly keeps the behaviour
+        # correct without a global chdir, which also matters for scanning several
+        # projects in one process.
+        source_dir = Path(self.context.source_dir)
         for conf_path in possible_config_paths:
-            if Path(conf_path).exists():
+            candidate = Path(conf_path)
+            if not candidate.is_absolute():
+                candidate = source_dir / candidate
+            if candidate.exists():
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config-file",
-                        value=get_shortest_name(input=conf_path),
+                        value=candidate.resolve().as_posix(),
                     )
                 )
                 break
