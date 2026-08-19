@@ -46,6 +46,8 @@ class LintCategory(str, Enum):
     SUPPRESSION_EXPIRED = "suppression-expired"
     SUPPRESSION_UNUSED = "suppression-unused"
     IGNORE_PATH_ISSUE = "ignore-path-issue"
+    LEGACY_NAME_VARIANT = "legacy-name-variant"
+    LEGACY_NAME_CONFLICT = "legacy-name-conflict"
     SYNTAX_ERROR = "syntax-error"
 
 
@@ -156,6 +158,8 @@ class ConfigLinter:
 
         # Run ignore_path and suppression path checks
         cls._check_ignore_path_issues(config_path, config_data, result, source_dir)
+        # Snake/kebab built-in name variant check (#82)
+        cls._check_legacy_name_variants(config_data, result)
 
         # Check for unused suppressions if requested
         if check_unused:
@@ -212,6 +216,10 @@ class ConfigLinter:
 
             elif issue.category == LintCategory.SUPPRESSION_LINE_RANGE:
                 if cls._fix_suppression_line_range(config_data, issue):
+                    fixed_issues.append(issue)
+
+            elif issue.category == LintCategory.LEGACY_NAME_VARIANT:
+                if cls._fix_legacy_name_variant(config_data, issue):
                     fixed_issues.append(issue)
 
         # Apply removals in reverse index order to preserve indices
@@ -448,7 +456,7 @@ class ConfigLinter:
     def _check_validation_issues(
         cls, config_path: Path, config_data: Dict[str, Any], result: LintResult
     ) -> None:
-        """Run the same checks as ConfigValidator but produce LintIssues."""
+        """Delegate shared structural checks to ConfigValidator, then enrich to LintIssues."""
         if not isinstance(config_data, dict):
             result.issues.append(
                 LintIssue(
@@ -459,115 +467,109 @@ class ConfigLinter:
             )
             return
 
-        # Check for required fields
-        for field_name in ConfigValidator.REQUIRED_TOP_LEVEL_FIELDS:
-            if field_name not in config_data:
-                result.issues.append(
-                    LintIssue(
-                        severity=LintSeverity.ERROR,
-                        category=LintCategory.MISSING_FIELD,
-                        message=f"Missing required top-level field: '{field_name}'",
-                        path=field_name,
-                    )
+        _, errors = ConfigValidator.validate_config_file(config_path)
+        for error in errors:
+            result.issues.append(cls._validator_error_to_lint_issue(error, config_data))
+
+    @classmethod
+    def _validator_error_to_lint_issue(
+        cls, error: str, config_data: Dict[str, Any]
+    ) -> LintIssue:
+        """Convert a ConfigValidator error string to a LintIssue with enriched metadata."""
+        # Missing required top-level field: 'field_name'
+        if error.startswith("Missing required top-level field: '"):
+            field_name = error.split("'")[1]
+            return LintIssue(
+                severity=LintSeverity.ERROR,
+                category=LintCategory.MISSING_FIELD,
+                message=error,
+                path=field_name,
+            )
+
+        # Invalid top-level field 'field_name' - this is an internal field...
+        if error.startswith("Invalid top-level field '"):
+            field_name = error.split("'")[1]
+            return LintIssue(
+                severity=LintSeverity.ERROR,
+                category=LintCategory.INVALID_SECTION,
+                message=error,
+                path=field_name,
+                fixable=True,
+                fix_description=f"Remove internal field '{field_name}'",
+            )
+
+        # Unknown top-level field 'field_name' - may cause parsing issues
+        if error.startswith("Unknown top-level field '"):
+            field_name = error.split("'")[1]
+            return LintIssue(
+                severity=LintSeverity.WARNING,
+                category=LintCategory.UNKNOWN_FIELD,
+                message=error,
+                path=field_name,
+            )
+
+        # Duplicate top-level field 'field_name' found at multiple locations
+        if error.startswith("Duplicate top-level field '"):
+            field_name = error.split("'")[1]
+            return LintIssue(
+                severity=LintSeverity.ERROR,
+                category=LintCategory.DUPLICATE_FIELD,
+                message=error,
+                path=field_name,
+            )
+
+        # Scanner 'scanner_name' contains internal-only field 'field_name' - ...
+        if error.startswith("Scanner '"):
+            parts = error.split("'")
+            # parts: ['Scanner ', scanner_name, ' contains internal-only field ', field_name, ...]
+            if len(parts) >= 4:
+                scanner_name = parts[1]
+                field_name = parts[3]
+                return LintIssue(
+                    severity=LintSeverity.ERROR,
+                    category=LintCategory.INTERNAL_FIELD,
+                    message=f"Scanner '{scanner_name}' contains internal-only field '{field_name}'",
+                    path=f"scanners.{scanner_name}.{field_name}",
+                    fixable=True,
+                    fix_description=f"Remove internal field '{field_name}' from scanner '{scanner_name}'",
                 )
 
-        # Check for invalid top-level fields
-        for field_name in config_data.keys():
-            if field_name in ConfigValidator.INVALID_TOP_LEVEL_FIELDS:
-                result.issues.append(
-                    LintIssue(
-                        severity=LintSeverity.ERROR,
-                        category=LintCategory.INVALID_SECTION,
-                        message=f"Invalid top-level field '{field_name}' - this is an internal field and should not be in user configs",
-                        path=field_name,
-                        fixable=True,
-                        fix_description=f"Remove internal field '{field_name}'",
-                    )
-                )
-            elif field_name not in ConfigValidator.VALID_TOP_LEVEL_FIELDS:
-                result.issues.append(
-                    LintIssue(
-                        severity=LintSeverity.WARNING,
-                        category=LintCategory.UNKNOWN_FIELD,
-                        message=f"Unknown top-level field '{field_name}' - may cause parsing issues",
-                        path=field_name,
-                    )
+        # Reporter 'reporter_name' contains internal-only field 'field_name' - ...
+        if error.startswith("Reporter '"):
+            parts = error.split("'")
+            if len(parts) >= 4:
+                reporter_name = parts[1]
+                field_name = parts[3]
+                return LintIssue(
+                    severity=LintSeverity.ERROR,
+                    category=LintCategory.INTERNAL_FIELD,
+                    message=f"Reporter '{reporter_name}' contains internal-only field '{field_name}'",
+                    path=f"reporters.{reporter_name}.{field_name}",
+                    fixable=True,
+                    fix_description=f"Remove internal field '{field_name}' from reporter '{reporter_name}'",
                 )
 
-        # Check for duplicate field definitions
-        raw_content = config_path.read_text(encoding="utf-8")
-        top_level_fields: Dict[str, int] = {}
-        for line in raw_content.split("\n"):
-            stripped = line.strip()
-            if (
-                stripped
-                and not stripped.startswith("#")
-                and ":" in stripped
-                and not line[0].isspace()
-            ):
-                field_name = stripped.split(":")[0].strip()
-                if field_name in ConfigValidator.VALID_TOP_LEVEL_FIELDS:
-                    if field_name in top_level_fields:
-                        result.issues.append(
-                            LintIssue(
-                                severity=LintSeverity.ERROR,
-                                category=LintCategory.DUPLICATE_FIELD,
-                                message=f"Duplicate top-level field '{field_name}' found at multiple locations",
-                                path=field_name,
-                            )
-                        )
-                    top_level_fields[field_name] = 1
+        # Converter 'converter_name' contains internal-only field 'field_name' - ...
+        if error.startswith("Converter '"):
+            parts = error.split("'")
+            if len(parts) >= 4:
+                converter_name = parts[1]
+                field_name = parts[3]
+                return LintIssue(
+                    severity=LintSeverity.ERROR,
+                    category=LintCategory.INTERNAL_FIELD,
+                    message=f"Converter '{converter_name}' contains internal-only field '{field_name}'",
+                    path=f"converters.{converter_name}.{field_name}",
+                    fixable=True,
+                    fix_description=f"Remove internal field '{field_name}' from converter '{converter_name}'",
+                )
 
-        # Validate scanners section
-        if "scanners" in config_data and isinstance(config_data["scanners"], dict):
-            for scanner_name, scanner_config in config_data["scanners"].items():
-                if isinstance(scanner_config, dict):
-                    for field_name in scanner_config.keys():
-                        if field_name in ConfigValidator.INTERNAL_SCANNER_FIELDS:
-                            result.issues.append(
-                                LintIssue(
-                                    severity=LintSeverity.ERROR,
-                                    category=LintCategory.INTERNAL_FIELD,
-                                    message=f"Scanner '{scanner_name}' contains internal-only field '{field_name}'",
-                                    path=f"scanners.{scanner_name}.{field_name}",
-                                    fixable=True,
-                                    fix_description=f"Remove internal field '{field_name}' from scanner '{scanner_name}'",
-                                )
-                            )
-
-        # Validate reporters section
-        if "reporters" in config_data and isinstance(config_data["reporters"], dict):
-            for reporter_name, reporter_config in config_data["reporters"].items():
-                if isinstance(reporter_config, dict):
-                    for field_name in reporter_config.keys():
-                        if field_name in ConfigValidator.INTERNAL_REPORTER_FIELDS:
-                            result.issues.append(
-                                LintIssue(
-                                    severity=LintSeverity.ERROR,
-                                    category=LintCategory.INTERNAL_FIELD,
-                                    message=f"Reporter '{reporter_name}' contains internal-only field '{field_name}'",
-                                    path=f"reporters.{reporter_name}.{field_name}",
-                                    fixable=True,
-                                    fix_description=f"Remove internal field '{field_name}' from reporter '{reporter_name}'",
-                                )
-                            )
-
-        # Validate converters section
-        if "converters" in config_data and isinstance(config_data["converters"], dict):
-            for converter_name, converter_config in config_data["converters"].items():
-                if isinstance(converter_config, dict):
-                    for field_name in converter_config.keys():
-                        if field_name in ConfigValidator.INTERNAL_CONVERTER_FIELDS:
-                            result.issues.append(
-                                LintIssue(
-                                    severity=LintSeverity.ERROR,
-                                    category=LintCategory.INTERNAL_FIELD,
-                                    message=f"Converter '{converter_name}' contains internal-only field '{field_name}'",
-                                    path=f"converters.{converter_name}.{field_name}",
-                                    fixable=True,
-                                    fix_description=f"Remove internal field '{field_name}' from converter '{converter_name}'",
-                                )
-                            )
+        # Fallback: unknown error format — surface as generic error
+        return LintIssue(
+            severity=LintSeverity.ERROR,
+            category=LintCategory.SYNTAX_ERROR,
+            message=error,
+        )
 
     @classmethod
     def _check_suppression_issues(
@@ -852,6 +854,142 @@ class ConfigLinter:
             str(line_end_val) if line_end_val is not None else "*",
         ]
         return "|".join(parts)
+
+    @classmethod
+    def _check_legacy_name_variants(
+        cls, config_data: Dict[str, Any], result: LintResult
+    ) -> None:
+        """Detect snake/kebab variants of built-in plugin names.
+
+        Operators sometimes type the snake_case Python field name when the
+        canonical input form for a built-in plugin is the kebab-case alias
+        (e.g. ``cdk_nag:`` instead of ``cdk-nag:``). The snake form silently
+        lands in ``__pydantic_extra__`` and the real built-in keeps its
+        default config — silent mis-configuration.
+
+        Walks the ``scanners``, ``reporters``, and ``converters`` segments,
+        compares each key against the segment's declared canonical input
+        forms (alias if present, else Python field name), and flags any
+        key whose snake/kebab swap-form matches a different canonical
+        input form. Third-party plugin names (no built-in collision) pass
+        through silently.
+
+        Each issue is :class:`LintSeverity.WARNING` and ``fixable=True``;
+        ``ash config lint --fix`` renames the key in-place.
+        """
+        # Lazy import to avoid pulling the full config-segment graph on
+        # module import.
+        from automated_security_helper.config.ash_config import (
+            ConverterConfigSegment,
+            ReporterConfigSegment,
+            ScannerConfigSegment,
+        )
+
+        segment_specs = (
+            ("scanners", ScannerConfigSegment),
+            ("reporters", ReporterConfigSegment),
+            ("converters", ConverterConfigSegment),
+        )
+
+        for segment_name, segment_cls in segment_specs:
+            segment_data = config_data.get(segment_name)
+            if not isinstance(segment_data, dict):
+                continue
+
+            # Canonical input form for each declared field: alias if set,
+            # else Python field name.
+            canonical_input_forms: set[str] = set()
+            for fname, finfo in segment_cls.model_fields.items():
+                alias = getattr(finfo, "alias", None)
+                canonical_input_forms.add(alias if alias else fname)
+
+            for key in list(segment_data):
+                if key in canonical_input_forms:
+                    continue  # already canonical; not a typo
+                if "-" in key:
+                    swapped = key.replace("-", "_")
+                elif "_" in key:
+                    swapped = key.replace("_", "-")
+                else:
+                    continue  # no separator; not a snake/kebab variant
+                if swapped not in canonical_input_forms:
+                    continue  # not a built-in variant; let it pass
+
+                # Collision: BOTH the legacy variant AND the canonical
+                # form are present. This is an ambiguity (which config
+                # wins?) — surface it as a non-fixable ERROR rather than
+                # silently picking one. See DA r7 #1 and #2.
+                if swapped in segment_data:
+                    result.issues.append(
+                        LintIssue(
+                            severity=LintSeverity.ERROR,
+                            category=LintCategory.LEGACY_NAME_CONFLICT,
+                            path=f"{segment_name}.{key}",
+                            message=(
+                                f"{segment_name} has BOTH the legacy form "
+                                f"{key!r} and the canonical form {swapped!r} "
+                                f"defined. This is ambiguous and would lose "
+                                f"data on auto-fix. Remove or merge one of "
+                                f"the entries by hand before running "
+                                f"`ash config lint --fix`."
+                            ),
+                            fixable=False,
+                        )
+                    )
+                    continue
+
+                # Plain legacy variant — auto-fixable.
+                result.issues.append(
+                    LintIssue(
+                        severity=LintSeverity.WARNING,
+                        category=LintCategory.LEGACY_NAME_VARIANT,
+                        path=f"{segment_name}.{key}",
+                        message=(
+                            f"{segment_name}.{key!r} uses the legacy "
+                            f"snake/kebab variant; canonical form is "
+                            f"{swapped!r}. The legacy form lands in "
+                            f"__pydantic_extra__ and the real built-in "
+                            f"keeps its default config."
+                        ),
+                        fixable=True,
+                    )
+                )
+
+    @classmethod
+    def _fix_legacy_name_variant(
+        cls, config_data: Dict[str, Any], issue: LintIssue
+    ) -> bool:
+        """Rename a legacy snake/kebab variant to its canonical form.
+
+        ``issue.path`` is ``"<segment>.<legacy-key>"``. The corresponding
+        canonical form is the kebab↔snake swap of ``<legacy-key>``.
+        """
+        if not issue.path or "." not in issue.path:
+            return False
+        segment_name, legacy_key = issue.path.split(".", 1)
+        segment_data = config_data.get(segment_name)
+        if not isinstance(segment_data, dict) or legacy_key not in segment_data:
+            return False
+        if "-" in legacy_key:
+            canonical_key = legacy_key.replace("-", "_")
+        elif "_" in legacy_key:
+            canonical_key = legacy_key.replace("_", "-")
+        else:
+            return False
+        # Defense in depth (DA r7 #1): refuse to fix if the canonical key
+        # already exists. The lint phase emits a LEGACY_NAME_CONFLICT
+        # error in this case which keeps `fixable=False` for that issue,
+        # but a stale issue or a direct caller could otherwise reach this
+        # method and cause silent data loss. Be strict.
+        if canonical_key in segment_data and canonical_key != legacy_key:
+            return False
+        # Preserve insertion order: rebuild dict with the new key in place
+        # of the legacy key, copying every other entry as-is.
+        new_segment: Dict[str, Any] = {}
+        for k, v in segment_data.items():
+            new_segment[canonical_key if k == legacy_key else k] = v
+        config_data[segment_name] = new_segment
+        return True
 
     @classmethod
     def _fix_internal_field(cls, config_data: Dict[str, Any], issue: LintIssue) -> bool:
