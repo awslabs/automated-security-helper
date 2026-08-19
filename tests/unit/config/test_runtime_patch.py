@@ -60,11 +60,11 @@ class TestAllowedPaths:
             {
                 "op": "add",
                 "path": "/external_reports_to_include/-",
-                "value": "/tmp/report.sarif",
+                "value": "/work/report.sarif",
             }
         ]
         result = apply_runtime_patch(base, ops, allowlist=allowlist)
-        assert "/tmp/report.sarif" in result.external_reports_to_include
+        assert "/work/report.sarif" in result.external_reports_to_include
 
     def test_allowed_glob_segment_match(self) -> None:
         base = _base_config()
@@ -293,12 +293,12 @@ class TestAtomicMultiOp:
             {
                 "op": "add",
                 "path": "/external_reports_to_include/-",
-                "value": "/tmp/r.sarif",
+                "value": "/work/r.sarif",
             },
         ]
         result = apply_runtime_patch(base, ops, allowlist=allowlist)
         assert result.project_name == "renamed"
-        assert "/tmp/r.sarif" in result.external_reports_to_include
+        assert "/work/r.sarif" in result.external_reports_to_include
 
 
 class TestDefaults:
@@ -375,7 +375,7 @@ class TestRecursiveValuePattern:
             {
                 "op": "replace",
                 "path": "/external_reports_to_include",
-                "value": ["/tmp/a.sarif", "DROP TABLE users", "/tmp/b.sarif"],
+                "value": ["/work/a.sarif", "DROP TABLE users", "/work/b.sarif"],
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
@@ -414,12 +414,12 @@ class TestRecursiveValuePattern:
             {
                 "op": "replace",
                 "path": "/external_reports_to_include",
-                "value": ["/tmp/a.sarif", "/tmp/b.sarif"],
+                "value": ["/work/a.sarif", "/work/b.sarif"],
             }
         ]
         # Should apply cleanly.
         result = apply_runtime_patch(base, ops, allowlist=allowlist)
-        assert result.external_reports_to_include == ["/tmp/a.sarif", "/tmp/b.sarif"]
+        assert result.external_reports_to_include == ["/work/a.sarif", "/work/b.sarif"]
 
     def test_value_key_missing_distinguished_from_explicit_null(self) -> None:
         """#72 regression: an op with no `value` key must be treated as
