@@ -44,6 +44,31 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.5.9 (2026-08-10)
+
+### Fix
+
+- **deps**: patch grype CVEs in gitpython, cryptography, pymdown-extensions (#407)
+
+## v3.5.8 (2026-07-24)
+
+### Fix
+
+- **deps**: patch GitPython argument-injection vulnerabilities (#397)
+- **deps**: patch vulnerable mcp, setuptools, and soupsieve (#394)
+
+## v3.5.7 (2026-07-06)
+
+### Fix
+
+- **scanners**: do not embed literal quotes in checkov/bandit exclusion args (#350)
+
+## v3.5.6 (2026-06-30)
+
+### Fix
+
+- **deps**: trigger patch release for dependency updates (v3.5.5 -> v3.5.6)
+
 ## v3.5.5 (2026-06-30)
 
 ### Fix
