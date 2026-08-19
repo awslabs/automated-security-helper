@@ -325,7 +325,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             bandit_excludes.append(str(Path("**").joinpath(item.path, "**")))
 
         self.args.extra_args.append(
-            ToolExtraArg(key=f'--exclude="{",".join(bandit_excludes)}"', value=None)
+            ToolExtraArg(key=f"--exclude={','.join(bandit_excludes)}", value=None)
         )
 
         return super()._process_config_options()

@@ -73,19 +73,19 @@ def test_scan_results_container_severity_counts():
     container = ScanResultsContainer(scanner_name="test_scanner")
 
     # Default severity counts
-    assert container.severity_counts["critical"] == 0
-    assert container.severity_counts["high"] == 0
-    assert container.severity_counts["medium"] == 0
-    assert container.severity_counts["low"] == 0
-    assert container.severity_counts["info"] == 0
-    assert container.severity_counts["suppressed"] == 0
-    assert container.severity_counts["total"] == 0
+    assert container.severity_counts.critical == 0
+    assert container.severity_counts.high == 0
+    assert container.severity_counts.medium == 0
+    assert container.severity_counts.low == 0
+    assert container.severity_counts.info == 0
+    assert container.severity_counts.suppressed == 0
+    assert container.severity_counts.total == 0
 
     # Update severity counts
-    container.severity_counts["critical"] = 1
-    container.severity_counts["high"] = 2
-    container.severity_counts["total"] = 3
+    container.severity_counts.critical = 1
+    container.severity_counts.high = 2
 
-    assert container.severity_counts["critical"] == 1
-    assert container.severity_counts["high"] == 2
-    assert container.severity_counts["total"] == 3
+    assert container.severity_counts.critical == 1
+    assert container.severity_counts.high == 2
+    # total is a computed property now: critical + high + medium + low + info
+    assert container.severity_counts.total == 3

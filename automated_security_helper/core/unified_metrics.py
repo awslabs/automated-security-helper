@@ -29,9 +29,11 @@ Example usage:
     ```
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import computed_field
 
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -46,7 +48,7 @@ from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-class ScannerMetrics(BaseModel):
+class ScannerMetrics(ScannerSeverityCount):
     """Unified scanner metrics data structure.
 
     This is the single source of truth for scanner metrics that should be used
@@ -56,27 +58,27 @@ class ScannerMetrics(BaseModel):
 
     All components that need to display or process scanner statistics should use
     this data structure to ensure consistency across all reports and displays.
+
+    Inherits severity fields (suppressed, critical, high, medium, low, info) and
+    the ``total`` / ``actionable_count()`` helpers from ``ScannerSeverityCount``.
     """
 
     scanner_name: str  # Name of the scanner (e.g., "bandit", "semgrep")
-    suppressed: int  # Number of findings that have been suppressed
-    critical: int  # Number of critical severity findings
-    high: int  # Number of high severity findings
-    medium: int  # Number of medium severity findings
-    low: int  # Number of low severity findings
-    info: int  # Number of informational findings
-    total: int  # Total number of non-suppressed findings
-    actionable: int  # Number of findings at or above the threshold severity
-    duration: Optional[
-        float
-    ]  # Time taken by the scanner in seconds, None for skipped/missing scanners
-    status: str  # Scanner status: "PASSED", "FAILED", "SKIPPED", or "MISSING"
-    status_text: str  # Human-readable status text
-    threshold: str  # Severity threshold used for this scanner
-    threshold_source: str  # Source of the threshold ("global", "config", etc.)
-    excluded: bool  # Whether the scanner was explicitly excluded
-    dependencies_missing: bool  # Whether the scanner has missing dependencies
-    passed: bool  # Whether the scanner passed (no actionable findings)
+    actionable: int = 0  # Number of findings at or above the threshold severity
+    duration: Optional[float] = (
+        None  # Time taken by the scanner in seconds, None for skipped/missing scanners
+    )
+    status: str = "PASSED"  # Scanner status: "PASSED", "FAILED", "SKIPPED", or "MISSING"
+    threshold: str = ""  # Severity threshold used for this scanner
+    threshold_source: str = ""  # Source of the threshold ("global", "config", etc.)
+    excluded: bool = False  # Whether the scanner was explicitly excluded
+    dependencies_missing: bool = False  # Whether the scanner has missing dependencies
+
+    @computed_field
+    @property
+    def passed(self) -> bool:
+        """True when the scanner did not produce actionable failures."""
+        return self.status in ("PASSED", "SKIPPED", "MISSING")
 
 
 def format_duration(duration_seconds: Optional[float]) -> str:
@@ -174,7 +176,7 @@ def get_unified_scanner_metrics(
 
     # Convert the statistics to ScannerMetrics objects
     for scanner_name, stats in scanner_stats.items():
-        # Determine status text (same as status for now)
+        # Determine status
         if stats["excluded"]:
             status = "SKIPPED"
         elif stats["dependencies_missing"]:
@@ -190,12 +192,9 @@ def get_unified_scanner_metrics(
             status = (
                 scan_result.status if scan_result and scan_result.status else "PASSED"
             )
-        status_text = status
 
-        # Determine if the scanner passed
-        passed = status in ["PASSED", "SKIPPED", "MISSING"]
-
-        # Create metrics entry
+        # Create metrics entry. total and passed are computed, so we do not pass
+        # them in explicitly — they're derived from severity fields and status.
         metrics = ScannerMetrics(
             scanner_name=scanner_name,
             suppressed=stats["suppressed"],
@@ -204,16 +203,13 @@ def get_unified_scanner_metrics(
             medium=stats["medium"],
             low=stats["low"],
             info=stats["info"],
-            total=stats["total"],
             actionable=stats["actionable"],
             duration=stats["duration"],
             status=status,
-            status_text=status_text,  # Same as the status for now
             threshold=stats["threshold"],
             threshold_source=stats["threshold_source"],
             excluded=stats["excluded"],
             dependencies_missing=stats["dependencies_missing"],
-            passed=passed,
         )
 
         metrics_list.append(metrics)
