@@ -66,21 +66,17 @@ class TestSuppression:
             )
         assert "Invalid expiration date format" in str(excinfo.value)
 
-    def test_suppression_model_expired_date_warns(self):
-        """Test that a suppression model with expired date warns and clears expiration."""
-        import warnings
+    def test_suppression_model_expired_date_accepted(self):
+        """Past expiration date must be stored; is_expired signals it at runtime."""
         yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            s = AshSuppression(
-                reason="Test suppression",
-                rule_id="RULE-123",
-                path="src/example.py",
-                expiration=yesterday,
-            )
-        assert s.expiration is None
-        assert len(w) >= 1
-        assert "past" in str(w[0].message).lower()
+        s = AshSuppression(
+            reason="Test suppression",
+            rule_id="RULE-123",
+            path="src/example.py",
+            expiration=yesterday,
+        )
+        assert s.expiration == yesterday
+        assert s.is_expired is True
 
     def test_suppression_model_future_date(self):
         """Test that a suppression model with future date is valid."""

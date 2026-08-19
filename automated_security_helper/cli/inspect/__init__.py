@@ -9,7 +9,7 @@ import os
 import typer
 
 from automated_security_helper.cli.inspect.inspect_findings_app import findings_command
-from automated_security_helper.cli.inspect.sarif_fields import analyze_sarif_fields
+from automated_security_helper.utils.sarif_field_analysis import analyze_sarif_fields
 
 inspect_app = typer.Typer(
     name="inspect",

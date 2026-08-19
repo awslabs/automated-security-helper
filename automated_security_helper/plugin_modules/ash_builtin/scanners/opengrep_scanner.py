@@ -6,13 +6,13 @@ import os
 from pathlib import Path
 import platform
 import subprocess  # nosec B404 — required for version detection of opengrep binary
-from typing import Annotated, List, Literal
+from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import ASH_ASSETS_DIR, is_offline_mode
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -108,6 +108,8 @@ class OpengrepScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
     """OpengrepScanner implements code scanning using Opengrep."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     def model_post_init(self, context):
         if self.config is None:
@@ -305,30 +307,26 @@ class OpengrepScanner(ScannerPluginBase[OpengrepScannerConfig]):
                 scanner_name="Opengrep",
             )
             if not offline_valid:
-                for msg in offline_messages:
-                    self._plugin_log(msg, level=logging.WARNING)
+                raise ScannerError(
+                    "Opengrep is running in offline mode but no rule cache was found. "
+                    "Set $OPENGREP_RULES_CACHE_DIR to a directory containing .yaml/.yml rule files. "
+                    "Run `ash build-image --offline` to pre-warm the cache via Dockerfile, "
+                    "or download rulesets manually with `semgrep --config p/ci --dryrun` "
+                    "while online and copy to cache."
+                )
 
             # Use cached rules directory with --no-rewrite-rule-ids to produce
             # clean rule IDs (the rule's own id field, no path-derived prefix).
             opengrep_rules_cache_dir = os.environ.get("OPENGREP_RULES_CACHE_DIR")
-            if opengrep_rules_cache_dir and Path(opengrep_rules_cache_dir).is_dir():
-                ASH_LOGGER.info(
-                    f"Opengrep offline mode: using cached rules from {opengrep_rules_cache_dir}"
-                )
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--config", value=opengrep_rules_cache_dir)
-                )
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--no-rewrite-rule-ids", value="")
-                )
-            else:
-                self._plugin_log(
-                    "🔴 Opengrep offline mode: cache dir not found, falling back to p/ci",
-                    level=logging.WARNING,
-                )
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--config", value="p/ci")
-                )
+            ASH_LOGGER.info(
+                f"Opengrep offline mode: using cached rules from {opengrep_rules_cache_dir}"
+            )
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=opengrep_rules_cache_dir)
+            )
+            self.args.extra_args.append(
+                ToolExtraArg(key="--no-rewrite-rule-ids", value="")
+            )
         else:
             # In online mode, use config=auto
             self.args.extra_args.append(

@@ -1618,6 +1618,7 @@
                 ],
                 "config_file": null,
                 "exclude": [],
+                "offline": false,
                 "severity_threshold": null
               }
             }
@@ -13323,19 +13324,21 @@
           "$ref": "#/$defs/SummaryStats",
           "default": {
             "actionable": 0,
-            "critical": 0,
             "duration": 0.0,
             "end": null,
             "failed": 0,
-            "high": 0,
-            "info": 0,
-            "low": 0,
-            "medium": 0,
             "missing": 0,
             "passed": 0,
+            "severity_counts": {
+              "critical": 0,
+              "high": 0,
+              "info": 0,
+              "low": 0,
+              "medium": 0,
+              "suppressed": 0
+            },
             "skipped": 0,
             "start": null,
-            "suppressed": 0,
             "total": 0
           },
           "description": "Summary statistics (e.g., count by severity)"
@@ -15776,6 +15779,7 @@
               ],
               "config_file": null,
               "exclude": [],
+              "offline": false,
               "severity_threshold": null
             }
           },
@@ -17468,16 +17472,11 @@
     },
     "SummaryStats": {
       "additionalProperties": true,
-      "description": "Summary statistics for the final report",
+      "description": "Summary statistics for the final report.\n\nComposes a ScannerSeverityCount for per-severity tallies. Flat severity\nkwargs (e.g. critical=2) are accepted for backward compatibility and routed\ninto severity_counts. Forwarding properties expose severity fields at the\ntop level so all existing call sites continue to work unchanged.",
       "properties": {
         "actionable": {
           "default": 0,
           "title": "Actionable",
-          "type": "integer"
-        },
-        "critical": {
-          "default": 0,
-          "title": "Critical",
           "type": "integer"
         },
         "duration": {
@@ -17506,26 +17505,6 @@
           "title": "Failed",
           "type": "integer"
         },
-        "high": {
-          "default": 0,
-          "title": "High",
-          "type": "integer"
-        },
-        "info": {
-          "default": 0,
-          "title": "Info",
-          "type": "integer"
-        },
-        "low": {
-          "default": 0,
-          "title": "Low",
-          "type": "integer"
-        },
-        "medium": {
-          "default": 0,
-          "title": "Medium",
-          "type": "integer"
-        },
         "missing": {
           "default": 0,
           "title": "Missing",
@@ -17535,6 +17514,9 @@
           "default": 0,
           "title": "Passed",
           "type": "integer"
+        },
+        "severity_counts": {
+          "$ref": "#/$defs/ScannerSeverityCount"
         },
         "skipped": {
           "default": 0,
@@ -17556,11 +17538,6 @@
           ],
           "default": null,
           "title": "Start"
-        },
-        "suppressed": {
-          "default": 0,
-          "title": "Suppressed",
-          "type": "integer"
         },
         "total": {
           "default": 0,
@@ -17756,6 +17733,7 @@
             ],
             "config_file": null,
             "exclude": [],
+            "offline": false,
             "severity_threshold": null
           },
           "description": "Configure Syft scanner"
@@ -17810,6 +17788,11 @@
           },
           "title": "Exclude",
           "type": "array"
+        },
+        "offline": {
+          "description": "Run in offline mode, disabling update checks",
+          "title": "Offline",
+          "type": "boolean"
         },
         "severity_threshold": {
           "anyOf": [

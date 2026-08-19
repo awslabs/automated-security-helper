@@ -1,10 +1,9 @@
 """Utility functions for masking secrets in security findings."""
 
 import re
-from typing import Optional
 
 
-def mask_secret_in_text(text: str, rule_id: Optional[str] = None) -> str:
+def mask_secret_in_text(text: str, rule_id: str | None = None) -> str:
     """
     Mask secrets in text based on the rule ID and content patterns.
 
@@ -54,7 +53,6 @@ def _mask_bandit_password_secret(text: str) -> str:
     return re.sub(pattern, mask_replacement, text)
 
 
-# Keep the old name as an alias for backward compatibility
 _mask_bandit_b105_secret = _mask_bandit_password_secret
 
 

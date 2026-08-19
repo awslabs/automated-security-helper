@@ -3,13 +3,13 @@
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, List, Literal
+from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS, is_offline_mode
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -144,6 +144,7 @@ class CheckovScannerConfig(ScannerPluginConfigBase):
 class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     """CheckovScanner implements IaC scanning using Checkov."""
 
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
     check_conf: str = "NOT_PROVIDED"
 
     def model_post_init(self, context):
@@ -247,12 +248,33 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             if item is not None
         ]
 
+        # Resolve config candidates against source_dir, not the process working
+        # directory, and hand checkov an absolute path.
+        #
+        # The subprocess runs with cwd=context.source_dir (see
+        # PluginBase._run_subprocess), so probing with a bare Path(...).exists()
+        # asked a different question than the one checkov would answer: it tested
+        # the directory ASH happens to be invoked from. When that directory was
+        # ASH's own checkout, the probe matched ASH's ".ash/.checkov.yaml" and
+        # passed it through get_shortest_name, which relativises against the
+        # process cwd. checkov then could not open it, wrote no SARIF, and the
+        # scanner reported ERROR with zero findings.
+        #
+        # This used to line up by accident: the pre-decomposition run_ash_scan
+        # chdir'd the whole process into source_dir, so process cwd and subprocess
+        # cwd were the same directory. Resolving explicitly keeps the behaviour
+        # correct without a global chdir, which also matters for scanning several
+        # projects in one process.
+        source_dir = Path(self.context.source_dir)
         for conf_path in possible_config_paths:
-            if Path(conf_path).exists():
+            candidate = Path(conf_path)
+            if not candidate.is_absolute():
+                candidate = source_dir / candidate
+            if candidate.exists():
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config-file",
-                        value=get_shortest_name(input=conf_path),
+                        value=candidate.resolve().as_posix(),
                     )
                 )
                 break
