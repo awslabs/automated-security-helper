@@ -62,10 +62,13 @@ jobs:
           install-ash: "false"
       - name: Install dependencies
         run: uv sync
-      - name: Run PyTest (as configured, -n 1)
+      # `-n 1` is passed explicitly rather than relying on pytest.ini. #417 changes
+      # that pin to `-n auto`; if it lands first, a bare `uv run pytest` here would
+      # silently become arm B and the A-vs-B comparison would collapse.
+      - name: Run PyTest (-n 1 baseline, pinned explicitly)
         run: |
           start=$(date +%s)
-          uv run pytest || true
+          uv run pytest -n 1 || true
           echo "ELAPSED=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
       - name: Record
         run: |
