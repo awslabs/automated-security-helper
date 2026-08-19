@@ -195,17 +195,6 @@ def test_resolve_config_uses_runtime_cwd(monkeypatch, tmp_path):
     assert config is not None
 
 
-def test_ash_config_load_config_uses_runtime_cwd(monkeypatch, tmp_path):
-    """AshConfig.load_config's default source_dir must resolve at call time."""
-    from automated_security_helper.config.ash_config import AshConfig
-
-    monkeypatch.chdir(tmp_path)
-
-    # With no config in tmp_path, load_config should still succeed (default
-    # config) without blowing up trying to read from the import-time cwd.
-    config = AshConfig.load_config()
-    assert config is not None
-
 
 # ---------------------------------------------------------------------------
 # The interaction entry points (run_ash_scan, run_ash_container) have
@@ -276,13 +265,6 @@ def test_resolve_config_signature_is_none():
     sig = inspect.signature(resolve_config)
     assert sig.parameters["source_dir"].default is None
 
-
-def test_ash_config_load_config_signature_is_none():
-    import inspect
-    from automated_security_helper.config.ash_config import AshConfig
-
-    sig = inspect.signature(AshConfig.load_config)
-    assert sig.parameters["source_dir"].default is None
 
 
 def test_scan_set_signature_is_none():

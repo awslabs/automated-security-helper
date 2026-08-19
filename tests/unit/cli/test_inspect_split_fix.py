@@ -13,7 +13,9 @@ def test_inspect_findings_split_uses_call_not_subscript():
         / "inspect"
         / "inspect_findings_app.py"
     )
-    source = source_path.read_text()
+    # Explicit encoding: package source is UTF-8, but read_text() defaults to the
+    # locale codepage, which breaks on Windows for non-ASCII sources.
+    source = source_path.read_text(encoding="utf-8")
     assert '.split["."]' not in source
     assert ".split['.']" not in source
     assert '.split(".")[-1]' in source or ".split('.')[-1]" in source

@@ -324,7 +324,7 @@ class TestEnsureCompleteResults:
         aggregated_results.scanner_results = {"bandit": MagicMock()}
 
         with patch.object(
-            manager,
+            manager._checkpointer,
             "_get_executed_scanners_from_validation_state",
             return_value=["bandit"],
         ):
@@ -346,11 +346,11 @@ class TestEnsureCompleteResults:
         aggregated_results.scanner_results = {"bandit": MagicMock()}
 
         with patch.object(
-            manager,
+            manager._checkpointer,
             "_get_executed_scanners_from_validation_state",
             return_value=["bandit"],
         ), patch.object(
-            manager,
+            manager._checkpointer,
             "_create_missing_scanner_result_entry",
             return_value=MagicMock(status=ScannerStatus.ERROR),
         ):
@@ -384,9 +384,11 @@ class TestGetScannerStateSummary:
         assert "excluded" in summary
 
     def test_skips_class_name_entries(self, manager):
-        manager.update_scanner_state(
-            "BanditScanner",
-            registration_status="registered",
+        # Insert a class-name entry directly (bypassing insert-time validation) to
+        # verify the summary filters it out even if one slipped in via legacy paths.
+        from automated_security_helper.models.scanner_validation import ScannerValidationState
+        manager.scanner_states["BanditScanner"] = ScannerValidationState(
+            name="BanditScanner", registration_status="registered"
         )
         summary = manager._get_scanner_state_summary()
         # Class name entries (ending in "Scanner") are filtered out

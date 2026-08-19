@@ -20,7 +20,7 @@ from automated_security_helper.config.ash_config import (
     ReporterConfigSegment,
     ScannerConfigSegment,
 )
-from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.resolve_config import find_config_file, resolve_config
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import get_logger
@@ -212,18 +212,10 @@ def update(
 
     # Find the config file if not specified
     if config_path is None:
-        for config_file in ASH_CONFIG_FILE_NAMES:
-            def_paths = [
-                Path.cwd().joinpath(config_file),
-                Path.cwd().joinpath(".ash", config_file),
-            ]
-            for def_path in def_paths:
-                if def_path.exists():
-                    logger.info(f"Using config file found at: {def_path.as_posix()}")
-                    config_path = def_path.as_posix()
-                    break
-            if config_path is not None:
-                break
+        found = find_config_file()
+        if found is not None:
+            logger.info(f"Using config file found at: {found.as_posix()}")
+            config_path = found.as_posix()
 
     # Check if config file exists
     if config_path is None or not Path(config_path).exists():

@@ -4,12 +4,12 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, List, Literal
+from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -63,6 +63,7 @@ class GrypeScannerConfig(ScannerPluginConfigBase):
 class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     """GrypeScanner implements IaC scanning using Grype."""
 
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
     check_conf: str = "NOT_PROVIDED"
     # Env vars to layer onto the subprocess. Populated by
     # _process_config_options (e.g. offline-mode flags). Kept local to the

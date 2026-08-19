@@ -145,15 +145,15 @@ def create_url_download_command(
 
 
 def get_opengrep_url(
-    platform: Literal["linux", "darwin", "windows"],
-    arch: Literal["amd64", "arm64"],
+    target_platform: Literal["linux", "darwin", "macos", "windows"],
+    arch: Literal["amd64", "arm64", "x86_64", "aarch64"],
     version: str = "v1.1.5",
     linux_type: Literal["musllinux", "manylinux"] = "manylinux",
 ) -> str:
     """Get the URL for the opengrep binary based on platform and architecture.
 
     Args:
-        platform: The platform (e.g., "linux", "darwin", "windows")
+        target_platform: The platform (e.g., "linux", "darwin", "windows")
         arch: The architecture (e.g., "amd64", "arm64")
         version: The version of opengrep to download (default: "v1.1.5")
         linux_type: Type of Linux build to use (manylinux or musllinux)
@@ -165,7 +165,7 @@ def get_opengrep_url(
     base_url = f"https://github.com/opengrep/opengrep/releases/download/{version}"
 
     # Map platform and architecture to the appropriate binary name
-    if platform == "linux":
+    if target_platform == "linux":
         # Validate linux_type
         if linux_type not in ["manylinux", "musllinux"]:
             ASH_LOGGER.warning(
@@ -177,13 +177,13 @@ def get_opengrep_url(
             return f"{base_url}/opengrep_{linux_type}_x86"
         elif arch == "arm64" or arch == "aarch64":
             return f"{base_url}/opengrep_{linux_type}_aarch64"
-    elif platform == "darwin" or platform == "macos":
+    elif target_platform == "darwin" or target_platform == "macos":
         if arch == "amd64" or arch == "x86_64":
             return f"{base_url}/opengrep_osx_x86"
         elif arch == "arm64" or arch == "aarch64":
             return f"{base_url}/opengrep_osx_arm64"
-    elif platform == "windows":
+    elif target_platform == "windows":
         return f"{base_url}/opengrep_windows_x86.exe"
 
     # Default case
-    raise ValueError(f"Unsupported platform/architecture: {platform}/{arch}")
+    raise ValueError(f"Unsupported platform/architecture: {target_platform}/{arch}")

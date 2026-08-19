@@ -85,11 +85,11 @@ while (("$#")); do
       INSTALL_ASH_REVISION="$1"
       ;;
     --help | -h)
-      source "${ASH_ROOT_DIR}/ash-multi" --help
+      python -m automated_security_helper.cli.main --help
       exit 0
       ;;
     --version | -v)
-      source "${ASH_ROOT_DIR}/ash-multi" --version
+      python -m automated_security_helper.cli.main --version
       exit 0
       ;;
     --no-color | -c)

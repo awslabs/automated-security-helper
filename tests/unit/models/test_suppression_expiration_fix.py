@@ -1,31 +1,26 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression test for #171: past expiration date should warn, not crash.
+"""Regression tests for #171: past expiration date must be accepted, not discarded.
 
-Before the fix, validate_expiration_date raised ValueError for past dates,
-which caused the entire config file to fail parsing when any suppression
-had an expired date. The fix changed it to warn and return None so that
-scanning continues and the suppression is simply ignored.
+After the fix the validator checks format only; past dates are preserved so
+that is_expired can return True at runtime. The old behaviour (warn + return
+None) was removed.
 """
-import warnings
 
 from automated_security_helper.models.core import AshSuppression
 
 
-def test_past_expiration_warns_instead_of_raising():
-    """A suppression with a past expiration date should not crash config parsing."""
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        s = AshSuppression(
-            path="test.py",
-            rule_id="TEST-001",
-            reason="test",
-            expiration="2020-01-01",
-        )
-        assert s.expiration is None
-        assert len(w) == 1
-        assert "past" in str(w[0].message).lower()
+def test_past_expiration_accepted_not_discarded():
+    """A past expiration date must be stored, not silently set to None."""
+    s = AshSuppression(
+        path="test.py",
+        rule_id="TEST-001",
+        reason="test",
+        expiration="2020-01-01",
+    )
+    assert s.expiration == "2020-01-01"
+    assert s.is_expired is True
 
 
 def test_future_expiration_accepted():
@@ -37,6 +32,7 @@ def test_future_expiration_accepted():
         expiration="2099-12-31",
     )
     assert s.expiration == "2099-12-31"
+    assert s.is_expired is False
 
 
 def test_none_expiration_accepted():
@@ -48,3 +44,4 @@ def test_none_expiration_accepted():
         expiration=None,
     )
     assert s.expiration is None
+    assert s.is_expired is False

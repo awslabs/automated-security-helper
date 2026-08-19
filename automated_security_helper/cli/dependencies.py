@@ -151,15 +151,11 @@ def install_dependencies(
     exit_code = 0
     for plugin_type in plugin_types:
         plugin_module_input = (
-            plugin_type
-            if isinstance(plugin_type, type)
-            else (
-                "converter"
-                if plugin_type == "converter"
-                else "reporter"
-                if plugin_type == "reporter"
-                else "scanner"
-            )
+            "converter"
+            if plugin_type == "converter"
+            else "reporter"
+            if plugin_type == "reporter"
+            else "scanner"
         )
         plugins = ash_plugin_manager.plugin_modules(plugin_module_input)
         for plugin_class in plugins:
