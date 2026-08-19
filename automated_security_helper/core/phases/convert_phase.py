@@ -40,14 +40,11 @@ class ConvertPhase(EnginePhase):
         # Get all converter plugins
         converter_classes = self.plugins
 
-        # Filter enabled converters
-        enabled_converters = []
-        enabled_converter_names = []
+        # Create all converter instances upfront, then filter via the shared helper.
+        all_converter_instances = []
         for plugin_class in converter_classes:
             try:
                 plugin_name = getattr(plugin_class, "__name__", "Unknown")
-
-                # Create temporary instance to check config
                 plugin_instance = plugin_class(
                     context=self.plugin_context,
                     config=(
@@ -59,47 +56,25 @@ class ConvertPhase(EnginePhase):
                         else None
                     ),
                 )
-
-                # Check if enabled
-                if hasattr(plugin_instance, "config") and hasattr(
-                    plugin_instance.config, "enabled"
-                ):
-                    if not plugin_instance.config.enabled:
-                        ASH_LOGGER.debug(
-                            f"Converter {plugin_name} is disabled, skipping"
-                        )
-                        continue
-
-                # Check if python_based_plugins_only is set and if the converter is Python-only
-                if python_based_plugins_only and not plugin_instance.is_python_only():
-                    ASH_LOGGER.debug(
-                        f"Converter {plugin_name} is not Python-only, skipping due to python_based_plugins_only flag"
-                    )
-                    continue
-
-                # Check if the converter validates
-                if not plugin_instance.validate_plugin_dependencies():
-                    ASH_LOGGER.debug(
-                        f"Converter {plugin_name} validation failed, skipping"
-                    )
-                    continue
-
-                # If we got here, the converter is enabled and validates
-                enabled_converters.append(plugin_class)
-
-                # Use the configured name if available
-                display_name = plugin_name
-                if hasattr(plugin_instance, "config") and hasattr(
-                    plugin_instance.config, "name"
-                ):
-                    display_name = plugin_instance.config.name
-
-                enabled_converter_names.append(display_name)
-
+                all_converter_instances.append(plugin_instance)
             except Exception as e:
                 ASH_LOGGER.error(
-                    f"Error checking converter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
+                    f"Error creating converter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
                 )
+
+        filtered_instances = self.filter_enabled_plugins(
+            plugin_instances=all_converter_instances,
+            plugin_context=self.plugin_context,
+            python_only=python_based_plugins_only,
+        )
+
+        enabled_converters = [inst.__class__ for inst in filtered_instances]
+        enabled_converter_names = [
+            inst.config.name
+            if hasattr(inst, "config") and hasattr(inst.config, "name")
+            else inst.__class__.__name__
+            for inst in filtered_instances
+        ]
 
         ASH_LOGGER.verbose(
             f"Prepared {len(enabled_converter_names)} enabled converters: {enabled_converter_names}"
@@ -143,12 +118,12 @@ class ConvertPhase(EnginePhase):
 
         # Directly invoke each converter plugin
         ASH_LOGGER.debug(
-            f"Processing {len(enabled_converters)} enabled converter plugins"
+            f"Processing {len(filtered_instances)} enabled converter plugins"
         )
-        for plugin_class in enabled_converters:
+        for plugin_instance in filtered_instances:
             plugin_converted_paths = []
             try:
-                plugin_name = getattr(plugin_class, "__name__", "Unknown")
+                plugin_name = plugin_instance.__class__.__name__
                 ASH_LOGGER.debug(f"Initializing converter: {plugin_name}")
 
                 # Create a task for this converter
@@ -156,19 +131,6 @@ class ConvertPhase(EnginePhase):
                     phase=ExecutionPhase.CONVERT,
                     description=f"Starting converter: {plugin_name}",
                     total=100,
-                )
-
-                # Create converter instance with context
-                plugin_instance = plugin_class(
-                    context=self.plugin_context,
-                    config=(
-                        self.plugin_context.config.get_plugin_config(
-                            plugin_type="converter",
-                            plugin_name=plugin_name.lower(),
-                        )
-                        if self.plugin_context.config is not None
-                        else None
-                    ),
                 )
 
                 # Use the configured name if available
@@ -203,7 +165,7 @@ class ConvertPhase(EnginePhase):
                     self.notify_event(
                         AshEventType.CONVERT_START,
                         converter=display_name,
-                        converter_class=plugin_class.__name__,
+                        converter_class=plugin_instance.__class__.__name__,
                         message=f"Starting converter: {display_name}",
                     )
                 except Exception as event_error:
@@ -249,7 +211,7 @@ class ConvertPhase(EnginePhase):
                         self.notify_event(
                             AshEventType.CONVERT_COMPLETE,
                             converter=display_name,
-                            converter_class=plugin_class.__name__,
+                            converter_class=plugin_instance.__class__.__name__,
                             converted_files=convert_result,
                             file_count=len(convert_result),
                             message=f"Converter {display_name} completed: {len(convert_result)} files converted",
@@ -281,7 +243,7 @@ class ConvertPhase(EnginePhase):
                         self.notify_event(
                             AshEventType.CONVERT_COMPLETE,
                             converter=display_name,
-                            converter_class=plugin_class.__name__,
+                            converter_class=plugin_instance.__class__.__name__,
                             converted_files=[],
                             file_count=0,
                             message=f"Converter {display_name} completed: no files to convert",

@@ -1,13 +1,13 @@
 """Module containing the CDK Nag security scanner implementation."""
 
 import logging
-from typing import Annotated, List, Literal
+from typing import Annotated, ClassVar, List, Literal
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -102,6 +102,8 @@ class CdkNagScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
     """CDK Nag security scanner, custom CDK-CLI-less implementation."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     def model_post_init(self, context):
         if self.config is None:

@@ -69,7 +69,7 @@ class TestUnifiedMetrics:
         assert format_duration(125.3) == "2m 5s"
 
         # Test with large duration
-        assert format_duration(3661) == "61m 1s"
+        assert format_duration(3661) == "1h 1m 1s"
 
     def test_get_unified_scanner_metrics_empty_model(self):
         """Test getting unified scanner metrics from an empty model."""

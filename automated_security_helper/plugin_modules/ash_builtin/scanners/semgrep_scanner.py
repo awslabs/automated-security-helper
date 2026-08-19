@@ -5,13 +5,13 @@ import logging
 import os
 from pathlib import Path
 import platform
-from typing import Annotated, List, Literal
+from typing import Annotated, ClassVar, List, Literal
 
 from pydantic import Field
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.constants import ASH_ASSETS_DIR, is_offline_mode
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -102,6 +102,8 @@ class SemgrepScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
     """SemgrepScanner implements code scanning using Semgrep."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     def model_post_init(self, context):
         if self.config is None:
@@ -266,30 +268,26 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 scanner_name="Semgrep",
             )
             if not offline_valid:
-                for msg in offline_messages:
-                    self._plugin_log(msg, level=logging.WARNING)
+                raise ScannerError(
+                    "Semgrep is running in offline mode but no rule cache was found. "
+                    "Set $SEMGREP_RULES_CACHE_DIR to a directory containing .yaml/.yml rule files. "
+                    "Run `ash build-image --offline` to pre-warm the cache via Dockerfile, "
+                    "or download rulesets manually with `semgrep --config p/ci --dryrun` "
+                    "while online and copy to cache."
+                )
 
             # Use cached rules directory with --no-rewrite-rule-ids to produce
             # clean rule IDs (the rule's own id field, no path-derived prefix).
             semgrep_rules_cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
-            if semgrep_rules_cache_dir and Path(semgrep_rules_cache_dir).is_dir():
-                ASH_LOGGER.info(
-                    f"Semgrep offline mode: using cached rules from {semgrep_rules_cache_dir}"
-                )
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--config", value=semgrep_rules_cache_dir)
-                )
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--no-rewrite-rule-ids", value="")
-                )
-            else:
-                self._plugin_log(
-                    "🔴 Semgrep offline mode: cache dir not found, falling back to p/ci",
-                    level=logging.WARNING,
-                )
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--config", value="p/ci")
-                )
+            ASH_LOGGER.info(
+                f"Semgrep offline mode: using cached rules from {semgrep_rules_cache_dir}"
+            )
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=semgrep_rules_cache_dir)
+            )
+            self.args.extra_args.append(
+                ToolExtraArg(key="--no-rewrite-rule-ids", value="")
+            )
         else:
             self.args.extra_args.append(
                 ToolExtraArg(
