@@ -22,6 +22,41 @@ class PluginDependency(BaseModel):
     package_manager: PackageManager = PackageManager.APT
 
 
+# Version strings starting with one of these are PEP 440 specifiers (a range),
+# not a single version.
+_VERSION_SPECIFIER_START = ("<", ">", "!", "~", "=")
+
+
+def pep440_requirement(name: str, version: str) -> str:
+    """Render ``name`` and ``version`` as one pip/uv requirement string.
+
+    ``version`` is interpreted three ways:
+
+    - ``"latest"`` -- no constraint, so the resolver takes the newest release.
+    - a PEP 440 specifier such as ``">=0.1.0,<2.0.0"`` -- passed through verbatim.
+    - a bare version such as ``"1.2.3"`` -- pinned exactly, with ``==``.
+
+    The middle case is why this helper exists. Rendering every non-``latest``
+    version as ``f"{name}=={version}"`` turns a range into a requirement pip
+    cannot parse (``ferret-scan==>=0.1.0,<2.0.0``), so a plugin that declared a
+    supported *range* had no way to get it honoured. The observable failure was
+    not an error, which is what made it expensive: the range went undeclared,
+    the installer fell back to "latest", and CI installed whichever release
+    happened to be newest at the moment the job ran. ferret-scan 2.3.3 was
+    published mid-run on 2026-08-20 and turned every open PR red without a
+    single source change.
+
+    Only pip and uv use this. apt, npm, brew, yum and choco all spell ranges
+    differently, and guessing a translation between them would trade a loud
+    failure for a quiet mis-install.
+    """
+    if version == "latest":
+        return name
+    if version.startswith(_VERSION_SPECIFIER_START):
+        return f"{name}{version}"
+    return f"{name}=={version}"
+
+
 class CustomCommand(BaseModel):
     args: List[str]
     shell: bool = False  # Set to True only when shell expansion is absolutely necessary
@@ -283,7 +318,7 @@ class PluginBase(UVToolMixin, BaseModel):
                             "-m",
                             "pip",
                             "install",
-                            f"{dep.name}{f'=={dep.version}' if dep.version != 'latest' else ''}",
+                            pep440_requirement(dep.name, dep.version),
                         ]
                     )
                 elif dep.package_manager == PackageManager.UV:
@@ -292,7 +327,7 @@ class PluginBase(UVToolMixin, BaseModel):
                             "uv",
                             "tool",
                             "install",
-                            f"{dep.name}{f'=={dep.version}' if dep.version != 'latest' else ''}",
+                            pep440_requirement(dep.name, dep.version),
                         ]
                     )
                 elif dep.package_manager == PackageManager.NPM:
