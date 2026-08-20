@@ -10,6 +10,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  #
+  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
+  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
+  # in its own group and entries never serialize behind one another.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict, and push/tag runs feed docs and releases.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   pr-title:
     name: Validate PR title
