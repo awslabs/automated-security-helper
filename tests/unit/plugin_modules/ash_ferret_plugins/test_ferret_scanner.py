@@ -954,6 +954,47 @@ class TestFerretScanScannerVersionSupport:
         constraint = scanner._get_tool_version_constraint()
         assert constraint == "==1.2.3"
 
+    def test_installation_command_applies_the_declared_constraint(
+        self, mock_plugin_context
+    ):
+        """The declared range has to reach the install command, not just a log line.
+
+        The plugin declared a supported range and installed nothing, so callers
+        ran `pip install ferret-scan` and got whatever was newest. On
+        2026-08-20 that was 2.3.3 -- past MAX_SUPPORTED_VERSION -- and its new
+        API_KEY_OR_SECRET detector failed the self-scan on two false positives.
+        """
+        from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+            DEFAULT_VERSION_CONSTRAINT,
+        )
+
+        scanner = FerretScanScanner(context=mock_plugin_context)
+
+        commands = scanner.get_installation_commands("linux", "amd64")
+        install_cmds = [c for c in commands if "install" in c]
+        assert install_cmds, "the plugin must emit an install command"
+
+        specs = [c[-1] for c in install_cmds if c[-1].startswith("ferret-scan")]
+        assert specs == [f"ferret-scan{DEFAULT_VERSION_CONSTRAINT}"]
+
+        # The point of the constraint is excluding the version that broke CI.
+        packaging_requirements = pytest.importorskip("packaging.requirements")
+        specifier = packaging_requirements.Requirement(specs[0]).specifier
+        assert "2.3.3" not in specifier
+        assert "1.10.0" in specifier
+
+    def test_installation_command_honours_a_user_pin(self, mock_plugin_context):
+        """An explicit tool_version must win over the plugin default."""
+        config = FerretScannerConfig(
+            options=FerretScannerConfigOptions(tool_version="==1.9.0")
+        )
+
+        scanner = FerretScanScanner(context=mock_plugin_context, config=config)
+
+        commands = scanner.get_installation_commands("linux", "amd64")
+        specs = [c[-1] for c in commands if c and str(c[-1]).startswith("ferret-scan")]
+        assert specs == ["ferret-scan==1.9.0"]
+
     @patch(
         "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.find_executable"
     )
