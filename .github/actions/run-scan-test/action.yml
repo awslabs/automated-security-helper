@@ -46,10 +46,22 @@ runs:
     # run's own token.
     #
     # Trade-off, stated plainly: exporting ACTIONS_RUNTIME_TOKEN into the job
-    # environment makes it visible to every later step in the job, including the
-    # scanners ASH runs over the checked-out code. What that token grants is read and
-    # write access to this repository's Actions cache - not code, not secrets, not
-    # package publishing.
+    # environment makes it visible to later steps in the job, including the scanners
+    # ASH runs over the checked-out code. What that token grants is read and write
+    # access to this repository's Actions cache - not code, not secrets, not package
+    # publishing.
+    #
+    # Two mitigations, because "it is only the cache token" is not a reason to be
+    # careless with a JWT in a public repository:
+    #
+    # 1. core.setSecret registers the value with the runner's log filter before it is
+    #    exported. Values written to GITHUB_ENV are NOT masked automatically, so
+    #    without this any later step that echoed its environment - a stray printenv,
+    #    a tool that logs its own env on error - would put the token into a log that
+    #    anyone can read on a public repository.
+    # 2. The companion step after the scan clears these back out, so the token is
+    #    live for the build and scan only and is gone before the report, artifact
+    #    upload and PR-comment steps run.
     - name: Expose the Actions cache credentials to ASH's build
       if: >-
         contains(inputs.os, 'ubuntu')
@@ -61,6 +73,10 @@ runs:
           for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_CACHE_URL', 'ACTIONS_RESULTS_URL']) {
             const value = process.env[name]
             if (value) {
+              // Mask before export. The URLs are not sensitive, but the token is,
+              // and masking all three is simpler than reasoning about which is which
+              // every time this list changes.
+              core.setSecret(value)
               core.exportVariable(name, value)
             } else {
               core.info(`${name} is not set on this runner; skipping`)
@@ -309,6 +325,28 @@ runs:
           echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
           exit 1
         fi
+
+    # Companion to "Expose the Actions cache credentials to ASH's build". The build
+    # is done by now, so clear the credentials back out rather than leaving them in
+    # the environment for the artifact upload, the PR comment and anything else a
+    # caller adds after this action.
+    #
+    # Writing an empty value to GITHUB_ENV is how a composite action unsets a
+    # variable for subsequent steps; there is no delete verb. `always()` so the
+    # cleanup still happens when a scan fails, which is exactly when extra debug
+    # output is most likely to be flowing.
+    - name: Revoke the Actions cache credentials from the job environment
+      if: >-
+        always()
+        && contains(inputs.os, 'ubuntu')
+        && inputs.method != 'python-local'
+        && inputs.oci-runner == 'docker'
+      shell: bash
+      run: |
+        for name in ACTIONS_RUNTIME_TOKEN ACTIONS_CACHE_URL ACTIONS_RESULTS_URL; do
+          echo "${name}=" >> "$GITHUB_ENV"
+        done
+        echo "Cleared the buildx cache credentials from the job environment"
 
     # Common post-scan validation
     - name: Collect ASH output artifact
