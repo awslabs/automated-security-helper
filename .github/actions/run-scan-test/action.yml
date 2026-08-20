@@ -47,17 +47,38 @@ runs:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
         echo "Installing tools needed for community plugins..."
-        npm install -g snyk
+
+        # Every install below pulls a third-party binary over the network, and none
+        # of them had a retry. Observed failure: snyk's npm post-install wrapper hit
+        # ECONNRESET part-way through downloading snyk-win.exe, retried the download
+        # successfully (shasums matched), then died renaming a temp file the failed
+        # attempt had already cleaned up - taking the whole
+        # `scan (python-local, windows-latest) - Community Plugins` job with it,
+        # before ASH was even invoked.
+        retry() {
+          local attempts=3 n=1
+          until "$@"; do
+            if [ "$n" -ge "$attempts" ]; then
+              echo "::error::'$*' failed after ${attempts} attempts"
+              return 1
+            fi
+            echo "::warning::'$*' failed (attempt ${n}/${attempts}); retrying in $((n * 10))s"
+            sleep $((n * 10))
+            n=$((n + 1))
+          done
+        }
+
+        retry npm install -g snyk
         snyk version
 
         if [[ "$RUNNER_OS" == "Linux" ]]; then
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          retry bash -c 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
           trivy version
         elif [[ "$RUNNER_OS" == "macOS" ]]; then
-          brew install trivy
+          retry brew install trivy
           trivy version
         elif [[ "$RUNNER_OS" == "Windows" ]]; then
-          curl -sfL -o trivy.zip "https://get.trivy.dev/trivy?type=zip&os=windows&arch=amd64"
+          retry curl -sfL -o trivy.zip "https://get.trivy.dev/trivy?type=zip&os=windows&arch=amd64"
           mkdir -p /tmp/trivy-install
           mv trivy.zip /tmp/trivy-install/
           cd /tmp/trivy-install
@@ -69,7 +90,7 @@ runs:
           trivy version
         fi
 
-        pip install ferret-scan
+        retry pip install ferret-scan
         ferret-scan --version
 
     # Validate config
