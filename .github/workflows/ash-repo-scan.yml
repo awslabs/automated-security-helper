@@ -22,8 +22,14 @@ jobs:
       security-events: write # Required for collection of SARIF code scanning results for GitHub Advanced Security checks
     with:
       # For PR runs, install ASH from the PR's head repo and branch so fork PRs work.
+      # For merge_group runs, github.head_ref is empty and github.ref_name is the
+      # ephemeral gh-readonly-queue/... branch, which GitHub deletes as soon as the
+      # queue entry is processed. The scan step's uvx install would win the race and
+      # the later report step's would not, failing with "couldn't find remote ref".
+      # The commit is unreachable once the branch is gone, so its SHA is not
+      # fetchable either - the only stable choice is the default branch.
       # For non-PR runs (workflow_dispatch, push), use the current repo and ref.
-      ash-version: ${{ github.head_ref || github.ref_name }}
+      ash-version: ${{ github.head_ref || (github.event_name == 'merge_group' && github.event.repository.default_branch) || github.ref_name }}
       ash-repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       # This repo uses GitHub Advanced Security. If you do not use GitHub Advanced Security,
       # it is recommended to set this to `false` to prevent failures during SARIF report
