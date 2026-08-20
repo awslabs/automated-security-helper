@@ -108,6 +108,7 @@ jobs:
   ash:
     name: SAST, SCA, and IaC Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       COLUMNS: 140
     steps:
@@ -166,7 +167,12 @@ jobs:
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
         run: |-
-          uvx --reinstall --from ${ASH_UVX_SOURCE} ash \
+          # No --reinstall here. The Run ASH step above already installed this exact
+          # source, so re-forcing a download makes the report step do a second git
+          # fetch it does not need - and if the ref has disappeared in the meantime
+          # (merge_group queue branches are deleted mid-run) that fetch is what
+          # fails, after the scan itself has already succeeded.
+          uvx --from ${ASH_UVX_SOURCE} ash \
             --output-dir "${ASH_OUTPUT_DIR}" report
 
       - name: Update step summary
