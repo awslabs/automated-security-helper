@@ -341,6 +341,57 @@ def _find_dockerfile(resolved_revision: str | None) -> Path:
     return dockerfile_path
 
 
+def _gha_layer_cache_args(
+    resolved_oci_runner: str,
+    build_target: str,
+    force: bool,
+) -> List[str]:
+    """Return buildx flags that read and write image layers via the GitHub Actions cache.
+
+    Returns an empty list whenever the cache is unusable, in which case the caller
+    keeps using a plain ``<runtime> build`` and nothing about the build changes.
+
+    Why each guard exists:
+
+    - docker only. ``type=gha`` is a buildx cache backend. podman and finch expose
+      only registry-backed caches, so there is nothing equivalent to offer them.
+    - Only inside a GitHub Actions run. The exporter authenticates with
+      ACTIONS_RUNTIME_TOKEN and talks to ACTIONS_CACHE_URL (protocol v1) or
+      ACTIONS_RESULTS_URL (v2). Note that Actions does not place these in the
+      environment of ``run:`` steps by default, so a workflow has to export them
+      deliberately; absent them this returns nothing rather than failing a build.
+    - Never with ``force``. ``force`` means ``--no-cache``, i.e. rebuild from
+      scratch, so reading from a cache would contradict the caller's intent.
+
+    Nothing is published. ``type=gha`` writes to the Actions cache service, not to
+    a registry, and the entries are scoped to the repository and readable only with
+    the run's token. Distributing an image is a separate ``--push`` operation that
+    this does not perform.
+    """
+    if resolved_oci_runner != "docker":
+        return []
+    if force:
+        return []
+    if os.environ.get("ASH_DISABLE_GHA_BUILD_CACHE", "").strip():
+        return []
+    if not os.environ.get("ACTIONS_RUNTIME_TOKEN"):
+        return []
+    if not (
+        os.environ.get("ACTIONS_CACHE_URL") or os.environ.get("ACTIONS_RESULTS_URL")
+    ):
+        return []
+
+    # One scope per build target. Builds sharing a scope overwrite each other's
+    # cache, so `ci` and `non-root` must not collide.
+    scope = f"ash-{build_target}"
+    return [
+        "--cache-from",
+        f"type=gha,scope={scope}",
+        "--cache-to",
+        f"type=gha,mode=max,scope={scope}",
+    ]
+
+
 def _build_image(
     oci_command_prefix: List[str],
     resolved_oci_runner: str,
@@ -367,7 +418,21 @@ def _build_image(
         f"Building image {image_name} -- this may take a few minutes during the first build..."
     )
 
-    build_cmd = [*oci_command_prefix, resolved_oci_runner, "build"]
+    # Layer caching needs buildx: type=gha is not supported by the default docker
+    # driver. buildx also leaves the local image store untouched unless asked, so
+    # --load is required or the image would not exist for the subsequent run.
+    cache_args = _gha_layer_cache_args(resolved_oci_runner, build_target, force)
+    if cache_args:
+        build_cmd = [
+            *oci_command_prefix,
+            resolved_oci_runner,
+            "buildx",
+            "build",
+            "--load",
+        ]
+    else:
+        build_cmd = [*oci_command_prefix, resolved_oci_runner, "build"]
+    build_cmd.extend(cache_args)
     build_cmd.extend(["--build-arg", f"UID={container_uid}"])
     build_cmd.extend(["--build-arg", f"GID={container_gid}"])
     build_cmd.extend(
