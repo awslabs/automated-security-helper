@@ -24,13 +24,13 @@ name: ASH Upgrade Paths
 
 on:
   merge_group:
+  # Deliberately unfiltered. These three arms are meant to be required checks in
+  # the "Protect main" ruleset, and a required check that does not run never
+  # reports - which blocks the pull request forever. A `paths:` filter here would
+  # do exactly that on any PR that happens not to touch pyproject.toml,
+  # uv.lock or automated_security_helper/**. The cost of always running is three
+  # parallel jobs on a repo that already runs well over a hundred.
   pull_request:
-    paths:
-      # Anything that can change how the package installs or what it exposes.
-      - pyproject.toml
-      - uv.lock
-      - automated_security_helper/**
-      - .github/workflows/ash-upgrade-paths.yml
   workflow_dispatch: {}
 
 permissions:
