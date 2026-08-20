@@ -30,6 +30,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ASH_SCRIPT = REPO_ROOT / "ash"
 
 pytestmark = [
+    # Windows users invoke ASH through utils/ash_helpers.ps1, not ./ash, so there
+    # is nothing here to cover on Windows. It also cannot work: on a GitHub
+    # Windows runner shutil.which("bash") finds C:\Windows\System32\bash.exe,
+    # the WSL launcher stub, which is on PATH regardless of whether a
+    # distribution is installed. With none installed it exits 1 and prints
+    # "Windows Subsystem for Linux has no installed distributions" as UTF-16 --
+    # so the which() guard passes and the assertions then fail on that output
+    # rather than on anything about ASH.
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="bash on Windows runners is the WSL stub; ./ash is the POSIX entrypoint",
+    ),
     pytest.mark.skipif(
         shutil.which("bash") is None, reason="the entrypoint under test is bash"
     ),

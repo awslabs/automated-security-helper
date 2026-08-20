@@ -31,10 +31,23 @@ from automated_security_helper.core.constants import ASH_ASSETS_DIR
 
 WITH_RETRY = ASH_ASSETS_DIR.joinpath("with-retry.sh")
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("bash") is None,
-    reason="with-retry.sh is a bash script; no bash interpreter available",
-)
+# with-retry.sh only ever runs inside the Linux container image, so there is
+# nothing to cover on Windows -- and trying to is actively misleading. On a
+# GitHub Windows runner `shutil.which("bash")` resolves to
+# C:\Windows\System32\bash.exe, the WSL launcher stub, which is on PATH whether
+# or not a distribution is installed. With none installed it exits 1 and prints
+# "Windows Subsystem for Linux has no installed distributions" as UTF-16, so a
+# which() guard alone passes and then every assertion fails on empty output.
+pytestmark = [
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="bash on Windows runners is the WSL stub; with-retry.sh runs in the Linux image",
+    ),
+    pytest.mark.skipif(
+        shutil.which("bash") is None,
+        reason="with-retry.sh is a bash script; no bash interpreter available",
+    ),
+]
 
 
 def run_with_retry(command: str, attempts: int = 3, extra_env: dict | None = None):
