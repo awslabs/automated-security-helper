@@ -321,7 +321,7 @@ def extract_mcp_tools() -> list[dict]:
     tools = []
 
     # Find all functions decorated with @mcp.tool()
-    # The FastMCP server registers tools - we can find them by looking at module-level
+    # The MCPServer registers tools - we can find them by looking at module-level
     # async functions that are decorated (they'll be in the mcp server's tool registry,
     # but we can also find them by scanning the module for known patterns)
     module = mcp_server
@@ -329,7 +329,7 @@ def extract_mcp_tools() -> list[dict]:
     # Get the mcp instance and its registered tools
     mcp_instance = module.mcp
 
-    # FastMCP stores tools internally - try to access them
+    # MCPServer stores tools internally - try to access them
     # But the simplest approach: scan module for async functions that we know are tools
     # by checking if they're registered in the mcp._tool_manager or similar
     tool_functions = []
