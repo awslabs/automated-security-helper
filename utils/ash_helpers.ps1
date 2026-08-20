@@ -312,6 +312,15 @@ function Invoke-ASH {
                     $buildCmdStr = $buildCmd -join ' '
                     Write-Verbose "Build command: $buildCmdStr"
                     Invoke-Expression $buildCmdStr
+
+                    # Invoke-Expression on a native command does not throw on a
+                    # non-zero exit, so without this a failed build continues to
+                    # the run below, which then fails trying to pull the image
+                    # from a registry and blames the registry rather than the
+                    # build step that actually broke.
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Failed to build image $AshImageName (exit $LASTEXITCODE). See the build output above for the failing step."
+                    }
                 }
 
                 # Run the container if not skipped
