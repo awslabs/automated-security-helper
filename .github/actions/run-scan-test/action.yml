@@ -35,45 +35,37 @@ runs:
       if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local' && inputs.oci-runner != 'finch'
       uses: docker/setup-buildx-action@v4
 
-    # Build the ASH image once for this cell with buildx, restoring layers from
-    # the GitHub Actions cache so repeat runs skip the apt/node/ruby/uv installs
-    # and the pinned syft+grype+trivy downloads.
+    # ASH's container build exports and restores its layers through the GitHub
+    # Actions cache (buildx type=gha) when it can see the cache credentials. Actions
+    # does not put these in the environment of `run:` steps, so they are exported
+    # here deliberately; without this the build silently falls back to an uncached
+    # `docker build`.
     #
-    # Nothing is published. type=gha writes to the Actions cache service, not a
-    # registry, and `push: false` with `load: true` means the image only ever
-    # exists in this runner's local store. Docker's own docs are explicit that the
-    # gha cache exporter does not publish the image.
+    # Nothing is published: type=gha writes to the Actions cache service, not a
+    # registry, and entries are scoped to this repository and readable only with the
+    # run's own token.
     #
-    # docker only: type=gha is a buildx cache backend, and podman/finch expose
-    # only registry-backed caches, which is deliberately not an option here.
-    #
-    # Skipped for the offline cell, whose image needs OFFLINE=YES baked in and so
-    # must not reuse a cache entry built with OFFLINE=NO.
-    #
-    # This also speeds up the bash and powershell cells even though they do not
-    # take --no-build: their own `docker build` of the same Dockerfile now hits
-    # the local build cache this step just populated.
-    - name: Pre-build the ASH image with a shared layer cache
-      id: prebuild
+    # Trade-off, stated plainly: exporting ACTIONS_RUNTIME_TOKEN into the job
+    # environment makes it visible to every later step in the job, including the
+    # scanners ASH runs over the checked-out code. What that token grants is read and
+    # write access to this repository's Actions cache - not code, not secrets, not
+    # package publishing.
+    - name: Expose the Actions cache credentials to ASH's build
       if: >-
         contains(inputs.os, 'ubuntu')
         && inputs.method != 'python-local'
         && inputs.oci-runner == 'docker'
-        && inputs.offline != 'true'
-      uses: docker/build-push-action@v7
+      uses: actions/github-script@v8
       with:
-        context: .
-        file: ./Dockerfile
-        # Must match ASH's default image name for the target,
-        # automated-security-helper:<build-target>, or --no-build will not find it.
-        target: ci
-        tags: automated-security-helper:ci
-        load: true
-        push: false
-        cache-from: type=gha,scope=ash-ci
-        cache-to: type=gha,mode=max,scope=ash-ci
-        build-args: |
-          INSTALL_ASH_REVISION=LOCAL
+        script: |
+          for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_CACHE_URL', 'ACTIONS_RESULTS_URL']) {
+            const value = process.env[name]
+            if (value) {
+              core.exportVariable(name, value)
+            } else {
+              core.info(`${name} is not set on this runner; skipping`)
+            }
+          }
 
     - name: Create output directory
       shell: bash
@@ -150,7 +142,6 @@ runs:
       shell: bash
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
-        PREBUILT: ${{ steps.prebuild.outcome }}
       run: |
         echo "Testing ASH using Python (Container) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
         ash --version
@@ -158,17 +149,10 @@ runs:
         if [ "${{ inputs.offline }}" = "true" ]; then
           OFFLINE_FLAG="--offline"
         fi
-        # If the pre-build step ran, automated-security-helper:ci is already in the
-        # local image store, so skip ASH's own build rather than repeating it.
-        NO_BUILD_FLAG=""
-        if [ "${PREBUILT}" = "success" ]; then
-          NO_BUILD_FLAG="--no-build"
-          echo "Reusing the pre-built image; skipping ASH's container build"
-        fi
         if [ "${{ inputs.config-file }}" = "community" ]; then
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG $NO_BUILD_FLAG --config .ash/.ash_community_plugins.yaml
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG --config .ash/.ash_community_plugins.yaml
         else
-          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG $NO_BUILD_FLAG
+          ash --mode container --build-target ci --verbose --no-progress --ash-revision-to-install LOCAL $OFFLINE_FLAG
         fi
 
     - name: Validate No Plugin Errors (Python Container)
