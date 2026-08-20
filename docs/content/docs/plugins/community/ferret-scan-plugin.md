@@ -74,9 +74,17 @@ This plugin is tested and compatible with specific ferret-scan versions. Using v
 
 The plugin requires Ferret Scan to be installed and available in your system PATH.
 
-**pip (Recommended)**:
+**ASH (Recommended)** — installs the version the plugin is tested against:
 ```bash
-pip install ferret-scan
+ash dependencies install --config .ash/.ash_community_plugins.yaml
+```
+
+**pip**: pass the supported range. A bare `pip install ferret-scan` resolves to
+the newest release, which may sit outside the range in the table above — that is
+how a release published partway through a CI run once failed every open pull
+request without a source change.
+```bash
+pip install 'ferret-scan>=0.1.0,<2.0.0'
 ```
 
 **Build from Source**:
