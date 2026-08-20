@@ -741,8 +741,14 @@ class TestOcsfReporterHelperMethods:
         assert finding.metadata.product.vendor_name == "Amazon Web Services"
         assert finding.metadata.product.version is not None
         assert finding.metadata.version == "1.1.0"
-        # Allow for small timing differences (within 10ms)
-        assert abs(finding.metadata.logged_time - current_time_ms) <= 10
+        # _create_vulnerability_finding passes `metadata` through untouched, so
+        # logged_time is whatever the sample_metadata fixture stamped -- it is not
+        # derived from current_time_ms. Comparing the two with a 10ms tolerance was
+        # therefore measuring how long pytest took to get from fixture setup to
+        # this line, which is sub-millisecond locally and much larger on a busy
+        # runner. It failed on ubuntu-24.04-arm/py3.11 at a 62ms gap. Asserting
+        # the pass-through directly is exact and cannot race.
+        assert finding.metadata.logged_time == sample_metadata.logged_time
 
         # Validate complete finding information (Requirement 3.2)
         assert finding.finding_info is not None
