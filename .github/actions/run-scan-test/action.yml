@@ -90,7 +90,26 @@ runs:
           trivy version
         fi
 
-        retry pip install ferret-scan
+        # `pip install ferret-scan` resolves to whatever is newest, which is not
+        # a version anyone chose. ferret-scan 2.3.3 was published at
+        # 2026-08-20T21:14:59Z; jobs whose install step ran after that installed
+        # it, picked up a new API_KEY_OR_SECRET detector that matches
+        # `session: Optional[Session]` in generated Pydantic schemas, and failed
+        # on 2 findings. Runs from 40 minutes earlier passed on 2.3.2. Three
+        # unrelated merge-queue branches broke in the same window with no source
+        # change.
+        #
+        # The plugin already declares the range it is tested against, so read it
+        # from there rather than repeating it here -- one source of truth, and if
+        # the constant moves this fails loudly instead of silently reverting to
+        # installing latest.
+        FERRET_CONSTRAINT="$(python -c 'from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import DEFAULT_VERSION_CONSTRAINT as c; print(c)')"
+        if [ -z "$FERRET_CONSTRAINT" ]; then
+          echo "::error::Could not read ferret-scan's declared version constraint from its ASH plugin. Refusing to install an unconstrained version."
+          exit 1
+        fi
+        echo "Installing ferret-scan against its plugin-declared constraint: ${FERRET_CONSTRAINT}"
+        retry pip install "ferret-scan${FERRET_CONSTRAINT}"
         ferret-scan --version
 
     # Validate config
