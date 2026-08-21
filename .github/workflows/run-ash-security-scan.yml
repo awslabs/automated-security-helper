@@ -221,11 +221,45 @@ jobs:
           cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
           tree "${ASH_OUTPUT_DIR}"
 
+      # GITHUB_TOKEN is read-only for pull requests opened from a fork, whatever
+      # `permissions:` the caller declares -- GitHub downgrades it so untrusted
+      # code cannot write to the base repository. Commenting therefore cannot
+      # work on a fork PR, and because this job is a required status check, the
+      # failure took the whole check down *after the scan had already passed*:
+      #
+      #   ##[error]Resource not accessible by integration
+      #   https://docs.github.com/rest/issues/comments#create-an-issue-comment
+      #
+      # That made every external contributor's PR unmergeable for a cosmetic
+      # reason. The existing `github.repository_owner == inputs.repository-owner`
+      # guard does not catch it: for a fork PR *into* this repo the owner is
+      # still the base repo's owner, so the guard passes.
+      #
+      # Comparing head.repo.full_name against github.repository is the exact test
+      # for "same-repo PR". It is scoped to pull_request so merge_group and
+      # workflow_dispatch behaviour is unchanged.
       - name: Post ASH MarkdownReporter output as PR comment
         uses: mshick/add-pr-comment@v3
-        if: inputs.post-pr-comment && github.repository_owner == inputs.repository-owner && (success() || failure())
+        if: >-
+          inputs.post-pr-comment
+          && github.repository_owner == inputs.repository-owner
+          && (github.event_name != 'pull_request'
+              || github.event.pull_request.head.repo.full_name == github.repository)
+          && (success() || failure())
         with:
           message-path: ${{ inputs.output-dir }}/reports/ash.summary.md
+
+      # Say so rather than leaving a contributor wondering why the bot went
+      # quiet. Mirrors the ::warning:: the checks-permission probe below emits.
+      - name: Note that the PR comment was skipped for a fork
+        if: >-
+          inputs.post-pr-comment
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name != github.repository
+          && (success() || failure())
+        shell: bash
+        run: |
+          echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the ash_output artifact."
 
       - name: Collect ASH output artifact
         uses: actions/upload-artifact@v7
