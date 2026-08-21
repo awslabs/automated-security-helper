@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "ash": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.0",
+        "ash",
+        "mcp"
+      ],
+      "environment": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "enabled": true
+    }
+  }
+}
