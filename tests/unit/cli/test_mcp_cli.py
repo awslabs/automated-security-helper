@@ -81,22 +81,22 @@ class TestValidateCommandOptions:
 
 
 class TestValidateMcpDependencies:
-    @patch("automated_security_helper.cli.mcp.FastMCP", new=object())
+    @patch("automated_security_helper.cli.mcp.MCPServer", new=object())
     @patch("automated_security_helper.cli.mcp.Context", new=object())
     def test_returns_true_when_both_available(self):
         assert validate_mcp_dependencies() is True
 
-    @patch("automated_security_helper.cli.mcp.FastMCP", new=None)
+    @patch("automated_security_helper.cli.mcp.MCPServer", new=None)
     @patch("automated_security_helper.cli.mcp.Context", new=object())
     def test_returns_false_when_fastmcp_missing(self):
         assert validate_mcp_dependencies() is False
 
-    @patch("automated_security_helper.cli.mcp.FastMCP", new=object())
+    @patch("automated_security_helper.cli.mcp.MCPServer", new=object())
     @patch("automated_security_helper.cli.mcp.Context", new=None)
     def test_returns_false_when_context_missing(self):
         assert validate_mcp_dependencies() is False
 
-    @patch("automated_security_helper.cli.mcp.FastMCP", new=None)
+    @patch("automated_security_helper.cli.mcp.MCPServer", new=None)
     @patch("automated_security_helper.cli.mcp.Context", new=None)
     def test_returns_false_when_both_missing(self):
         assert validate_mcp_dependencies() is False

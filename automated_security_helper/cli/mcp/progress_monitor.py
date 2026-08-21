@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Awaitable, Callable, Optional, Tuple
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 
 from automated_security_helper.cli.mcp_tools import (
     mcp_get_scan_progress,

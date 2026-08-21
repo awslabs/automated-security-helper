@@ -26,13 +26,13 @@ def mock_mcp_environment():
     """Mock MCP environment for integration tests."""
     # Mock MCP modules to be available
     mock_mcp = MagicMock()
-    mock_fastmcp = MagicMock()
+    mock_mcpserver = MagicMock()
     mock_context = MagicMock()
 
-    # Create a mock FastMCP server
+    # Create a mock MCPServer
     mock_server = MagicMock()
     mock_server.run = MagicMock()
-    mock_fastmcp.return_value = mock_server
+    mock_mcpserver.return_value = mock_server
 
     # Mock async methods for context
     async def mock_report_progress(current, total, message):
@@ -44,13 +44,13 @@ def mock_mcp_environment():
     modules_to_mock = {
         "mcp": mock_mcp,
         "mcp.server": MagicMock(),
-        "mcp.server.fastmcp": MagicMock(FastMCP=mock_fastmcp, Context=mock_context),
+        "mcp.server.mcpserver": MagicMock(MCPServer=mock_mcpserver, Context=mock_context),
     }
 
     with patch.dict("sys.modules", modules_to_mock):
         yield {
             "mcp": mock_mcp,
-            "FastMCP": mock_fastmcp,
+            "MCPServer": mock_mcpserver,
             "Context": mock_context,
             "server": mock_server,
         }
