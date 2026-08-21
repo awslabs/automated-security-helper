@@ -241,36 +241,51 @@ SCANNER_MODULES_WITH_SCAN = [
 
 @pytest.mark.parametrize("module_name", SCANNER_MODULES_WITH_SCAN)
 def test_builtin_scanner_scan_signatures_use_none_default(module_name):
-    """Every builtin scanner's scan() override should use None, not []."""
+    """Every builtin scanner's scan entry point should use None, not [].
+
+    Scanners reach their work through one of two entry points. Some still
+    override scan() directly; those migrated to the ScannerPluginBase template
+    method implement _execute_scan() instead and inherit scan() unchanged. Both
+    are checked, and at least one must be concrete - a scanner defining neither
+    would mean this module list has gone stale.
+    """
     import importlib
+
+    ENTRY_POINTS = ("scan", "_execute_scan")
 
     try:
         mod = importlib.import_module(module_name)
     except ImportError as exc:
         pytest.skip(f"Could not import {module_name}: {exc}")
 
-    # Find a class in the module whose `scan` method was defined in this module
-    # (not inherited from ScannerPluginBase).
-    found_concrete_scan = False
+    found: List[str] = []
     for attr_name in dir(mod):
         obj = getattr(mod, attr_name)
         if not isinstance(obj, type):
             continue
-        scan_fn = obj.__dict__.get("scan")
-        if scan_fn is None:
-            continue
-        found_concrete_scan = True
-        sig = inspect.signature(scan_fn)
-        param = sig.parameters.get("global_ignore_paths")
-        if param is None:
-            continue
-        assert param.default is None, (
-            f"{module_name}.{attr_name}.scan(global_ignore_paths=...) "
-            f"should default to None, got {param.default!r}"
-        )
+        for entry in ENTRY_POINTS:
+            # Only methods defined in this module, not inherited ones.
+            fn = obj.__dict__.get(entry)
+            if fn is None:
+                continue
+            found.append(f"{attr_name}.{entry}")
+            param = inspect.signature(fn).parameters.get("global_ignore_paths")
+            if param is None:
+                continue
+            # A required parameter cannot leak state between calls, so only a
+            # parameter that actually has a default is in scope for this check.
+            # _execute_scan takes global_ignore_paths positionally.
+            if param.default is inspect.Parameter.empty:
+                continue
+            assert param.default is None, (
+                f"{module_name}.{attr_name}.{entry}(global_ignore_paths=...) "
+                f"should default to None, got {param.default!r}"
+            )
 
-    assert found_concrete_scan, (
-        f"Sanity check: expected a concrete scan() override in {module_name}"
+    assert found, (
+        f"Sanity check: expected a concrete scan() or _execute_scan() override in "
+        f"{module_name}. If this scanner genuinely has neither, remove it from "
+        f"SCANNER_MODULES_WITH_SCAN."
     )
 
 

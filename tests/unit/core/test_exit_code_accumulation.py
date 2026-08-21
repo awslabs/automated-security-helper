@@ -23,6 +23,12 @@ class _StubConfig(ScannerPluginConfigBase):
 class _StubScanner(ScannerPluginBase[_StubConfig]):
     """Minimal concrete scanner for testing subprocess exit codes."""
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — _StubScanner overrides scan() directly."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
+
     def scan(self, target, target_type="source"):
         pass
 
