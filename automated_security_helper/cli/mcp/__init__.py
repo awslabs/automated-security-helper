@@ -9,9 +9,9 @@ security scanning capabilities through the Model Context Protocol. The server
 supports multiple transports:
 
 - ``stdio`` (default): legacy in-process transport, no network
-- ``streamable-http``: FastMCP streamable-HTTP app served via uvicorn, with
+- ``streamable-http``: MCPServer streamable-HTTP app served via uvicorn, with
   optional single-tenant header auth
-- ``sse``: legacy FastMCP SSE app served via uvicorn (best-effort; the SSE
+- ``sse``: legacy MCPServer SSE app served via uvicorn (best-effort; the SSE
   transport is deprecated upstream)
 """
 
@@ -25,12 +25,12 @@ from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 
-# Import MCP dependencies directly. We capture both the FastMCP class and the
+# Import MCP dependencies directly. We capture both the server class and the
 # Starlette type so the streamable-HTTP path can build a typed ASGI app.
 try:
-    from mcp.server.fastmcp import FastMCP, Context
+    from mcp.server.mcpserver import MCPServer, Context
 except ImportError:  # pragma: no cover - exercised only when MCP missing
-    FastMCP = None  # type: ignore[assignment]
+    MCPServer = None  # type: ignore[assignment]
     Context = None  # type: ignore[assignment]
 
 # Configure module logger
@@ -54,8 +54,12 @@ def validate_log_options(
 
 
 def validate_mcp_dependencies() -> bool:
-    """Return True when FastMCP and Context are importable."""
-    return FastMCP is not None and Context is not None
+    """Validate that MCP dependencies are available.
+
+    Returns:
+        True if MCPServer and Context are importable, False otherwise
+    """
+    return MCPServer is not None and Context is not None
 
 
 def validate_command_options(verbose: bool, debug: bool, quiet: bool) -> None:
@@ -133,7 +137,7 @@ def build_streamable_http_app(
     auth_header_name: Optional[str] = None,
     auth_header_value: Optional[str] = None,
 ):
-    """Build the FastMCP streamable-HTTP ASGI app, optionally guarded by auth.
+    """Build the MCPServer streamable-HTTP ASGI app, optionally guarded by auth.
 
     Args:
         mount_path: HTTP path the streamable transport listens on.
@@ -145,18 +149,18 @@ def build_streamable_http_app(
         A Starlette application ready to hand to uvicorn.
 
     Raises:
-        RuntimeError: if FastMCP is not installed.
+        RuntimeError: if MCPServer is not installed.
     """
-    if FastMCP is None:
+    if MCPServer is None:
         raise RuntimeError(
-            "FastMCP is not installed. The 'mcp' package is required for "
+            "MCPServer is not installed. The 'mcp' package is required for "
             "the streamable-http transport."
         )
     # Import here to keep the stdio path zero-cost when the streamable-HTTP
     # transport is not used.
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
 
-    # Configure the FastMCP routing on its settings before materializing the
+    # Configure the MCPServer routing on its settings before materializing the
     # app so the path matches what the user requested.
     _mcp_instance.settings.streamable_http_path = mount_path
     app = _mcp_instance.streamable_http_app()
@@ -173,10 +177,10 @@ def build_sse_app(
     auth_header_name: Optional[str] = None,
     auth_header_value: Optional[str] = None,
 ):
-    """Build the FastMCP SSE ASGI app (legacy)."""
-    if FastMCP is None:
+    """Build the MCPServer SSE ASGI app (legacy)."""
+    if MCPServer is None:
         raise RuntimeError(
-            "FastMCP is not installed. The 'mcp' package is required for "
+            "MCPServer is not installed. The 'mcp' package is required for "
             "the sse transport."
         )
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance

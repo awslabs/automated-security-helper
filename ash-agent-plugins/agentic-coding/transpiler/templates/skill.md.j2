@@ -1,0 +1,34 @@
+{#-
+  Generic frontmatter + body renderer.
+
+  Used for skills, commands, agents — anywhere the output shape is:
+    optional YAML frontmatter (driven by `frontmatter_fields`)
+    body content (already-rendered string)
+
+  Inputs:
+    frontmatter_fields  list[str]  — field names in order (empty = no frontmatter)
+    frontmatter_values  dict       — field name -> rendered value (string or list)
+                                      list values are emitted as JSON arrays for
+                                      compactness (matches the Claude `allowed-tools`
+                                      and `tools` field convention).
+    body                str        — raw body content to follow the frontmatter
+-#}
+{%- if frontmatter_fields -%}
+---
+{% for field in frontmatter_fields -%}
+{%- set value = frontmatter_values[field] -%}
+{%- if value is sequence and value is not string -%}
+{{ field }}: {{ value | tojson }}
+{% else -%}
+{%- if single_quote_strings -%}
+{{ field }}: '{{ value }}'
+{% else -%}
+{{ field }}: {{ value }}
+{% endif -%}
+{% endif -%}
+{%- endfor -%}
+---
+
+{% endif -%}
+{{ body -}}
+

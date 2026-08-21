@@ -125,6 +125,39 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Compute cache keys
+        id: cachekeys
+        run: |
+          set -euo pipefail
+          # The grype database key rotates daily. grype refuses a database older
+          # than db.max-allowed-built-age (default 120h), so a key that never
+          # rotated would keep restoring an archive grype then rejects.
+          echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          # Tool binaries rotate weekly, so a cache cannot pin a security scanner
+          # to one build indefinitely.
+          echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the grype vulnerability database
+        if: inputs.install-grype
+        uses: actions/cache@v6
+        with:
+          # grype's db.cache-dir default; equivalently GRYPE_DB_CACHE_DIR.
+          path: ~/.cache/grype/db
+          key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.day }}
+          # Falling back to an earlier day is safe: grype sets
+          # validate-by-hash-on-start and auto-update by default (throttled to
+          # max-update-check-frequency, 2h), so a slightly older database is
+          # verified and refreshed rather than trusted blindly.
+          restore-keys: |
+            grype-db-${{ runner.os }}-
+
+      - name: Cache the OpenGrep binary
+        if: inputs.install-opengrep
+        uses: actions/cache@v6
+        with:
+          path: ~/.opengrep/cli/latest
+          key: opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}
+
       - name: Install Grype
         if: inputs.install-grype
         run: |
@@ -142,8 +175,14 @@ jobs:
         run: |
           INSTALL_DIR="$HOME/.opengrep/cli/latest"
           mkdir -p "$INSTALL_DIR"
-          gh release download --repo opengrep/opengrep --pattern 'opengrep_manylinux_x86' --dir "$INSTALL_DIR"
-          chmod +x "$INSTALL_DIR/opengrep_manylinux_x86"
+          # Only download on a cache miss. The symlink and PATH export run either
+          # way, so a cache hit still leaves the job fully set up.
+          if [ ! -x "$INSTALL_DIR/opengrep_manylinux_x86" ]; then
+            gh release download --repo opengrep/opengrep --pattern 'opengrep_manylinux_x86' --dir "$INSTALL_DIR"
+            chmod +x "$INSTALL_DIR/opengrep_manylinux_x86"
+          else
+            echo "Reusing cached OpenGrep binary"
+          fi
           ln -sf "$INSTALL_DIR/opengrep_manylinux_x86" "$INSTALL_DIR/opengrep"
           echo "$INSTALL_DIR" >> $GITHUB_PATH
 

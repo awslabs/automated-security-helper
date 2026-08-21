@@ -1,0 +1,41 @@
+{
+  "name": "ash",
+  "version": "1.0.0",
+  "description": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
+  "author": {
+    "name": "AWS Labs",
+    "url": "https://github.com/awslabs/automated-security-helper"
+  },
+  "homepage": "https://github.com/awslabs/automated-security-helper",
+  "repository": "https://github.com/awslabs/automated-security-helper",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security-scan",
+    "vulnerability-scan",
+    "ash",
+    "sast",
+    "sca",
+    "checkov",
+    "bandit",
+    "semgrep",
+    "grype"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "ASH Security Scanner",
+    "shortDescription": "Run security scans via ASH MCP",
+    "longDescription": "Run ASH (Automated Security Helper) security scans via MCP — Bandit, Semgrep, detect-secrets, Checkov, Grype, Syft, and more across Python, JS, IaC, and dependencies.",
+    "developerName": "AWS Labs",
+    "category": "Security",
+    "capabilities": [
+      "Read"
+    ],
+    "websiteURL": "https://github.com/awslabs/automated-security-helper",
+    "defaultPrompt": [
+      "Scan this project for security vulnerabilities",
+      "Run an ASH security audit and prioritize findings",
+      "Check the dependencies for known CVEs"
+    ]
+  }
+}
