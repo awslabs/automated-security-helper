@@ -90,7 +90,7 @@ dev = [
  "toml>=0.10.2",
  "hatchling>=1.31.0",
  "mcp>=2.0.0",
- "commitizen>=4.13.10",
+ "commitizen>=4.17.0",
 ]
 
 [build-system]
