@@ -195,10 +195,12 @@ def test_streamable_http_check_installation_via_client(streamable_server) -> Non
 
     async def _run() -> None:
         async with httpx.AsyncClient(headers=headers, timeout=10.0) as http_client:
+            # MCP SDK v2 yields two streams. FastMCP's client also handed back a
+            # get_session_id callable, so unpacking three raised
+            # "not enough values to unpack (expected 3, got 2)".
             async with streamable_http_client(url, http_client=http_client) as (
                 read_stream,
                 write_stream,
-                _get_session_id,
             ):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
