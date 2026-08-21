@@ -48,6 +48,9 @@ global_settings:
     - path: ".github/**/*.yml"
       rule_id: "yaml.github-actions.security.*"
       reason: "ASH workflow interpolations use inputs.*/matrix.* (author-defined), not attacker-controlled github.event.* context"
+    - path: "ash-agent-plugins/**/.github/**/*.yml"
+      rule_id: "yaml.github-actions.security.*"
+      reason: "Same rationale as the root .github rule: interpolations are author-defined inputs.*/matrix.*, not attacker-controlled github.event.* context. The repo pins actions by major tag by convention (see .github/workflows)."
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

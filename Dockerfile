@@ -58,7 +58,6 @@ ARG INSTALL_ASH_REVISION="LOCAL"
 ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 
 ENV ASH_BIN_PATH="${ASH_BIN_PATH}"
-ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
 ENV OFFLINE="${OFFLINE}"
 ENV OFFLINE_AT_BUILD_TIME="${OFFLINE}"
 ENV ASH_OFFLINE="${OFFLINE}"
@@ -220,6 +219,20 @@ ENV PATH="${ASH_BIN_PATH}:$PATH"
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
 #
 ENV ASH_IN_CONTAINER="YES"
+
+#
+# Build metadata, deliberately last in this stage.
+#
+# BUILD_DATE_EPOCH changes on every invocation - run_ash_container.py passes
+# --build-arg BUILD_DATE_EPOCH=<now>. Referencing it near the top of the stage
+# invalidated every layer below it, so the apt/node/ruby/uv installs, the
+# pinned syft+grype+trivy downloads and `ash dependencies install` were all
+# rebuilt from scratch on every build, and no layer cache of any kind could
+# ever hit. Nothing reads this value at runtime - it is referenced only here
+# and in the ARG declaration - so evaluating it last keeps the metadata while
+# leaving everything above it cacheable.
+#
+ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
 
 
 # CI stage -- any customizations specific to CI platform compatibility should be added

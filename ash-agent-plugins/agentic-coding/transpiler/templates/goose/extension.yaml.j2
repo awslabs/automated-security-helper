@@ -1,0 +1,17 @@
+extensions:
+  {{ server_name }}:
+    name: {{ display_name }}
+    cmd: {{ server_cfg.command }}
+    args:
+{%- for arg in server_cfg.args %}
+      - {{ arg | tojson }}
+{%- endfor %}
+    enabled: true
+    type: stdio
+    timeout: {{ timeout_seconds }}
+{%- if server_cfg.env %}
+    envs:
+{%- for k, v in server_cfg.env.items() %}
+      {{ k }}: {{ v | tojson }}
+{%- endfor %}
+{%- endif %}
