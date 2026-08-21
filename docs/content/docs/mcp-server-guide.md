@@ -8,6 +8,15 @@ The Automated Security Helper (ASH) MCP server provides a reliable interface for
 
 The MCP server uses a file-based approach to track scan progress and completion, making it more reliable than event-based tracking. This approach ensures that scan progress and results are accurately tracked even in complex threading scenarios.
 
+### Transport choice
+
+`ash mcp` supports two transports:
+
+- **stdio (default)** — local, single-user, launched as a subprocess by an IDE or local agent. This is what every example below assumes.
+- **streamable-HTTP** — networked, multi-tenant, supports remote clients with per-session workspaces and config profiles. See [Streamable-HTTP MCP Deployment Guide](mcp/streamable-http.md).
+
+Pick stdio for local IDE integration. Pick streamable-HTTP when ASH must be reachable over the network.
+
 ## Architecture
 
 The ASH MCP server architecture consists of the following components:
