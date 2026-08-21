@@ -15,7 +15,7 @@ import os
 from typing import Dict, Any, Optional
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.mcpserver import MCPServer, Context
 
 from automated_security_helper.cli.mcp_tools import (
     mcp_scan_directory,
@@ -56,7 +56,7 @@ _apply_content_filters = apply_content_filters
 _add_findings_list = add_findings_list
 _monitor_scan_progress = monitor_scan_progress
 
-mcp = FastMCP(name="ASH Security Scanner")
+mcp = MCPServer(name="ASH Security Scanner")
 
 
 @mcp.tool()

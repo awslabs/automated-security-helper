@@ -131,7 +131,7 @@ The integration tests require:
 
 The tests use comprehensive mocking to avoid requiring actual MCP package installation:
 
-- **MCP Server**: Mocked FastMCP server with tool/resource registration
+- **MCP Server**: Mocked MCPServer with tool/resource registration
 - **ASH Integration**: Mocked direct function calls to ASH core functionality
 - **File System**: Temporary directories and files for realistic testing
 - **Results**: Mock aggregated results and report files

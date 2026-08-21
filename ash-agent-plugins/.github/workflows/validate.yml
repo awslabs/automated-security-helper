@@ -1,0 +1,69 @@
+name: Validate plugin packages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: this workflow only reads the repo and runs validation.
+permissions:
+  contents: read
+
+jobs:
+  # Drift + structural validation runs once on the full output tree.
+  # Cheap, deterministic, catches the byte-identical-output regressions.
+  drift-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Run drift + structural validation
+        run: uv run --project agentic-coding/transpiler agentic-plugins check
+      - name: Run pytest regression suite
+        run: uv run --project agentic-coding/transpiler --extra test pytest agentic-coding/transpiler/tests/
+
+  # Generate the (backend, validator-CLI) matrix from the transpiler so
+  # adding a new backend or CLI declaration auto-expands the CI surface.
+  matrix-config:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - id: generate
+        name: Generate matrix from `agentic-plugins matrix --validators-only`
+        run: |
+          MATRIX=$(uv run --project agentic-coding/transpiler agentic-plugins matrix --validators-only | jq -c .)
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  # One job per (backend, validator-CLI) pair. Each cell installs only
+  # the CLI it needs at the pinned version (matching cli_versions.json),
+  # then runs `agentic-plugins smoke-test <backend>`. Fail-fast disabled
+  # so a single broken pair doesn't mask other regressions.
+  smoke-test:
+    needs: [drift-and-validate, matrix-config]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix-config.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install ${{ matrix.cli }} (pinned)
+        if: matrix.install_cmd != '' && matrix.headless
+        run: ${{ matrix.install_cmd }}
+
+      - name: Smoke-test ${{ matrix.backend }} (validator=${{ matrix.cli }})
+        run: uv run --project agentic-coding/transpiler agentic-plugins smoke-test ${{ matrix.backend }}

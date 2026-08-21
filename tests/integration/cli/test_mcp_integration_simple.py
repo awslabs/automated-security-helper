@@ -67,7 +67,7 @@ class TestMcpIntegrationValidation:
         mock_fastmcp = MagicMock()
         mock_context = MagicMock()
 
-        # Create a mock FastMCP server
+        # Create a mock MCPServer
         mock_server = MagicMock()
         mock_server.run = MagicMock()
         mock_fastmcp.return_value = mock_server

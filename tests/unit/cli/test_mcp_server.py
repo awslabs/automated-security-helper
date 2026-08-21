@@ -141,7 +141,7 @@ class TestServerInitialization:
     """Tests for MCP server module initialization."""
 
     def test_mcp_server_module_imports(self):
-        """Module imports without error and exposes the FastMCP instance."""
+        """Module imports without error and exposes the MCPServer instance."""
         from automated_security_helper.cli.mcp_server import mcp
 
         assert mcp is not None
