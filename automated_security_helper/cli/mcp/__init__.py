@@ -160,10 +160,13 @@ def build_streamable_http_app(
     # transport is not used.
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
 
-    # Configure the MCPServer routing on its settings before materializing the
-    # app so the path matches what the user requested.
-    _mcp_instance.settings.streamable_http_path = mount_path
-    app = _mcp_instance.streamable_http_app()
+    # MCP SDK v2 takes the mount path as a keyword argument here. Under FastMCP
+    # it was a Settings field, assigned before materializing the app; v2's
+    # Settings has no such field, so the old assignment raised
+    # `ValueError: "Settings" object has no field "streamable_http_path"`.
+    # Passing it per call is also better behaved: the previous form mutated a
+    # module-level singleton's settings as a side effect.
+    app = _mcp_instance.streamable_http_app(streamable_http_path=mount_path)
 
     if auth_header_name and auth_header_value:
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
@@ -185,8 +188,9 @@ def build_sse_app(
         )
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
 
-    _mcp_instance.settings.sse_path = mount_path
-    app = _mcp_instance.sse_app()
+    # Same v2 change as the streamable-HTTP path above: sse_path is a keyword
+    # argument on sse_app() rather than a Settings field.
+    app = _mcp_instance.sse_app(sse_path=mount_path)
 
     if auth_header_name and auth_header_value:
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
