@@ -25,9 +25,9 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 # Import MCP dependencies directly
 try:
-    from mcp.server.fastmcp import FastMCP, Context
+    from mcp.server.mcpserver import MCPServer, Context
 except ImportError:
-    FastMCP = None
+    MCPServer = None
     Context = None
 
 # Configure module logger
@@ -62,7 +62,7 @@ def validate_mcp_dependencies() -> bool:
     Returns:
         True if dependencies are available, False otherwise
     """
-    return FastMCP is not None and Context is not None
+    return MCPServer is not None and Context is not None
 
 
 def validate_command_options(verbose: bool, debug: bool, quiet: bool) -> None:
