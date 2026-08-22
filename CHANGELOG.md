@@ -44,6 +44,30 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.6.0 (2026-08-21)
+
+### Feat
+
+- agentic-coding transpiler — single-source-of-truth across 15 AI agent platforms (#331)
+- add 19 model methods (TDD) + fix to_flat_vulnerabilities bug + docs overhaul (#312)
+- **config**: lint detects + fixes legacy snake/kebab plugin name variants (#332)
+
+### Fix
+
+- make piped install retries actually retry, and stop the bash entrypoint continuing past a failed build (#427)
+- **ci**: stop the fork-PR comment failure from failing the required ASH scan check (#429)
+- enforce plugin-declared tool version constraints when installing scanner tools (#426)
+- **ci**: stop installing ASH from the ephemeral merge-queue ref, and gate all three upgrade paths (#424)
+- **logging**: restore UTF-8 console reconfiguration on Windows (#412)
+
+### Refactor
+
+- scan-phase decomposition + offline mode + lint sweep (#95) (#334)
+
+### Perf
+
+- **tests**: run the unit suite on all cores instead of pinning -n 1 (#417)
+
 ## v3.5.9 (2026-08-10)
 
 ### Fix
