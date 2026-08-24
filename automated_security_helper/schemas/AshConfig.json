@@ -92,6 +92,20 @@
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
             "ignore_paths": [],
+            "mcp": {
+              "runtime_overrides": {
+                "allowed_paths": [],
+                "denied_paths": [
+                  "/fail_on_findings",
+                  "/global_settings/ignore_paths",
+                  "/global_settings/suppressions",
+                  "/reporters/bedrock-summary-reporter/options/aws_*",
+                  "/reporters/cloudwatch-logs/**"
+                ],
+                "denied_value_patterns": {},
+                "enabled": false
+              }
+            },
             "severity_threshold": "MEDIUM",
             "suppressions": []
           },
@@ -403,6 +417,24 @@
           "title": "Ignore Paths",
           "type": "array"
         },
+        "mcp": {
+          "$ref": "#/$defs/AshMcpConfig",
+          "default": {
+            "runtime_overrides": {
+              "allowed_paths": [],
+              "denied_paths": [
+                "/fail_on_findings",
+                "/global_settings/ignore_paths",
+                "/global_settings/suppressions",
+                "/reporters/bedrock-summary-reporter/options/aws_*",
+                "/reporters/cloudwatch-logs/**"
+              ],
+              "denied_value_patterns": {},
+              "enabled": false
+            }
+          },
+          "description": "MCP-server-specific configuration (runtime override allowlist, etc.)."
+        },
         "severity_threshold": {
           "default": "MEDIUM",
           "description": "Global minimum severity level to consider findings as failures across all scanners",
@@ -427,6 +459,30 @@
         }
       },
       "title": "AshConfigGlobalSettingsSection",
+      "type": "object"
+    },
+    "AshMcpConfig": {
+      "additionalProperties": false,
+      "description": "MCP-server-specific config bundle (transport-agnostic).",
+      "properties": {
+        "runtime_overrides": {
+          "$ref": "#/$defs/RuntimeOverridesConfig",
+          "default": {
+            "allowed_paths": [],
+            "denied_paths": [
+              "/fail_on_findings",
+              "/global_settings/ignore_paths",
+              "/global_settings/suppressions",
+              "/reporters/bedrock-summary-reporter/options/aws_*",
+              "/reporters/cloudwatch-logs/**"
+            ],
+            "denied_value_patterns": {},
+            "enabled": false
+          },
+          "description": "Allowlist for runtime JSON-Patch overrides."
+        }
+      },
+      "title": "AshMcpConfig",
       "type": "object"
     },
     "AshSuppression": {
@@ -2679,6 +2735,53 @@
         }
       },
       "title": "ReporterPluginConfigBase",
+      "type": "object"
+    },
+    "RuntimeOverridesConfig": {
+      "additionalProperties": false,
+      "description": "Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.\n\nThe MCP server's streamable-HTTP transport lets clients apply JSON-Patch ops\nto a profile-resolved config at session-bind time. This object is the security\nboundary: by default, runtime overrides are disabled. When enabled, only ops\nwhose `path` matches `allowed_paths` AND does not match `denied_paths` are\naccepted. `denied_value_patterns` blocks values that match a regex on a\nper-path basis (e.g. shell metacharacters in extra_args).",
+      "properties": {
+        "allowed_paths": {
+          "default": [],
+          "description": "JSON-Pointer glob patterns the client may target. `*` matches one segment, `**` matches any subtree. Example: '/scanners/*/options/severity_threshold'.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Paths",
+          "type": "array"
+        },
+        "denied_paths": {
+          "default": [
+            "/fail_on_findings",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+            "/reporters/bedrock-summary-reporter/options/aws_*",
+            "/reporters/cloudwatch-logs/**"
+          ],
+          "description": "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Denied Paths",
+          "type": "array"
+        },
+        "denied_value_patterns": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Map of JSON-Pointer pattern \u2192 regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only.",
+          "title": "Denied Value Patterns",
+          "type": "object"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Master switch \u2014 runtime patches are rejected unless True.",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "RuntimeOverridesConfig",
       "type": "object"
     },
     "SARIFReporterConfig": {
