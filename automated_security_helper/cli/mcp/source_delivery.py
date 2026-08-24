@@ -45,7 +45,7 @@ import base64
 import hashlib
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import zipfile
 from pathlib import Path
 from typing import Dict, Optional
@@ -165,6 +165,68 @@ def _resolve_ssh_key(ssh_key_id: Optional[str]) -> Optional[Path]:
 # git-ref delivery.
 # ---------------------------------------------------------------------------
 
+# git reads any argument beginning with "-" as an option, so passing a
+# caller-supplied url or ref straight to the command line is an
+# argument-injection sink and not merely a shell-injection one. Building argv as
+# a list stops the *shell* from re-parsing the value; it does nothing to stop
+# git from treating it as a flag. Two concrete escalations:
+#
+#   url = "--upload-pack=<cmd>"   -> git executes <cmd>
+#   url = "ext::sh -c <cmd>"      -> the ext:: transport executes <cmd>
+#
+# These values arrive over MCP from a remote client, so they are untrusted by
+# construction. This repository has already been bitten by this class of bug
+# once (see the GitPython argument-injection dependency patches), so the guards
+# below reject the option-like shape outright rather than trying to escape it.
+_DANGEROUS_URL_PREFIXES = ("ext::",)
+
+
+def _reject_option_like(value: str, what: str) -> str:
+    """Reject a caller-supplied git argument that git would parse as an option.
+
+    Args:
+        value: The caller-supplied value.
+        what: Name of the parameter, used in the error message.
+
+    Returns:
+        ``value`` unchanged when it is safe to pass as a positional argument.
+
+    Raises:
+        ValueError: if ``value`` begins with ``-``.
+    """
+
+    if value.startswith("-"):
+        raise ValueError(
+            f"{what} must not begin with '-': git would parse "
+            f"{value!r} as an option rather than a value"
+        )
+    return value
+
+
+def _validate_clone_url(url: str) -> str:
+    """Reject clone URLs that let git execute an arbitrary command.
+
+    Args:
+        url: The caller-supplied remote URL.
+
+    Returns:
+        ``url`` unchanged when it is safe to clone from.
+
+    Raises:
+        ValueError: if ``url`` is option-like or uses a command-executing
+            transport.
+    """
+
+    _reject_option_like(url, "url")
+    lowered = url.lower()
+    for prefix in _DANGEROUS_URL_PREFIXES:
+        if lowered.startswith(prefix):
+            raise ValueError(
+                f"refusing url with {prefix!r} transport: it instructs git to "
+                f"execute an arbitrary command"
+            )
+    return url
+
 
 def set_source_git(
     url: str,
@@ -192,10 +254,17 @@ def set_source_git(
         The absolute path of the cloned working tree.
 
     Raises:
-        ValueError: if ``session_id`` is invalid.
+        ValueError: if ``session_id`` is invalid, or if ``url``/``ref`` is
+            option-like or uses a command-executing git transport.
         RuntimeError: if ``git clone`` (or the optional ``git checkout``
             for an explicit ref) fails.
     """
+
+    # Validate before touching the filesystem so a rejected request leaves no
+    # session directory behind.
+    url = _validate_clone_url(url)
+    if ref:
+        ref = _reject_option_like(ref, "ref")
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     session_dir = _ensure_dir(_session_workspace(root, session_id))
@@ -220,10 +289,13 @@ def set_source_git(
         "clone",
         "--depth",
         str(int(depth)),
+        # End-of-options marker, so even a future change that loosens
+        # _validate_clone_url cannot turn the url into a git flag.
+        "--",
         url,
         str(target),
     ]
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, url validated by _validate_clone_url and fenced behind "--"
         cmd,
         capture_output=True,
         text=True,
@@ -240,7 +312,7 @@ def set_source_git(
         # ``--depth 1`` may not have fetched the requested ref. Fetch it
         # explicitly before checking out so non-default refs work reliably.
         fetch_cmd = ["git", "-C", str(target), "fetch", "--depth", str(int(depth)), "origin", ref]
-        fetch_res = subprocess.run(
+        fetch_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
             fetch_cmd, capture_output=True, text=True, env=env, check=False
         )
         if fetch_res.returncode != 0:
@@ -250,7 +322,7 @@ def set_source_git(
             pass
 
         checkout_cmd = ["git", "-C", str(target), "checkout", "--detach", ref]
-        co_res = subprocess.run(
+        co_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
             checkout_cmd, capture_output=True, text=True, env=env, check=False
         )
         if co_res.returncode != 0:

@@ -91,7 +91,10 @@ class TestSetSourceGit:
 
         assert target == tmp_path / _SESSION / "source"
         assert called["cmds"][0][0:4] == ["git", "clone", "--depth", "1"]
-        assert called["cmds"][0][4] == "https://example.com/foo.git"
+        # "--" fences the url off from git's option parsing, so it sits after
+        # the end-of-options marker rather than directly after the depth.
+        assert called["cmds"][0][4] == "--"
+        assert called["cmds"][0][5] == "https://example.com/foo.git"
         # Workspace was recorded.
         assert sd.get_session_source_dir(_SESSION) == target
         sd.clear_source(_SESSION, workspace_root=tmp_path)
@@ -175,6 +178,86 @@ def _make_zip_with_symlink(link_name: str, link_target: str) -> bytes:
 # ---------------------------------------------------------------------------
 # Chunk reassembly.
 # ---------------------------------------------------------------------------
+
+
+class TestGitArgumentInjectionDefenses:
+    """set_source_git takes url and ref straight from an MCP client.
+
+    Building argv as a list stops the shell from re-parsing those values, but it
+    does nothing to stop *git* from reading a leading "-" as an option. Two
+    values turn that into command execution:
+
+        url = "--upload-pack=<cmd>"   -> git runs <cmd>
+        url = "ext::sh -c <cmd>"      -> the ext:: transport runs <cmd>
+
+    Each test asserts subprocess is never reached, because a guard that raises
+    only after spawning git is not a guard.
+    """
+
+    @pytest.mark.parametrize(
+        "bad_url",
+        [
+            "--upload-pack=touch /tmp/pwned",
+            "--config=core.sshCommand=touch /tmp/pwned",
+            "-u",
+            "--",
+        ],
+    )
+    def test_option_like_url_is_rejected_before_spawning_git(self, tmp_path, bad_url):
+        with (
+            patch.object(sd.subprocess, "run") as run,
+            pytest.raises(ValueError, match="must not begin with"),
+        ):
+            sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
+        run.assert_not_called()
+
+    @pytest.mark.parametrize("bad_url", ["ext::sh -c whoami", "EXT::sh -c whoami"])
+    def test_command_executing_transport_is_rejected(self, tmp_path, bad_url):
+        """ext:: is matched case-insensitively; git accepts either casing."""
+        with (
+            patch.object(sd.subprocess, "run") as run,
+            pytest.raises(ValueError, match="transport"),
+        ):
+            sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
+        run.assert_not_called()
+
+    @pytest.mark.parametrize("bad_ref", ["--upload-pack=touch /tmp/pwned", "-x"])
+    def test_option_like_ref_is_rejected_before_spawning_git(self, tmp_path, bad_ref):
+        with (
+            patch.object(sd.subprocess, "run") as run,
+            pytest.raises(ValueError, match="must not begin with"),
+        ):
+            sd.set_source_git(
+                url="https://example.com/foo.git",
+                ref=bad_ref,
+                workspace_root=tmp_path,
+                session_id=_SESSION,
+            )
+        run.assert_not_called()
+
+    def test_rejection_leaves_no_session_directory_behind(self, tmp_path):
+        """Validation runs before any mkdir, so a rejected call is inert."""
+        with (
+            patch.object(sd.subprocess, "run") as run,
+            pytest.raises(ValueError),
+        ):
+            sd.set_source_git(
+                url="--upload-pack=id", workspace_root=tmp_path, session_id=_SESSION
+            )
+        run.assert_not_called()
+        assert not (tmp_path / _SESSION).exists()
+
+    def test_legitimate_urls_and_refs_still_pass(self, tmp_path):
+        """The guard must not reject ordinary remotes or ref names."""
+        for url in (
+            "https://example.com/foo.git",
+            "git@example.com:org/repo.git",
+            "ssh://git@example.com/org/repo.git",
+            "/local/path/to/repo",
+        ):
+            assert sd._validate_clone_url(url) == url
+        for ref in ("main", "v3.6.0", "release/v3.6.0", "abc1234"):
+            assert sd._reject_option_like(ref, "ref") == ref
 
 
 class TestChunkReassembly:
