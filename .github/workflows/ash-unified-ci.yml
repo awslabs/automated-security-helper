@@ -220,14 +220,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    env:
-      # The gate builds its fixture with tempfile.mkdtemp(). Pointing the temp dir
-      # at the runner's own scratch space keeps it on the workspace volume and makes
-      # the tree's location predictable enough to upload as an artifact below.
-      # All three names because tempfile checks TMPDIR first and TEMP/TMP on Windows.
-      TMPDIR: ${{ runner.temp }}
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -249,6 +241,17 @@ jobs:
       # --timeout is passed explicitly so it sits next to timeout-minutes above.
       - name: Verify ASH can scan a target outside the repository
         shell: bash
+        # The gate builds its fixture with tempfile.mkdtemp(). Pointing the temp dir
+        # at the runner's own scratch space makes the tree's location predictable
+        # enough to upload as an artifact below. All three names because tempfile
+        # checks TMPDIR first and TEMP/TMP on Windows. This sits on the step rather
+        # than the job because the runner context does not exist in job-level env --
+        # a workflow using it there is rejected outright, with no jobs and no
+        # annotation, which is a slow thing to diagnose.
+        env:
+          TMPDIR: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: python scripts/verify_external_target_scan.py --timeout 1200
       # The gate keeps its fixture and scan output on disk when it fails, and its
       # failure messages tell the reader to go and look at them. Upload them so a
