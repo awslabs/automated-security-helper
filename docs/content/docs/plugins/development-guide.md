@@ -81,20 +81,37 @@ Scanner plugins analyze code and infrastructure for security issues.
 
 ### Scanner Plugin Interface
 
+`scan()` is a template method rather than an abstract one: it owns the fixed
+sequence around a scan, and `_execute_scan()` is the abstract hook it calls for
+the tool-specific part.
+
 ```python
-class ScannerPluginBase(ABC):
+class ScannerPluginBase(PluginBase, Generic[T]):
     """Base class for all scanner plugins."""
 
     @abstractmethod
-    def scan(self, target_path: str) -> dict:
-        """Scan the target path and return findings."""
-        pass
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths,
+    ) -> Tuple[List[str], Path, Optional[dict]]:
+        """Return (argv, results_file, subprocess_env) for this tool."""
 
-    @abstractmethod
-    def cleanup(self):
-        """Clean up resources."""
-        pass
+    def scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths=None,
+        config=None,
+    ) -> Any | SarifReport | CycloneDXReport:
+        """Template: preamble -> _execute_scan -> read results -> invocation -> postamble."""
 ```
+
+Only `_execute_scan()` is required. A plugin that does not fit the template
+overrides `scan()` instead, and still declares `_execute_scan()` as a stub that
+raises — see [Scanner Plugins](scanner-plugins.md) for that variant. There is no
+abstract `cleanup()`; release resources in `_post_scan()` if you need to.
 
 ### Scanner Plugin Example
 
