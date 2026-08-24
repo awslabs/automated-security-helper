@@ -74,8 +74,53 @@ def _scanner(status, findings=0, actionable=0, exit_code=0, **extra):
     return record
 
 
+BANDIT_FIXTURE = "insecure_app.py"
+CHECKOV_FIXTURE = "insecure_bucket.tf"
+
+
+def _sarif_result(rule_id, scanner, uri):
+    """One SARIF result. ``scanner``/``uri`` of None omit that field entirely."""
+    result = {"ruleId": rule_id}
+    if scanner is not None:
+        result["properties"] = {"scanner_name": scanner}
+    if uri is not None:
+        result["locations"] = [{"physicalLocation": {"artifactLocation": {"uri": uri}}}]
+    return result
+
+
+def _sarif(entries):
+    """Build a SARIF dict from (rule_id, scanner_name, uri) triples.
+
+    ASH merges every scanner into one run whose driver is the ASH name, so the shape
+    here is one run with mixed attribution -- the same shape the real file has.
+    """
+    return {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "AWS Labs - Automated Security Helper"}},
+                "results": [_sarif_result(*entry) for entry in entries],
+            }
+        ],
+    }
+
+
+def _owner(rule_id):
+    """The scanner that really produces a rule ID, for building healthy fixtures."""
+    return "checkov" if rule_id.startswith("CKV") else "bandit"
+
+
+def _fixture_for(scanner):
+    return CHECKOV_FIXTURE if scanner == "checkov" else BANDIT_FIXTURE
+
+
 def _results(scanners=None, rule_ids=None, checkpoints=None):
-    """A results dict shaped like the real file, healthy unless overridden."""
+    """A results dict shaped like the real file, healthy unless overridden.
+
+    Rule IDs are attributed to their real producer and located in that producer's
+    fixture file, so the default dict passes the attribution and fixture-scoping
+    checks as well as the older ones.
+    """
     if scanners is None:
         scanners = {
             "bandit": _scanner("FAILED", findings=4, actionable=3),
@@ -85,12 +130,13 @@ def _results(scanners=None, rule_ids=None, checkpoints=None):
         }
     if rule_ids is None:
         rule_ids = ["B307", "B324", "B602", "CKV_AWS_18", "CKV_AWS_21", "CKV2_AWS_6"]
+    entries = [
+        (rule_id, _owner(rule_id), _fixture_for(_owner(rule_id)))
+        for rule_id in rule_ids
+    ]
     return {
         "scanner_results": scanners,
-        "sarif": {
-            "version": "2.1.0",
-            "runs": [{"results": [{"ruleId": rule_id} for rule_id in rule_ids]}],
-        },
+        "sarif": _sarif(entries),
         "validation_checkpoints": checkpoints if checkpoints is not None else [],
         "metadata": {},
     }
@@ -255,8 +301,8 @@ class TestMissingIsTolerated:
             rule_ids=["B307"],
         )
         states = gate.parse_scanner_states(results)
-        counts = gate.collect_rule_ids(results)
-        assert gate.check_expected_rules_present(states, counts) == []
+        evidence = gate.collect_sarif_evidence(results)
+        assert gate.check_expected_rules_present(states, evidence) == []
 
     def test_skipped_is_treated_like_missing(self):
         results = _results(
@@ -325,8 +371,8 @@ class TestRuleAssertions:
         """bandit ran but left no B-rule, so the scan produced nothing real."""
         results = _results(rule_ids=["CKV_AWS_18", "CKV_AWS_21"])
         states = gate.parse_scanner_states(results)
-        counts = gate.collect_rule_ids(results)
-        violations = gate.check_expected_rules_present(states, counts)
+        evidence = gate.collect_sarif_evidence(results)
+        violations = gate.check_expected_rules_present(states, evidence)
         assert len(violations) == 1, violations
         assert "bandit" in violations[0]
 
@@ -334,8 +380,8 @@ class TestRuleAssertions:
         """Guards against the fixture drifting away from the rules it targets."""
         results = _results(rule_ids=["B999", "CKV_AWS_18"])
         states = gate.parse_scanner_states(results)
-        counts = gate.collect_rule_ids(results)
-        violations = gate.check_expected_rules_present(states, counts)
+        evidence = gate.collect_sarif_evidence(results)
+        violations = gate.check_expected_rules_present(states, evidence)
         assert len(violations) == 1, violations
         assert "anchors" in violations[0]
 
@@ -343,19 +389,21 @@ class TestRuleAssertions:
         """An upstream rule rename must not redden the branch on its own."""
         results = _results(rule_ids=["B307", "CKV2_AWS_6"])
         states = gate.parse_scanner_states(results)
-        counts = gate.collect_rule_ids(results)
-        assert gate.check_expected_rules_present(states, counts) == []
+        evidence = gate.collect_sarif_evidence(results)
+        assert gate.check_expected_rules_present(states, evidence) == []
 
     def test_rule_ids_are_counted_across_runs(self):
         results = _results()
-        results["sarif"]["runs"].append({"results": [{"ruleId": "B307"}]})
-        counts = gate.collect_rule_ids(results)
-        assert counts["B307"] == 2
+        results["sarif"]["runs"].append(
+            {"results": [_sarif_result("B307", "bandit", BANDIT_FIXTURE)]}
+        )
+        evidence = gate.collect_sarif_evidence(results)
+        assert evidence.rules_for("bandit")["B307"] == 2
 
     def test_results_without_a_rule_id_are_skipped(self):
         results = _results(rule_ids=[])
         results["sarif"]["runs"][0]["results"] = [{"message": {"text": "x"}}]
-        assert gate.collect_rule_ids(results) == {}
+        assert gate.collect_sarif_evidence(results).all_rule_ids() == ()
 
     def test_every_expected_producer_pattern_matches_its_anchors(self):
         """A typo in a pattern would make the family check unsatisfiable."""
@@ -366,6 +414,287 @@ class TestRuleAssertions:
                     producer.rule_pattern,
                     anchor,
                 )
+
+
+class TestRuleAttribution:
+    """Rules must be credited to the scanner that produced them, not pooled.
+
+    A flat global histogram would let an attribution regression pass: bandit and
+    checkov would report zero findings in the summary table while the rule-evidence
+    block printed rules for both. Every SARIF result carries
+    properties.scanner_name, so the data to do this right is already there.
+    """
+
+    def test_a_rule_attributed_to_another_scanner_does_not_satisfy_a_producer(self):
+        """B307 exists, but checkov produced it, so bandit is still empty."""
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif(
+            [
+                ("B307", "checkov", CHECKOV_FIXTURE),
+                ("CKV_AWS_18", "checkov", CHECKOV_FIXTURE),
+            ]
+        )
+        states = gate.parse_scanner_states(results)
+        evidence = gate.collect_sarif_evidence(results)
+        violations = gate.check_expected_rules_present(states, evidence)
+        assert len(violations) == 1, violations
+        assert "bandit" in violations[0]
+        assert "attributed" in violations[0]
+
+    def test_correct_attribution_passes(self):
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif(
+            [
+                ("B307", "bandit", BANDIT_FIXTURE),
+                ("CKV_AWS_18", "checkov", CHECKOV_FIXTURE),
+            ]
+        )
+        states = gate.parse_scanner_states(results)
+        evidence = gate.collect_sarif_evidence(results)
+        assert gate.check_expected_rules_present(states, evidence) == []
+
+    def test_buckets_are_keyed_by_scanner(self):
+        results = _results()
+        evidence = gate.collect_sarif_evidence(results)
+        assert sorted(evidence.by_scanner) == ["bandit", "checkov"]
+        assert sorted(evidence.rules_for("bandit")) == ["B307", "B324", "B602"]
+        assert "B307" not in evidence.rules_for("checkov")
+
+    def test_no_attribution_anywhere_falls_back_to_the_union(self):
+        """An older or future results file without the property must still work."""
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif(
+            [
+                ("B307", None, BANDIT_FIXTURE),
+                ("CKV_AWS_18", None, CHECKOV_FIXTURE),
+            ]
+        )
+        evidence = gate.collect_sarif_evidence(results)
+        assert evidence.has_attribution is False
+        assert sorted(evidence.rules_for("bandit")) == ["B307", "CKV_AWS_18"]
+        states = gate.parse_scanner_states(results)
+        assert gate.check_expected_rules_present(states, evidence) == []
+
+    def test_partial_attribution_does_not_fall_back(self):
+        """One named result means the buckets are authoritative for everyone."""
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif(
+            [
+                ("CKV_AWS_18", "checkov", CHECKOV_FIXTURE),
+                ("B307", None, BANDIT_FIXTURE),
+            ]
+        )
+        evidence = gate.collect_sarif_evidence(results)
+        assert evidence.has_attribution is True
+        assert evidence.rules_for("bandit") == {}
+        assert gate.check_expected_rules_present(
+            gate.parse_scanner_states(results), evidence
+        )
+
+    def test_all_rule_ids_spans_every_bucket(self):
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif(
+            [
+                ("B307", "bandit", BANDIT_FIXTURE),
+                ("CKV_AWS_18", "checkov", CHECKOV_FIXTURE),
+                ("X1", None, BANDIT_FIXTURE),
+            ]
+        )
+        evidence = gate.collect_sarif_evidence(results)
+        assert evidence.all_rule_ids() == ("B307", "CKV_AWS_18", "X1")
+
+    def test_evidence_cannot_report_rules_a_producer_did_not_produce(self):
+        """The printed evidence must agree with the assertion, always.
+
+        This is the manufactured-evidence failure: the summary table showed zero
+        findings for bandit while the block below it printed bandit's rules.
+        """
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif([("B307", "checkov", CHECKOV_FIXTURE)])
+        states = gate.parse_scanner_states(results)
+        evidence = gate.collect_sarif_evidence(results)
+        rendered = gate.format_rule_evidence(states, evidence)
+        bandit_line = next(
+            line for line in rendered.splitlines() if line.startswith("bandit:")
+        )
+        assert "0 rule(s)" in bandit_line, rendered
+        assert "B307" not in bandit_line, rendered
+        # And the assertion agrees with what was printed.
+        assert gate.check_expected_rules_present(states, evidence), rendered
+
+
+class TestFindingsComeFromTheFixture:
+    """The property the job is named for, and the one that was unasserted.
+
+    Without this, the inverse regression -- ASH ignoring --source-dir and scanning
+    the process working directory -- passes every other check: the repository yields
+    findings, ASH's own Python trips bandit, the anchors plausibly appear, the exit
+    code is 0 or 2.
+    """
+
+    def test_fixture_relative_uris_pass(self):
+        results = _results()
+        evidence = gate.collect_sarif_evidence(results)
+        assert gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT) == []
+
+    # The absolute cases deliberately do not spell "/tmp": bandit's B108
+    # (hardcoded_tmp_directory) fires on a literal /tmp path at MEDIUM severity, and
+    # ASH scans its own tests/, so writing the real temp prefix here would add an
+    # actionable finding to the repository's own scan. Only absoluteness matters to
+    # this check, not the directory name.
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "./insecure_app.py",
+            "insecure_app.py",
+            "sub/insecure_app.py",
+            "C:/Temp/target/insecure_app.py",
+            "C:\\Temp\\target\\insecure_app.py",
+            "/scratch/ash-external-target-x/target/insecure_app.py",
+            "scratch/ash-external-target-x/target/insecure_app.py",
+            "../../../scratch/ash-external-target-x/target/insecure_app.py",
+            "file:///scratch/ash-external-target-x/target/insecure_app.py",
+        ],
+    )
+    def test_every_observed_uri_shape_for_a_fixture_file_passes(self, uri):
+        """A healthy run really does produce all of these; see Known limitations.
+
+        bandit emits an absolute path, checkov the same path with the leading
+        separator stripped, detect-secrets a cwd-relative path with .. segments.
+        Rejecting absolute URIs would fail every healthy run.
+        """
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif([("B307", "bandit", uri)])
+        evidence = gate.collect_sarif_evidence(results)
+        assert gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT) == [], uri
+
+    def test_a_repository_file_fails(self):
+        """The exact shape a scan of the working directory produces."""
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif(
+            [
+                (
+                    "B307",
+                    "bandit",
+                    "automated_security_helper/core/phases/scanner_executor.py",
+                )
+            ]
+        )
+        evidence = gate.collect_sarif_evidence(results)
+        violations = gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
+        assert violations, "a scan of the repository must not pass"
+        assert any("scanner_executor.py" in v for v in violations), violations
+
+    def test_a_repository_file_is_reported_as_inside_the_repository(self):
+        """Both tests must fire, so the message names the real cause."""
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif([("B307", "bandit", "Dockerfile")])
+        evidence = gate.collect_sarif_evidence(results)
+        violations = gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
+        assert any("inside the repository" in v for v in violations), violations
+
+    def test_an_absolute_path_to_a_repository_file_fails(self):
+        """Caught by the basename test even though it is not repo-relative."""
+        target = REPO_ROOT / "automated_security_helper" / "core" / "orchestrator.py"
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif([("B307", "bandit", target.as_posix())])
+        evidence = gate.collect_sarif_evidence(results)
+        assert gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
+
+    def test_a_non_fixture_basename_fails(self):
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif([("B307", "bandit", "/elsewhere/other_module.py")])
+        evidence = gate.collect_sarif_evidence(results)
+        violations = gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
+        assert any("not part of the fixture" in v for v in violations), violations
+
+    def test_offending_uris_appear_in_the_message(self):
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif([("B307", "bandit", "/elsewhere/other_module.py")])
+        evidence = gate.collect_sarif_evidence(results)
+        violations = gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
+        assert any("/elsewhere/other_module.py" in v for v in violations), violations
+
+    def test_a_result_without_a_location_neither_passes_nor_fails(self):
+        """It cannot confirm or deny the target, so it must not decide either way."""
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif(
+            [("B307", "bandit", None), ("B324", "bandit", BANDIT_FIXTURE)]
+        )
+        evidence = gate.collect_sarif_evidence(results)
+        assert evidence.results_without_location == 1
+        assert gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT) == []
+
+    def test_no_uris_at_all_is_reported(self):
+        """Silence here means the location shape moved; do not pass quietly."""
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif([("B307", "bandit", None)])
+        evidence = gate.collect_sarif_evidence(results)
+        violations = gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT)
+        assert any("carry a location URI" in v for v in violations), violations
+
+    def test_zero_findings_is_not_this_checks_verdict(self):
+        """check_findings_present owns that; double-reporting is noise."""
+        results = _results(rule_ids=[])
+        evidence = gate.collect_sarif_evidence(results)
+        assert gate.check_findings_are_from_the_fixture(evidence, REPO_ROOT) == []
+
+    def test_the_check_runs_through_evaluate_results_when_repo_root_is_given(self):
+        results = _results(rule_ids=[])
+        results["sarif"] = _sarif([("B307", "bandit", "Dockerfile")])
+        with_root = gate.evaluate_results(results, repo_root=REPO_ROOT).violations
+        without_root = gate.evaluate_results(results).violations
+        assert any("inside the repository" in v for v in with_root), with_root
+        assert not any("inside the repository" in v for v in without_root)
+
+    def test_a_healthy_dict_passes_with_repo_root(self):
+        assert (
+            gate.evaluate_results(
+                _results(), exit_code=2, repo_root=REPO_ROOT
+            ).violations
+            == []
+        )
+
+
+class TestTimeoutBudget:
+    def test_the_default_timeout_fits_inside_the_job_budget(self):
+        """The job sets timeout-minutes: 25 (1500s).
+
+        If the script's default exceeded that, GitHub would cancel the job first and
+        the operator would get no summary table, no rule evidence and no log tail.
+        """
+        assert gate.JOB_TIMEOUT_BUDGET_SECONDS == 25 * 60
+        assert gate.DEFAULT_SCAN_TIMEOUT_SECONDS < gate.JOB_TIMEOUT_BUDGET_SECONDS
+
+    def test_the_workflow_timeout_matches_the_documented_budget(self):
+        """Ties the two numbers together so they cannot drift apart silently."""
+        import yaml
+
+        workflow = yaml.safe_load(
+            (REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        job = workflow["jobs"]["external-target-scan"]
+        assert job["timeout-minutes"] * 60 == gate.JOB_TIMEOUT_BUDGET_SECONDS
+
+    def test_the_argparse_default_is_the_module_constant(self):
+        args = gate._parse_args([])
+        assert args.timeout == gate.DEFAULT_SCAN_TIMEOUT_SECONDS
+
+
+class TestCapturedStreamDecoding:
+    """TimeoutExpired carries bytes even when subprocess.run was given text=True."""
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [(None, ""), ("plain", "plain"), (b"bytes", "bytes")],
+    )
+    def test_streams_of_any_type_decode(self, value, expected):
+        assert gate._as_text(value) == expected
+
+    def test_undecodable_bytes_do_not_raise(self):
+        assert gate._as_text(b"\xff\xfe ok").endswith("ok")
 
 
 class TestResultsShape:
@@ -471,7 +800,8 @@ class TestOutputIsAscii:
     def test_the_rule_evidence_block_is_pure_ascii(self):
         results = _results()
         evidence = gate.format_rule_evidence(
-            gate.parse_scanner_states(results), gate.collect_rule_ids(results)
+            gate.parse_scanner_states(results),
+            gate.collect_sarif_evidence(results),
         )
         evidence.encode("cp1252")
 
