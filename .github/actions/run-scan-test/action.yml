@@ -120,7 +120,11 @@ runs:
         snyk version
 
         if [[ "$RUNNER_OS" == "Linux" ]]; then
-          retry bash -c 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
+          # -o pipefail on the inner shell, not just this one: pipefail is a
+          # shell option and does not cross a `bash -c` boundary. Without it
+          # `sh` exits 0 on the empty stdin curl leaves behind when it fails,
+          # retry() sees success, and the missing binary surfaces later.
+          retry bash -o pipefail -c 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
           trivy version
         elif [[ "$RUNNER_OS" == "macOS" ]]; then
           retry brew install trivy
