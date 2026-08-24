@@ -217,7 +217,16 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         Subclasses may override for bespoke result-file locations (e.g.
         opengrep patterns mode, which writes opengrep_results.json).
         """
-        assert self.results_dir is not None, "results_dir must be set by model_post_init"
+        # Not an assert: `python -O` strips assert statements, which would drop
+        # this guard exactly where it matters and surface the failure one line
+        # later as "'NoneType' object has no attribute 'joinpath'" instead of
+        # naming the real problem. ScannerError matches how the rest of this
+        # class reports unusable configuration.
+        if self.results_dir is None:
+            raise ScannerError(
+                f"{self.__class__.__name__} has no results_dir; it must be set by "
+                "model_post_init before a scan is executed."
+            )
         target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         target_results_dir.mkdir(exist_ok=True, parents=True)

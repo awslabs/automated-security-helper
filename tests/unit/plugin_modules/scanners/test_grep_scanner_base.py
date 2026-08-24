@@ -325,6 +325,55 @@ class TestSarifPostProcessingParity:
 # ---------------------------------------------------------------------------
 
 
+class TestMissingResultsDirGuard:
+    """_execute_scan must fail loudly when results_dir was never set.
+
+    This started life as an `assert`, which python -O strips -- removing the
+    guard precisely in an optimised deployment and turning the failure into
+    "'NoneType' object has no attribute 'joinpath'" one line later. Asserting on
+    ScannerError here keeps anyone from quietly reverting to `assert`.
+    """
+
+    def test_none_results_dir_raises_scanner_error(
+        self, test_plugin_context, monkeypatch, tmp_path
+    ):
+        from automated_security_helper.core.exceptions import ScannerError
+
+        monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+        scanner = SemgrepScanner(
+            context=test_plugin_context,
+            config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions()),
+        )
+        scanner.results_dir = None
+
+        with pytest.raises(ScannerError, match="results_dir"):
+            scanner._execute_scan(
+                target=tmp_path,
+                target_type="source",
+                global_ignore_paths=[],
+            )
+
+    def test_error_names_the_scanner_class(
+        self, test_plugin_context, monkeypatch, tmp_path
+    ):
+        """A bare 'results_dir is None' is not actionable; name the plugin."""
+        from automated_security_helper.core.exceptions import ScannerError
+
+        monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+        scanner = SemgrepScanner(
+            context=test_plugin_context,
+            config=SemgrepScannerConfig(options=SemgrepScannerConfigOptions()),
+        )
+        scanner.results_dir = None
+
+        with pytest.raises(ScannerError, match="SemgrepScanner"):
+            scanner._execute_scan(
+                target=tmp_path,
+                target_type="source",
+                global_ignore_paths=[],
+            )
+
+
 def test_semgrep_inherits_from_grep_base():
     assert issubclass(SemgrepScanner, GrepScannerBase)
 
