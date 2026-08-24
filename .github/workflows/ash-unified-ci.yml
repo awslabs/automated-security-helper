@@ -184,6 +184,50 @@ jobs:
           offline: ${{ matrix.offline || 'false' }}
 
   # ---------------------------------------------------------------------------
+  # External-target scan: prove ASH can scan a directory that is not its own
+  # working directory.
+  #
+  # Every other scan job in this file runs ash from the repository root with no
+  # --source-dir, so the process working directory and source_dir are always the
+  # same path. Two bugs hid inside that coincidence: a producer/consumer arity
+  # break that left every scanner at status ERROR with zero findings, and a
+  # checkov config probe that tested the process cwd while checkov's subprocess
+  # ran from source_dir. Both were invisible to CI for exactly this reason.
+  # scripts/verify_external_target_scan.py is the only place cwd != source_dir.
+  #
+  # Windows is in the matrix deliberately -- this project's path, encoding and
+  # console bugs concentrate there. Python 3.12 only: the gate exercises the scan
+  # path, which the unit-test matrix already covers across every version.
+  #
+  # bandit and checkov install themselves through uv on first use. If a runner
+  # comes up without them the gate fails loudly rather than passing while having
+  # tested nothing; `ash dependencies install` is the escape hatch if that ever
+  # turns out to be flaky.
+  # ---------------------------------------------------------------------------
+  external-target-scan:
+    name: "external-target scan (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "true"
+      # One shell for both platforms, so there is one command to reason about.
+      # The path is relative, so Git Bash on Windows does not rewrite it.
+      - name: Verify ASH can scan a target outside the repository
+        shell: bash
+        run: python scripts/verify_external_target_scan.py
+
+  # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
   # ---------------------------------------------------------------------------
   install-validation:
