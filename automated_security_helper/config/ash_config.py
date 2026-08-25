@@ -560,6 +560,21 @@ class WorkspaceExecutionConfig(BaseModel):
     suppressions -- can change a verdict, and they arrive separately and visibly
     rather than riding in on an execution change.
 
+    Wall clock is ``ceil(projects / bound)`` waves, and that is arithmetic
+    -----------------------------------------------------------------------
+    A workspace of N projects at a bound of B runs in ``ceil(N / B)`` waves, so
+    its wall clock is roughly that multiple of one project's. Measured on a
+    192-CPU host with five projects of ~21s each:
+
+    * bound 5 -- 20.65s, or 0.88x the slowest single project. One wave.
+    * bound 4 (the derived default) -- 49.50s, or 2.35x. Two waves.
+
+    Neither number says anything about the implementation; they are both the wave
+    count. An operator who wants a workspace to finish in about the time of its
+    slowest project has to set ``max_parallel_projects`` to at least the project
+    count, and accept the thread product below. The default stays at 4 because
+    that product is the thing worth defaulting conservatively.
+
     Failure modes and known limitations
     -----------------------------------
     * ``project_timeout`` bounds the *verdict*, not the worker. Python cannot
@@ -569,9 +584,11 @@ class WorkspaceExecutionConfig(BaseModel):
       run as subprocesses with their own timeouts, so the residual exposure is a
       genuinely wedged in-process scanner.
     * The outer bound multiplies with the inner scanner pool. That pool is
-      ``min(32, cpu_count + 4)`` in ``ScanExecutionEngine.__init__``, not 4, so
-      the worst-case thread count is ``max_parallel_projects * min(32, cpu+4)``.
-      Raising this knob on a large host raises that product quickly.
+      ``min(32, cpu_count + 4)`` in ``ScanExecutionEngine.__init__``, not 4, and
+      not the unrelated ``thread_pool_max_workers`` MCP setting, so the
+      worst-case thread count is ``max_parallel_projects * min(32, cpu + 4)``.
+      On the 192-CPU host above, the default bound of 4 already permits up to
+      128 concurrent scanner threads.
     """
 
     model_config = ConfigDict(extra="forbid")

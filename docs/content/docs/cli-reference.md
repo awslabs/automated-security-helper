@@ -136,7 +136,47 @@ Folder paths are relative to the directory holding the workspace file, which bec
 
 `--workspace` and `--source-dir` cannot be combined. Note that `ASH_SOURCE_DIR` counts as setting `--source-dir`.
 
-`--dry-run` resolves and validates the workspace, prints the resulting plan, and exits 0 without scanning anything. In this release that is the only supported use of `--workspace`; running the scans arrives in a later release.
+`--dry-run` resolves and validates the workspace, prints the resulting plan, and exits 0 without scanning anything. Without it, the same plan is what gets scanned — resolved once, so what you inspect is what runs.
+
+#### What each project gets
+
+Each project is scanned in its own scope: its own directory as the scan root, its own configuration, its own suppressions, and its own severity threshold. A project's findings and its pass/fail verdict are the same as `ash --source-dir <that project>` would produce. A suppression written in one project's config does not apply to another, even for the same rule at the same relative path.
+
+Output is laid out per project, with a workspace-level roll-up beside it:
+
+```
+.ash/ash_output/
+  ash_aggregated_results.json      # unified, with per-project attribution
+  projects/<project-key>/
+    ash_aggregated_results.json    # this project alone
+    scanners/<scanner>/<target>/   # raw scanner output
+```
+
+The unified `ash_aggregated_results.json` carries a `workspace` block: one entry per project with its threshold, finding counts, verdict and `sarif_run_index`, plus the `skipped_projects` payload.
+
+Its SARIF holds one `run` per project. Each run declares its own project root under `originalUriBaseIds`, and result paths inside a run stay relative to that root — so a consumer that ingests SARIF against a single repository root, such as GitHub code scanning, still resolves every path correctly. Selecting one run gives you a valid single-root SARIF document for one project. Each result also carries `properties.workspace_project` and `properties.workspace_uri`, the workspace-relative path, for consumers that want one flat coordinate space.
+
+#### Changed files and precommit
+
+`--mode precommit` and `--changed-files-only` are evaluated per project, against that project's own git repository, because projects in a workspace are versioned independently. A project with no changed files is skipped and recorded with `skipped_reason: no-changes`, which does not affect the exit code. Under `--mode precommit`, a project that is not a git repository is an error, because precommit selects files from a diff; pass `--allow-missing-projects` to scan it in full instead.
+
+#### Concurrency
+
+Set these in the ASH config resolved for the workspace **root** — how many projects run at once is not a project's decision:
+
+```yaml
+workspace:
+  max_parallel_projects: 4   # default: min(4, cpu_count)
+  project_timeout: 600       # seconds; default: no limit
+```
+
+`max_parallel_projects` bounds how many projects run concurrently. It is an outer bound over each project's own scanner thread pool, not a replacement for it, so the worst-case thread count is the product of the two. Wall clock is roughly `ceil(projects / max_parallel_projects)` times one project's: five projects at the default bound of 4 take two waves. Raise the bound to the project count to get one wave, and accept the larger thread product.
+
+`project_timeout` records a project that overruns as failed and continues with the others; the workspace then exits non-zero. The abandoned worker cannot be interrupted, so it runs to completion in the background and the process will not exit until it does.
+
+#### Container mode
+
+Container mode has one bind mount, so the workspace **root** is mounted at `/src` and each project is `/src/<relative-path>`. This is why every project must sit below the workspace root. `--changed-files-only` is not supported in container mode, as in single-directory mode.
 
 #### Fail-closed validation
 
@@ -153,6 +193,8 @@ Workspace resolution refuses the whole workspace rather than scanning part of it
 `--allow-missing-projects` opts out of the first item only. Projects skipped that way are recorded in the plan's `skipped_projects` payload with a reason, not just logged. Nothing opts out of the others: they are problems with the definition rather than with the machine, so they are wrong everywhere.
 
 Workspace mode does not introduce a separate exit-code vocabulary; it uses the codes in [Exit Codes](#exit-codes). Every refusal listed above is code `4` — the workspace definition could not be used, so nothing was scanned. That is deliberately distinct from code `2`, which means a scan ran and found issues above the threshold.
+
+When several projects end differently, the code is chosen by how specific the diagnosis is rather than by severity: `3` (a named misconfigured project) outranks `1` (a project that reached no verdict at all), which outranks `2` (a project with a verdict that failed). The results payload also records `workspace.status` — `completed` or `refused` — and `workspace.refusal_detail`, for consumers reading the file rather than the exit status.
 
 Comments are not supported in the workspace file. VS Code tolerates them; ASH reads strict JSON and reports a commented file as malformed.
 
