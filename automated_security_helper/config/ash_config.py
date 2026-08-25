@@ -685,11 +685,25 @@ class AshConfig(BaseModel):
         # Reduce the provided plugin_name in case the class name was passed in,
         # as the config itself uses kebab-case keys while the classes use PascalCase
         # for class names.
+        #
+        # Punctuation is stripped as well as the type word. Stripping only the type
+        # word left a caller who passed the *config-key* spelling with a dangling
+        # separator -- "bedrock-summary-reporter" reduced to "bedrock-summary-",
+        # which matches no key and no candidate -- so the lookup missed even though
+        # the key was spelled exactly right. cli/report.py passes
+        # plugin_name=report_format straight from --output-format, and
+        # scanner_statistics_calculator passes the registered scanner name, so this
+        # is the spelling real callers use, not a hypothetical one.
         og_plugin_name = plugin_name
         plugin_name = re.sub(
-            r"(Converter|Scanner|Reporter)(Config)?",
+            r"[^a-z0-9+]+",
             "",
-            plugin_name,
+            re.sub(
+                r"(Converter|Scanner|Reporter)(Config)?",
+                "",
+                plugin_name,
+                flags=re.IGNORECASE,
+            ),
             flags=re.IGNORECASE,
         ).lower()
         match plugin_type:
@@ -744,13 +758,22 @@ class AshConfig(BaseModel):
             ).lower()
             if stripped:
                 key_map.setdefault(stripped, item_name)
-        # Try direct match first
-        if plugin_name in item_dict:
+        # The caller's spelling, before any reduction, wins. This is checked
+        # against og_plugin_name rather than plugin_name: by this point plugin_name
+        # has had its type word and punctuation removed, so an exactly-correct
+        # config key such as "bedrock-summary-reporter" no longer resembles itself
+        # and could never match item_dict here.
+        if og_plugin_name in item_dict:
+            ASH_LOGGER.debug(
+                f"Found {plugin_type} plugin {og_plugin_name} with direct match"
+            )
+            found = item_dict[og_plugin_name]
+        # Then the reduced form, against the reduced spellings of each key.
+        elif plugin_name in item_dict:
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} with direct match"
             )
             found = item_dict[plugin_name]
-        # Then try normalized match
         elif plugin_name in key_map:
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"

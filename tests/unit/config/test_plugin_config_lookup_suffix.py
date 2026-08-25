@@ -79,6 +79,42 @@ class TestSuffixedConfigKeyIsReachable:
         assert found["options"]["model_id"] == "MY-MODEL"
 
     @pytest.mark.parametrize(
+        "query",
+        [
+            "bedrock-summary-reporter",  # the config-key spelling
+            "bedrock_summary_reporter",  # snake spelling
+            "bedrocksummaryreporter",  # lowercased class name
+        ],
+    )
+    def test_every_spelling_a_real_caller_uses_resolves(self, query):
+        """The reported command passes the config key, not the class name.
+
+        cli/report.py calls get_plugin_config(plugin_name=report_format) with
+        `report_format` taken straight from --output-format, and
+        scanner_statistics_calculator passes the registered scanner name. So
+
+            ash report --format bedrock-summary-reporter
+
+        arrives here as "bedrock-summary-reporter".
+
+        An earlier revision stripped the type word from the query but not its
+        punctuation, reducing that to "bedrock-summary-" -- a dangling separator
+        matching no key and no candidate. The lookup missed even though the key was
+        spelled exactly right, so the fix did not cover the command in the bug
+        report. Every spelling below has to work.
+        """
+        config = _config_with(
+            "reporters.bedrock-summary-reporter.options.model_id=MY-MODEL"
+        )
+
+        found = config.get_plugin_config(
+            plugin_type="reporter", plugin_name=query.lower()
+        )
+
+        assert found is not None, f"{query!r} did not resolve"
+        assert found["options"]["model_id"] == "MY-MODEL"
+
+    @pytest.mark.parametrize(
         "plugin_type,key,query",
         [
             ("reporter", "my-thing-reporter", "mythingreporter"),
