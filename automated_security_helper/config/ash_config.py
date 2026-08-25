@@ -442,9 +442,7 @@ class RuntimeOverridesConfig(BaseModel):
 
     enabled: Annotated[
         bool,
-        Field(
-            description="Master switch — runtime patches are rejected unless True."
-        ),
+        Field(description="Master switch — runtime patches are rejected unless True."),
     ] = False
 
     allowed_paths: Annotated[
@@ -703,23 +701,49 @@ class AshConfig(BaseModel):
                 item_dict = self.converters.model_dump(by_alias=True)
             case _:
                 item_dict = {}
+        # Exact and punctuation-stripped spellings of each config key, in that
+        # order of preference.
+        #
+        # (The previous version of this loop opened with `if found is not None:
+        # break`, but nothing assigns `found` before the loop ends, so it never
+        # fired.)
         key_map = {}
-        for item_name, item in item_dict.items():
-            if found is not None:
-                break
-            for possible in list(
-                sorted(
-                    set(
-                        [
-                            item_name,
-                            re.sub(
-                                r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
-                            ).lower(),
-                        ]
-                    )
-                )
+        for item_name in item_dict:
+            for possible in sorted(
+                {
+                    item_name,
+                    re.sub(r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE).lower(),
+                }
             ):
                 key_map[possible] = item_name
+
+        # The same suffix removal that was applied to plugin_name above, applied
+        # to the config keys. Without this the two forms can never meet: a query
+        # for BedrockSummaryReporter reduces to "bedrocksummary", while the key
+        # "bedrock-summary-reporter" reduces only to "bedrocksummaryreporter", so
+        # any plugin whose config key contains the plugin-type word was
+        # unreachable and silently fell back to its defaults. `csv` matched only
+        # because its key does not contain "reporter", which is why this looked
+        # like an external-plugin problem.
+        #
+        # setdefault, not assignment: a stripped spelling must never shadow a real
+        # key. With both "bedrock-summary" and "bedrock-summary-reporter" present,
+        # the second one's stripped form collides with the first, and adding a
+        # plugin should not repoint another plugin's config.
+        for item_name in item_dict:
+            stripped = re.sub(
+                r"[^a-z0-9+]+",
+                "",
+                re.sub(
+                    r"(Converter|Scanner|Reporter)(Config)?",
+                    "",
+                    item_name,
+                    flags=re.IGNORECASE,
+                ),
+                flags=re.IGNORECASE,
+            ).lower()
+            if stripped:
+                key_map.setdefault(stripped, item_name)
         # Try direct match first
         if plugin_name in item_dict:
             ASH_LOGGER.debug(
@@ -741,9 +765,7 @@ class AshConfig(BaseModel):
         return found
 
 
-def add_suppression_to_config(
-    config_path: Path, suppression: AshSuppression
-) -> None:
+def add_suppression_to_config(config_path: Path, suppression: AshSuppression) -> None:
     """Append a suppression to the suppressions list in an .ash.yaml config file.
 
     Uses an append-only strategy when the file already contains a suppressions
@@ -764,9 +786,7 @@ def add_suppression_to_config(
         # Duplicate detection: check if rule_id+path already suppressed
         data = yaml.safe_load(text) or {}
         if isinstance(data, dict):
-            existing = (
-                data.get("global_settings", {}).get("suppressions", []) or []
-            )
+            existing = data.get("global_settings", {}).get("suppressions", []) or []
             for existing_entry in existing:
                 if (
                     isinstance(existing_entry, dict)
@@ -782,7 +802,9 @@ def add_suppression_to_config(
             field_indent = list_indent + "  "
             items = list(entry.items())
             first_key, first_val = items[0]
-            formatted_lines = [f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"]
+            formatted_lines = [
+                f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"
+            ]
             for k, v in items[1:]:
                 formatted_lines.append(f"{field_indent}{k}: {_yaml_scalar(v)}\n")
             for line in reversed(formatted_lines):
@@ -862,7 +884,11 @@ def _find_suppressions_append_point(lines: list) -> tuple:
                 list_indent = line[:indent_len]
                 last_item_end = idx + 1
                 continue
-            if indent_len > 0 and not stripped.startswith("- ") and not stripped.startswith("#"):
+            if (
+                indent_len > 0
+                and not stripped.startswith("- ")
+                and not stripped.startswith("#")
+            ):
                 last_item_end = idx + 1
                 continue
             if stripped == "" or stripped.startswith("#"):
