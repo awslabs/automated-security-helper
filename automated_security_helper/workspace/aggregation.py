@@ -61,24 +61,52 @@ The cost is that the unified file is assembled by hand rather than by
 the written file back -- one with ``json.loads`` and one with
 ``AshAggregatedResults.model_validate_json`` -- rather than trusting the writer.
 
+Absolute scanner URIs are relativized, not prefixed
+--------------------------------------------------
+A scanner-emitted URI is not an operator-written pattern, and the difference
+matters. ``to_workspace_pattern`` reads a leading separator as *project-rooted*
+and prefixes it, which is deliberate for a pattern -- prefixing makes escape from
+the project structurally impossible. Applied to an absolute URI it relocates a
+real file: ``/ws/api/src/app.py`` became ``api/ws/api/src/app.py``, naming
+nothing, and without being counted as a failure.
+
+So every URI passes through :func:`project_relative_uri` first, which reduces an
+absolute path to its remainder inside the project or refuses it. checkov's shape
+makes this more than a leading-separator test: it emits
+``ws/api/src/insecure_bucket.tf``, absolute with the separator already stripped
+upstream, so an unrooted URI is also tried with a separator restored.
+
+These shapes are the default in workspace mode rather than an edge case.
+``scripts/verify_external_target_scan.py`` records three of them from one healthy
+run, and they appear whenever the process working directory differs from
+``source_dir`` -- which in workspace mode it must, for all but one project.
+
 An unconvertible path is counted, never dropped
 -----------------------------------------------
-``to_workspace_pattern`` refuses a path containing ``..`` or anchored to a drive.
-Some scanners emit exactly those: ``scripts/verify_external_target_scan.py``
-records three different URI shapes observed from one healthy run, including a
-``../../../..``-prefixed one. A refused path leaves the finding in place without a
-``workspace_uri`` and increments ``unconvertible_finding_paths``. Dropping the
-finding would be a silent false negative, which is the failure mode this whole
-feature is designed against; failing the scan would red-build a workspace over a
-cosmetic path shape.
+A URI that is absolute and outside its project, or that contains ``..``, cannot
+be placed. It keeps the text the scanner wrote, gets no ``workspace_uri``, gets
+no ``uriBaseId`` -- an ``artifactLocation`` carrying both an absolute ``uri`` and
+a base ID contradicts itself, and GitHub code scanning mis-locates or rejects it
+-- and increments ``unconvertible_finding_paths``.
+
+That counter counts *findings*, one per finding that ended with no
+workspace-relative path at all. A finding offering three locations of which one
+converts is located, and counting the other two would overstate the loss.
+
+Dropping the finding would be a silent false negative, which is the failure mode
+this whole feature is designed against; failing the scan would red-build a
+workspace over a cosmetic path shape.
 
 Failure modes and known limitations
 -----------------------------------
-* The workspace-level ``scanner_results`` sums counts per scanner and takes the
-  worst status across projects. That is lossy on purpose -- it exists so
-  consumers that already read ``scanner_results`` keep working -- and the
-  per-project truth is in ``workspace.projects``. A scanner that ran on one
-  project and is missing from another reports the worse of the two.
+* The workspace-level ``scanner_results`` sums both finding and actionable counts
+  per scanner and takes the worst status across projects. That is lossy on
+  purpose -- it exists so consumers that already read ``scanner_results`` keep
+  working, and ``core/resource_management/result_filters.py`` is one of them --
+  and the per-project truth is in ``workspace.projects``. A scanner that ran on
+  one project and is missing from another reports the worse of the two.
+  Per-scanner actionable counts are judged against each project's own threshold
+  and then summed, so the rollup total equals the sum of the per-project totals.
 * ``exceeds_threshold`` is decided by the caller, not here, because it depends on
   ``fail_on_findings``, which is not a property of the findings.
 * The unified file carries no ``cyclonedx``. SBOM merging across projects is a
@@ -93,8 +121,9 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from automated_security_helper.core.exceptions import WorkspacePatternError
@@ -123,6 +152,14 @@ PROJECT_ROOT_URI_BASE_ID = "PROJECTROOT"
 SPOOL_DIR_NAME = ".workspace-spool"
 
 RESULTS_FILENAME = "ash_aggregated_results.json"
+
+#: A Windows drive at the start of a path, e.g. ``C:/ws/api``. Matched on the raw
+#: text rather than via ``PureWindowsPath.drive``, whose value for unusual inputs
+#: changed between 3.11 and 3.12 and this project supports 3.10 through 3.13.
+_DRIVE_ANCHOR = re.compile(r"^[A-Za-z]:[/\\]")
+
+#: The component that makes ``relative_to`` unable to answer containment.
+_PARENT_COMPONENT = ".."
 
 # min_severity ranks, as run_ash_scan._SEVERITY_RANK defines them. Kept as a
 # separate table from the severity ladder because this is the --min-severity
@@ -180,28 +217,140 @@ def _strip_file_scheme(uri: str) -> str:
     return text
 
 
-def to_workspace_uri(uri: str, project_relative_path: str) -> Optional[str]:
-    """Express a project-relative finding URI in workspace-relative coordinates.
+#: Returned by :func:`project_relative_uri` when the URI is not an absolute path
+#: naming a file inside the project, so the caller should read it as
+#: project-relative. Distinct from ``None``, which means "absolute and outside".
+NOT_ABSOLUTE = object()
 
-    The single place the conversion happens. Goes through Phase 0's
-    ``to_workspace_pattern`` rather than concatenating, because a rooted path
-    joined onto a prefix with ``PurePosixPath`` discards the prefix rather than
-    doubling a separator -- a pattern that has escaped its project, not a
-    cosmetic defect.
+
+def _posix_text(uri: str) -> str:
+    """A scanner URI reduced to bare POSIX-shaped text.
+
+    Backslashes become separators, and a Windows drive that arrived with a
+    leading separator (``/C:/x``, as ``file:///C:/x`` reduces to) loses it, so a
+    drive is always spelled the same way before anything compares paths.
+    """
+    text = _strip_file_scheme(uri).replace("\\", "/")
+    if len(text) > 2 and text[0] == "/" and text[2] == ":":
+        text = text[1:]
+    return text
+
+
+def project_relative_uri(uri: str, project_path: str) -> Any:
+    """Reduce an absolute scanner URI to a path relative to its own project.
+
+    Why this exists
+    ---------------
+    ``to_workspace_pattern`` reads a leading separator as *project-rooted* and
+    prefixes it. That is correct and deliberate for an operator-written pattern:
+    prefixing makes escape from the project structurally impossible. It is wrong
+    for a scanner-emitted URI, which names a real file that the prefix then
+    relocates -- ``/ws/api/src/app.py`` became ``api/ws/api/src/app.py``, a path
+    naming nothing, silently and without being counted.
+
+    These shapes are the default in workspace mode, not an edge case.
+    ``scripts/verify_external_target_scan.py`` records three different URI
+    shapes from one healthy run, and they appear whenever the process working
+    directory differs from ``source_dir``. In workspace mode each project's
+    ``source_dir`` is ``<workspace>/<project>``, so the working directory cannot
+    coincide with more than one of them.
+
+    The separator-stripped shape, and why a leading-separator test is not enough
+    ---------------------------------------------------------------------------
+    checkov emits ``ws/api/src/insecure_bucket.tf`` -- absolute, with the leading
+    separator already gone upstream. No test on the leading character can catch
+    it. So an unrooted URI is also tried with a separator restored, and is read
+    as absolute only when that lands inside the project.
+
+    The residual ambiguity is a project that contains a directory tree mirroring
+    its own absolute path -- project ``/ws/api`` holding ``ws/api/src/`` -- where
+    a genuinely project-relative ``ws/api/src/x.py`` would be misread as
+    absolute. Resolved textually and in favour of the absolute reading, because
+    that nesting is pathological while the checkov shape is routine. Deliberately
+    no filesystem check: aggregation would then depend on the tree still being
+    present, and reading the same SARIF twice could give two answers.
+
+    Args:
+        uri: A SARIF artifact URI as a scanner emitted it.
+        project_path: The project's canonical absolute path.
+
+    Returns:
+        The project-relative path when the URI is absolute and inside the
+        project; ``None`` when it is absolute and outside; :data:`NOT_ABSOLUTE`
+        when it does not look like an absolute path at all.
+    """
+    text = _posix_text(uri)
+    if not text:
+        return None
+
+    root = PurePosixPath(str(project_path).replace("\\", "/"))
+    rooted = text.startswith("/") or bool(_DRIVE_ANCHOR.match(text))
+
+    candidates = [text] if rooted else [text, "/" + text]
+    for candidate in candidates:
+        # ".." would make relative_to lie about containment, and Phase 0 rejects
+        # it anyway; leave those to the pattern converter, which returns None.
+        if _PARENT_COMPONENT in PurePosixPath(candidate).parts:
+            continue
+        try:
+            remainder = PurePosixPath(candidate).relative_to(root)
+        except ValueError:
+            continue
+        # relative_to succeeds for the root itself, whose remainder is "."; that
+        # names a directory, not a finding location.
+        return remainder.as_posix() if remainder.parts else None
+
+    if rooted:
+        # Absolute, and not inside this project. Counted, never prefixed: a
+        # prefix would invent a path that names nothing.
+        return None
+    return NOT_ABSOLUTE
+
+
+def to_workspace_uri(
+    uri: str, project_relative_path: str, project_path: Optional[str] = None
+) -> Optional[str]:
+    """Express a finding URI in workspace-relative coordinates.
+
+    The single place the conversion happens. A URI that is already
+    project-relative goes through Phase 0's ``to_workspace_pattern`` rather than
+    string concatenation, because a rooted path joined onto a prefix with
+    ``PurePosixPath`` discards the prefix rather than doubling a separator -- a
+    path that has escaped its project, not a cosmetic defect.
+
+    An absolute URI is reduced to project-relative first; see
+    :func:`project_relative_uri` for why that step cannot be skipped.
 
     Args:
         uri: A SARIF artifact URI as a scanner emitted it. May carry a
-            ``file://`` scheme, may use backslashes, may be rooted.
+            ``file://`` scheme, may use backslashes, may be rooted, may be
+            absolute with its leading separator already stripped.
         project_relative_path: The project's path below the workspace root.
+        project_path: The project's absolute path. Optional only so that callers
+            with no absolute path can still convert an already-relative URI;
+            without it an absolute URI cannot be recognised and will be refused
+            rather than mis-prefixed.
 
     Returns:
         The workspace-relative path, or ``None`` when the URI cannot be expressed
         that way. ``None`` is a routine outcome, not an error: see "An
         unconvertible path is counted, never dropped" in the module docstring.
     """
-    text = _strip_file_scheme(uri)
+    text = _posix_text(uri)
     if not text:
         return None
+
+    if project_path is not None:
+        reduced = project_relative_uri(text, project_path)
+        if reduced is None:
+            return None
+        if reduced is not NOT_ABSOLUTE:
+            text = reduced
+    elif text.startswith("/") or _DRIVE_ANCHOR.match(text):
+        # No project path to relativize against, so an absolute URI cannot be
+        # placed. Refusing beats prefixing it into a path that names nothing.
+        return None
+
     try:
         return to_workspace_pattern(text, project_relative_path)
     except WorkspacePatternError:
@@ -230,13 +379,23 @@ def rebase_run_for_project(
     the dict came from, and a scan that reported its own findings differently
     after aggregation would be very hard to explain.
 
+    An absolute artifact URI is rewritten to the project-relative remainder, so
+    that every path inside the run really is relative to the one root the run
+    declares. Leaving it absolute while also tagging it with a ``uriBaseId``
+    produces a self-contradictory ``artifactLocation`` that GitHub code scanning
+    mis-locates or rejects, which is the whole thing one-run-per-project exists
+    to avoid. A URI that cannot be placed inside the project keeps its original
+    text, gets no ``uriBaseId``, and is counted.
+
     Args:
         run: The project's single SARIF run, as a plain dict.
         project: The project's entry in the resolved plan.
 
     Returns:
         ``(run, unconvertible)`` -- the attributed run, and how many of its
-        findings could not be given a workspace-relative path.
+        *findings* could not be given a workspace-relative path. Findings, not
+        locations: a finding with three locations of which one converts is
+        located, and counting it as two failures would overstate the loss.
     """
     rebased: Dict[str, Any] = copy.deepcopy(dict(run))
 
@@ -266,6 +425,7 @@ def rebase_run_for_project(
         properties["workspace_project"] = project.key
 
         workspace_uri: Optional[str] = None
+        had_locatable_uri = False
         for location in result.get("locations") or []:
             artifact = _artifact_location(location)
             if artifact is None:
@@ -273,19 +433,37 @@ def rebase_run_for_project(
             uri = artifact.get("uri")
             if not uri:
                 continue
-            # Anchor to the project root so the run stays coherent with exactly
-            # one root. A scanner that already anchored its own output knows
-            # something we do not, so leave that alone.
-            artifact.setdefault("uriBaseId", PROJECT_ROOT_URI_BASE_ID)
-            if workspace_uri is None:
-                converted = to_workspace_uri(str(uri), project.relative_path)
-                if converted is None:
-                    unconvertible += 1
-                else:
-                    workspace_uri = converted
+            had_locatable_uri = True
+
+            reduced = project_relative_uri(str(uri), project.path)
+            if reduced is NOT_ABSOLUTE:
+                placed: Optional[str] = str(uri)
+            elif reduced is None:
+                # Absolute and outside the project. Left exactly as the scanner
+                # wrote it, and deliberately NOT anchored: an artifactLocation
+                # carrying both an absolute uri and a uriBaseId contradicts
+                # itself.
+                placed = None
+            else:
+                placed = reduced
+                artifact["uri"] = reduced
+
+            if placed is not None:
+                # Anchor to the project root so the run stays coherent with
+                # exactly one root. A scanner that already anchored its own
+                # output knows something we do not, so leave that alone.
+                artifact.setdefault("uriBaseId", PROJECT_ROOT_URI_BASE_ID)
+                if workspace_uri is None:
+                    workspace_uri = to_workspace_uri(
+                        placed, project.relative_path, project.path
+                    )
 
         if workspace_uri is not None:
             properties["workspace_uri"] = workspace_uri
+        elif had_locatable_uri:
+            # One increment per finding that ended up with no workspace-relative
+            # path at all, however many locations it offered.
+            unconvertible += 1
         result["properties"] = properties
 
     return rebased, unconvertible
@@ -434,6 +612,7 @@ class WorkspaceAggregator:
 
         # Credit findings to the scanner that produced them, so the rollup sums
         # what the per-project files say rather than re-deriving it.
+        by_scanner: Dict[str, List[Mapping[str, Any]]] = {}
         for result in rebased.get("results") or []:
             if not isinstance(result, Mapping):
                 continue
@@ -442,10 +621,32 @@ class WorkspaceAggregator:
             if isinstance(properties, Mapping):
                 scanner = properties.get("scanner_name")
             name = str(scanner) if scanner else "unattributed"
+            by_scanner.setdefault(name, []).append(result)
+            self._scanner_status.setdefault(name, None)
             if result.get("suppressions"):
                 continue
             self._scanner_findings[name] = self._scanner_findings.get(name, 0) + 1
-            self._scanner_status.setdefault(name, None)
+
+        # Actionable counts, per scanner, against THIS project's own threshold.
+        #
+        # Derived here rather than carried on the outcome, because the outcome
+        # holds one number for the whole project and the rollup needs it split.
+        # Zeroed wholesale when the project's own actionable count is zero: that
+        # is how the --min-severity gate reaches this layer, since it is a
+        # whole-scan switch in _compute_exit_code rather than a per-finding
+        # filter, and a per-scanner sum that ignored it would exceed the
+        # project's own total.
+        if outcome.actionable_finding_count:
+            for name, results in by_scanner.items():
+                actionable = count_actionable_results(
+                    results, project.severity_threshold
+                )
+                self._scanner_actionable[name] = (
+                    self._scanner_actionable.get(name, 0) + actionable
+                )
+        else:
+            for name in by_scanner:
+                self._scanner_actionable.setdefault(name, 0)
 
         self.spool_dir.mkdir(parents=True, exist_ok=True)
         # The project key is a path-derived value with separators already

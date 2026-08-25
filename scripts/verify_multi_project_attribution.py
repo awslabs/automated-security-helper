@@ -147,14 +147,42 @@ def evaluate(expression: str):
     return eval(expression)
 '''
 
+FIXTURE_TERRAFORM = """resource "aws_s3_bucket" "gate_fixture" {
+  bucket = "ash-multi-project-gate-fixture"
+}
+"""
+
 #: The rule project-a suppresses. B324 is hashlib.md5 -- present in every bandit
 #: release this project has run against, and independent of the other two
 #: findings so suppressing it does not change whether project-a has a verdict.
 SUPPRESSED_RULE_ID = "B324"
 
-#: Where the fixture file lives inside every project. Identical across all three,
-#: which is what makes the suppression scoping testable.
+#: Where the fixture files live inside every project. Identical across all three,
+#: which is what makes the suppression and attribution scoping testable.
 FIXTURE_RELATIVE_PATH = "src/insecure.py"
+
+#: A second producer, and not decoration: it doubles the scanner families the
+#: gate asserts on and it is what makes the scanner-rollup check meaningful,
+#: since a single-scanner rollup cannot show one scanner's count leaking into
+#: another's.
+#:
+#: It was added while chasing the absolute-URI defect, on the expectation that
+#: checkov would emit the separator-stripped absolute shape
+#: (``ws/api/src/x.tf``) that used to be mis-prefixed. Measured: in workspace
+#: mode it does NOT -- ``sanitize_sarif_paths`` runs with the project as
+#: ``source_dir`` and has already relativized the path by the time the aggregator
+#: sees it, so both scanners hand over ``src/...``. The absolute shapes recorded
+#: in ``verify_external_target_scan.py`` are therefore not reachable through this
+#: fixture, and the coverage for that handling is the parametrised unit tests in
+#: ``tests/unit/workspace/test_aggregation.py::TestAbsoluteScannerUris``, not this
+#: gate. Stated here so nobody reads a green gate as proof of it.
+FIXTURE_TERRAFORM_RELATIVE_PATH = "src/insecure_bucket.tf"
+
+#: Every fixture file, by project-relative path.
+FIXTURE_FILES: Dict[str, str] = {
+    FIXTURE_RELATIVE_PATH: FIXTURE_PYTHON,
+    FIXTURE_TERRAFORM_RELATIVE_PATH: FIXTURE_TERRAFORM,
+}
 
 CONFIG_TEMPLATE = """project_name: {name}
 global_settings:
@@ -834,6 +862,95 @@ def check_per_project_subtrees(
     return violations
 
 
+def check_scanner_rollup_agrees_with_the_projects(
+    results: Mapping[str, Any], projects: Sequence[ProjectOutcome]
+) -> List[str]:
+    """The workspace-level rollup must not contradict the per-project truth.
+
+    ``scanner_results[*].actionable_finding_count`` was previously zero by
+    construction -- initialised, defaulted, read, never incremented. It is not
+    inert: ``core/resource_management/result_filters.py`` reads it and republishes
+    it as ``actionable_findings``, so a consumer reading the rollup rather than
+    ``workspace.projects`` concluded a workspace with real findings had none.
+    Fail-open, with the correct value two keys away in the same file.
+    """
+    scanner_results = results.get("scanner_results") or {}
+    if not scanner_results:
+        return ["'scanner_results' is empty -- the rollup recorded no scanners"]
+
+    rollup_actionable = sum(
+        _as_int(entry.get("actionable_finding_count"))
+        for entry in scanner_results.values()
+        if isinstance(entry, Mapping)
+    )
+    rollup_findings = sum(
+        _as_int(entry.get("finding_count"))
+        for entry in scanner_results.values()
+        if isinstance(entry, Mapping)
+    )
+    project_actionable = sum(project.actionable_finding_count for project in projects)
+    project_findings = sum(project.finding_count for project in projects)
+
+    violations: List[str] = []
+    if project_actionable and not rollup_actionable:
+        violations.append(
+            f"the projects report {project_actionable} actionable finding(s) but "
+            f"the scanner_results rollup reports 0. A consumer reading the rollup "
+            f"-- result_filters.py does -- would conclude this workspace is clean"
+        )
+    elif rollup_actionable != project_actionable:
+        violations.append(
+            f"scanner_results actionable total is {rollup_actionable} but the "
+            f"projects sum to {project_actionable}; the two views of the same run "
+            f"disagree"
+        )
+    if rollup_findings != project_findings:
+        violations.append(
+            f"scanner_results finding total is {rollup_findings} but the projects "
+            f"sum to {project_findings}; the two views of the same run disagree"
+        )
+    return violations
+
+
+def check_no_finding_lost_its_workspace_path(
+    results: Mapping[str, Any], runs: Sequence[RunEvidence]
+) -> List[str]:
+    """Every finding must carry a workspace-relative path, and be counted if not.
+
+    An absolute scanner URI used to be prefixed rather than relativized --
+    ``/ws/api/src/app.py`` became ``api/ws/api/src/app.py``, naming nothing, and
+    *without* incrementing the counter, so two of three broken shapes were
+    invisible in the payload.
+
+    This check is a backstop rather than the primary coverage. Measured on this
+    fixture, both scanners hand the aggregator already-relative paths, so the
+    absolute branch is not reached here; the per-shape coverage lives in
+    ``tests/unit/workspace/test_aggregation.py::TestAbsoluteScannerUris``. What
+    this does catch is the general case of a finding losing its path silently --
+    counted or not -- whatever shape caused it.
+    """
+    workspace = results.get("workspace") or {}
+    counted = _as_int(workspace.get("unconvertible_finding_paths"))
+    located = sum(len(run.workspace_uris) for run in runs)
+    total = sum(len(run.result_projects) for run in runs)
+
+    violations: List[str] = []
+    if counted:
+        violations.append(
+            f"{counted} finding(s) could not be given a workspace-relative path. "
+            f"Every fixture file lives inside its project, so all of them should "
+            f"convert -- this points at the absolute-URI handling in "
+            f"workspace/aggregation.py"
+        )
+    if total and located != total:
+        violations.append(
+            f"{total} finding(s) carry a project attribution but only {located} "
+            f"carry a workspace_uri, and {counted} were counted as unconvertible. "
+            f"The difference is findings that lost their path silently"
+        )
+    return violations
+
+
 def check_workspace_status(results: Mapping[str, Any], exit_code: int) -> List[str]:
     """The payload's own status must agree with having scanned something.
 
@@ -868,7 +985,9 @@ def check_findings_are_from_the_fixture(
     process working directory. Every other assertion would still pass.
     """
     root = repo_root.resolve()
-    expected_basename = PurePosixPath(FIXTURE_RELATIVE_PATH).name
+    expected_basenames = frozenset(
+        PurePosixPath(relative).name for relative in FIXTURE_FILES
+    )
     wrong_basename: List[str] = []
     inside_repository: List[str] = []
 
@@ -879,7 +998,7 @@ def check_findings_are_from_the_fixture(
                 normalized = normalized[2:]
             if not normalized:
                 continue
-            if PurePosixPath(normalized).name != expected_basename:
+            if PurePosixPath(normalized).name not in expected_basenames:
                 wrong_basename.append(uri)
             candidate = Path(root, normalized)
             with suppress(OSError, ValueError):
@@ -890,8 +1009,9 @@ def check_findings_are_from_the_fixture(
     violations: List[str] = []
     if wrong_basename:
         violations.append(
-            f"finding(s) name a file that is not the fixture. Expected basename "
-            f"'{expected_basename}'; got {sorted(set(wrong_basename))[:5]}"
+            f"finding(s) name a file that is not part of the fixture. Expected a "
+            f"basename in {sorted(expected_basenames)}; got "
+            f"{sorted(set(wrong_basename))[:5]}"
         )
     if inside_repository:
         violations.append(
@@ -965,6 +1085,10 @@ def evaluate_results(
     outcome.violations.extend(check_suppression_is_project_scoped(runs))
     outcome.violations.extend(check_thresholds_are_per_project(projects))
     outcome.violations.extend(check_verdicts_match_their_counts(projects))
+    outcome.violations.extend(
+        check_scanner_rollup_agrees_with_the_projects(results, projects)
+    )
+    outcome.violations.extend(check_no_finding_lost_its_workspace_path(results, runs))
     outcome.violations.extend(check_per_project_subtrees(projects, output_dir))
     if exit_code is not None:
         outcome.violations.extend(check_workspace_status(results, exit_code))
@@ -1049,9 +1173,10 @@ def write_fixture(workspace_root: Path) -> Path:
 
     for project in FIXTURE_PROJECTS:
         project_dir = workspace_root / project.key
-        source_file = project_dir / FIXTURE_RELATIVE_PATH
-        source_file.parent.mkdir(parents=True, exist_ok=True)
-        source_file.write_text(FIXTURE_PYTHON, encoding="utf-8")
+        for relative, content in FIXTURE_FILES.items():
+            source_file = project_dir / relative
+            source_file.parent.mkdir(parents=True, exist_ok=True)
+            source_file.write_text(content, encoding="utf-8")
 
         config_dir = project_dir / ".ash"
         config_dir.mkdir(parents=True, exist_ok=True)

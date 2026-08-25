@@ -146,6 +146,9 @@ def healthy(workspace_root, output_dir):
             }
         )
 
+    # The rollup has to agree with the projects, because that is now asserted.
+    # Summed here rather than hardcoded so the fixture stays consistent when the
+    # project list or the actionable rule changes.
     return {
         "workspace": {
             "workspace_file": (workspace_root / gate.WORKSPACE_FILENAME).as_posix(),
@@ -153,9 +156,16 @@ def healthy(workspace_root, output_dir):
             "status": "completed",
             "exit_code": 2,
             "projects": projects,
+            "unconvertible_finding_paths": 0,
         },
         "scanner_results": {
-            "bandit": {"status": "PASSED", "finding_count": 9},
+            "bandit": {
+                "status": "PASSED",
+                "finding_count": sum(p["finding_count"] for p in projects),
+                "actionable_finding_count": sum(
+                    p["actionable_finding_count"] for p in projects
+                ),
+            },
         },
         "sarif": {"version": "2.1.0", "runs": runs},
     }
@@ -417,6 +427,62 @@ class TestOutputSubtreeRegression:
 # ---------------------------------------------------------------------------
 # Status, exit code, and fixture scoping
 # ---------------------------------------------------------------------------
+
+
+class TestScannerRollupRegression:
+    """The rollup zero that result_filters.py republishes as actionable_findings."""
+
+    def test_a_rollup_actionable_of_zero_fails(self, healthy, output_dir):
+        """The exact shape of the defect: initialised, defaulted, never summed."""
+        healthy["scanner_results"]["bandit"]["actionable_finding_count"] = 0
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any(
+            "would conclude this workspace is clean" in v for v in outcome.violations
+        )
+
+    def test_a_rollup_actionable_that_merely_disagrees_fails(self, healthy, output_dir):
+        healthy["scanner_results"]["bandit"]["actionable_finding_count"] += 1
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any(
+            "two views of the same run disagree" in v for v in outcome.violations
+        )
+
+    def test_a_rollup_finding_total_that_disagrees_fails(self, healthy, output_dir):
+        healthy["scanner_results"]["bandit"]["finding_count"] += 5
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any("finding total" in v for v in outcome.violations)
+
+    def test_an_empty_rollup_fails(self, healthy, output_dir):
+        healthy["scanner_results"] = {}
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any("recorded no scanners" in v for v in outcome.violations)
+
+
+class TestLostWorkspacePathRegression:
+    def test_a_counted_unconvertible_path_fails(self, healthy, output_dir):
+        """Every fixture file lives inside its project, so none should be refused."""
+        healthy["workspace"]["unconvertible_finding_paths"] = 2
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any(
+            "could not be given a workspace-relative path" in v
+            for v in outcome.violations
+        )
+
+    def test_a_finding_that_lost_its_path_without_being_counted_fails(
+        self, healthy, output_dir
+    ):
+        """The silent half of the defect: mis-prefixed and not counted.
+
+        This is what made two of the three broken URI shapes invisible -- they
+        produced a workspace_uri that named nothing, or none at all, while the
+        counter stayed at zero.
+        """
+        for run in healthy["sarif"]["runs"]:
+            for entry in run["results"]:
+                entry["properties"].pop("workspace_uri", None)
+        healthy["workspace"]["unconvertible_finding_paths"] = 0
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert any("lost their path silently" in v for v in outcome.violations)
 
 
 class TestStatusAndExitCode:

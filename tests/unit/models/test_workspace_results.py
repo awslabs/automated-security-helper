@@ -97,12 +97,54 @@ class TestWorkspaceExitCode:
             == WorkspaceExitCode.INVALID_PROJECT_CONFIG
         )
 
-    def test_a_failed_project_outranks_findings(self):
-        """A project with no verdict is worse news than a project with a verdict."""
+    def test_findings_outrank_a_failed_project(self):
+        """Reverses an earlier ordering, deliberately.
+
+        This used to assert INTERNAL_ERROR, on the reasoning that "we do not know
+        whether this project is clean" is worse news than "this project is not
+        clean". Sound about severity, wrong about consequence: a CI gate that
+        treats 1 as retryable infrastructure trouble and 2 as blocking would
+        retry a workspace with real findings and never block on them. A finding
+        is a certainty and a failed project is an unknown; an unknown must not
+        suppress a certainty.
+        """
         assert (
             workspace_exit_code([_completed("a", exceeds=True), _failed("b")])
+            == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        )
+
+    def test_a_failed_project_still_shows_when_nothing_exceeded(self):
+        """Reordering must not make a failure invisible when there are no findings."""
+        assert (
+            workspace_exit_code([_completed("a"), _failed("b")])
             == WorkspaceExitCode.INTERNAL_ERROR
         )
+
+    def test_an_invalid_project_config_still_outranks_findings(self):
+        """3 stays on top: both are blocking, and 3 names the project to fix.
+
+        No CI gate retries "invalid configuration", so promoting findings past it
+        would buy nothing that the reversal above buys.
+        """
+        invalid = _failed("b")
+        invalid.invalid_config = True
+        assert (
+            workspace_exit_code([_completed("a", exceeds=True), invalid])
+            == WorkspaceExitCode.INVALID_PROJECT_CONFIG
+        )
+
+    def test_the_failed_project_is_still_disclosed_in_the_payload(self):
+        """The reordering hides the failure from the exit code, not from the file."""
+        results = WorkspaceResults(
+            workspace_file="/w/x.code-workspace",
+            workspace_root="/w",
+            exit_code=WorkspaceExitCode.ACTIONABLE_FINDINGS,
+            projects=[_completed("a", exceeds=True), _failed("b", "scanner blew up")],
+        )
+        payload = results.model_dump(mode="json")
+        failed = [p for p in payload["projects"] if p["status"] == "failed"]
+        assert len(failed) == 1
+        assert failed[0]["error"] == "scanner blew up"
 
     def test_a_no_changes_skip_does_not_colour_the_exit_code(self):
         assert (
@@ -131,10 +173,43 @@ class TestWorkspaceExitCode:
         """Exiting 0 for an empty run reports a clean result for nothing scanned."""
         assert workspace_exit_code([]) == WorkspaceExitCode.WORKSPACE_ERROR
 
-    def test_every_project_skipped_is_a_workspace_error(self):
+    def test_every_project_unchanged_is_success(self):
+        """Reverses an earlier expectation, deliberately.
+
+        This used to assert WORKSPACE_ERROR for any all-skipped workspace, which
+        made a precommit hook fail on a clean no-op: in a monorepo the common case
+        is an edit outside every project directory, so every project skips
+        no-changes. Single-project mode exits 0 for exactly that, and three
+        docstrings in this feature already promised a no-changes skip would not
+        colour the status.
+        """
         assert (
-            workspace_exit_code([_skipped("a", SkippedProjectReason.NO_CHANGES)])
+            workspace_exit_code(
+                [
+                    _skipped("a", SkippedProjectReason.NO_CHANGES),
+                    _skipped("b", SkippedProjectReason.NO_CHANGES),
+                ]
+            )
+            == WorkspaceExitCode.SUCCESS
+        )
+
+    def test_every_project_skipped_by_error_is_a_workspace_error(self):
+        """Nothing was looked at, whatever tolerated it."""
+        assert (
+            workspace_exit_code([_skipped("a", SkippedProjectReason.ERROR)])
             == WorkspaceExitCode.WORKSPACE_ERROR
+        )
+
+    def test_a_mix_of_unchanged_and_tolerated_errors_is_success(self):
+        """At least one project was examined and had nothing to do."""
+        assert (
+            workspace_exit_code(
+                [
+                    _skipped("a", SkippedProjectReason.NO_CHANGES),
+                    _skipped("b", SkippedProjectReason.ERROR),
+                ]
+            )
+            == WorkspaceExitCode.SUCCESS
         )
 
 

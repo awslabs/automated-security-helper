@@ -98,28 +98,46 @@ exit status, which stands on its own.
 
 Precedence in ``workspace_exit_code``, and why it runs in this order
 -------------------------------------------------------------------
-``INVALID_PROJECT_CONFIG`` (3) > ``INTERNAL_ERROR`` (1) >
-``ACTIONABLE_FINDINGS`` (2) > ``SUCCESS`` (0). The order is by how specific the
-diagnosis is, not by how bad the outcome is:
+``INVALID_PROJECT_CONFIG`` (3) > ``ACTIONABLE_FINDINGS`` (2) >
+``INTERNAL_ERROR`` (1) > ``SUCCESS`` (0).
 
-* 3 names a misconfigured project, which is actionable by one person.
-* 1 says a project reached no verdict at all. That outranks findings because
-  "we do not know whether this project is clean" is worse news than "this
-  project is not clean" -- the second is a result, the first is the absence of
-  one.
-* 2 means every project reached a verdict and at least one project exceeded its
-  own effective threshold.
+An earlier ordering put 1 above 2, reasoning that "we do not know whether this
+project is clean" is worse news than "this project is not clean". That is sound
+about severity and wrong about consequence. A CI gate that treats 1 as retryable
+infrastructure trouble and 2 as blocking would retry a workspace that has real
+findings and never block on them -- fail-open, and silently. A finding is a
+certainty; a failed project is an unknown; an unknown must not be allowed to
+suppress a certainty. So findings win, and the failure stays disclosed in the
+payload and through every reporter, which is where an unknown belongs.
+
+3 stays above 2 because both are blocking. No gate retries "invalid
+configuration", so promoting findings past it would buy nothing, and 3 names one
+misconfigured project -- a more specific diagnosis, actionable by one person.
 
 ``WORKSPACE_ERROR`` (4) does not appear in that ordering because it is not a
 verdict over projects. It is returned when nothing was attempted at all, and
 raised as ``WorkspaceDefinitionError`` before execution starts in every other
 case.
 
-A skip recorded by *resolution* -- a missing project tolerated under
-``--allow-missing-projects``, or a project with no changed files -- does not
-affect the status. Failing on the former would make the flag mean nothing, and
-failing on the latter would make the optimisation useless. A project that fails
-during *execution* is ``FAILED``, not skipped, and does affect the status.
+When nothing was attempted, the skip reason decides
+---------------------------------------------------
+A workspace where every project was skipped is not one situation but two, and
+they need opposite answers:
+
+* At least one ``NO_CHANGES`` skip -- ASH asked git what changed and git said
+  nothing. Exit 0. This is the ordinary outcome of a precommit hook in a
+  monorepo when the edit landed outside every project directory, and
+  single-project mode exits 0 for exactly that case. Returning 4 here would fail
+  a clean no-op hook run and make the optimisation worse than not having it.
+* Every skip an ``ERROR`` -- nothing was looked at, whatever tolerated it. Exit
+  4, because exiting 0 would report a clean result for code nothing examined.
+
+A skip recorded by *resolution* alongside projects that did run -- a missing
+project tolerated under ``--allow-missing-projects``, or a project with no
+changed files -- does not affect the status at all. Failing on the former would
+make the flag mean nothing, and failing on the latter would make the
+optimisation useless. A project that fails during *execution* is ``FAILED``, not
+skipped, and does affect the status.
 """
 
 from __future__ import annotations
@@ -431,8 +449,10 @@ class WorkspaceResults(BaseModel):
             0,
             ge=0,
             description=(
-                "Findings whose path could not be expressed in workspace-relative "
-                "coordinates. Counted rather than dropped: dropping a finding "
+                "Number of findings that could not be given a workspace-relative "
+                "path, because every location they offered was absolute and "
+                "outside the project or traversed upward. One per finding, not "
+                "per location. Counted rather than dropped: dropping a finding "
                 "because its path is awkward is a silent false negative."
             ),
         ),
@@ -486,17 +506,42 @@ def workspace_exit_code(
     failed = [entry for entry in entries if entry.status is ProjectRunStatus.FAILED]
 
     if not completed and not failed:
-        # Nothing was attempted. Exiting 0 would report a clean result for a
-        # workspace nothing examined, which in CI reads as a passing scan.
+        # Nothing was attempted, and the reason decides the status.
+        #
+        # A project skipped as NO_CHANGES was examined: ASH asked git what
+        # changed and git said nothing. That is a successful no-op, and it is the
+        # ordinary outcome of a precommit hook in a monorepo where the edit
+        # landed outside every project directory. Single-project mode exits 0 for
+        # exactly this case, so a workspace of unchanged projects must too --
+        # anything else fails a clean hook run and makes the optimisation worse
+        # than not having it.
+        #
+        # A workspace whose every project was skipped by ERROR was never looked
+        # at, whatever tolerated it. Exiting 0 there would report a clean result
+        # for code nothing examined.
+        if any(
+            entry.skip_reason is SkippedProjectReason.NO_CHANGES for entry in entries
+        ):
+            return WorkspaceExitCode.SUCCESS
         return WorkspaceExitCode.WORKSPACE_ERROR
 
     if any(entry.invalid_config for entry in failed):
         return WorkspaceExitCode.INVALID_PROJECT_CONFIG
-    if failed:
-        return WorkspaceExitCode.INTERNAL_ERROR
     if any(entry.exceeds_threshold for entry in completed):
         # ASH's long-standing "actionable findings" status, with the same meaning
         # it has in single-project mode. Named rather than written as 2, so that
         # renumbering the table cannot silently turn this into another code.
+        #
+        # Deliberately ABOVE a failed project, reversing an earlier ordering that
+        # put INTERNAL_ERROR first on the grounds that "we do not know" is worse
+        # news than "we know it is bad". That reasoning was sound about severity
+        # and wrong about consequence: a CI gate that treats 1 as retryable
+        # infrastructure trouble and 2 as blocking would retry a workspace with
+        # real findings and never block on them. A finding is a certainty and a
+        # failed project is an unknown, and an unknown must not suppress a
+        # certainty. The failure stays disclosed in the payload and in every
+        # reporter, which is where an unknown belongs.
         return WorkspaceExitCode.ACTIONABLE_FINDINGS
+    if failed:
+        return WorkspaceExitCode.INTERNAL_ERROR
     return WorkspaceExitCode.SUCCESS

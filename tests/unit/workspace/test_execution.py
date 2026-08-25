@@ -334,6 +334,24 @@ class TestFailureHandling:
         FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
         assert _run(tmp_path, plan).exit_code == WorkspaceExitCode.INTERNAL_ERROR
 
+    def test_a_failing_project_does_not_mask_another_project_findings(self, tmp_path):
+        """A gate that retries 1 as infrastructure trouble would never block.
+
+        The failed project stays disclosed in the payload; what changes is that it
+        no longer decides the exit code when a real finding is present.
+        """
+        _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"), ("dirty", "LOW"))
+        FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
+        FakeOrchestrator.behaviour["dirty"] = {"sarif": _sarif(level="error", count=7)}
+
+        outcome = _run(tmp_path, plan)
+
+        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        statuses = {p.project: p.status for p in outcome.payload.projects}
+        assert statuses["broken"] is ProjectRunStatus.FAILED
+        errors = {p.project: p.error for p in outcome.payload.projects}
+        assert "boom" in (errors["broken"] or "")
+
     def test_the_failure_message_names_the_project(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"))
         FakeOrchestrator.behaviour["broken"] = {
@@ -543,6 +561,36 @@ class TestChangedFilesGate:
         _init_repo(root / "changed", commit_extra=True)
         outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_a_workspace_where_every_project_is_unchanged_exits_zero(
+        self, tmp_path, git_available
+    ):
+        """The precommit no-op, end to end.
+
+        In a monorepo the common case is an edit outside every project directory
+        -- a README at the workspace root -- so every project skips no-changes.
+        This used to exit 4, failing a clean hook run on a workspace where
+        nothing needed scanning. Single-project mode exits 0 for exactly this.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
+        for key in ("api", "web"):
+            _init_repo(root / key, commit_extra=False)
+        # The edit that triggered the hook lands outside every project.
+        (root / "README.md").write_text("docs only\n", encoding="utf-8")
+
+        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+        assert all(
+            p.status is ProjectRunStatus.SKIPPED for p in outcome.payload.projects
+        )
+        assert [e.reason.value for e in outcome.payload.skipped_projects] == [
+            "no-changes",
+            "no-changes",
+        ]
+        assert FakeOrchestrator.built == []
 
     def test_a_changed_project_is_scanned(self, tmp_path, git_available):
         if not git_available:

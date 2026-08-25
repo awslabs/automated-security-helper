@@ -24,10 +24,12 @@ from automated_security_helper.models.workspace import (
     WorkspaceProjectResult,
 )
 from automated_security_helper.workspace.aggregation import (
+    NOT_ABSOLUTE,
     PROJECT_ROOT_URI_BASE_ID,
     WorkspaceAggregator,
     count_actionable_results,
     has_finding_at_min_severity,
+    project_relative_uri,
     project_root_uri,
     rebase_run_for_project,
     to_workspace_uri,
@@ -100,12 +102,28 @@ class TestWorkspaceUriConversion:
     def test_a_nested_project_prefix_is_applied_whole(self):
         assert to_workspace_uri("src/app.py", "apps/web") == "apps/web/src/app.py"
 
-    def test_a_project_rooted_path_does_not_double_the_separator(self):
-        """PurePosixPath('api') / '/src/x' silently discards the prefix."""
-        assert to_workspace_uri("/src/app.py", "api") == "api/src/app.py"
+    def test_a_rooted_uri_is_refused_when_there_is_no_project_path(self):
+        """Reverses an earlier expectation, deliberately.
+
+        This used to assert ``/src/app.py`` -> ``api/src/app.py``, borrowing
+        ``to_workspace_pattern``'s rule that a leading separator means
+        project-rooted. That rule is right for an operator-written pattern and
+        wrong for a scanner-emitted URI, which names a real file that the prefix
+        relocates. With no project path to relativize against, refusing is the
+        only honest answer -- and the caller counts it.
+        """
+        assert to_workspace_uri("/src/app.py", "api") is None
+
+    def test_a_rooted_uri_is_relativized_when_the_project_path_is_known(self):
+        assert (
+            to_workspace_uri("/ws/api/src/app.py", "api", "/ws/api") == "api/src/app.py"
+        )
 
     def test_a_file_scheme_uri_is_unwrapped_before_conversion(self):
-        assert to_workspace_uri("file:///src/app.py", "api") == "api/src/app.py"
+        assert (
+            to_workspace_uri("file:///ws/api/src/app.py", "api", "/ws/api")
+            == "api/src/app.py"
+        )
 
     def test_a_backslash_path_is_normalised(self):
         assert to_workspace_uri("src\\app.py", "api") == "api/src/app.py"
@@ -119,6 +137,91 @@ class TestWorkspaceUriConversion:
 
     def test_an_empty_uri_returns_none(self):
         assert to_workspace_uri("", "api") is None
+
+
+class TestAbsoluteScannerUris:
+    """The shapes real scanners emit, and why prefixing them was wrong.
+
+    ``scripts/verify_external_target_scan.py`` records three different URI shapes
+    from one healthy run. They appear whenever the process working directory
+    differs from ``source_dir``, which in workspace mode it must for all but one
+    project -- so these are the default here, not an edge case.
+
+    Prefixing an absolute path relocates a real file to somewhere that names
+    nothing, and the old code did it silently: two of the three shapes were not
+    even counted as unconvertible, which defeated the counter's whole purpose.
+    """
+
+    PROJECT = "/ws/api"
+
+    @pytest.mark.parametrize(
+        "uri,expected",
+        [
+            # bandit: absolute, rooted.
+            ("/ws/api/src/insecure_app.py", "api/src/insecure_app.py"),
+            # checkov: absolute with the leading separator already stripped
+            # upstream. No leading-separator test can catch this one.
+            ("ws/api/src/insecure_bucket.tf", "api/src/insecure_bucket.tf"),
+            # detect-secrets: relative to the process cwd, which we cannot know.
+            ("../../../../ws/api/src/app.py", None),
+            # The ordinary case, unchanged.
+            ("src/ok.py", "api/src/ok.py"),
+            # Absolute and outside the project: refused, never prefixed.
+            ("/somewhere/else/x.py", None),
+            ("/ws/other-project/x.py", None),
+            # file:// scheme on an absolute path.
+            ("file:///ws/api/src/f.py", "api/src/f.py"),
+            # The project root itself names a directory, not a finding.
+            ("/ws/api", None),
+        ],
+    )
+    def test_the_measured_shapes(self, uri, expected):
+        assert to_workspace_uri(uri, "api", self.PROJECT) == expected
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "C:/ws/api/src/w.py",
+            "/C:/ws/api/src/w.py",
+            "file:///C:/ws/api/src/w.py",
+            "C:\\ws\\api\\src\\w.py",
+        ],
+    )
+    def test_a_windows_project_relativizes_every_drive_spelling(self, uri):
+        """file:///C:/x reduces to /C:/x, so a drive arrives spelled three ways."""
+        assert to_workspace_uri(uri, "api", "C:/ws/api") == "api/src/w.py"
+
+    def test_a_relative_windows_uri_still_converts(self):
+        assert to_workspace_uri("src\\w.py", "api", "C:/ws/api") == "api/src/w.py"
+
+    def test_a_nested_project_prefix_is_applied_after_relativizing(self):
+        assert (
+            to_workspace_uri("/ws/apps/web/src/a.py", "apps/web", "/ws/apps/web")
+            == "apps/web/src/a.py"
+        )
+
+    def test_a_sibling_project_sharing_a_name_prefix_is_not_swallowed(self):
+        """/ws/api-v2 is not inside /ws/api, however similar the text looks."""
+        assert to_workspace_uri("/ws/api-v2/src/a.py", "api", "/ws/api") is None
+
+    def test_project_relative_uri_distinguishes_its_three_answers(self):
+        """None and NOT_ABSOLUTE mean different things and must not be conflated."""
+        assert project_relative_uri("/ws/api/src/a.py", "/ws/api") == "src/a.py"
+        assert project_relative_uri("/elsewhere/a.py", "/ws/api") is None
+        assert project_relative_uri("src/a.py", "/ws/api") is NOT_ABSOLUTE
+
+    def test_the_ambiguous_nesting_is_read_as_absolute(self):
+        """Documented, not accidental.
+
+        A project at /ws/api containing its own path as a subtree -- ws/api/src
+        under /ws/api -- makes a project-relative 'ws/api/src/x.py' textually
+        identical to a separator-stripped absolute one. Resolved in favour of
+        absolute, because that nesting is pathological while checkov's shape is
+        routine. No filesystem check: aggregation must not depend on the tree
+        still being present, and reading the same SARIF twice must not give two
+        answers.
+        """
+        assert project_relative_uri("ws/api/src/x.py", "/ws/api") == "src/x.py"
 
 
 class TestProjectRootUri:
@@ -202,6 +305,81 @@ class TestRebaseRun:
         run, unconvertible = rebase_run_for_project(_run(entry), plan.projects[0])
         assert len(run["results"]) == 1
         assert unconvertible == 0
+
+    def test_an_absolute_uri_is_rewritten_to_project_relative(self, tmp_path):
+        """The run declares one root; every path inside it must be relative to it."""
+        plan = _plan(tmp_path, "api")
+        absolute = (tmp_path / "api" / "src" / "app.py").as_posix()
+        run, unconvertible = rebase_run_for_project(
+            _run(_result(absolute)), plan.projects[0]
+        )
+        artifact = run["results"][0]["locations"][0]["physicalLocation"][
+            "artifactLocation"
+        ]
+        assert artifact["uri"] == "src/app.py"
+        assert artifact["uriBaseId"] == PROJECT_ROOT_URI_BASE_ID
+        assert run["results"][0]["properties"]["workspace_uri"] == "api/src/app.py"
+        assert unconvertible == 0
+
+    def test_an_absolute_uri_outside_the_project_gets_no_uri_base_id(self, tmp_path):
+        """An artifactLocation with both an absolute uri and a base ID is
+        self-contradictory, and GitHub code scanning mis-locates or rejects it."""
+        plan = _plan(tmp_path, "api")
+        outside = (tmp_path / "elsewhere" / "x.py").as_posix()
+        run, unconvertible = rebase_run_for_project(
+            _run(_result(outside)), plan.projects[0]
+        )
+        artifact = run["results"][0]["locations"][0]["physicalLocation"][
+            "artifactLocation"
+        ]
+        assert artifact["uri"] == outside
+        assert "uriBaseId" not in artifact
+        assert "workspace_uri" not in run["results"][0]["properties"]
+        assert unconvertible == 1
+
+    def test_a_relative_uri_still_gets_the_base_id(self, tmp_path):
+        plan = _plan(tmp_path, "api")
+        run, _ = rebase_run_for_project(_run(_result("src/app.py")), plan.projects[0])
+        artifact = run["results"][0]["locations"][0]["physicalLocation"][
+            "artifactLocation"
+        ]
+        assert artifact["uriBaseId"] == PROJECT_ROOT_URI_BASE_ID
+
+    def test_unconvertible_counts_findings_not_locations(self, tmp_path):
+        """One finding with three bad locations is one loss, not three."""
+        plan = _plan(tmp_path, "api")
+        entry = _result("../a.py")
+        physical = entry["locations"][0]["physicalLocation"]
+        entry["locations"] = [
+            {"physicalLocation": {"artifactLocation": {"uri": "../a.py"}}},
+            {"physicalLocation": {"artifactLocation": {"uri": "/gone/b.py"}}},
+            {"physicalLocation": {"artifactLocation": {"uri": "../../c.py"}}},
+        ]
+        assert physical is not None
+        run, unconvertible = rebase_run_for_project(_run(entry), plan.projects[0])
+        assert unconvertible == 1
+        assert "workspace_uri" not in run["results"][0]["properties"]
+
+    def test_a_finding_with_one_good_location_is_not_counted(self, tmp_path):
+        """It has a workspace-relative path, so nothing was lost."""
+        plan = _plan(tmp_path, "api")
+        entry = _result("../a.py")
+        entry["locations"] = [
+            {"physicalLocation": {"artifactLocation": {"uri": "../a.py"}}},
+            {"physicalLocation": {"artifactLocation": {"uri": "C:/b.py"}}},
+            {"physicalLocation": {"artifactLocation": {"uri": "src/c.py"}}},
+        ]
+        run, unconvertible = rebase_run_for_project(_run(entry), plan.projects[0])
+        assert unconvertible == 0
+        assert run["results"][0]["properties"]["workspace_uri"] == "api/src/c.py"
+
+    def test_two_bad_findings_count_twice(self, tmp_path):
+        """Per-finding, not per-run: the counter still scales with real losses."""
+        plan = _plan(tmp_path, "api")
+        run, unconvertible = rebase_run_for_project(
+            _run(_result("../a.py"), _result("../b.py")), plan.projects[0]
+        )
+        assert unconvertible == 2
 
     def test_the_input_run_is_not_mutated(self, tmp_path):
         """The caller may still be holding the model this dict came from."""
@@ -513,6 +691,125 @@ class TestAggregatorOutput:
         path = aggregator.write(exit_code=0, wall_clock_seconds=1.0)
         parsed = json.loads(path.read_text(encoding="utf-8"))
         assert parsed["scanner_results"]["bandit"]["finding_count"] == 3
+
+    def test_scanner_results_sums_actionable_across_projects(self, tmp_path):
+        """The rollup's actionable count was hardcoded to zero by construction.
+
+        ``core/resource_management/result_filters.py`` reads this key and
+        republishes it as ``actionable_findings``, so a zero here tells a consumer
+        that a workspace with real findings has none -- fail-open, with the
+        correct value two keys away in the same file.
+        """
+        plan = _plan(tmp_path, "api", "web")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        aggregator.add(
+            self._outcome(
+                "api", scanners={"bandit": "FAILED"}, actionable_finding_count=2
+            ),
+            _run(_result(), _result("src/two.py")),
+            plan.projects[0],
+        )
+        aggregator.add(
+            self._outcome(
+                "web", scanners={"bandit": "FAILED"}, actionable_finding_count=1
+            ),
+            _run(_result()),
+            plan.projects[1],
+        )
+        parsed = json.loads(
+            aggregator.write(exit_code=2, wall_clock_seconds=1.0).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert parsed["scanner_results"]["bandit"]["actionable_finding_count"] == 3
+
+    def test_the_rollup_total_equals_the_sum_of_the_per_project_totals(self, tmp_path):
+        """The invariant that makes the rollup safe to read at all."""
+        plan = _plan(tmp_path, "api", "web")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        for index, key in enumerate(("api", "web")):
+            results = [_result(), _result("src/two.py", scanner="checkov")]
+            actionable = count_actionable_results(
+                results, plan.projects[index].severity_threshold
+            )
+            aggregator.add(
+                self._outcome(
+                    key,
+                    scanners={"bandit": "FAILED", "checkov": "FAILED"},
+                    actionable_finding_count=actionable,
+                ),
+                _run(*results),
+                plan.projects[index],
+            )
+        parsed = json.loads(
+            aggregator.write(exit_code=2, wall_clock_seconds=1.0).read_text(
+                encoding="utf-8"
+            )
+        )
+        rollup = sum(
+            entry["actionable_finding_count"]
+            for entry in parsed["scanner_results"].values()
+        )
+        per_project = sum(
+            entry["actionable_finding_count"]
+            for entry in parsed["workspace"]["projects"]
+        )
+        assert rollup == per_project
+
+    def test_a_project_whose_actionable_count_is_zero_contributes_zero(self, tmp_path):
+        """This is how the --min-severity gate reaches the rollup.
+
+        That gate is a whole-scan switch in ``_compute_exit_code``, not a
+        per-finding filter, so the aggregator cannot re-derive it. Taking the
+        project's own zero as authoritative keeps the rollup from exceeding the
+        per-project total.
+        """
+        plan = _plan(tmp_path, "api")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        aggregator.add(
+            self._outcome(
+                "api", scanners={"bandit": "PASSED"}, actionable_finding_count=0
+            ),
+            _run(_result(level="error"), _result("src/two.py", level="error")),
+            plan.projects[0],
+        )
+        parsed = json.loads(
+            aggregator.write(exit_code=0, wall_clock_seconds=1.0).read_text(
+                encoding="utf-8"
+            )
+        )
+        entry = parsed["scanner_results"]["bandit"]
+        assert entry["actionable_finding_count"] == 0
+        assert entry["finding_count"] == 2
+
+    def test_actionable_is_judged_against_each_project_own_threshold(self, tmp_path):
+        """A looser project contributes less from identical findings."""
+        plan = _plan(tmp_path, "strict", "lax")
+        plan.projects[0].severity_threshold = "LOW"
+        plan.projects[1].severity_threshold = "CRITICAL"
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        for index, key in enumerate(("strict", "lax")):
+            results = [_result(level="warning")]
+            actionable = count_actionable_results(
+                results, plan.projects[index].severity_threshold
+            )
+            aggregator.add(
+                self._outcome(
+                    key,
+                    scanners={"bandit": "FAILED"},
+                    actionable_finding_count=actionable,
+                ),
+                _run(*results),
+                plan.projects[index],
+            )
+        parsed = json.loads(
+            aggregator.write(exit_code=2, wall_clock_seconds=1.0).read_text(
+                encoding="utf-8"
+            )
+        )
+        # strict contributes 1 at LOW, lax contributes 0 at CRITICAL.
+        assert parsed["scanner_results"]["bandit"]["actionable_finding_count"] == 1
+        assert parsed["scanner_results"]["bandit"]["finding_count"] == 2
 
     def test_scanner_results_takes_the_worst_status(self, tmp_path):
         plan = _plan(tmp_path, "api", "web")
