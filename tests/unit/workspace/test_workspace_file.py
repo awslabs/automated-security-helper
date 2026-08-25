@@ -110,7 +110,7 @@ def test_workspace_file_is_read_as_utf8(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Malformed definitions -- every one of these is exit code 2
+# Malformed definitions -- every one of these is exit code 4
 # ---------------------------------------------------------------------------
 
 
@@ -195,7 +195,7 @@ def test_folder_entry_containing_a_null_character_is_rejected(tmp_path, entry):
     A null byte reaches ``os.lstat`` and raises ValueError, whose message differs
     between Python versions ("embedded null byte" on 3.10, "lstat: embedded null
     character in path" on 3.13). Letting it through would turn a malformed
-    workspace file into an unhandled exception and exit 1 rather than exit 2, and
+    workspace file into an unhandled exception and exit 1 rather than exit 4, and
     would do it with a version-dependent message.
     """
     path = _write(tmp_path, {"folders": [{"path": entry}]})

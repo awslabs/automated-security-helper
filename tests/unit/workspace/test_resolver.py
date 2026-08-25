@@ -523,12 +523,12 @@ def test_malformed_workspace_file_is_refused(tmp_path):
 
 
 def test_a_null_character_entry_is_a_workspace_error_not_a_value_error(tmp_path):
-    """Exit 2, on every supported Python version.
+    """Exit 4, on every supported Python version.
 
     Left to pathlib this raised an uncaught ValueError, which the CLI does not
     catch -- so a malformed workspace file produced a traceback and exit 1
-    instead of the fail-closed exit 2, with a message that differed between 3.10
-    and 3.13.
+    instead of the fail-closed workspace-error code, with a message that
+    differed between 3.10 and 3.13.
     """
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api", "bad\x00entry"])
@@ -544,7 +544,7 @@ def test_an_unexpected_path_error_is_reported_as_a_workspace_error(
 
     Folder entries are untrusted text handed to pathlib, and pathlib's set of
     refusals has changed between supported Python versions. Any surprise from
-    the containment check has to land on exit 2 naming the entry, rather than as
+    the containment check has to land on exit 4 naming the entry, rather than as
     a traceback and exit 1.
     """
     _project(tmp_path, "api")

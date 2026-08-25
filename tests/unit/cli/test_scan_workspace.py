@@ -7,8 +7,13 @@ Phase 1 resolves and validates; it never scans. These tests assert that from
 the outside -- by checking that the scan entry point is not reached and that no
 output directory appears -- rather than by reading the implementation.
 
-Exit codes come from ``models.workspace.WorkspaceExitCode``: 2 for a workspace
-definition or policy error, 3 for a project whose own config is invalid.
+Exit codes come from ``models.workspace.WorkspaceExitCode``: 4 for a workspace
+definition or policy error, 3 for a project whose own config is invalid. Every
+assertion below names the enum member rather than the integer, so a test cannot
+keep passing while meaning the wrong thing if the contract moves again -- which
+it already has once, from 2 to 4. The one place the literal value is pinned is
+``test_a_workspace_error_is_not_the_findings_exit_code``, which exists to catch
+the specific regression of collapsing 4 back onto 2.
 """
 
 import json
@@ -82,6 +87,36 @@ def _all_output(result, capsys):
     """
     captured = capsys.readouterr()
     return result.output + captured.out + captured.err
+
+
+# ---------------------------------------------------------------------------
+# The exit-code contract itself
+# ---------------------------------------------------------------------------
+
+
+def test_a_workspace_error_is_not_the_findings_exit_code(tmp_path, no_scan):
+    """The one place in this file that pins the literal value.
+
+    Everything else names the enum member, which is what keeps those tests
+    meaningful if the contract moves. But an enum-only assertion cannot catch the
+    specific regression this code exists to prevent: collapsing the
+    workspace-error code back onto 2. Exit 2 means a scan ran and found
+    actionable findings; a workspace refusal means nothing was scanned at all. A
+    CI job reading 2 as "review the findings" would treat a workspace that never
+    ran as a successful scan with issues, which is fail-open.
+
+    Asserted through the real CLI rather than off the enum, so it covers the
+    value the process actually returns.
+    """
+    workspace = tmp_path / "dev.code-workspace"
+    workspace.write_text(json.dumps({"folders": []}), encoding="utf-8")
+
+    result = _invoke("--workspace", str(workspace), "--dry-run")
+
+    assert result.exit_code == 4
+    assert result.exit_code != WorkspaceExitCode.ACTIONABLE_FINDINGS
+    assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
+    assert not no_scan
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +206,11 @@ def test_a_file_literally_named_auto_is_still_treated_as_discovery(
 
 
 # ---------------------------------------------------------------------------
-# 1. and 12. Fail-closed definition errors surface as exit 2
+# 1. and 12. Fail-closed definition errors surface as exit 4
 # ---------------------------------------------------------------------------
 
 
-def test_missing_project_exits_two_and_names_the_path(tmp_path, no_scan):
+def test_missing_project_is_a_workspace_error_and_names_the_path(tmp_path, no_scan):
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api", "not-cloned-yet"])
 
@@ -200,7 +235,7 @@ def test_allow_missing_projects_opts_out_and_discloses_the_skip(tmp_path, no_sca
     assert not no_scan
 
 
-def test_empty_folders_list_exits_two(tmp_path, no_scan):
+def test_empty_folders_list_is_a_workspace_error(tmp_path, no_scan):
     workspace = tmp_path / "dev.code-workspace"
     workspace.write_text(json.dumps({"folders": []}), encoding="utf-8")
 
@@ -210,7 +245,7 @@ def test_empty_folders_list_exits_two(tmp_path, no_scan):
     assert not no_scan
 
 
-def test_malformed_workspace_file_exits_two(tmp_path, no_scan):
+def test_malformed_workspace_file_is_a_workspace_error(tmp_path, no_scan):
     workspace = tmp_path / "dev.code-workspace"
     workspace.write_text("{not json", encoding="utf-8")
 
@@ -220,7 +255,7 @@ def test_malformed_workspace_file_exits_two(tmp_path, no_scan):
     assert not no_scan
 
 
-def test_a_null_character_folder_entry_exits_two(tmp_path, no_scan):
+def test_a_null_character_folder_entry_is_a_workspace_error(tmp_path, no_scan):
     """Not exit 1 with a traceback, which is what pathlib's ValueError produced."""
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api", "bad\x00entry"])
@@ -231,14 +266,14 @@ def test_a_null_character_folder_entry_exits_two(tmp_path, no_scan):
     assert not no_scan
 
 
-def test_absent_workspace_file_exits_two(tmp_path, no_scan):
+def test_absent_workspace_file_is_a_workspace_error(tmp_path, no_scan):
     result = _invoke("--workspace", str(tmp_path / "gone.code-workspace"), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
     assert not no_scan
 
 
-def test_incompatible_scanner_pins_exit_two(tmp_path, no_scan):
+def test_incompatible_scanner_pins_are_a_workspace_error(tmp_path, no_scan):
     _project(
         tmp_path,
         "api",
@@ -258,8 +293,11 @@ def test_incompatible_scanner_pins_exit_two(tmp_path, no_scan):
     assert not no_scan
 
 
-def test_an_invalid_project_config_exits_three(tmp_path, no_scan, capsys):
-    """A distinct code, because it routes to a different person than exit 2."""
+def test_an_invalid_project_config_is_an_invalid_config_error(
+    tmp_path, no_scan, capsys
+):
+    """A distinct code, because it routes to a different person than a
+    workspace definition error: the workspace is fine, one project is not."""
     _project(tmp_path, "api", "project_name: api\nglobal_settings: 7\n")
     workspace = _workspace(tmp_path, ["api"])
 
