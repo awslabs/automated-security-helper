@@ -436,6 +436,17 @@ class WorkspaceResults(BaseModel):
         ),
     ] = 0
 
+    refusal_detail: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "Why the workspace was refused, for status='refused'. Null for a "
+                "run that scanned anything."
+            ),
+        ),
+    ] = None
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def skipped_projects(self) -> List[SkippedProject]:
