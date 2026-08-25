@@ -264,7 +264,7 @@ class TestPerProjectThresholds:
         entry = outcome.payload.projects[0]
         assert entry.actionable_finding_count == 1
         assert entry.exceeds_threshold is True
-        assert outcome.exit_code == 2
+        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
 
     def test_two_projects_are_judged_against_their_own_thresholds(self, tmp_path):
         """The whole point of per-project scoping, on one identical finding."""
@@ -281,7 +281,11 @@ class TestPerProjectThresholds:
         _, plan = _make_workspace(tmp_path, ("strict", "LOW"), ("lax", "CRITICAL"))
         FakeOrchestrator.behaviour["strict"] = {"sarif": _sarif(level="warning")}
         FakeOrchestrator.behaviour["lax"] = {"sarif": _sarif(level="warning")}
-        assert _run(tmp_path, plan).exit_code == 2
+        outcome = _run(tmp_path, plan)
+        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        # Asserted against the member, not the integer: a findings verdict and a
+        # workspace definition error are different codes and must stay different.
+        assert outcome.exit_code != WorkspaceExitCode.WORKSPACE_ERROR
 
     def test_fail_on_findings_off_records_findings_without_failing(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "LOW"))

@@ -61,6 +61,14 @@ the scripts, the tests and the CI workflows before it was chosen.
 every value here agrees semantically with ``ASH_EXIT_CODES`` -- so changing
 either side fails the suite.
 
+One rejected alternative is worth naming, because a field survives from it.
+Leaving the collision in place and disambiguating out of band -- via a status
+field in the payload, and via the fact that a refused workspace writes no
+results file -- does work, but it makes a consumer parse output before it can
+interpret the status, and an exit code exists to be readable before that.
+``WorkspaceResults.status`` remains as ordinary metadata: it still says plainly
+whether any project ran, but nothing depends on it to tell two exit codes apart.
+
 Note that ASH_EXIT_CODES' own code 1 is partly aspirational: a scanner at ERROR
 does not produce exit 1 today, because ``_compute_exit_code`` returns 1 only
 when ``results is None``. That happens to make it a good match for a
@@ -77,33 +85,22 @@ would let a broken project masquerade as an unchanged one -- a silent
 false-negative in a security tool, which is the failure mode most worth
 designing against.
 
-The results payload, and living with the collision at code 2
-------------------------------------------------------------
+The results payload
+-------------------
 ``WorkspaceResults`` is what a workspace scan writes into
 ``ash_aggregated_results.json`` under the ``workspace`` key, and
-``workspace_exit_code`` derives the process status from it. Phase 2a does not
-resolve the code-2 collision described above -- renumbering a published contract
-is not a decision to make silently -- so it supplies a discriminator instead.
-Two independent ones, in fact, because they fail in different directions:
-
-1. ``WorkspaceResults.status`` is ``"refused"`` when the workspace definition or
-   a workspace-level policy was rejected and nothing ran, and ``"completed"``
-   when projects were scanned. A consumer reading the results file can always
-   tell the two apart, whatever the exit code says.
-2. A refused workspace writes no results file at all. So a caller that only has
-   the exit status still has a reliable test: exit 2 with a results file means
-   findings, exit 2 without one means the workspace was rejected. This is the
-   same discriminator ``scripts/verify_external_target_scan.py`` already relies
-   on for Typer's UsageError, which is also 2.
-
-Neither is as good as distinct numbers. Both are better than an ambiguity with
-no way out, and both survive the eventual renumbering.
+``workspace_exit_code`` derives the process status from it. ``status`` says
+whether any project ran -- ``"refused"`` when the definition or a
+workspace-level policy was rejected, ``"completed"`` otherwise -- and
+``refusal_detail`` carries the reason for a refusal. Both are ordinary metadata:
+useful for a consumer that has the file open, not load-bearing for reading the
+exit status, which stands on its own.
 
 Precedence in ``workspace_exit_code``, and why it runs in this order
 -------------------------------------------------------------------
-``INVALID_PROJECT_CONFIG`` (3) > ``INTERNAL_ERROR`` (1) > findings (2) > success
-(0). The order is by how specific the diagnosis is, not by how bad the outcome
-is:
+``INVALID_PROJECT_CONFIG`` (3) > ``INTERNAL_ERROR`` (1) >
+``ACTIONABLE_FINDINGS`` (2) > ``SUCCESS`` (0). The order is by how specific the
+diagnosis is, not by how bad the outcome is:
 
 * 3 names a misconfigured project, which is actionable by one person.
 * 1 says a project reached no verdict at all. That outranks findings because
@@ -112,6 +109,11 @@ is:
   one.
 * 2 means every project reached a verdict and at least one project exceeded its
   own effective threshold.
+
+``WORKSPACE_ERROR`` (4) does not appear in that ordering because it is not a
+verdict over projects. It is returned when nothing was attempted at all, and
+raised as ``WorkspaceDefinitionError`` before execution starts in every other
+case.
 
 A skip recorded by *resolution* -- a missing project tolerated under
 ``--allow-missing-projects``, or a project with no changed files -- does not
@@ -471,9 +473,10 @@ def workspace_exit_code(
         projects: Every project in the run, skipped ones included.
 
     Returns:
-        The contract code. Note that findings above threshold return the integer
-        2, which is ``WORKSPACE_ERROR``'s value -- the collision Phase 0
-        recorded. ``WorkspaceResults.status`` distinguishes them.
+        The contract code, always as an enum member rather than a literal, so
+        that a future renumbering cannot leave a stale integer behind. Never
+        returns ``WORKSPACE_ERROR`` except for the nothing-was-attempted case;
+        every other definition or policy failure is raised before execution.
     """
     entries = list(projects)
 
@@ -492,8 +495,8 @@ def workspace_exit_code(
     if failed:
         return WorkspaceExitCode.INTERNAL_ERROR
     if any(entry.exceeds_threshold for entry in completed):
-        # ASH's long-standing "actionable findings" status. Deliberately the same
-        # integer as WORKSPACE_ERROR; the payload's `status` field is what tells
-        # a consumer which of the two this is.
-        return WorkspaceExitCode(2)
+        # ASH's long-standing "actionable findings" status, with the same meaning
+        # it has in single-project mode. Named rather than written as 2, so that
+        # renumbering the table cannot silently turn this into another code.
+        return WorkspaceExitCode.ACTIONABLE_FINDINGS
     return WorkspaceExitCode.SUCCESS

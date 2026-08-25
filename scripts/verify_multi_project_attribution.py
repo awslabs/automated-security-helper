@@ -99,17 +99,21 @@ STATUS_ERROR = "ERROR"
 STATUS_MISSING = "MISSING"
 STATUS_SKIPPED = "SKIPPED"
 
-# Workspace exit codes: 0 success, 1 internal error, 2 either a definition error
-# or actionable findings, 3 invalid project config. The fixture is built to
-# produce actionable findings in project-a and project-b, so 2 is expected, and 0
-# is tolerated in case a future default turns fail_on_findings off.
+# Workspace exit codes: 0 success, 1 internal error, 2 actionable findings above
+# threshold, 3 invalid project config, 4 workspace definition or policy error.
+# The fixture is built to produce actionable findings in project-a and project-b,
+# so 2 is expected, and 0 is tolerated in case a future default turns
+# fail_on_findings off.
 #
-# 2 is ambiguous by design -- see automated_security_helper/models/workspace.py.
-# The gate disambiguates it the way that module documents: a refused workspace
-# writes no results file, so reaching the assertions at all means this 2 is
-# findings. check_workspace_status() then reads the payload's own status field as
-# the second, independent check.
+# Tolerating 2 is safe precisely because the definition error is 4. Were they the
+# same number, this tuple would silently accept a workspace that resolved to
+# nothing -- the gate would pass having scanned no projects at all.
+# check_workspace_status() still cross-checks the payload's own status and
+# exit_code, so a drift on either side surfaces rather than being tolerated.
 TOLERATED_EXIT_CODES = (0, 2)
+
+#: What a refused workspace exits with. Never tolerated: it means no project ran.
+WORKSPACE_ERROR_EXIT_CODE = 4
 
 JOB_TIMEOUT_BUDGET_SECONDS = 1500.0
 DEFAULT_SCAN_TIMEOUT_SECONDS = 1200.0
@@ -901,6 +905,13 @@ def check_findings_are_from_the_fixture(
 def check_exit_code(exit_code: int) -> List[str]:
     if exit_code in TOLERATED_EXIT_CODES:
         return []
+    if exit_code == WORKSPACE_ERROR_EXIT_CODE:
+        return [
+            f"the workspace scan exited {exit_code} -- a workspace definition or "
+            "policy error, meaning no project was scanned. The generated fixture "
+            "should always resolve, so this points at the fixture or at "
+            "resolution, not at the projects"
+        ]
     return [
         f"the workspace scan exited {exit_code}; expected one of "
         f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "

@@ -67,9 +67,19 @@ class TestWorkspaceExitCode:
             == WorkspaceExitCode.SUCCESS
         )
 
-    def test_a_project_over_its_threshold_is_not_success(self):
+    def test_a_project_over_its_threshold_is_actionable_findings(self):
+        """ASH's own code 2, with the same meaning as in single-project mode."""
         assert (
-            workspace_exit_code([_completed("a"), _completed("b", exceeds=True)]) != 0
+            workspace_exit_code([_completed("a"), _completed("b", exceeds=True)])
+            == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        )
+
+    def test_findings_are_not_reported_as_a_workspace_error(self):
+        """The two must never converge. A malformed workspace file scanned
+        nothing; a project over threshold was scanned and failed."""
+        assert (
+            workspace_exit_code([_completed("b", exceeds=True)])
+            != WorkspaceExitCode.WORKSPACE_ERROR
         )
 
     def test_a_failed_project_is_an_internal_error(self):
@@ -153,23 +163,32 @@ class TestWorkspaceResultsPayload:
         )
         assert "skipped_projects" in results.model_dump(mode="json")
 
-    def test_status_discriminates_a_refusal_from_a_completed_scan(self):
-        """The whole point: exit 2 alone cannot tell these apart."""
+    def test_a_refusal_and_a_findings_verdict_differ_in_code_and_in_status(self):
+        """Both, independently.
+
+        The exit code alone is now sufficient -- 4 for a refusal, 2 for findings
+        -- which is the point of giving the definition error its own number. The
+        status field still says the same thing in the payload, for a consumer
+        that has the file open. This asserts both so a regression that collapses
+        the codes back together cannot hide behind the status field.
+        """
         refused = WorkspaceResults(
             workspace_file="/w/x.code-workspace",
             workspace_root="/w",
             exit_code=WorkspaceExitCode.WORKSPACE_ERROR,
             status="refused",
+            refusal_detail="folders list is empty",
         )
         found = WorkspaceResults(
             workspace_file="/w/x.code-workspace",
             workspace_root="/w",
-            exit_code=2,
+            exit_code=WorkspaceExitCode.ACTIONABLE_FINDINGS,
             status="completed",
             projects=[_completed("a", exceeds=True)],
         )
-        assert refused.exit_code == found.exit_code
+        assert refused.exit_code != found.exit_code
         assert refused.status != found.status
+        assert refused.refusal_detail and found.refusal_detail is None
 
     def test_status_defaults_to_completed(self):
         results = WorkspaceResults(
