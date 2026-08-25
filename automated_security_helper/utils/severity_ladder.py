@@ -10,8 +10,33 @@ apart: ``ScanResultsContainer.determine_status`` (severity counts), the
 junitxml reporter (SARIF levels, missing two of the five threshold values),
 and two tables inside ``run_ash_scan._compute_exit_code``. A finding could
 therefore be counted as gate-failing by the exit code and reported as a
-passing test in the same run. Everything that answers "does this finding fail
-the gate?" now routes through here so those answers cannot disagree.
+passing test in the same run.
+
+Phase 0 unifies TWO of those four. ``determine_status`` and the junitxml
+reporter now both call this module. The two tables inside
+``_compute_exit_code`` -- ``_THRESHOLD_QUALIFYING_LEVELS`` at
+run_ash_scan.py:528 and the rank pair at run_ash_scan.py:538-543 -- are still
+inline and are NOT consumed from here, so this is not yet the single source of
+truth for the whole codebase. Converting them means touching the exit-code
+path, which is out of scope for a phase that ships no user-visible change.
+
+The remaining two agree with this module for all five real threshold values,
+which is why nothing is currently broken. They diverge only off-table, and both
+divergences are latent because ``global_settings.severity_threshold`` is a
+``Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]`` that cannot hold an
+off-table value:
+
+* An unrecognised threshold gates ``{error}`` here (CRITICAL, matching the
+  historical ``determine_status`` cascade) but ``{"error", "warning"}`` at
+  run_ash_scan.py:536, and rank 4 here against ``.get(..., 2)`` at
+  run_ash_scan.py:544 -- MEDIUM.
+* run_ash_scan.py:525 calls ``.upper()`` on the configured value; this module is
+  case-sensitive, for the reason in "Failure modes" below.
+
+If either table is ever fed a value from outside that Literal -- a
+workspace-level per-project threshold would do it -- the two paths will disagree
+before anyone notices, because the disagreement is silent: the exit code and the
+report simply describe different runs.
 
 The direction is counter-intuitive: RAISING the threshold LOOSENS the gate
 ------------------------------------------------------------------------

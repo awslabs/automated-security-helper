@@ -26,9 +26,18 @@ The checks, and why each one is separate
    outside the root.
 3. The candidate itself must not be a symlink. This cannot be folded into the
    containment check: a symlink pointing at a sibling *inside* the root
-   resolves to a contained path and would otherwise be accepted, which would
-   let a workspace definition scan the same tree twice under two names, or
-   follow a link whose target changes between validation and use.
+   resolves to a contained path and would otherwise be accepted, so the
+   containment check alone would not reject it.
+
+   Note what this does NOT do. Only the final component is tested, via
+   ``joined.is_symlink()``. With ``aliasdir`` linked to ``api``, the candidate
+   ``aliasdir/sub`` is ACCEPTED and resolves to the same real path as
+   ``api/sub`` -- so this check does not stop a workspace definition from
+   scanning one tree twice under two names. That is deliberate: the RFC
+   requires only that the entry itself be rejected. Aliasing is a different
+   property and is caught separately, by overlap detection comparing the
+   canonicalised real paths of all accepted projects against each other. The
+   ``resolved`` field returned here is exactly the input that check needs.
 4. Containment is decided by ``Path.is_relative_to``, which compares path
    components. The root itself is accepted -- "at-or-below" includes "at".
 5. Existence and directory-ness are checked only when ``must_exist=True``.
