@@ -218,6 +218,78 @@ class _ProjectRun:
     run: Optional[Dict[str, Any]] = None
 
 
+def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) -> int:
+    """Register every plugin the workspace needs, once, before any project starts.
+
+    Why this has to happen up front
+    -------------------------------
+    ``ScanExecutionEngine.__init__`` registers a project's ``ash_plugin_modules``
+    into the module-level ``plugin_library`` and then reads the scanner set back
+    through ``ash_plugin_manager.plugin_modules()``, which memoises into
+    ``_resolved_plugins``. Whichever project builds its engine first therefore
+    freezes the scanner class list for the whole run. Measured before this
+    existed, on two real projects where only one declared an external plugin:
+    scanning the non-declaring project first made the declaring project LOSE its
+    own scanner, and the other order gave the non-declaring project one it never
+    asked for. Neither order was correct, at every value of
+    ``max_parallel_projects`` -- concurrency only randomises which project is
+    wrong.
+
+    Resolution has already refused any workspace whose projects ask for different
+    module sets (see ``resolver._validate_plugin_modules``), so there is exactly
+    one correct set and registering it here is correct for every project. Doing it
+    before the pool starts also removes the ordering nondeterminism entirely, and
+    with it the concurrent-registration race in ``plugin_modules``: that function
+    iterates ``plugin_library.scanners`` doing imports inside the loop, and a
+    second thread registering a new key mid-iteration raises
+    ``RuntimeError: dictionary changed size during iteration``, which surfaces as
+    a spurious failed project.
+
+    This does not change *which* scanners run for a project. Registration and
+    selection are separate mechanisms: this fills the registry, and each
+    project's own config still decides enablement through
+    ``ScanPhase._execute_phase``'s ``config.enabled`` and enabled/excluded
+    filtering. A project that disables a scanner still skips it.
+
+    Returns:
+        How many scanner classes the registry resolved to, for logging. Zero
+        means plugin discovery found nothing, which is worth seeing in a log
+        rather than discovering later as an empty scan.
+    """
+    from automated_security_helper.plugins import ash_plugin_manager
+    from automated_security_helper.plugins.discovery import discover_plugins
+    from automated_security_helper.plugins.loader import (
+        load_additional_plugin_modules,
+        load_internal_plugins,
+    )
+
+    load_internal_plugins()
+
+    # Every active project has the same list by now, so the first one speaks for
+    # all of them; settings may add more from the CLI.
+    declared: Set[str] = set(settings.ash_plugin_modules)
+    for project in plan.active_projects:
+        declared.update(project.ash_plugin_modules)
+    modules = sorted(declared)
+
+    if modules:
+        ASH_LOGGER.info(f"Loading workspace plugin modules: {modules}")
+        load_additional_plugin_modules(modules)
+        discover_plugins(plugin_modules=modules)
+
+    # Resolve once so the memoised list is complete and identical for every
+    # project, rather than whatever the first project happened to see.
+    resolved = 0
+    for plugin_type in ("converter", "scanner", "reporter"):
+        found = ash_plugin_manager.plugin_modules(plugin_type)
+        if plugin_type == "scanner":
+            resolved = len(found)
+    ASH_LOGGER.verbose(
+        f"Workspace plugin registry pre-warmed with {resolved} scanner class(es)"
+    )
+    return resolved
+
+
 def _project_output_dir(settings: ProjectScanSettings, project: ProjectPlan) -> Path:
     """Where one project's own output subtree lives.
 
@@ -564,6 +636,10 @@ def execute_workspace(
     # because that is the knob the operator set. How much parallelism actually
     # happened is min(that, len(projects)), and both numbers are in the payload.
     configured_bound = max(1, settings.max_parallel_projects)
+    # Before the pool, never inside it: the registry is process-global and the
+    # first project to touch it would otherwise freeze the scanner set for all.
+    prewarm_plugin_registry(plan, settings)
+
     bound = min(configured_bound, len(active) or 1)
     ASH_LOGGER.info(
         f"Scanning {len(active)} workspace project(s), "

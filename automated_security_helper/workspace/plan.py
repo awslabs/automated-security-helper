@@ -175,6 +175,19 @@ class ProjectPlan(BaseModel):
             ),
         ),
     ]
+    ash_plugin_modules: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "Python modules this project's config asks ASH to import for "
+                "extra plugins, sorted. Carried on the plan because plugin "
+                "registration is process-global: two projects wanting different "
+                "sets cannot both be honoured in one run, so the resolver has to "
+                "compare them before anything is scanned."
+            ),
+        ),
+    ]
     skipped: Annotated[
         bool,
         Field(
