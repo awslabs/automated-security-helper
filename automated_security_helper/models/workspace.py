@@ -76,14 +76,56 @@ means a project the operator asked for was not scanned. Collapsing the two
 would let a broken project masquerade as an unchanged one -- a silent
 false-negative in a security tool, which is the failure mode most worth
 designing against.
+
+The results payload, and living with the collision at code 2
+------------------------------------------------------------
+``WorkspaceResults`` is what a workspace scan writes into
+``ash_aggregated_results.json`` under the ``workspace`` key, and
+``workspace_exit_code`` derives the process status from it. Phase 2a does not
+resolve the code-2 collision described above -- renumbering a published contract
+is not a decision to make silently -- so it supplies a discriminator instead.
+Two independent ones, in fact, because they fail in different directions:
+
+1. ``WorkspaceResults.status`` is ``"refused"`` when the workspace definition or
+   a workspace-level policy was rejected and nothing ran, and ``"completed"``
+   when projects were scanned. A consumer reading the results file can always
+   tell the two apart, whatever the exit code says.
+2. A refused workspace writes no results file at all. So a caller that only has
+   the exit status still has a reliable test: exit 2 with a results file means
+   findings, exit 2 without one means the workspace was rejected. This is the
+   same discriminator ``scripts/verify_external_target_scan.py`` already relies
+   on for Typer's UsageError, which is also 2.
+
+Neither is as good as distinct numbers. Both are better than an ambiguity with
+no way out, and both survive the eventual renumbering.
+
+Precedence in ``workspace_exit_code``, and why it runs in this order
+-------------------------------------------------------------------
+``INVALID_PROJECT_CONFIG`` (3) > ``INTERNAL_ERROR`` (1) > findings (2) > success
+(0). The order is by how specific the diagnosis is, not by how bad the outcome
+is:
+
+* 3 names a misconfigured project, which is actionable by one person.
+* 1 says a project reached no verdict at all. That outranks findings because
+  "we do not know whether this project is clean" is worse news than "this
+  project is not clean" -- the second is a result, the first is the absence of
+  one.
+* 2 means every project reached a verdict and at least one project exceeded its
+  own effective threshold.
+
+A skip recorded by *resolution* -- a missing project tolerated under
+``--allow-missing-projects``, or a project with no changed files -- does not
+affect the status. Failing on the former would make the flag mean nothing, and
+failing on the latter would make the optimisation useless. A project that fails
+during *execution* is ``FAILED``, not skipped, and does affect the status.
 """
 
 from __future__ import annotations
 
 from enum import Enum, IntEnum
-from typing import Annotated, Dict, Optional
+from typing import Annotated, Dict, Iterable, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class WorkspaceExitCode(IntEnum):
@@ -170,3 +212,277 @@ class SkippedProject(BaseModel):
     def is_error(self) -> bool:
         """True when this skip represents a failure rather than an optimisation."""
         return self.reason.is_error
+
+
+class ProjectRunStatus(str, Enum):
+    """What became of one project once execution started.
+
+    ``SKIPPED`` covers both skip reasons and carries ``skip_reason`` to say
+    which; ``FAILED`` is reserved for a project that was attempted and produced
+    no verdict, which is the only one of the three that fails the workspace.
+    """
+
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+class WorkspaceProjectResult(BaseModel):
+    """One project's outcome, as it appears in the aggregated results."""
+
+    model_config = {"extra": "allow"}
+
+    project: Annotated[
+        str,
+        Field(
+            ...,
+            min_length=1,
+            description=(
+                "The project key -- its workspace-relative path with separators "
+                "replaced by dashes. Every other attribution in the results "
+                "joins on this."
+            ),
+        ),
+    ]
+    relative_path: Annotated[
+        str,
+        Field(
+            ...,
+            min_length=1,
+            description=(
+                "The project's workspace-relative path, forward-slash separated. "
+                "The coordinate system workspace-relative finding paths live in."
+            ),
+        ),
+    ]
+    display_label: Annotated[
+        str,
+        Field(..., min_length=1, description="What a human reads. Not unique."),
+    ]
+    status: Annotated[
+        ProjectRunStatus,
+        Field(
+            ..., description="Whether the project completed, was skipped, or failed."
+        ),
+    ]
+    severity_threshold: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "The threshold this project's verdict was judged against. Null "
+                "for a project that never ran."
+            ),
+        ),
+    ] = None
+    finding_count: Annotated[
+        int,
+        Field(0, ge=0, description="Unsuppressed findings reported for the project."),
+    ] = 0
+    actionable_finding_count: Annotated[
+        int,
+        Field(
+            0,
+            ge=0,
+            description=(
+                "Findings at or above this project's own effective threshold."
+            ),
+        ),
+    ] = 0
+    exceeds_threshold: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether this project's own verdict is a failure. Stored rather "
+                "than derived from actionable_finding_count because "
+                "fail_on_findings can be off, in which case a project has "
+                "actionable findings and still passes."
+            ),
+        ),
+    ] = False
+    duration_seconds: Annotated[
+        float, Field(0.0, ge=0.0, description="Wall clock spent on this project.")
+    ] = 0.0
+    output_path: Annotated[
+        str,
+        Field(
+            ...,
+            min_length=1,
+            description=(
+                "Where this project's own subtree lives, relative to the "
+                "workspace output directory."
+            ),
+        ),
+    ]
+    sarif_run_index: Annotated[
+        Optional[int],
+        Field(
+            None,
+            ge=0,
+            description=(
+                "Index of this project's run in the aggregated SARIF, so a "
+                "consumer can extract one project by selecting a run. Null when "
+                "the project contributed no run."
+            ),
+        ),
+    ] = None
+    scanners: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description="Final status per scanner name, for this project alone.",
+        ),
+    ]
+    skip_reason: Annotated[
+        Optional[SkippedProjectReason],
+        Field(None, description="Why the project was skipped, when it was."),
+    ] = None
+    skip_detail: Annotated[
+        Optional[str],
+        Field(None, description="Human-readable explanation of the skip."),
+    ] = None
+    error: Annotated[
+        Optional[str],
+        Field(None, description="What went wrong, for a FAILED project."),
+    ] = None
+    invalid_config: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether the failure was this project's own configuration. "
+                "Separated from a general failure because it selects exit code "
+                "3 rather than 1, and those route to different people."
+            ),
+        ),
+    ] = False
+
+    def as_skipped_project(self) -> Optional[SkippedProject]:
+        """This project as a ``skipped_projects`` payload entry, or None."""
+        if self.status is not ProjectRunStatus.SKIPPED or self.skip_reason is None:
+            return None
+        return SkippedProject(
+            project=self.project,
+            reason=self.skip_reason,
+            detail=self.skip_detail,
+        )
+
+
+class WorkspaceResults(BaseModel):
+    """Everything a workspace scan concluded, keyed under ``workspace``."""
+
+    model_config = {"extra": "allow"}
+
+    workspace_file: Annotated[
+        str,
+        Field(
+            ..., min_length=1, description="Absolute path of the workspace definition."
+        ),
+    ]
+    workspace_root: Annotated[
+        str,
+        Field(
+            ...,
+            min_length=1,
+            description=(
+                "Absolute path of the directory holding it. Every "
+                "workspace-relative finding path is relative to this, and in "
+                "container mode this is what was mounted at /src."
+            ),
+        ),
+    ]
+    status: Annotated[
+        Literal["completed", "refused"],
+        Field(
+            "completed",
+            description=(
+                "Whether projects were scanned at all. The discriminator for the "
+                "code-2 collision -- see the module docstring."
+            ),
+        ),
+    ] = "completed"
+    exit_code: Annotated[
+        int, Field(..., description="The process status this run exited with.")
+    ]
+    projects: Annotated[
+        List[WorkspaceProjectResult],
+        Field(
+            default_factory=list,
+            description="Every project in workspace-file order, skipped ones included.",
+        ),
+    ]
+    max_parallel_projects: Annotated[
+        Optional[int],
+        Field(None, ge=1, description="The outer concurrency bound this run used."),
+    ] = None
+    project_timeout: Annotated[
+        Optional[float],
+        Field(None, gt=0, description="The per-project time budget, when one was set."),
+    ] = None
+    wall_clock_seconds: Annotated[
+        float, Field(0.0, ge=0.0, description="Wall clock for the whole workspace.")
+    ] = 0.0
+    unconvertible_finding_paths: Annotated[
+        int,
+        Field(
+            0,
+            ge=0,
+            description=(
+                "Findings whose path could not be expressed in workspace-relative "
+                "coordinates. Counted rather than dropped: dropping a finding "
+                "because its path is awkward is a silent false negative."
+            ),
+        ),
+    ] = 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def skipped_projects(self) -> List[SkippedProject]:
+        """The Phase 0 ``skipped_projects`` payload, derived from the projects.
+
+        Derived rather than stored so the two cannot disagree, and a
+        ``computed_field`` so it serialises -- a downstream consumer must be able
+        to see that a project was dropped, and cannot read stderr.
+        """
+        entries = (project.as_skipped_project() for project in self.projects)
+        return [entry for entry in entries if entry is not None]
+
+
+def workspace_exit_code(
+    projects: Iterable[WorkspaceProjectResult],
+) -> WorkspaceExitCode:
+    """Derive the process status from the per-project outcomes.
+
+    See "Precedence" in the module docstring for the ordering and its rationale.
+
+    Args:
+        projects: Every project in the run, skipped ones included.
+
+    Returns:
+        The contract code. Note that findings above threshold return the integer
+        2, which is ``WORKSPACE_ERROR``'s value -- the collision Phase 0
+        recorded. ``WorkspaceResults.status`` distinguishes them.
+    """
+    entries = list(projects)
+
+    completed = [
+        entry for entry in entries if entry.status is ProjectRunStatus.COMPLETED
+    ]
+    failed = [entry for entry in entries if entry.status is ProjectRunStatus.FAILED]
+
+    if not completed and not failed:
+        # Nothing was attempted. Exiting 0 would report a clean result for a
+        # workspace nothing examined, which in CI reads as a passing scan.
+        return WorkspaceExitCode.WORKSPACE_ERROR
+
+    if any(entry.invalid_config for entry in failed):
+        return WorkspaceExitCode.INVALID_PROJECT_CONFIG
+    if failed:
+        return WorkspaceExitCode.INTERNAL_ERROR
+    if any(entry.exceeds_threshold for entry in completed):
+        # ASH's long-standing "actionable findings" status. Deliberately the same
+        # integer as WORKSPACE_ERROR; the payload's `status` field is what tells
+        # a consumer which of the two this is.
+        return WorkspaceExitCode(2)
+    return WorkspaceExitCode.SUCCESS

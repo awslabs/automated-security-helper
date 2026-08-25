@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import re
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
-from typing import Annotated, Any, List, Dict, Literal
+from typing import Annotated, Any, List, Dict, Literal, Optional
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
@@ -535,6 +535,95 @@ class AshConfigGlobalSettingsSection(BaseModel):
     ] = AshMcpConfig()
 
 
+# Distinguishes "caller did not pass cpu_count" from "caller passed None", which
+# is a real value here: os.cpu_count() returns None on hosts that cannot report it,
+# and a test needs to be able to say so explicitly.
+_UNSET_CPU_COUNT: Any = object()
+
+
+class WorkspaceExecutionConfig(BaseModel):
+    """How many projects a workspace scan runs at once, and how long each may take.
+
+    Why this is not read from the .code-workspace file
+    --------------------------------------------------
+    ``automated_security_helper.workspace.workspace_file`` deliberately ignores
+    that file's ``settings`` block, because it belongs to another tool whose
+    schema ASH does not control. So every ASH knob, including these two, lives in
+    ASH's own config -- here, in the config resolved for the workspace root.
+
+    Why these two land before the workspace policy block
+    ----------------------------------------------------
+    Neither can change any project's verdict. ``max_parallel_projects`` decides
+    scheduling and ``project_timeout`` decides how long to wait; the findings a
+    project reports and the threshold they are judged against are untouched. The
+    workspace-level *policy* fields -- a severity ceiling, workspace-wide
+    suppressions -- can change a verdict, and they arrive separately and visibly
+    rather than riding in on an execution change.
+
+    Failure modes and known limitations
+    -----------------------------------
+    * ``project_timeout`` bounds the *verdict*, not the worker. Python cannot
+      preempt a thread, so a timed-out project is recorded FAILED and the
+      workspace continues, but the abandoned worker runs to completion in the
+      background and the process will not exit until it does. Scanners already
+      run as subprocesses with their own timeouts, so the residual exposure is a
+      genuinely wedged in-process scanner.
+    * The outer bound multiplies with the inner scanner pool. That pool is
+      ``min(32, cpu_count + 4)`` in ``ScanExecutionEngine.__init__``, not 4, so
+      the worst-case thread count is ``max_parallel_projects * min(32, cpu+4)``.
+      Raising this knob on a large host raises that product quickly.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_parallel_projects: Annotated[
+        Optional[int],
+        Field(
+            None,
+            ge=1,
+            le=64,
+            description=(
+                "Maximum number of projects scanned concurrently. Unset means "
+                "min(4, cpu_count). This is an outer bound over each project's "
+                "own scanner thread pool, not a replacement for it."
+            ),
+        ),
+    ] = None
+
+    project_timeout: Annotated[
+        Optional[float],
+        Field(
+            None,
+            gt=0,
+            description=(
+                "Seconds to allow a single project. Unset means no limit. On "
+                "timeout that project is recorded as failed and the remaining "
+                "projects still complete."
+            ),
+        ),
+    ] = None
+
+    def resolved_max_parallel_projects(
+        self, cpu_count: Optional[int] = _UNSET_CPU_COUNT
+    ) -> int:
+        """The bound to use, deriving the default when none is configured.
+
+        Stored as ``None`` and derived here rather than defaulted to 4 in the
+        field, so that a one-CPU host gets one worker instead of four and a
+        serialised config still shows the operator did not choose a number.
+
+        Args:
+            cpu_count: Override for the host CPU count, for tests. ``None`` and
+                ``0`` are both treated as one CPU, because ``os.cpu_count()``
+                can return ``None`` and a pool of zero workers never runs.
+        """
+        if self.max_parallel_projects is not None:
+            return self.max_parallel_projects
+        if cpu_count is _UNSET_CPU_COUNT:
+            cpu_count = os.cpu_count()
+        return max(1, min(4, cpu_count or 1))
+
+
 class AshConfig(BaseModel):
     """Main configuration model for Automated Security Helper."""
 
@@ -619,6 +708,18 @@ class AshConfig(BaseModel):
             alias="mcp-resource-management",
         ),
     ] = MCPResourceManagementConfig()
+
+    workspace: Annotated[
+        WorkspaceExecutionConfig,
+        Field(
+            description=(
+                "Workspace-mode execution settings. Read from the config "
+                "resolved for the workspace root; a project's own copy of this "
+                "block is ignored, because how many projects run at once is not "
+                "a project's decision."
+            ),
+        ),
+    ] = WorkspaceExecutionConfig()
 
     @classmethod
     def from_file(cls, config_path: Path) -> "AshConfig":
