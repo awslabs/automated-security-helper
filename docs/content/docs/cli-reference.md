@@ -711,3 +711,9 @@ ASH returns the following exit codes:
 | 0    | Success - No issues found                        |
 | 1    | Scan execution error                             |
 | 2    | Issues found with severity at or above threshold |
+| 3    | Invalid configuration                            |
+| 4    | Workspace definition or policy error - nothing was scanned |
+
+Code 4 is distinct from code 2 on purpose. Code 2 means a scan ran and found
+issues; code 4 means the workspace definition could not be used and no project
+was scanned at all.

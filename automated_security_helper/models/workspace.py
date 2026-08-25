@@ -15,57 +15,56 @@ each invent their own numbering.
 
 The contract
 ------------
-* ``0`` success.
-* ``1`` internal error -- ASH itself failed; no verdict was reached.
-* ``2`` workspace definition or policy error -- the workspace file, a project
-  path, or a workspace-level policy is not usable. Nothing was scanned.
-* ``3`` invalid project configuration -- the workspace is fine but a project's
-  own config is not.
+Workspace mode EXTENDS the published ``ASH_EXIT_CODES`` rather than
+reinterpreting any of it, so a caller that understands single-project ASH does
+not have to relearn the first four codes:
 
-Codes 2 and 3 are both configuration problems and the split is deliberate: 2
+* ``0`` success.
+* ``1`` scan errors / scanner failures. A workspace-mode internal error -- ASH
+  itself failed and reached no verdict -- is a case of this.
+* ``2`` actionable findings above threshold. Workspace mode uses this for
+  exactly that: a project exceeded its effective threshold, consistently with
+  single-project mode.
+* ``3`` invalid config. A project's own config being unusable is a case of this.
+* ``4`` workspace definition or policy error -- the workspace file, a project
+  path, or a workspace-level policy is not usable. NOTHING WAS SCANNED.
+
+Codes 3 and 4 are both configuration problems and the split is deliberate: 4
 means the operator's workspace file is wrong and no project could run, 3 means
 one project is misconfigured. They route to different people.
 
-UNRESOLVED: code 2 contradicts the shipped ASH_EXIT_CODES
----------------------------------------------------------
-``automated_security_helper.core.constants.ASH_EXIT_CODES`` already publishes a
-contract, exposed as an MCP resource and covered by
-``tests/unit/cli/mcp/test_exit_codes_resource.py``::
+Why 4, when the RFC's table said 2
+----------------------------------
+This is a deliberate deviation from the RFC, not a transcription error.
 
-    0 success
-    1 scan errors / scanner failures
-    2 actionable findings above threshold
-    3 invalid config
+The RFC assigned "workspace definition or policy error" to exit code 2. But 2
+was already published, in
+``automated_security_helper.core.constants.ASH_EXIT_CODES``, as "actionable
+findings above threshold" -- exposed as an MCP resource and pinned by
+``tests/unit/cli/mcp/test_exit_codes_resource.py``. It is also the ordinary,
+expected result of a scan that worked: ``_compute_exit_code`` in
+``run_ash_scan`` returns 2 whenever there are actionable findings.
 
-Codes 0, 1 and 3 line up. Code 2 does not, and it fails in the unsafe
-direction. Today code 2 is the ordinary, expected result of a scan that worked
-and found something; ``_compute_exit_code`` in ``run_ash_scan`` returns it
-whenever there are actionable findings. A CI job that reads 2 as "scan
-completed, review the findings" would read a malformed workspace file exactly
-the same way -- reporting a scan that never ran as a scan with findings.
+Overloading it would make two opposite outcomes indistinguishable. A malformed
+workspace file means NOTHING WAS SCANNED; exit 2 means a scan completed and
+found things worth reviewing. A CI job treating 2 as "review the findings"
+would read a workspace that never ran as a successful scan with issues -- a
+fail-open failure, and precisely the mode the RFC's own failure-semantics
+section exists to reject, by the same argument it uses against "warn and skip"
+for a missing project.
 
-This module implements the workspace contract as specified rather than quietly
-renumbering it, because the numbering is a published interface and the choice
-of how to reconcile the two is not one to make silently. The options, none of
-which is taken here:
+Extending the contract with an unused code keeps both meanings unambiguous and
+breaks no existing consumer. Code 4 was confirmed unused across the package,
+the scripts, the tests and the CI workflows before it was chosen.
 
-1. Give workspace-definition errors their own unused code (4 or above). Keeps
-   both contracts unambiguous; costs a change to the RFC's stated numbering.
-2. Redefine 2 as "definition or policy error" everywhere and move
-   findings-above-threshold to a new code. Cleanest end state, but a breaking
-   change for every existing consumer of ASH's exit status.
-3. Leave the collision. Workspace mode is opt-in behind a flag, so a caller
-   that never passes ``--workspace`` cannot observe the ambiguity -- but a
-   caller that adopts workspace mode inherits it silently, which is the worst
-   of the three.
-
-``tests/unit/models/test_workspace_models.py`` asserts the collision exists, so
-it surfaces on any change to either side rather than being rediscovered later.
+``tests/unit/models/test_workspace_models.py`` asserts there is NO collision --
+every value here agrees semantically with ``ASH_EXIT_CODES`` -- so changing
+either side fails the suite.
 
 Note that ASH_EXIT_CODES' own code 1 is partly aspirational: a scanner at ERROR
 does not produce exit 1 today, because ``_compute_exit_code`` returns 1 only
-when ``results is None``. That happens to make it a good match for "internal
-error" here.
+when ``results is None``. That happens to make it a good match for a
+workspace-mode internal error.
 
 The skipped-projects payload
 ----------------------------
@@ -93,22 +92,32 @@ class WorkspaceExitCode(IntEnum):
     An IntEnum so members can be handed straight to ``typer.Exit`` or
     ``sys.exit`` without conversion at the call site.
 
-    See the module docstring for the unresolved collision at code 2.
+    Every value agrees with ``ASH_EXIT_CODES``; only ``WORKSPACE_ERROR`` is new.
+    ``ACTIONABLE_FINDINGS`` is modelled here rather than left as a bare literal
+    because workspace mode really does return it -- a project over its
+    effective threshold -- and a call site should not have to hardcode 2.
+
+    See the module docstring for why WORKSPACE_ERROR is 4 and not the 2 the RFC
+    table assigned.
     """
 
     SUCCESS = 0
     INTERNAL_ERROR = 1
-    WORKSPACE_ERROR = 2
+    ACTIONABLE_FINDINGS = 2
     INVALID_PROJECT_CONFIG = 3
+    WORKSPACE_ERROR = 4
 
 
 # Descriptions keyed by code, mirroring the shape of ASH_EXIT_CODES so the MCP
-# resource can serialise either table the same way.
+# resource can serialise either table the same way. The wording matches
+# ASH_EXIT_CODES for the four shared codes, because they are the same codes --
+# not a parallel vocabulary for them.
 WORKSPACE_EXIT_CODES: Dict[int, str] = {
     WorkspaceExitCode.SUCCESS.value: "success",
-    WorkspaceExitCode.INTERNAL_ERROR.value: "internal error",
+    WorkspaceExitCode.INTERNAL_ERROR.value: "scan errors / scanner failures",
+    WorkspaceExitCode.ACTIONABLE_FINDINGS.value: "actionable findings above threshold",
+    WorkspaceExitCode.INVALID_PROJECT_CONFIG.value: "invalid config",
     WorkspaceExitCode.WORKSPACE_ERROR.value: "workspace definition or policy error",
-    WorkspaceExitCode.INVALID_PROJECT_CONFIG.value: "invalid project configuration",
 }
 
 

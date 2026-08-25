@@ -36,8 +36,9 @@ class TestWorkspaceExitCode:
         [
             (WorkspaceExitCode.SUCCESS, 0),
             (WorkspaceExitCode.INTERNAL_ERROR, 1),
-            (WorkspaceExitCode.WORKSPACE_ERROR, 2),
+            (WorkspaceExitCode.ACTIONABLE_FINDINGS, 2),
             (WorkspaceExitCode.INVALID_PROJECT_CONFIG, 3),
+            (WorkspaceExitCode.WORKSPACE_ERROR, 4),
         ],
     )
     def test_values(self, member, value):
@@ -46,10 +47,10 @@ class TestWorkspaceExitCode:
     def test_is_an_int_so_it_can_be_returned_directly(self):
         """typer.Exit and sys.exit take an int; no conversion at the call site."""
         assert isinstance(WorkspaceExitCode.WORKSPACE_ERROR, int)
-        assert WorkspaceExitCode.WORKSPACE_ERROR == 2
+        assert WorkspaceExitCode.WORKSPACE_ERROR == 4
 
-    def test_exactly_four_codes(self):
-        assert len(WorkspaceExitCode) == 4
+    def test_exactly_five_codes(self):
+        assert len(WorkspaceExitCode) == 5
 
     def test_every_code_has_a_description(self):
         assert set(WORKSPACE_EXIT_CODES) == {c.value for c in WorkspaceExitCode}
@@ -70,40 +71,66 @@ class TestWorkspaceExitCode:
                 assert code != 0
 
 
-class TestCollisionWithAshExitCodes:
-    """Records a real, unresolved contradiction rather than hiding it.
+class TestNoCollisionWithAshExitCodes:
+    """The workspace contract EXTENDS ASH_EXIT_CODES; it reinterprets nothing.
 
-    ASH already publishes ASH_EXIT_CODES, exposed as an MCP resource and
-    covered by tests/unit/cli/mcp/test_exit_codes_resource.py. Codes 0, 1 and 3
-    line up with the workspace contract. Code 2 does not, and the mismatch is
-    the dangerous direction: a CI job that reads 2 as "scan completed, findings
-    to review" would read a malformed workspace file the same way.
+    An earlier revision assigned WORKSPACE_ERROR to 2, per the RFC's table, and
+    this class asserted the resulting collision EXISTED so it could not be
+    forgotten. The decision was to extend the contract with an unused code
+    instead, so these tests now assert the opposite: every workspace code agrees
+    semantically with the published map. Changing either side fails the suite.
     """
 
-    def test_codes_zero_one_and_three_are_compatible(self):
-        assert WorkspaceExitCode.SUCCESS.value in ASH_EXIT_CODES
-        assert WorkspaceExitCode.INTERNAL_ERROR.value in ASH_EXIT_CODES
-        assert WorkspaceExitCode.INVALID_PROJECT_CONFIG.value in ASH_EXIT_CODES
-        assert "success" in ASH_EXIT_CODES[0]
-        assert "config" in ASH_EXIT_CODES[3]
+    # Every WorkspaceExitCode paired with the ASH_EXIT_CODES wording it must
+    # agree with. There is no "absent from ASH_EXIT_CODES" case left: code 4 was
+    # added to the published map, which is the point -- one source of truth.
+    SEMANTIC_ALIGNMENT = [
+        (WorkspaceExitCode.SUCCESS, "success"),
+        (WorkspaceExitCode.INTERNAL_ERROR, "scan errors / scanner failures"),
+        (WorkspaceExitCode.ACTIONABLE_FINDINGS, "actionable findings above threshold"),
+        (WorkspaceExitCode.INVALID_PROJECT_CONFIG, "invalid config"),
+        (WorkspaceExitCode.WORKSPACE_ERROR, "workspace definition or policy error"),
+    ]
 
-    def test_code_two_means_something_else_in_the_shipped_contract(self):
-        """The conflict, asserted so it cannot be forgotten.
+    @pytest.mark.parametrize("code,published", SEMANTIC_ALIGNMENT)
+    def test_every_workspace_code_agrees_with_the_published_map(self, code, published):
+        assert code.value in ASH_EXIT_CODES, (
+            f"{code.name} is not in ASH_EXIT_CODES, so the published map is no "
+            f"longer the single source of truth"
+        )
+        assert ASH_EXIT_CODES[code.value] == published
+        assert WORKSPACE_EXIT_CODES[code.value] == published
 
-        If this test starts failing, one of the two contracts was changed --
-        check that the other was updated to match and that the workspace docs
-        still describe reality.
+    def test_the_two_tables_are_identical(self):
+        """Same codes, same wording -- WORKSPACE_EXIT_CODES adds no vocabulary."""
+        for value, description in WORKSPACE_EXIT_CODES.items():
+            assert ASH_EXIT_CODES[value] == description
+
+    def test_code_two_is_findings_not_a_workspace_error(self):
+        """The specific regression this decision guards against.
+
+        A malformed workspace file means nothing was scanned; 2 means a scan
+        completed and found things. Collapsing them would let a CI job read a
+        workspace that never ran as a successful scan with issues.
         """
         assert ASH_EXIT_CODES[2] == "actionable findings above threshold"
-        assert WorkspaceExitCode.WORKSPACE_ERROR.value == 2
-        assert "workspace" in WORKSPACE_EXIT_CODES[2].lower()
+        assert WorkspaceExitCode.WORKSPACE_ERROR.value != 2
+        assert WorkspaceExitCode.WORKSPACE_ERROR.value == 4
+        assert "workspace" in ASH_EXIT_CODES[4].lower()
 
-    def test_the_conflict_is_documented_in_the_module(self):
-        """A reader hitting code 2 must find the caveat without digging."""
+    def test_workspace_error_is_the_only_code_ash_did_not_already_have(self):
+        """Extending by exactly one code is what makes this non-breaking."""
+        preexisting = {0, 1, 2, 3}
+        added = {c.value for c in WorkspaceExitCode} - preexisting
+        assert added == {WorkspaceExitCode.WORKSPACE_ERROR.value}
+
+    def test_the_deviation_from_the_rfc_is_documented(self):
+        """A reader must find out why 4, not 2, without digging through git."""
         from automated_security_helper.models import workspace
 
         assert workspace.__doc__ is not None
         assert "ASH_EXIT_CODES" in workspace.__doc__
+        assert "RFC" in workspace.__doc__
 
 
 # ---------------------------------------------------------------------------
