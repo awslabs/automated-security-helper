@@ -691,6 +691,16 @@ def get_uv_tool_command(
             return _uv_command_cache[cache_key]
         # Get-or-create the per-key probe lock under the coarse lock so two
         # threads racing here see the same lock object.
+        #
+        # STRONG-REF CONTRACT (DA r6 #6): the local `probe_lock` variable
+        # MUST stay in scope until after the `with probe_lock:` acquire
+        # below. The WeakValueDictionary holds the lock by weak reference;
+        # without a stack-frame strong reference, GC could collect the
+        # lock between the dict-write here and the acquire below, and a
+        # concurrent thread on the same cache key would create a NEW
+        # lock — defeating the per-key serialization. Do NOT refactor
+        # this block to return the lock from a helper without giving the
+        # caller a strong ref before the acquire.
         probe_lock = _uv_tool_probe_locks.get(cache_key)
         if probe_lock is None:
             probe_lock = threading.Lock()
