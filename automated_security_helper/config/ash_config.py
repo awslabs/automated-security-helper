@@ -442,9 +442,7 @@ class RuntimeOverridesConfig(BaseModel):
 
     enabled: Annotated[
         bool,
-        Field(
-            description="Master switch — runtime patches are rejected unless True."
-        ),
+        Field(description="Master switch — runtime patches are rejected unless True."),
     ] = False
 
     allowed_paths: Annotated[
@@ -563,17 +561,45 @@ class WorkspaceExecutionConfig(BaseModel):
     Wall clock is ``ceil(projects / bound)`` waves, and that is arithmetic
     -----------------------------------------------------------------------
     A workspace of N projects at a bound of B runs in ``ceil(N / B)`` waves, so
-    its wall clock is roughly that multiple of one project's. Measured on a
-    192-CPU host with five projects of ~21s each:
+    its wall clock is roughly that multiple of one project's. Reproduce with
+    ``scripts/measure_workspace_parallelism.py``; measured on a 192-CPU Linux
+    host on 2026-08-25, five projects, bound 4, three timed runs per arm, the
+    whole child process timed:
 
-    * bound 5 -- 20.65s, or 0.88x the slowest single project. One wave.
-    * bound 4 (the derived default) -- 49.50s, or 2.35x. Two waves.
+    * five equal projects -- one alone 21.3s median (19.4-22.7), the workspace
+      43.4s median (41.5-45.8). Ratio of medians **2.036x**, range 1.823-2.365x.
+    * one larger project plus four small -- one alone 20.7s median (20.7-26.3),
+      the workspace 40.5s median (39.3-46.0). Ratio **1.958x**, range
+      1.495-2.227x.
 
-    Neither number says anything about the implementation; they are both the wave
-    count. An operator who wants a workspace to finish in about the time of its
-    slowest project has to set ``max_parallel_projects`` to at least the project
-    count, and accept the thread product below. The default stays at 4 because
-    that product is the thing worth defaulting conservatively.
+    Both sit on the ``ceil(5/4) = 2`` floor, so neither says much about the
+    implementation: an operator who wants a workspace to finish in about the time
+    of its slowest project has to set ``max_parallel_projects`` to at least the
+    project count and accept the thread product below. The default stays at 4
+    because that product is the thing worth defaulting conservatively.
+
+    Two earlier figures for this were wrong and are withdrawn. A reported 0.88x at
+    bound 5 -- a five-project workspace beating one project alone -- was an
+    artefact of timing a cold single-project arm against a warm workspace arm,
+    because ``uv_tool_runner`` caches tool probing across invocations. The
+    measurement script now runs a discard pass first and alternates the arms, and
+    nothing close to a sub-1.0 ratio reappears. A reported 2.35x at bound 4 was a
+    single unrepeated run; it lands at the top of the range measured here rather
+    than at its centre, which is why the figures above are medians with a spread.
+
+    The second shape did not do what it was designed to do, and that is worth
+    knowing before anyone repeats it. It gave one project five times the files, on
+    the theory that "the slowest project alone" would then be a real baseline and
+    the small projects could hide inside its wave. But 60 files scanned in 20.7s
+    and 12 files in 21.3s -- indistinguishable. Scan wall clock here is dominated
+    by per-scanner startup, not by file count, so the fixture produced no dominant
+    project and its number is really the equal case again. Testing the RFC's 1.5x
+    criterion properly needs a project large enough to be file-bound rather than
+    startup-bound, which is thousands of files, not sixty.
+
+    On this evidence the 1.5x criterion is not met at the default bound in either
+    shape, and for five projects at bound 4 it cannot be: two waves is 2.0x before
+    any implementation cost.
 
     Failure modes and known limitations
     -----------------------------------
@@ -865,9 +891,7 @@ class AshConfig(BaseModel):
         return found
 
 
-def add_suppression_to_config(
-    config_path: Path, suppression: AshSuppression
-) -> None:
+def add_suppression_to_config(config_path: Path, suppression: AshSuppression) -> None:
     """Append a suppression to the suppressions list in an .ash.yaml config file.
 
     Uses an append-only strategy when the file already contains a suppressions
@@ -888,9 +912,7 @@ def add_suppression_to_config(
         # Duplicate detection: check if rule_id+path already suppressed
         data = yaml.safe_load(text) or {}
         if isinstance(data, dict):
-            existing = (
-                data.get("global_settings", {}).get("suppressions", []) or []
-            )
+            existing = data.get("global_settings", {}).get("suppressions", []) or []
             for existing_entry in existing:
                 if (
                     isinstance(existing_entry, dict)
@@ -906,7 +928,9 @@ def add_suppression_to_config(
             field_indent = list_indent + "  "
             items = list(entry.items())
             first_key, first_val = items[0]
-            formatted_lines = [f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"]
+            formatted_lines = [
+                f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"
+            ]
             for k, v in items[1:]:
                 formatted_lines.append(f"{field_indent}{k}: {_yaml_scalar(v)}\n")
             for line in reversed(formatted_lines):
@@ -986,7 +1010,11 @@ def _find_suppressions_append_point(lines: list) -> tuple:
                 list_indent = line[:indent_len]
                 last_item_end = idx + 1
                 continue
-            if indent_len > 0 and not stripped.startswith("- ") and not stripped.startswith("#"):
+            if (
+                indent_len > 0
+                and not stripped.startswith("- ")
+                and not stripped.startswith("#")
+            ):
                 last_item_end = idx + 1
                 continue
             if stripped == "" or stripped.startswith("#"):
