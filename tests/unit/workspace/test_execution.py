@@ -99,6 +99,11 @@ class FakeOrchestrator:
         spec = FakeOrchestrator.behaviour.get(self.key, {})
         if "sleep" in spec:
             time.sleep(spec["sleep"])
+        if "block" in spec:
+            # An event rather than a sleep, so a timeout test can assert the
+            # workspace returned while the worker was still running instead of
+            # depending on a duration.
+            spec["block"].wait(timeout=60)
         if "raise" in spec:
             raise spec["raise"]
 
@@ -392,6 +397,112 @@ class TestFailureHandling:
         error = outcome.payload.projects[0].error or ""
         assert "timed out" in error.lower()
         assert "0.2" in error
+
+    def test_the_timeout_bounds_wall_clock_when_the_bound_is_smaller(self, tmp_path):
+        """The defect: a queued project was never given a deadline.
+
+        The deadline check skipped any project with no start time, which is
+        exactly a queued one. An abandoned worker keeps its slot, so at a bound
+        smaller than the project count the queue could never drain and the loop
+        waited on threads that were not coming back. Measured before the fix:
+        three projects at bound 1 with a 1s budget ran past 12s. The shipped
+        default bound is 4, so every workspace of five or more was exposed.
+
+        The wedge here releases on an event rather than sleeping, so the test
+        asserts the workspace returned while the worker was still running --
+        which is the whole property -- without depending on a sleep duration.
+        """
+        _, plan = _make_workspace(
+            tmp_path,
+            ("wedged", "MEDIUM"),
+            ("queued-a", "MEDIUM"),
+            ("queued-b", "MEDIUM"),
+        )
+        release = threading.Event()
+        FakeOrchestrator.behaviour["wedged"] = {"block": release}
+        try:
+            started = time.monotonic()
+            outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=1)
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+
+        assert elapsed < 5.0, f"took {elapsed:.1f}s; the budget was 0.2s"
+        statuses = {p.project: p.status for p in outcome.payload.projects}
+        assert statuses == {
+            "wedged": ProjectRunStatus.FAILED,
+            "queued-a": ProjectRunStatus.FAILED,
+            "queued-b": ProjectRunStatus.FAILED,
+        }
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
+
+    def test_a_never_started_project_says_why_and_how_to_fix_it(self, tmp_path):
+        _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"), ("queued", "MEDIUM"))
+        release = threading.Event()
+        FakeOrchestrator.behaviour["wedged"] = {"block": release}
+        try:
+            outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=1)
+        finally:
+            release.set()
+
+        error = (
+            next(p.error for p in outcome.payload.projects if p.project == "queued")
+            or ""
+        )
+        assert "never started" in error
+        assert "project_timeout" in error
+
+    def test_spare_capacity_still_drains_the_queue(self, tmp_path):
+        """Only a fully-exhausted pool gives up; one lost slot of two does not."""
+        _, plan = _make_workspace(
+            tmp_path,
+            ("wedged", "MEDIUM"),
+            ("queued-a", "MEDIUM"),
+            ("queued-b", "MEDIUM"),
+        )
+        release = threading.Event()
+        FakeOrchestrator.behaviour["wedged"] = {"block": release}
+        try:
+            outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=2)
+        finally:
+            release.set()
+
+        statuses = {p.project: p.status for p in outcome.payload.projects}
+        assert statuses["wedged"] is ProjectRunStatus.FAILED
+        assert statuses["queued-a"] is ProjectRunStatus.COMPLETED
+        assert statuses["queued-b"] is ProjectRunStatus.COMPLETED
+
+    def test_an_abandoned_project_does_not_write_a_results_file(self, tmp_path):
+        """Otherwise its subtree contradicts the workspace verdict.
+
+        The unified file records FAILED with finding_count=0 while
+        projects/<key>/ash_aggregated_results.json holds real findings, and an
+        operator can only resolve that by guessing which to trust.
+        """
+        _, plan = _make_workspace(tmp_path, ("wedged", "MEDIUM"))
+        release = threading.Event()
+        FakeOrchestrator.behaviour["wedged"] = {
+            "block": release,
+            "sarif": _sarif(level="error", count=3),
+        }
+        try:
+            outcome = _run(tmp_path, plan, project_timeout=0.2)
+            # Let the abandoned worker finish and attempt its write.
+            release.set()
+            time.sleep(0.4)
+        finally:
+            release.set()
+
+        entry = outcome.payload.projects[0]
+        assert entry.status is ProjectRunStatus.FAILED
+        assert entry.finding_count == 0
+        results = (
+            tmp_path / "out" / "projects" / "wedged" / "ash_aggregated_results.json"
+        )
+        assert not results.exists(), (
+            "the abandoned worker wrote per-project results that contradict the "
+            "FAILED verdict already recorded for it"
+        )
 
     def test_no_timeout_lets_a_slow_project_finish(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("slow", "MEDIUM"))

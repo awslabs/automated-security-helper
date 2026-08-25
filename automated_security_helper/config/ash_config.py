@@ -579,10 +579,16 @@ class WorkspaceExecutionConfig(BaseModel):
     -----------------------------------
     * ``project_timeout`` bounds the *verdict*, not the worker. Python cannot
       preempt a thread, so a timed-out project is recorded FAILED and the
-      workspace continues, but the abandoned worker runs to completion in the
-      background and the process will not exit until it does. Scanners already
-      run as subprocesses with their own timeouts, so the residual exposure is a
-      genuinely wedged in-process scanner.
+      workspace continues, but the abandoned worker keeps running -- and keeps
+      its pool slot. Once every slot is held by an abandoned project, nothing
+      still queued can start, so those projects are cancelled and recorded
+      FAILED rather than waited on. A workspace with more projects than
+      ``max_parallel_projects`` can therefore report several failures from one
+      slow project; raising either knob avoids it.
+    * The process still does not exit until every abandoned worker finishes,
+      because the interpreter joins them. Scanners run as subprocesses with
+      their own timeouts, so the residual exposure is a genuinely wedged
+      in-process scanner.
     * The outer bound multiplies with the inner scanner pool. That pool is
       ``min(32, cpu_count + 4)`` in ``ScanExecutionEngine.__init__``, not 4, and
       not the unrelated ``thread_pool_max_workers`` MCP setting, so the

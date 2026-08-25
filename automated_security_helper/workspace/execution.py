@@ -61,22 +61,55 @@ Timeouts bound the verdict, not the worker
 ``project_timeout`` is measured from the moment a project *starts*, not from when
 it was submitted, so a project queued behind others is not punished for waiting.
 On expiry the project is recorded FAILED, the workspace exits non-zero, and every
-other project still completes.
-
-The worker thread is not killed, because Python cannot preempt a thread. The pool
-is shut down with ``wait=False`` so the workspace reports immediately, but the
-abandoned worker runs to completion in the background and the interpreter's own
-exit handler joins it -- so a genuinely wedged project delays process exit even
-though it does not delay the result. Two things bound the exposure: scanners run
-as subprocesses with their own timeouts, so a hung *tool* is already handled
-below this layer, and the residual case is an in-process scanner stuck in Python.
-Fixing it properly means running each project in a subprocess, which is a larger
-change than this phase and would move the per-project scan out of
-``core/orchestrator.py``.
+other project that can still run does.
 
 Rejected: ``future.result(timeout=...)`` over the futures in submission order.
 That measures from submission, so with a bound of 2 and a timeout of 60s the
 fifth project can be recorded as timed out before it has started.
+
+An abandoned worker costs a pool slot permanently
+------------------------------------------------
+The worker thread is not killed, because Python cannot preempt a thread. So an
+abandoned project keeps its slot for as long as it runs, and the pool
+effectively shrinks. Once every slot is held by an abandoned project, nothing
+still queued can ever start, and waiting on it would block on threads that are
+not coming back.
+
+That was a real defect rather than a theoretical one: the deadline check skipped
+any project with no start time, which is exactly a queued one, so a workspace
+whose bound was smaller than its project count had no wall-clock bound at all.
+Measured -- three projects, one wedged, a 1s budget: at bound 3 the run returned
+at 1.0s, and at bound 1 it was still running past 12s. The shipped default bound
+is 4, so any workspace of five or more projects was exposed, which is precisely
+the shape the wave arithmetic in ``ash_config`` is written for.
+
+Now, when the count of abandoned workers reaches the bound, every project that
+has not started is cancelled and recorded FAILED with a message naming the three
+ways out: raise the bound, raise the budget, or scan the slow project separately.
+Cancelling first matters -- a queued future can still be cancelled, and that stops
+it starting after the workspace has already reported it as failed.
+
+A project that has started and is inside its budget is still waited for; only
+never-started ones are given up on.
+
+Results from an abandoned worker are discarded
+----------------------------------------------
+If an abandoned project's scan finishes later, its worker checks before writing
+and throws the results away. Otherwise
+``projects/<key>/ash_aggregated_results.json`` would hold real findings while the
+unified file recorded that project as FAILED with ``finding_count=0`` -- a
+contradiction an operator could only resolve by guessing which file to trust, in
+a subtree this feature advertises as consumable by existing single-project
+tooling.
+
+The residual exposure is process exit. The pool is shut down with ``wait=False``
+so the workspace reports immediately, but the interpreter's own exit handler
+joins the abandoned thread, so a genuinely wedged project still delays the
+process from exiting. Two things bound it: scanners run as subprocesses with
+their own timeouts, so a hung *tool* is handled below this layer, and the
+residual case is an in-process scanner stuck in Python. Fixing that properly
+means a subprocess per project, which is a larger change than this phase and
+would move the per-project scan out of ``core/orchestrator.py``.
 
 The changed-files gate is per project, per repository
 ----------------------------------------------------
@@ -125,7 +158,7 @@ import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -405,8 +438,18 @@ def _scan_one_project(
     project: ProjectPlan,
     settings: ProjectScanSettings,
     orchestrator_factory: OrchestratorFactory,
+    abandoned: Optional[Event] = None,
 ) -> _ProjectRun:
-    """Scan one project in its own scope and reduce it to an outcome plus a run."""
+    """Scan one project in its own scope and reduce it to an outcome plus a run.
+
+    Args:
+        abandoned: Set by the outer loop when this project has been given up on
+            at its timeout. The worker cannot be interrupted, so it keeps running
+            -- but it checks this before writing, because the workspace has
+            already recorded the project as FAILED and a later write would leave
+            ``projects/<key>/ash_aggregated_results.json`` holding real findings
+            that the unified file says do not exist.
+    """
     from automated_security_helper.core.enums import ExecutionStrategy, ExportFormat
 
     started = time.monotonic()
@@ -498,6 +541,25 @@ def _scan_one_project(
         actionable = 0
 
     fail_on_findings = _resolve_fail_on_findings(settings, results)
+
+    if abandoned is not None and abandoned.is_set():
+        # Given up on while this was running. Do not write, and do not return an
+        # outcome -- the outer loop already recorded FAILED for this project, and
+        # a per-project results file with real findings beside a unified file
+        # saying finding_count=0 is a contradiction an operator would have to
+        # resolve by guessing which one to trust.
+        ASH_LOGGER.warning(
+            f"Project '{project.key}' finished after being abandoned at its "
+            f"timeout; discarding its results rather than contradicting the "
+            f"workspace verdict already recorded for it."
+        )
+        return _failed_outcome(
+            project,
+            settings,
+            "abandoned at its project_timeout; the scan completed later and its "
+            "results were discarded",
+            duration_seconds=time.monotonic() - started,
+        )
 
     _write_project_results(project_output, results)
 
@@ -704,11 +766,16 @@ def _run_projects(
     collected: Dict[str, _ProjectRun] = {}
     start_times: Dict[str, float] = {}
     start_lock = Lock()
+    # Set when a project is abandoned, so its worker can tell it has been given
+    # up on and stop before writing output the workspace has already contradicted.
+    abandoned: Dict[str, Event] = {project.key: Event() for project in active}
 
     def worker(project: ProjectPlan) -> _ProjectRun:
         with start_lock:
             start_times[project.key] = time.monotonic()
-        return _scan_one_project(project, settings, orchestrator_factory)
+        return _scan_one_project(
+            project, settings, orchestrator_factory, abandoned[project.key]
+        )
 
     pool = ThreadPoolExecutor(max_workers=bound)
     try:
@@ -717,6 +784,9 @@ def _run_projects(
         }
         pending: Set[Future] = set(futures)
         timeout = settings.project_timeout
+        # Workers lost to abandoned projects. Each one is a pool slot that will
+        # never come back, because the thread cannot be interrupted.
+        lost_workers = 0
 
         while pending:
             done, pending = wait(
@@ -741,7 +811,12 @@ def _run_projects(
                 project = futures[future]
                 with start_lock:
                     begin = start_times.get(project.key)
-                if begin is None or now - begin <= timeout:
+                if begin is None:
+                    # Queued and never started. It has not overrun a budget
+                    # because it has not been given one yet; whether it ever can
+                    # is decided below, from how many workers are left.
+                    continue
+                if now - begin <= timeout:
                     continue
                 elapsed = now - begin
                 ASH_LOGGER.error(
@@ -750,6 +825,8 @@ def _run_projects(
                     f"be interrupted and will run to completion in the "
                     f"background."
                 )
+                abandoned[project.key].set()
+                lost_workers += 1
                 collected[project.key] = _failed_outcome(
                     project,
                     settings,
@@ -758,6 +835,47 @@ def _run_projects(
                     duration_seconds=elapsed,
                 )
                 pending.discard(future)
+
+            if lost_workers < bound:
+                continue
+
+            # Every worker is held by an abandoned project, so nothing still
+            # queued can ever start and waiting would block on threads that are
+            # never coming back. Without this the timeout bounded nothing
+            # whenever the bound was smaller than the project count -- measured,
+            # three projects at bound 1 with a 1s budget ran past 12s -- which
+            # is precisely the shape the default bound of 4 produces for a
+            # workspace of five.
+            never_started = [
+                future
+                for future in list(pending)
+                if start_times.get(futures[future].key) is None
+            ]
+            for future in never_started:
+                project = futures[future]
+                # Cancel first: a queued future can still be cancelled, and that
+                # stops it starting after we have already reported it failed.
+                future.cancel()
+                abandoned[project.key].set()
+                ASH_LOGGER.error(
+                    f"Project '{project.key}' never started: all {bound} worker "
+                    f"slot(s) are held by project(s) abandoned at the "
+                    f"{timeout}s project_timeout, and an abandoned worker cannot "
+                    f"be reclaimed. Raise max_parallel_projects, raise "
+                    f"project_timeout, or scan the slow project separately."
+                )
+                collected[project.key] = _failed_outcome(
+                    project,
+                    settings,
+                    f"never started: all {bound} worker slot(s) were held by "
+                    f"project(s) that exceeded the {timeout}s project_timeout",
+                )
+                pending.discard(future)
+            if pending:
+                # Anything left here has started and is inside its budget, so it
+                # is still worth waiting for.
+                continue
+            break
     finally:
         # wait=False so an abandoned worker does not delay the workspace result.
         # The interpreter still joins it at exit; see the module docstring.
