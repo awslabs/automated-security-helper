@@ -5701,10 +5701,18 @@
           "description": "Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file"
         },
         "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 300,
-          "description": "Maximum time in seconds to allow the detect-secrets scan to run before aborting. Prevents hangs on pathological files.",
-          "title": "Scan Timeout",
-          "type": "integer"
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity_threshold": {
           "anyOf": [

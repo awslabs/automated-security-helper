@@ -35,6 +35,7 @@ error path returned for everything.
 
 import sys
 import time
+from unittest.mock import patch
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.utils.subprocess_utils import (
@@ -132,6 +133,131 @@ class TestNormalExecutionIsUnaffected:
 
         assert response["returncode"] == 0
         assert "unbounded" in response.get("stdout", "")
+
+
+class TestTheUvToolPathIsAlsoBounded:
+    """The path bandit, checkov and semgrep actually take.
+
+    `_run_subprocess` has two execution paths. The uv-tool branch returns before
+    the direct-execution call, so a timeout wired only into the latter applies
+    exclusively to scanners for which uv is *unavailable*.
+
+    bandit, checkov and semgrep set `use_uv_tool = True` unconditionally and clear
+    it only when uv is missing. ASH ships via uv, so on a normal install the
+    reported bandit hang went through the uv branch, unbounded, no matter what
+    scan_timeout said. The original version of this file tested
+    `run_command_with_output_handling` directly and never exercised that branch,
+    which is exactly why the gap survived a green build.
+    """
+
+    def test_run_tool_forwards_the_timeout_on_the_results_dir_branch(self, tmp_path):
+        """This is the branch scanners take: they all pass results_dir.
+
+        `run_tool` already accepted a `timeout`, but honoured it only on its
+        fallback path -- the one used by callers that do *not* want output files,
+        i.e. none of the scanners.
+        """
+        from automated_security_helper.utils import subprocess_utils
+        from automated_security_helper.utils.uv_tool_runner import get_uv_tool_runner
+
+        captured = {}
+
+        def _fake(**kwargs):
+            captured.update(kwargs)
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+
+        with patch.object(
+            subprocess_utils, "run_command_with_output_handling", side_effect=_fake
+        ):
+            get_uv_tool_runner().run_tool(
+                tool_name="bandit",
+                args=["--version"],
+                results_dir=tmp_path,
+                timeout=_TIMEOUT_SECONDS,
+            )
+
+        assert captured.get("timeout") == _TIMEOUT_SECONDS, (
+            "run_tool dropped the timeout on the results_dir branch, so every "
+            "uv-run scanner executes unbounded."
+        )
+
+    def test_try_uv_tool_execution_forwards_the_timeout(self, tmp_path):
+        """The seam between the plugin and the runner.
+
+        Patched at `uv_tool_runner.get_uv_tool_runner`, not on the mixin module.
+        The mixin imports it *inside* the method, so the name is resolved from the
+        source module at call time and never becomes an attribute of
+        uv_tool_mixin -- patching there with create=True silently installs a decoy
+        that nothing ever reads, and the test passes for the wrong reason.
+        """
+        from automated_security_helper.utils import uv_tool_runner as runner_module
+        from automated_security_helper.base.uv_tool_mixin import UVToolMixin
+
+        class _Probe(UVToolMixin):
+            """Minimal host: the mixin only needs these three from its owner."""
+
+            command = "bandit"
+            use_uv_tool = True
+
+            def _plugin_log(self, *args, **kwargs):
+                return None
+
+            def _get_tool_package_extras(self):
+                return None
+
+            def _get_tool_version_constraint(self):
+                return None
+
+        captured = {}
+
+        class _Runner:
+            def is_uv_available(self):
+                return True
+
+            def run_tool(self, **kwargs):
+                captured.update(kwargs)
+
+                class _Result:
+                    stdout = ""
+                    stderr = ""
+                    returncode = 0
+
+                return _Result()
+
+        with patch.object(runner_module, "get_uv_tool_runner", return_value=_Runner()):
+            _Probe()._try_uv_tool_execution(
+                ["bandit", "--version"],
+                tmp_path,
+                results_dir=tmp_path,
+                timeout=_TIMEOUT_SECONDS,
+            )
+
+        assert captured.get("timeout") == _TIMEOUT_SECONDS, (
+            "_try_uv_tool_execution accepted a timeout but did not pass it to "
+            f"run_tool: {captured!r}"
+        )
+
+
+def test_detect_secrets_inherits_the_shared_scan_timeout():
+    """detect-secrets must not carry its own copy of the option.
+
+    Its local field declared `int` with no `ge`, shadowing the base field and
+    giving one scanner a different contract from the rest: `scan_timeout: null`,
+    documented by the base field as the way to run unbounded, raised a validation
+    error for detect-secrets only, and `scan_timeout: 0` was accepted here and
+    rejected everywhere else -- then passed to future.result(timeout=0), timing out
+    instantly on every run.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        DetectSecretsScannerConfigOptions,
+    )
+
+    field = DetectSecretsScannerConfigOptions.model_fields["scan_timeout"]
+
+    assert DetectSecretsScannerConfigOptions(scan_timeout=None).scan_timeout is None, (
+        "detect-secrets rejects scan_timeout: null, so it still shadows the base "
+        f"field: {field!r}"
+    )
 
 
 def test_scanner_options_expose_a_scan_timeout_default():
