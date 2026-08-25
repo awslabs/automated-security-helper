@@ -260,12 +260,62 @@ def test_detect_secrets_inherits_the_shared_scan_timeout():
     )
 
 
+def test_scanners_that_override_scan_still_pass_the_timeout():
+    """A field that appears in a schema and does nothing is worse than absent.
+
+    scan_timeout lives on ScannerOptionsBase, so it shows up in every scanner's
+    generated schema. But six scanners override `scan()` and call
+    `_run_subprocess` themselves rather than going through the template, so
+    setting the option on them had no effect and nothing said so.
+
+    This is a structural check on the source rather than a behavioural one:
+    driving each of the six through a real scan needs a PluginContext, a target
+    tree and per-tool fixtures, which is a wider harness than the property
+    warrants. It catches the regression that matters -- someone adding another
+    `scan()` override without threading the timeout -- and the message says where
+    to look.
+    """
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    overriding_scanners = [
+        "plugin_modules/ash_builtin/scanners/cfn_nag_scanner.py",
+        "plugin_modules/ash_builtin/scanners/npm_audit_scanner.py",
+        "plugin_modules/ash_builtin/scanners/syft_scanner.py",
+        "plugin_modules/ash_ferret_plugins/ferret_scanner.py",
+        "plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
+        "plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py",
+    ]
+
+    missing = []
+    for rel in overriding_scanners:
+        path = repo_root / "automated_security_helper" / rel
+        if not path.exists():
+            continue
+        if "_effective_scan_timeout()" not in path.read_text(encoding="utf-8"):
+            missing.append(rel)
+
+    assert not missing, (
+        "These scanners override scan() and call _run_subprocess without a "
+        "timeout, so scan_timeout is silently ignored for them even though it "
+        f"appears in their schema: {missing}"
+    )
+
+
 def test_scanner_options_expose_a_scan_timeout_default():
     """Every scanner gets the knob, not just the one that grew its own.
 
-    300s matches the default detect-secrets already chose for the same problem,
-    and what the issue asks for.
+    1800 rather than the 300 detect-secrets chose, and rather than the 300 the
+    issue suggested. Two reasons: it matches the timeout ASH already declares for
+    a scan operation (mcp_resource_management.scan_timeout_seconds), so there is
+    one number rather than two differing by 6x; and 300 would newly fail scans
+    that succeed today -- checkov on a large Terraform tree fetching external
+    modules, grype's first-run DB pull, semgrep against a full ruleset all
+    routinely exceed five minutes.
+
+    A genuinely stuck scanner now burns 30 minutes before it is cut, which is the
+    cost of not breaking working scans.
     """
     options = ScannerOptionsBase()
 
-    assert options.scan_timeout == 300
+    assert options.scan_timeout == 1800

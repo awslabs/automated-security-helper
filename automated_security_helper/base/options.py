@@ -45,7 +45,7 @@ class ScannerOptionsBase(PluginOptionsBase):
             ),
             ge=1,
         ),
-    ] = 300
+    ] = 1800
 
 
 class ReporterOptionsBase(PluginOptionsBase):

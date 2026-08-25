@@ -1509,7 +1509,7 @@
                 "excluded_paths": [],
                 "ignore_nosec": false,
                 "install_timeout": 300,
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null,
                 "tool_version": ">=1.7.0,<2.0.0"
               }
@@ -1526,7 +1526,7 @@
                   "NIST80053R5Checks": false,
                   "PCIDSS321Checks": false
                 },
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -1534,7 +1534,7 @@
               "enabled": true,
               "name": "cfn-nag",
               "options": {
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -1551,7 +1551,7 @@
                 ],
                 "install_timeout": 300,
                 "offline": false,
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null,
                 "skip_frameworks": [],
                 "skip_path": [],
@@ -1570,7 +1570,7 @@
                   "results": {},
                   "version": null
                 },
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -1580,7 +1580,7 @@
               "options": {
                 "config_file": null,
                 "offline": false,
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -1589,7 +1589,7 @@
               "name": "npm-audit",
               "options": {
                 "offline": false,
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -1606,7 +1606,7 @@
                 "metrics": "auto",
                 "offline": false,
                 "patterns": [],
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity": [],
                 "severity_threshold": null,
                 "version": "v1.15.1"
@@ -1625,7 +1625,7 @@
                 "install_timeout": 300,
                 "metrics": "auto",
                 "offline": false,
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity": [],
                 "severity_threshold": null,
                 "tool_version": null
@@ -1641,7 +1641,7 @@
                 "config_file": null,
                 "exclude": [],
                 "offline": false,
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             }
@@ -1946,7 +1946,7 @@
             "excluded_paths": [],
             "ignore_nosec": false,
             "install_timeout": 300,
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null,
             "tool_version": ">=1.7.0,<2.0.0"
           },
@@ -2038,7 +2038,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -2269,7 +2269,7 @@
               "NIST80053R5Checks": false,
               "PCIDSS321Checks": false
             },
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure Bandit scanner"
@@ -2309,7 +2309,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -2515,7 +2515,7 @@
         "options": {
           "$ref": "#/$defs/CfnNagScannerConfigOptions",
           "default": {
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure CFN Nag scanner"
@@ -2537,7 +2537,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -2591,7 +2591,7 @@
             ],
             "install_timeout": 300,
             "offline": false,
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null,
             "skip_frameworks": [],
             "skip_path": [],
@@ -2716,7 +2716,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -5660,7 +5660,7 @@
               "results": {},
               "version": null
             },
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure detect-secrets scanner"
@@ -5710,7 +5710,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -8106,7 +8106,7 @@
           "default": {
             "config_file": null,
             "offline": false,
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure Grype scanner"
@@ -8150,7 +8150,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -11011,7 +11011,7 @@
           "$ref": "#/$defs/NpmAuditScannerConfigOptions",
           "default": {
             "offline": false,
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure NpmAudit scanner"
@@ -11038,7 +11038,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -11207,7 +11207,7 @@
             "metrics": "auto",
             "offline": false,
             "patterns": [],
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity": [],
             "severity_threshold": null,
             "version": "v1.15.1"
@@ -11283,7 +11283,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -15845,7 +15845,7 @@
               "excluded_paths": [],
               "ignore_nosec": false,
               "install_timeout": 300,
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null,
               "tool_version": ">=1.7.0,<2.0.0"
             }
@@ -15866,7 +15866,7 @@
                 "NIST80053R5Checks": false,
                 "PCIDSS321Checks": false
               },
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -15878,7 +15878,7 @@
             "enabled": true,
             "name": "cfn-nag",
             "options": {
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -15899,7 +15899,7 @@
               ],
               "install_timeout": 300,
               "offline": false,
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null,
               "skip_frameworks": [],
               "skip_path": [],
@@ -15922,7 +15922,7 @@
                 "results": {},
                 "version": null
               },
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -15936,7 +15936,7 @@
             "options": {
               "config_file": null,
               "offline": false,
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -15949,7 +15949,7 @@
             "name": "npm-audit",
             "options": {
               "offline": false,
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -15970,7 +15970,7 @@
               "metrics": "auto",
               "offline": false,
               "patterns": [],
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity": [],
               "severity_threshold": null,
               "version": "v1.15.1"
@@ -15993,7 +15993,7 @@
               "install_timeout": 300,
               "metrics": "auto",
               "offline": false,
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity": [],
               "severity_threshold": null,
               "tool_version": null
@@ -16013,7 +16013,7 @@
               "config_file": null,
               "exclude": [],
               "offline": false,
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -16037,7 +16037,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -16313,7 +16313,7 @@
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
           "default": {
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Scanner options"
@@ -16569,7 +16569,7 @@
             "install_timeout": 300,
             "metrics": "auto",
             "offline": false,
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity": [],
             "severity_threshold": null,
             "tool_version": null
@@ -16642,7 +16642,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
@@ -17998,7 +17998,7 @@
             "config_file": null,
             "exclude": [],
             "offline": false,
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure Syft scanner"
@@ -18069,7 +18069,7 @@
               "type": "null"
             }
           ],
-          "default": 300,
+          "default": 1800,
           "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
           "title": "Scan Timeout"
         },
