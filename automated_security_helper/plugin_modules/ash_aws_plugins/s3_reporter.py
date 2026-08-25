@@ -14,6 +14,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -92,7 +93,28 @@ class S3ReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
-    """Formats results and uploads to an S3 bucket."""
+    """Formats results and uploads to an S3 bucket.
+
+    Workspace mode: per project. The RFC's reporter table did not rule on this
+    one, so the reasoning is recorded here.
+
+    Same shape of argument as ``cloudwatch_logs_reporter``: a delivery mechanism
+    rather than a format, with a side effect -- ``PutObject``. Each project's own
+    scan already uploads its own object, and a workspace-level invocation would
+    add an N+1st object holding the lossy ``scanner_results`` rollup and an
+    ``ash_config`` belonging to no project.
+
+    The object key needs care for this ruling to actually hold. It is derived from
+    ``model.metadata.summary_stats.start``, and all N projects share one
+    configured ``key_prefix``, so per-project uploads collide with each other
+    whenever two projects start within the same resolution of that timestamp --
+    silently, because ``PutObject`` overwrites. Under a workspace this is not a
+    remote possibility: projects run concurrently by default. So the key carries
+    the project when the scan is part of a workspace. Without that, "per project,
+    one artefact each" would be false in exactly the case this feature exists for.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
 
     def model_post_init(self, context):
         if self.config is None:

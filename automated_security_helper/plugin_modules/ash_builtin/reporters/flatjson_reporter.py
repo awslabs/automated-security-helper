@@ -10,6 +10,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
@@ -36,7 +37,19 @@ class FlatJSONReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
-    """Formats results as a flattened JSON array of findings."""
+    """Formats results as a flattened JSON array of findings.
+
+    Workspace mode: one merged artefact. Each finding carries
+    ``workspace_project``, and a ``workspace`` block carries the per-project
+    verdicts so a consumer can group without re-deriving anything.
+
+    The per-finding field needs no code here: ``FlatVulnerability`` reads it off
+    ``result.properties.workspace_project``, which the aggregator sets on every
+    result, and ``model_dump(exclude_none=True)`` omits it for a single-directory
+    scan. So this output is unchanged outside workspace mode.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         if self.config is None:

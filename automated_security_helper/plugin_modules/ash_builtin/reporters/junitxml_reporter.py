@@ -8,6 +8,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.severity_ladder import (
@@ -33,7 +34,25 @@ class JUnitXMLReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
-    """Formats results as JUnitXML."""
+    """Formats results as JUnitXML.
+
+    Workspace mode: one merged artefact, with the project in the testsuite name
+    as ``<project>/<scanner>``.
+
+    A deliberate deviation from the RFC, which said the project *becomes* the
+    testsuite name. Taken literally that discards the per-scanner grouping
+    single-directory mode has, and every CI front end that renders JUnit XML
+    groups by suite name -- so a reader would lose the ability to see that
+    bandit failed and checkov did not. The compound name costs nothing, keeps
+    the project as the primary sort key (it is the leading segment, so suites
+    for one project sort together), and makes the workspace artefact a strict
+    refinement of the per-project ones rather than a lossy reshape of them.
+
+    A single-directory scan is unaffected: with no project attribution the suite
+    name stays the bare scanner name it has always been.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         with warnings.catch_warnings():

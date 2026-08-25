@@ -9,6 +9,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
@@ -44,7 +45,20 @@ class OCSFReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
-    """Formats results as an array of Open Cybersecurity Schema Framework (OCSF) VulnerabilityFinding objects."""
+    """Formats results as an array of Open Cybersecurity Schema Framework (OCSF) VulnerabilityFinding objects.
+
+    Workspace mode: one merged artefact, with the project carried in each
+    finding's ``metadata``.
+
+    ``metadata`` rather than ``resources`` or the finding title, because OCSF's
+    ``Metadata`` object is where provenance belongs and a SIEM ingesting these
+    can index on it without parsing a string. Each finding gets its own copy: the
+    array is flat, an event is routed individually, and a project stated once at
+    the top of the file would be lost the moment a consumer split the array --
+    which is the normal way a SIEM ingests one.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         if self.config is None:

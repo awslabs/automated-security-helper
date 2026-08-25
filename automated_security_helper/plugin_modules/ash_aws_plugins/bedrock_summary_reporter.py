@@ -14,6 +14,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -257,7 +258,23 @@ class BedrockSummaryReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
-    """Generates a summary of security findings using Amazon Bedrock."""
+    """Generates a summary of security findings using Amazon Bedrock.
+
+    Workspace mode: per project.
+
+    A useful remediation summary is specific to one codebase -- its language, its
+    frameworks, its conventions. Handing a model N projects' findings at once
+    produces advice that is either generic across all of them or silently focused
+    on whichever project dominates the prompt, and there is no way for a reader to
+    tell which happened. Per project, each summary is grounded in one codebase,
+    exactly as ``ash --source-dir P`` would produce it.
+
+    Cost is a secondary argument in the same direction: this reporter makes a paid
+    inference call, and a workspace-level invocation would add an N+1st call whose
+    output is worse than the N it duplicates.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

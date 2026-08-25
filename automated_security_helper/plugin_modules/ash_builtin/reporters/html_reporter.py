@@ -11,6 +11,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
@@ -32,7 +33,21 @@ class HTMLReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
-    """Formats results as HTML."""
+    """Formats results as HTML.
+
+    Workspace mode: one merged artefact with a per-project section. A human
+    reading a workspace report is asking "which project is in trouble", so the
+    project has to be the top-level structure and not a column buried in the
+    findings table.
+
+    The workspace section is added ahead of the existing content rather than
+    replacing it. The whole-workspace severity and scanner tables stay useful --
+    they answer "how bad is it overall" -- and reshaping the entire document
+    around projects would have made a workspace report and a single-project
+    report two different things to read.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         if self.config is None:

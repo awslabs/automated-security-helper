@@ -10,6 +10,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -46,7 +47,15 @@ class MarkdownReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
-    """Formats results as a human-readable Markdown document."""
+    """Formats results as a human-readable Markdown document.
+
+    Workspace mode: one merged artefact with a per-project section, placed
+    immediately after the header so it survives ``compact`` mode. Compact exists
+    for PR comments, and in a monorepo PR the single most useful line is which
+    project the findings are in -- so this is the one section compact must keep.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         if self.config is None:
