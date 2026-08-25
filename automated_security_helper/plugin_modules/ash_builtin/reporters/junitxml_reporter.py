@@ -10,6 +10,9 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.severity_ladder import (
+    sarif_level_fails_threshold,
+)
 
 
 import defusedxml
@@ -118,19 +121,24 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                                     "severity_threshold"
                                 ]
 
-                        # If we have a threshold and level, check if the finding is actionable
+                        # If we have a threshold and level, check if the finding is
+                        # actionable. The gate lives in utils.severity_ladder, shared
+                        # with ScanResultsContainer.determine_status and matching the
+                        # qualifying-level table the exit code uses, so the reporter
+                        # can no longer call a finding actionable that the exit code
+                        # ignores. The cascade this replaced had branches for only
+                        # CRITICAL, HIGH and MEDIUM, so a level of `none` was treated
+                        # as actionable under a LOW threshold.
+                        #
+                        # The `threshold and result.level` guard is deliberate and is
+                        # not the ladder's None handling: the ladder reads a falsy
+                        # threshold as "no gate configured", but an absent property
+                        # here means "threshold not stated", which must leave the
+                        # finding actionable rather than silently gate it off.
                         if threshold and result.level:
-                            level = result.level.lower()
-                            # Simple mapping of SARIF levels to severity thresholds
-                            if threshold == "CRITICAL" and level != "error":
-                                is_actionable = False
-                            elif threshold == "HIGH" and level not in ["error"]:
-                                is_actionable = False
-                            elif threshold == "MEDIUM" and level not in [
-                                "error",
-                                "warning",
-                            ]:
-                                is_actionable = False
+                            is_actionable = sarif_level_fails_threshold(
+                                result.level, threshold
+                            )
 
                     # Only mark as error if it's actionable
                     if is_actionable:
