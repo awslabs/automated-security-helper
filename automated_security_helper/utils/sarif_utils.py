@@ -40,9 +40,7 @@ def get_finding_id(
     end_line: int | None = None,
 ) -> str:
     seed = "::".join(
-        str(item)
-        for item in [rule_id, file, start_line, end_line]
-        if item is not None
+        str(item) for item in [rule_id, file, start_line, end_line] if item is not None
     )
     rd = random.Random()  # nosec B311 — seeded PRNG for deterministic finding IDs, not security
     rd.seed(seed)
@@ -244,10 +242,10 @@ def _resolve_result_severity(result) -> str:
     if result.properties:
         props = result.properties
         if isinstance(props, PropertyBag):
-            props = props.model_dump(
-                mode="json", exclude_unset=True, exclude_none=True
-            )
-        issue_sev = props.get("issue_severity", "").upper() if isinstance(props, dict) else ""
+            props = props.model_dump(mode="json", exclude_unset=True, exclude_none=True)
+        issue_sev = (
+            props.get("issue_severity", "").upper() if isinstance(props, dict) else ""
+        )
         if issue_sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
             return issue_sev.lower()
 
@@ -331,11 +329,13 @@ def _normalize_sarif_uri(
     """
     uri_normalized = uri.replace("\\", "/")
     if uri_normalized.startswith(source_dir_prefix):
-        return uri_normalized[len(source_dir_prefix):]
+        return uri_normalized[len(source_dir_prefix) :]
     if uri_normalized.startswith(source_dir_prefix_with_slash):
-        return uri_normalized[len(source_dir_prefix_with_slash):]
-    if source_dir_prefix_no_drive and uri_normalized.startswith(source_dir_prefix_no_drive):
-        return uri_normalized[len(source_dir_prefix_no_drive):]
+        return uri_normalized[len(source_dir_prefix_with_slash) :]
+    if source_dir_prefix_no_drive and uri_normalized.startswith(
+        source_dir_prefix_no_drive
+    ):
+        return uri_normalized[len(source_dir_prefix_no_drive) :]
     # source_dir_basename is None when the source dir contains a child of the same
     # name (see #361): the basename is a real project dir, not a scanner artifact,
     # so stripping it would corrupt the path. relative_to(None) raises TypeError,
@@ -367,7 +367,9 @@ def _apply_config_suppression(
 
     Mutates result.suppressions on match. Returns True when a suppression was applied.
     """
-    should_suppress, matching_suppression = should_suppress_finding(flat_finding, suppressions)
+    should_suppress, matching_suppression = should_suppress_finding(
+        flat_finding, suppressions
+    )
     if not should_suppress:
         return False
 
@@ -382,7 +384,9 @@ def _apply_config_suppression(
         )
         return True
 
-    reason = (matching_suppression and matching_suppression.reason) or "No reason provided"
+    reason = (
+        matching_suppression and matching_suppression.reason
+    ) or "No reason provided"
     ASH_LOGGER.verbose(
         f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
     )
@@ -411,7 +415,10 @@ def _apply_inline_suppression(
     if file_key not in inline_cache:
         inline_cache[file_key] = find_inline_suppressions(file_path)
     for isup in inline_cache[file_key]:
-        if isup.rule_id.lower() == result.ruleId.lower() and isup.line_number == result_line:
+        if (
+            isup.rule_id.lower() == result.ruleId.lower()
+            and isup.line_number == result_line
+        ):
             if not result.suppressions:
                 result.suppressions = []
             ASH_LOGGER.verbose(
@@ -465,12 +472,16 @@ def apply_suppressions_to_sarif(
     _output_dir_resolved = plugin_context.output_dir.resolve()
     _work_dir_resolved = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME).resolve()
     _uri_resolve_cache: dict[str, Path] = {}
-    _source_dir_prefix = str(plugin_context.source_dir.resolve()).replace("\\", "/") + "/"
+    _source_dir_prefix = (
+        str(plugin_context.source_dir.resolve()).replace("\\", "/") + "/"
+    )
     # On Windows, SARIF URIs may have a leading "/" before the drive letter (e.g., /D:/path)
     _source_dir_prefix_with_slash = "/" + _source_dir_prefix
     # Some Windows scanners strip the drive letter entirely (e.g., /a/repo/ instead of D:/a/repo/)
     _source_dir_prefix_no_drive = (
-        _source_dir_prefix[2:] if len(_source_dir_prefix) > 2 and _source_dir_prefix[1] == ":" else None
+        _source_dir_prefix[2:]
+        if len(_source_dir_prefix) > 2 and _source_dir_prefix[1] == ":"
+        else None
     )
     # Offline opengrep produces relative paths with source_dir basename prefix (e.g., "src/.github/...")
     # However, skip basename stripping when source_dir contains a subdirectory with the same name
@@ -517,9 +528,9 @@ def apply_suppressions_to_sarif(
                     if uri not in _uri_resolve_cache:
                         _uri_resolve_cache[uri] = Path(uri).resolve()
                     resolved_uri = _uri_resolve_cache[uri]
-                    if resolved_uri.is_relative_to(_output_dir_resolved) and not resolved_uri.is_relative_to(
-                        _work_dir_resolved
-                    ):
+                    if resolved_uri.is_relative_to(
+                        _output_dir_resolved
+                    ) and not resolved_uri.is_relative_to(_work_dir_resolved):
                         ASH_LOGGER.verbose(
                             f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'"
                         )
@@ -549,13 +560,17 @@ def apply_suppressions_to_sarif(
                         and location.physicalLocation.root.artifactLocation
                     ):
                         raw_uri = location.physicalLocation.root.artifactLocation.uri
-                        uri = _normalize_sarif_uri(
-                            raw_uri or "",
-                            _source_dir_prefix,
-                            _source_dir_prefix_with_slash,
-                            _source_dir_prefix_no_drive,
-                            _source_dir_basename,
-                        ) if raw_uri else (raw_uri or "")
+                        uri = (
+                            _normalize_sarif_uri(
+                                raw_uri or "",
+                                _source_dir_prefix,
+                                _source_dir_prefix_with_slash,
+                                _source_dir_prefix_no_drive,
+                                _source_dir_basename,
+                            )
+                            if raw_uri
+                            else (raw_uri or "")
+                        )
                         line_start = None
                         line_end = None
                         if (
@@ -599,7 +614,9 @@ def apply_suppressions_to_sarif(
                         continue
 
             # --- Step 3: inline suppression ---
-            if not ignore_suppressions and not (result.suppressions and len(result.suppressions) >= 1):
+            if not ignore_suppressions and not (
+                result.suppressions and len(result.suppressions) >= 1
+            ):
                 if result.ruleId and result.locations:
                     for location in result.locations:
                         if not (
@@ -615,7 +632,9 @@ def apply_suppressions_to_sarif(
                             hasattr(location.physicalLocation.root, "region")
                             and location.physicalLocation.root.region
                         ):
-                            result_line = location.physicalLocation.root.region.startLine
+                            result_line = (
+                                location.physicalLocation.root.region.startLine
+                            )
                         if result_line is None:
                             continue
                         uri = _normalize_sarif_uri(
@@ -626,7 +645,11 @@ def apply_suppressions_to_sarif(
                             _source_dir_basename,
                         )
                         _apply_inline_suppression(
-                            result, uri, plugin_context.source_dir, result_line, _inline_suppression_cache
+                            result,
+                            uri,
+                            plugin_context.source_dir,
+                            result_line,
+                            _inline_suppression_cache,
                         )
 
             updated_results.append(result)

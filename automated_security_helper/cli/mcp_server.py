@@ -404,9 +404,7 @@ async def get_scan_summary(
     Args:
         output_dir: Path to the scan output directory (absolute path recommended)
     """
-    summary = await get_scan_results(
-        ctx, output_dir=output_dir, filter_level="summary"
-    )
+    summary = await get_scan_results(ctx, output_dir=output_dir, filter_level="summary")
     # Tag the response with the entry point that produced it. get_scan_results
     # serves several filter levels, so callers use this to tell a summary obtained
     # via get_scan_summary from one obtained by calling get_scan_results directly.
@@ -667,7 +665,13 @@ def list_scanners() -> list:
         return mcp_list_scanners()
     except Exception as e:
         logger.exception(f"Error in list_scanners: {str(e)}")
-        return [{"success": False, "error": f"Error listing scanners: {str(e)}", "error_type": type(e).__name__}]
+        return [
+            {
+                "success": False,
+                "error": f"Error listing scanners: {str(e)}",
+                "error_type": type(e).__name__,
+            }
+        ]
 
 
 @mcp.tool()
@@ -710,7 +714,9 @@ def validate_config(
         Dict with valid (bool) and errors (list of {field, message, type}).
     """
     try:
-        return mcp_validate_config(config_content=config_content, config_path=config_path)
+        return mcp_validate_config(
+            config_content=config_content, config_path=config_path
+        )
     except Exception as e:
         logger.exception(f"Error in validate_config: {str(e)}")
         return {
@@ -741,6 +747,7 @@ def _read_ash_suppression_schema() -> str:
     """Return the AshSuppression JSON schema as a string."""
     from automated_security_helper.models.core import AshSuppression
     import json as _json
+
     return _json.dumps(AshSuppression.model_json_schema(), indent=2)
 
 

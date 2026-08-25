@@ -124,7 +124,10 @@ def _build_auth_middleware(header_name: str, header_value: str):
                 received.encode("latin-1", errors="replace"), expected_value_bytes
             ):
                 return JSONResponse(
-                    {"error": "unauthorized", "detail": "missing or invalid auth header"},
+                    {
+                        "error": "unauthorized",
+                        "detail": "missing or invalid auth header",
+                    },
                     status_code=401,
                 )
             return await call_next(request)

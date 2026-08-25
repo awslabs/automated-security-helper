@@ -248,7 +248,6 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             )
             return False
 
-
         if not self.dependencies_satisfied:
             self._post_scan(
                 target=target,
@@ -316,7 +315,9 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                                 arguments=final_args[1:],
                                 startTimeUtc=self.start_time,
                                 endTimeUtc=self.end_time,
-                                executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                                executionSuccessful=(
+                                    self.exit_code == 0 or self.exit_code == 1
+                                ),
                                 exitCode=self.exit_code,
                                 exitCodeDescription="\n".join(self.errors),
                                 workingDirectory=ArtifactLocation(

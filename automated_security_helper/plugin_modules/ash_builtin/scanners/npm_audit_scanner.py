@@ -263,9 +263,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # created above.  Build a minimal result from vuln_info.
                 if not has_dict_via and via_items:
                     vuln_id = f"npm-audit-transitive-{pkg_name}"
-                    via_refs = ", ".join(
-                        v for v in via_items if isinstance(v, str)
-                    )
+                    via_refs = ", ".join(v for v in via_items if isinstance(v, str))
                     title = f"Transitive vulnerability in {pkg_name} (via {via_refs})"
                     description = title
 
@@ -334,7 +332,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                            executionSuccessful=(
+                                self.exit_code == 0 or self.exit_code == 1
+                            ),
                             exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target_path)
@@ -354,7 +354,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — NpmAudit overrides scan() directly; this is unreachable."""
-        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
 
     def scan(
         self,
@@ -394,7 +396,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                            executionSuccessful=(
+                                self.exit_code == 0 or self.exit_code == 1
+                            ),
                             exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target)
@@ -432,7 +436,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 target_type=target_type,
             )
             return False
-
 
         if not self.dependencies_satisfied:
             self._post_scan(
@@ -634,7 +637,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             invocations=[
                                 Invocation(
                                     commandLine="npm audit --json",
-                                    executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                                    executionSuccessful=(
+                                        self.exit_code == 0 or self.exit_code == 1
+                                    ),
                                     exitCode=self.exit_code,
                                     workingDirectory=ArtifactLocation(
                                         uri=get_shortest_name(input=target)

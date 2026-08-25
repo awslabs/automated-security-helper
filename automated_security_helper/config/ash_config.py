@@ -442,9 +442,7 @@ class RuntimeOverridesConfig(BaseModel):
 
     enabled: Annotated[
         bool,
-        Field(
-            description="Master switch — runtime patches are rejected unless True."
-        ),
+        Field(description="Master switch — runtime patches are rejected unless True."),
     ] = False
 
     allowed_paths: Annotated[
@@ -741,9 +739,7 @@ class AshConfig(BaseModel):
         return found
 
 
-def add_suppression_to_config(
-    config_path: Path, suppression: AshSuppression
-) -> None:
+def add_suppression_to_config(config_path: Path, suppression: AshSuppression) -> None:
     """Append a suppression to the suppressions list in an .ash.yaml config file.
 
     Uses an append-only strategy when the file already contains a suppressions
@@ -764,9 +760,7 @@ def add_suppression_to_config(
         # Duplicate detection: check if rule_id+path already suppressed
         data = yaml.safe_load(text) or {}
         if isinstance(data, dict):
-            existing = (
-                data.get("global_settings", {}).get("suppressions", []) or []
-            )
+            existing = data.get("global_settings", {}).get("suppressions", []) or []
             for existing_entry in existing:
                 if (
                     isinstance(existing_entry, dict)
@@ -782,7 +776,9 @@ def add_suppression_to_config(
             field_indent = list_indent + "  "
             items = list(entry.items())
             first_key, first_val = items[0]
-            formatted_lines = [f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"]
+            formatted_lines = [
+                f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"
+            ]
             for k, v in items[1:]:
                 formatted_lines.append(f"{field_indent}{k}: {_yaml_scalar(v)}\n")
             for line in reversed(formatted_lines):
@@ -862,7 +858,11 @@ def _find_suppressions_append_point(lines: list) -> tuple:
                 list_indent = line[:indent_len]
                 last_item_end = idx + 1
                 continue
-            if indent_len > 0 and not stripped.startswith("- ") and not stripped.startswith("#"):
+            if (
+                indent_len > 0
+                and not stripped.startswith("- ")
+                and not stripped.startswith("#")
+            ):
                 last_item_end = idx + 1
                 continue
             if stripped == "" or stripped.startswith("#"):

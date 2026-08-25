@@ -120,19 +120,22 @@ class TestApplyConfigOverrides:
 
     def test_validation_error_returns_original(self):
         from pydantic import ValidationError
+
         config = AshConfig(project_name="test")
         # Apply an override that makes the model invalid
         with patch(
             "automated_security_helper.config.resolve_config.AshConfig.model_validate",
             side_effect=ValidationError.from_exception_data(
                 title="AshConfig",
-                line_errors=[{
-                    "type": "value_error",
-                    "loc": ("project_name",),
-                    "msg": "invalid",
-                    "input": "bad",
-                    "ctx": {"error": ValueError("test")},
-                }],
+                line_errors=[
+                    {
+                        "type": "value_error",
+                        "loc": ("project_name",),
+                        "msg": "invalid",
+                        "input": "bad",
+                        "ctx": {"error": ValueError("test")},
+                    }
+                ],
             ),
         ):
             result = apply_config_overrides(config, ["project_name=new"])

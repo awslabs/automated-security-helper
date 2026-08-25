@@ -832,7 +832,6 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             self._post_scan(target=target, target_type=target_type)
             return False
 
-
         if not self.dependencies_satisfied:
             self._post_scan(target=target, target_type=target_type)
             return False

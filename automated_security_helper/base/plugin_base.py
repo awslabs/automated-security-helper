@@ -205,7 +205,9 @@ class PluginBase(UVToolMixin, BaseModel):
         # Use abs() so negative codes (e.g. -1 for timeout) aren't
         # silently swallowed by max(0, -1).
         new_code = response.get("returncode", 1)
-        self.exit_code = max(self.exit_code, abs(new_code) if new_code < 0 else new_code)
+        self.exit_code = max(
+            self.exit_code, abs(new_code) if new_code < 0 else new_code
+        )
 
     def _run_subprocess(
         self,
