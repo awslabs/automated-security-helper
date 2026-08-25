@@ -136,7 +136,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 -- the gate runs ASH as a child process with cwd != source_dir
 import sys
 import tempfile
 from contextlib import suppress
