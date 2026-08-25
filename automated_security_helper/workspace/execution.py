@@ -56,6 +56,40 @@ The per-project Rich progress display is disabled. N concurrent ``Live`` display
 write to the same terminal and corrupt each other's output; the workspace emits
 plain per-project lines instead.
 
+Process-global state, and the sweep that would have missed it
+------------------------------------------------------------
+Running N differently-configured scans in one interpreter is new, and it makes
+every piece of module-level mutable state a possible cross-project leak. Three
+pieces live on ``ash_plugin_manager``, the singleton in ``plugins/__init__.py``:
+
+* ``context`` is written by every ``ScanExecutionEngine.__init__`` through
+  ``set_context``, so under parallel projects the last writer wins. It is safe
+  today only because nothing reads it -- safety by accident. A reader added later
+  would silently see an arbitrary project's context, so
+  ``tests/unit/workspace/test_project_isolation.py`` fails if one appears.
+* ``plugin_library`` and ``_resolved_plugins`` are the registry, and they were an
+  actual defect rather than a hypothetical one: the first project to build an
+  engine froze the scanner class list for every project. See
+  :func:`prewarm_plugin_registry`.
+
+Worth recording because of how the original audit missed all three. It swept for
+module-level assignments of mutable literals (``X = {}``, ``X = []``), found six
+benign caches, and concluded the design was safe. The conclusion happened to be
+right and the evidence was not: ``ash_plugin_manager = AshPluginManager()`` is an
+assignment of an *object*, so it matches no mutable-literal pattern, while its
+``_resolved_plugins`` private attribute is process-global mutable state; and
+``.context`` is never assigned at module level at all, so there was nothing for
+that sweep to find. Any future search for shared state has to cover singleton
+instances, attributes set on them later, and the *cache key* of every memo -- the
+registry bug was a memo keyed on the literal string ``"scanner"``, carrying
+nothing that varied per project.
+
+The other half of that lesson is what evidence counts. A green per-project test
+suite proves nothing here, because a leak between differently-configured runs is
+invisible to any test that constructs one configuration. The discriminator is to
+run the same code twice in one process with *different* configuration and assert
+each run saw its own.
+
 Timeouts bound the verdict, not the worker
 ------------------------------------------
 ``project_timeout`` is measured from the moment a project *starts*, not from when
