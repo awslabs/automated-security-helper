@@ -89,11 +89,21 @@ def file_path_matches(
     if finding_lower == suppression_lower:
         return True
 
-    # When the pattern contains "**", we need special handling because
-    # fnmatch treats "*" as "anything except /" and has no concept of
-    # recursive directory matching.  We split on "**" and check that
-    # each segment matches in order, allowing any number of path
-    # components (including zero) in place of each "**".
+    # A pattern containing "**" is routed to _recursive_glob_match instead of
+    # fnmatch.
+    #
+    # Not because fnmatch's "*" stops at a path separator -- it does not.
+    # fnmatch.translate("*") is "(?s:.*)", so "*" matches any run of characters
+    # including "/". The practical consequence is that the plain fnmatch call
+    # below OVER-matches rather than under-matches: the pattern "src/*.py" also
+    # matches "src/sub/deep/a.py", so a suppression written that way silently
+    # covers subdirectories too.
+    #
+    # "**" needs its own matcher because fnmatch has no notion of path
+    # components at all, so it cannot express the per-segment anchoring a
+    # recursive glob implies. _recursive_glob_match splits the pattern on "**"
+    # and requires each segment to match whole path components in order,
+    # allowing any number of components (including zero) in place of each "**".
     if "**" in suppression_lower:
         return _recursive_glob_match(finding_lower, suppression_lower)
 
