@@ -302,7 +302,9 @@ def _selected_reporters(
             continue
         name = _reporter_name(instance)
         if not _is_enabled(instance):
-            ASH_LOGGER.debug(f"Reporter {name} is disabled; skipping at workspace level")
+            ASH_LOGGER.debug(
+                f"Reporter {name} is disabled; skipping at workspace level"
+            )
             continue
         if python_based_plugins_only and not instance.is_python_only():
             ASH_LOGGER.debug(

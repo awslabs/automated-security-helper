@@ -13,6 +13,9 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    html_workspace_section,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -80,6 +83,12 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         # Get top hotspots
         top_hotspots = emitter.get_top_hotspots(10)
         hotspots_section = self._format_hotspots_section(top_hotspots)
+
+        # The per-project table, placed after the metadata block and before the
+        # whole-workspace scanner table. Empty string for a single-directory scan,
+        # so that output is unchanged. Every value inside is escaped by the
+        # renderer -- a project label arrives from a project's own config file.
+        workspace_section = html_workspace_section(model)
 
         template = f"""
 <!DOCTYPE html>
@@ -172,6 +181,8 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             <p><strong>Report generated:</strong> {html.escape(metadata["report_time"])}</p>
             <p><strong>ASH version:</strong> {html.escape(metadata["tool_version"])}</p>
         </div>
+
+        {workspace_section}
 
         <h2>Scanner Results</h2>
         <div class="help-text">

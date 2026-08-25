@@ -49,15 +49,25 @@ class TestCsvReporter:
     def test_report_empty_model_returns_header_only(
         self, csv_reporter, sample_ash_model
     ):
-        """When there are no vulnerabilities, only the header row is produced."""
+        """When there are no vulnerabilities, only the header row is produced.
+
+        The column names asserted here changed from title case ("ID", "Severity")
+        to the field names the populated form has always emitted ("id",
+        "severity"). This test previously pinned a real inconsistency: the two
+        code paths in ``CsvReporter.report`` produced different headers for the
+        same data, so a consumer parsing by header name worked against one and
+        not the other depending on whether the scan happened to find anything.
+        Both headers are now derived from ``FlatVulnerability``'s own field
+        order, so they cannot disagree.
+        """
         result = csv_reporter.report(sample_ash_model)
 
         lines = result.strip().split("\n")
         assert len(lines) == 1  # header only
         # Verify some expected header columns
-        assert "ID" in lines[0]
-        assert "Severity" in lines[0]
-        assert "Scanner" in lines[0]
+        assert "id" in lines[0]
+        assert "severity" in lines[0]
+        assert "scanner" in lines[0]
 
     def test_report_with_vulnerabilities(self, csv_reporter):
         """When there are vulnerabilities, data rows follow the header."""

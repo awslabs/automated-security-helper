@@ -11,6 +11,9 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.models.flat_vulnerability import (
+    extract_workspace_project,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     VulnerabilityFinding,
@@ -30,6 +33,42 @@ from datetime import datetime, timezone
 import uuid
 from typing import Optional, List, Tuple
 from automated_security_helper.utils.log import ASH_LOGGER
+
+
+#: Prefix for the ``metadata.labels`` entry carrying workspace attribution.
+#: ``key:value`` is OCSF's conventional shape for a label, and the prefix is what
+#: lets a SIEM query for it without matching a project name by accident.
+WORKSPACE_PROJECT_LABEL_PREFIX = "workspace_project:"
+
+
+def _metadata_for_project(metadata: Metadata, result: Result) -> Metadata:
+    """*metadata* with this finding's workspace project recorded in ``labels``.
+
+    Returns the shared object unchanged for a single-directory scan, so that
+    output is byte-identical and no needless copies are made.
+
+    Why ``labels`` and not a ``metadata.workspace_project`` field
+    -------------------------------------------------------------
+    The RFC asked for the project "in metadata", and OCSF's ``Metadata`` sets
+    ``extra="forbid"``. Worse than forbidding, pydantic's ``model_copy(update=...)``
+    *silently drops* a key the schema does not declare -- so the obvious
+    implementation would have produced findings with no attribution at all and no
+    error to show for it. ``labels`` is the schema's own slot for free-form
+    annotation, is indexed by SIEMs, and needs no schema extension.
+
+    Copied per finding rather than mutated in place: one ``Metadata`` instance is
+    shared across every finding in the report, so appending to its ``labels``
+    would give every finding every project's label.
+    """
+    project = extract_workspace_project(result)
+    if not project:
+        return metadata
+    existing = metadata.labels
+    labels = list(existing) if isinstance(existing, list) else []
+    label = f"{WORKSPACE_PROJECT_LABEL_PREFIX}{project}"
+    if label not in labels:
+        labels.append(label)
+    return metadata.model_copy(update={"labels": labels})
 
 
 class OCSFReporterConfigOptions(ReporterOptionsBase):
@@ -542,7 +581,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 "category_uid": 2,  # Vulnerability Finding category ID
                 "category_name": "Findings",
                 "time": current_time_ms,
-                "metadata": metadata,
+                "metadata": _metadata_for_project(metadata, result),
                 "finding_info": finding_info,
                 "vulnerabilities": [vulnerability],
             }

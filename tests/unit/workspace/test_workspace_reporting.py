@@ -574,7 +574,10 @@ class TestTheOutputFormatFilter:
     def test_an_empty_format_filter_means_every_reporter(self, workspace):
         """Matches ``ReportPhase``: no ``--output-format`` is not "none"."""
         outcome = _emit(
-            workspace, FakeMergedReporter, FakeWorkspaceScopedReporter, output_formats=()
+            workspace,
+            FakeMergedReporter,
+            FakeWorkspaceScopedReporter,
+            output_formats=(),
         )
         assert set(outcome.workspace_artifacts) == {
             "fake-merged",
@@ -695,7 +698,9 @@ class TestExecuteWorkspaceRunsTheReportStep:
         assert result.report_outcome is not None
         assert "fake-merged" in result.report_outcome.workspace_artifacts
 
-    def test_the_report_step_is_skipped_when_the_phase_was_not_requested(self, tmp_path):
+    def test_the_report_step_is_skipped_when_the_phase_was_not_requested(
+        self, tmp_path
+    ):
         """``--phases scan`` must not produce reports, at workspace level either.
 
         The companion assertion to the test above: without it, a gate that was

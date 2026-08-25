@@ -12,6 +12,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -99,12 +100,22 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         # Add top hotspots
         report_data["top_hotspots"] = emitter.get_top_hotspots(10)
 
-        # Add findings
+        # Add findings. Each carries workspace_project when the scan was a
+        # workspace one; exclude_none drops it otherwise, so single-directory
+        # output is unchanged.
         flat_vulns = model.to_flat_vulnerabilities()
         report_data["findings"] = [
             vuln.model_dump(exclude_none=True, exclude_unset=True, mode="json")
             for vuln in flat_vulns
         ]
+
+        # The per-project verdicts, so a consumer can group and judge without
+        # re-deriving anything. Re-deriving would mean applying one threshold to
+        # every project, and projects in a workspace are independently
+        # configured -- so the consumer's answer would differ from the exit code
+        # for the same run, with no rule for which is authoritative.
+        if is_workspace_scan(model):
+            report_data["workspace"] = model.workspace.model_dump(mode="json")
 
         # Return the JSON string
         return json.dumps(report_data, indent=2, default=str)

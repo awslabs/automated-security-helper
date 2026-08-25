@@ -10,6 +10,9 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.models.flat_vulnerability import (
+    extract_workspace_project,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.severity_ladder import (
     sarif_level_fails_threshold,
@@ -208,11 +211,26 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 ):
                     if hasattr(result.properties.scanner_details, "tool_name"):
                         actual_scanner = result.properties.scanner_details.tool_name
-                if actual_scanner not in test_suite_dict:
-                    test_suite_dict[actual_scanner] = TestSuite(name=actual_scanner)
-                test_suite_dict[actual_scanner].add_testcase(test_case)
+                # In workspace mode the suite is named "<project>/<scanner>".
+                # Project leads so that one project's suites sort together in
+                # every CI front end that groups by suite name; the scanner is
+                # kept because discarding it -- the RFC's literal reading -- would
+                # lose a grouping single-directory mode has, for no gain.
+                #
+                # Read through the shared helper rather than inline, so this and
+                # the flattening path cannot disagree about where the attribution
+                # lives -- which is how a finding ends up under the wrong project
+                # in one report and the right one in another.
+                project = extract_workspace_project(result)
+                suite_name = (
+                    f"{project}/{actual_scanner}" if project else actual_scanner
+                )
+                if suite_name not in test_suite_dict:
+                    test_suite_dict[suite_name] = TestSuite(name=suite_name)
+                test_suite_dict[suite_name].add_testcase(test_case)
 
-        for scanner, test_suite in test_suite_dict.items():
+        for suite_name, test_suite in test_suite_dict.items():
+            del suite_name  # keyed for grouping; the name is already on the suite
             report.add_testsuite(test_suite)
         # Return the XML string representation of all test suites
         report_bytes: bytes = report.tostring()
