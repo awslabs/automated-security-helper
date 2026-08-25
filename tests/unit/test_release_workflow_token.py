@@ -130,6 +130,37 @@ def test_the_pr_creation_step_prefers_the_app_token(workflow):
         )
 
 
+def test_both_app_secrets_are_required_before_minting(workflow):
+    """An id without a key must skip the App, not fail the release.
+
+    create-github-app-token fails the step when the key is missing or malformed,
+    and that step has no continue-on-error, so gating on the id alone would let a
+    half-configured secret set kill the whole release job -- strictly worse than
+    the degraded-but-working state this replaces. The `||` fallback cannot rescue
+    it either: that only covers an absent output, never a failed step.
+    """
+    steps = _steps(workflow)
+    detect = next(
+        s for s in steps if "GITHUB_OUTPUT" in str(s.get("run", "")) and s.get("env")
+    )
+
+    env = detect.get("env") or {}
+    referenced = " ".join(str(v) for v in env.values())
+
+    assert "RELEASE_APP_ID" in referenced, (
+        "The detect step does not read RELEASE_APP_ID."
+    )
+    assert "RELEASE_APP_PRIVATE_KEY" in referenced, (
+        "The detect step never looks at RELEASE_APP_PRIVATE_KEY, so an id set "
+        "without a key would still attempt the mint and fail the release job."
+    )
+
+    run = str(detect.get("run", ""))
+    assert run.count("-n ") >= 2, (
+        f"The detect step does not test both secrets for non-emptiness: {run!r}"
+    )
+
+
 def test_there_is_a_fallback_to_github_token(workflow_text):
     """Releases must still work before the App secrets exist.
 

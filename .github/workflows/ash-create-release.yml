@@ -39,16 +39,27 @@ jobs:
       # Nothing is lost by leaving the push as it was: the workflow already sets
       # its git identity to github-actions[bot], so the commit attribution is
       # unchanged either way.
+      # Both secrets are required, not just the id. create-github-app-token fails
+      # the step if the key is missing or malformed, and the step has no
+      # continue-on-error, so a half-configured secret set would kill the whole
+      # release job -- strictly worse than the degraded-but-working state this
+      # replaces. The `||` fallback further down cannot rescue that: it only covers
+      # an absent output, never a failed step.
       - name: Detect release App credentials
         id: appcreds
         env:
           APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          APP_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
         run: |
-          if [ -n "$APP_ID" ]; then
+          if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::RELEASE_APP_ID is not set, so the release PR will be created with GITHUB_TOKEN and will not trigger its required checks. A maintainer will need to push to the branch to start them. See issue #341."
+            if [ -n "$APP_ID" ] || [ -n "$APP_KEY" ]; then
+              echo "::warning::Only one of RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY is set. Both are required, so the App is being skipped and the release PR will be created with GITHUB_TOKEN. See issue #341."
+            else
+              echo "::warning::RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY are not set, so the release PR will be created with GITHUB_TOKEN and will not trigger its required checks. A maintainer will need to push to the branch to start them. See issue #341."
+            fi
           fi
 
       - name: Mint a GitHub App token
