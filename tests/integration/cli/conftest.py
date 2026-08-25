@@ -44,7 +44,9 @@ def mock_mcp_environment():
     modules_to_mock = {
         "mcp": mock_mcp,
         "mcp.server": MagicMock(),
-        "mcp.server.mcpserver": MagicMock(MCPServer=mock_mcpserver, Context=mock_context),
+        "mcp.server.mcpserver": MagicMock(
+            MCPServer=mock_mcpserver, Context=mock_context
+        ),
     }
 
     with patch.dict("sys.modules", modules_to_mock):
@@ -211,11 +213,40 @@ def pytest_configure(config):
 
 # Test collection configuration
 def pytest_collection_modifyitems(config, items):
-    """Modify test collection to add markers automatically."""
+    """Modify test collection to add markers automatically.
+
+    Every rule here is scoped to this directory, and that scoping is the point.
+
+    ``pytest_collection_modifyitems`` receives *every* item in the session, not
+    only the ones under the conftest that defines the hook. The name-based rules
+    below were unscoped, so any test anywhere in the repository whose name
+    contained "workflow", "lifecycle" or "end_to_end" was marked slow -- and
+    ``tests/conftest.py`` then skips slow tests unless ``--run-slow`` is passed.
+    Any unit test whose name matched was therefore silently not running in a
+    full-suite run, including CI gates whose whole job is to fail when a workflow
+    drifts from its documented budget. Every affected test passes when executed
+    directly, which is how they were verified when written, so nothing was
+    hiding a real failure; they were simply providing no coverage while appearing
+    to.
+
+    The failure mode is worth naming because it is invisible from either end. The
+    test file gives no hint it will be skipped, and the conftest that skips it
+    lives in an unrelated directory the author had no reason to read. A green
+    suite plus a skip count nobody diffs is all the signal there was.
+    """
+    integration_root = Path(__file__).resolve().parent.parent
+
     for item in items:
-        # Add integration marker to all tests in this directory
-        if "integration" in str(item.fspath):
+        path = str(item.fspath)
+        if "integration" in path:
             item.add_marker(pytest.mark.integration)
+
+        # Scoped to the integration tree, which is what these heuristics are
+        # about. Compared against a resolved path rather than by substring: a
+        # substring test is how the unscoped version reached the whole repo, and
+        # "integration" appears in enough unrelated paths to do it again.
+        if not Path(item.fspath).resolve().is_relative_to(integration_root):
+            continue
 
         # Add slow marker to tests that might take longer
         if any(
