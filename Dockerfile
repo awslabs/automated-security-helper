@@ -85,17 +85,24 @@ RUN mkdir -p ${HOME}/.ssh && \
 #
 # Base dependency installation
 #
+# build-essential and ruby-dev are deliberately absent here: they are needed only
+# to build cfn-nag's gems, and this layer is never purged, so anything listed here
+# ships at runtime. They are installed and removed inside the gem build below.
+#
+# `ruby` is listed in its own right. It used to arrive only as a dependency of
+# ruby-dev, which meant removing ruby-dev would have taken the interpreter
+# cfn-nag runs on. Installing it explicitly also marks it manual, so the
+# --auto-remove in the gem build cannot collect it.
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    build-essential \
     ca-certificates \
     curl \
     git \
     gnupg \
     python3-venv \
     ripgrep \
-    ruby-dev \
+    ruby \
     tree && \
     rm -rf /var/lib/apt/lists/*
 
@@ -135,9 +142,20 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 #
 COPY automated_security_helper/assets/Gemfile /deps/Gemfile
 ARG BUNDLER_VERSION="2.4.22"
+# One RUN for install, build and purge. `core` is the base for both `ci` and
+# `non-root`, so a C toolchain left here ships in every published image, which is
+# its own finding in a security scanner. Docker layers are additive, so purging in
+# a later RUN would remove the compiler from the container while the image still
+# carried it -- keeping all three steps in one layer means it never lands at all.
+#
+# apt-get update runs again because the base layer clears the package lists.
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    with-retry 'gem install bundler -v ${BUNDLER_VERSION}'
-RUN with-retry 'bundle install --jobs=4'
+    apt-get update && \
+    apt-get install -y --no-install-recommends build-essential ruby-dev && \
+    with-retry 'gem install bundler -v ${BUNDLER_VERSION}' && \
+    with-retry 'bundle install --jobs=4' && \
+    apt-get purge -y --auto-remove build-essential ruby-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 #
 # JavaScript: corepack manages npm/yarn/pnpm versions via package.json engines
