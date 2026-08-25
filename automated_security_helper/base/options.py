@@ -30,6 +30,23 @@ class ScannerOptionsBase(PluginOptionsBase):
         ),
     ] = None
 
+    # Lives on the base rather than on individual scanners because the hang it
+    # prevents is a property of the shared subprocess path, not of any one tool.
+    # detect-secrets previously carried its own copy of this option, which is why
+    # it was the only scanner that timed out cleanly while the rest could run
+    # unbounded. 300 matches the default it chose.
+    scan_timeout: Annotated[
+        int | None,
+        Field(
+            description=(
+                "Maximum time in seconds to allow this scanner's tool invocation "
+                "to run before it is killed. Set to null to leave the scanner "
+                "unbounded, which risks a scan that never completes."
+            ),
+            ge=1,
+        ),
+    ] = 300
+
 
 class ReporterOptionsBase(PluginOptionsBase):
     """Base class for reporter options."""

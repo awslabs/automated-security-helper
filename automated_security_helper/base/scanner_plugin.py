@@ -10,13 +10,28 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
-from automated_security_helper.schemas.sarif_schema_model import ArtifactLocation, Invocation, SarifReport
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactLocation,
+    Invocation,
+    SarifReport,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 from pydantic import Field
-from typing import Annotated, Any, ClassVar, Generic, List, Literal, Optional, Set, Tuple, TypeVar
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Generic,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+)
 from abc import abstractmethod
 
 # Pattern for valid CLI flag keys: one or two leading dashes followed by
@@ -323,9 +338,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return
         working_dir = ArtifactLocation(uri=get_shortest_name(input=target))  # type: ignore[call-arg]
         extras = self._invocation_extras(sarif_report, final_args, target)
-        command_line = (
-            shlex.join(str(a) for a in final_args) if final_args else ""
-        )
+        command_line = shlex.join(str(a) for a in final_args) if final_args else ""
         sarif_report.runs[0].invocations = [
             Invocation(  # type: ignore[call-arg]
                 commandLine=command_line,
@@ -443,6 +456,25 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             "or override scan() directly."
         )
 
+    def _effective_scan_timeout(self) -> float | None:
+        """Seconds to allow this scanner's tool, or None to leave it unbounded.
+
+        Read defensively rather than as self.config.options.scan_timeout. A
+        third-party scanner may define options that predate this field, or set
+        config to None entirely, and a scan must not fail with AttributeError
+        because of a timeout lookup. An absent option means unbounded, which is
+        the behaviour those scanners already had.
+        """
+        options = getattr(self.config, "options", None)
+        timeout = getattr(options, "scan_timeout", None)
+        if timeout is None:
+            return None
+        try:
+            timeout = float(timeout)
+        except (TypeError, ValueError):
+            return None
+        return timeout if timeout > 0 else None
+
     def scan(
         self,
         target: "Path",
@@ -490,10 +522,16 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 global_ignore_paths=global_ignore_paths,
             )
 
+            # Bound the tool invocation. Without this every template-based
+            # scanner could run indefinitely: bandit was reported running past 50
+            # minutes on a project the CLI scanned in 20 seconds. detect-secrets
+            # was the only scanner that timed out cleanly, because it carried its
+            # own copy of this option and enforced it in its own scan override.
             self._run_subprocess(
                 command=final_args,
                 results_dir=results_file.parent,
                 env=subprocess_env,
+                timeout=self._effective_scan_timeout(),
             )
 
             self._post_scan(target=target, target_type=target_type)
