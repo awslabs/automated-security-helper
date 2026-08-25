@@ -25,6 +25,17 @@ What this package deliberately does NOT do
   versions is refused rather than run with one project's requirement quietly
   ignored.
 
+Module map
+----------
+* :mod:`~automated_security_helper.workspace.workspace_file` -- parse and
+  discover the ``.code-workspace`` definition.
+* :mod:`~automated_security_helper.workspace.scanner_pins` -- decide whether
+  two version pins for the same scanner can both be satisfied.
+* :mod:`~automated_security_helper.workspace.plan` -- the execution plan
+  produced by resolution, and its rendering.
+* :mod:`~automated_security_helper.workspace.resolver` -- validate every entry
+  and build the plan.
+
 Exit codes and failure modes are the ones modelled in
 :mod:`automated_security_helper.models.workspace`; this package raises
 ``WorkspaceDefinitionError`` for code 2 and lets ``ASHConfigValidationError``
