@@ -17,10 +17,48 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # GitHub does not start workflow runs for events authenticated with
+      # GITHUB_TOKEN. Pushing the release branch with it therefore produced a PR
+      # with none of its required checks, and the ruleset waits for exactly those
+      # checks, so the PR could not merge on its own. v3.6.0's release PR needed a
+      # manual push before it would go green.
+      #
+      # An App token is a different identity, so the push it makes does trigger
+      # workflows.
+      #
+      # This runs before checkout on purpose. `gh pr create` reads GH_TOKEN, but
+      # `git push` does not: it uses the credential actions/checkout persists.
+      # Fixing only GH_TOKEN would leave the push on GITHUB_TOKEN, and the push is
+      # what the pull_request event hangs off.
+      - name: Detect release App credentials
+        id: appcreds
+        env:
+          APP_ID: ${{ secrets.RELEASE_APP_ID }}
+        run: |
+          if [ -n "$APP_ID" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::RELEASE_APP_ID is not set, so the release PR will be created with GITHUB_TOKEN and will not trigger its required checks. A maintainer will need to push to the branch to start them. See issue #341."
+          fi
+
+      - name: Mint a GitHub App token
+        id: app-token
+        if: steps.appcreds.outputs.present == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # Falls back to GITHUB_TOKEN so a release still works before the App
+          # secrets exist. A release needing one manual nudge is worse than the
+          # status quo; a release that cannot run at all is much worse.
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -77,7 +115,7 @@ jobs:
       - name: Create release PR
         if: steps.bump.outputs.bumped == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           OLD_VERSION: ${{ steps.bump.outputs.old_version }}
           NEW_VERSION: ${{ steps.bump.outputs.new_version }}
           ACTOR: ${{ github.actor }}
