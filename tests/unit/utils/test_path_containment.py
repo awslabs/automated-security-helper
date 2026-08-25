@@ -268,7 +268,11 @@ class TestResultShape:
     def test_result_is_immutable(self, root):
         result = validate_contained_path("project-a", root)
         with pytest.raises(FrozenInstanceError):
-            result.resolved = Path("/tmp")  # type: ignore[misc]
+            # Any Path will do -- this only proves the dataclass is frozen and
+            # never touches the filesystem. Deliberately not a temp-directory
+            # literal: ASH scans its own repository in CI at MEDIUM, and
+            # bandit's B108 flags those regardless of intent.
+            result.resolved = Path("elsewhere")  # type: ignore[misc]
 
     def test_error_is_immutable(self, root):
         result = validate_contained_path("..", root)
