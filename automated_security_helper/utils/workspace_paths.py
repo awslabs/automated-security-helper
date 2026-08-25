@@ -208,29 +208,75 @@ _GLOB_METACHARACTERS = frozenset("*?[]")
 _WHOLE_PROJECT = "**"
 
 
+def _leading_separator_count(normalised_raw: str) -> int:
+    """Count the leading separators of an already backslash-normalised string.
+
+    Decided from the raw text rather than from ``PureWindowsPath.drive``, because
+    that attribute is version-dependent and would make this a portability bug.
+    See :func:`_normalise` for the table.
+    """
+    return len(normalised_raw) - len(normalised_raw.lstrip("/"))
+
+
 def _normalise(value: PathLike, *, label: str) -> PurePosixPath:
     """Normalise separators and validate, returning a PurePosixPath.
 
-    Rejects the empty value, any ``..`` component, and any drive or UNC anchor.
-    Backslashes become forward slashes first, so a Windows-style pattern is
-    validated on POSIX rather than being read as one long filename.
+    Rejects the empty value, any ``..`` component, two-or-more leading
+    separators, and any drive anchor. Backslashes become forward slashes first,
+    so a Windows-style pattern is validated on POSIX rather than being read as
+    one long filename.
+
+    The leading-separator rule is decided by counting characters, NOT by
+    ``PureWindowsPath(raw).drive``, because that value changed between 3.11 and
+    3.12 and this project supports 3.10 through 3.13::
+
+        input            3.10/3.11 .drive     3.12/3.13 .drive
+        /src/x.py        ''       falsy       ''         falsy
+        //src/x.py       '\\\\\\\\src\\\\x.py'  truthy      same       truthy
+        ///src/x.py      ''       FALSY       '\\\\\\\\\\\\src'  TRUTHY
+        ////src/x.py     ''       FALSY       '\\\\\\\\\\\\'     TRUTHY
+
+    So three-or-more leading separators read as an ordinary rooted path on
+    3.10/3.11 and as a drive anchor on 3.12+. Relying on ``.drive`` for this
+    made ``///src/x.py`` accepted on the older interpreters and rejected on the
+    newer ones -- the module docstring claimed the latter, and CI's py3.10 and
+    py3.11 rows disagreed. Counting characters is identical on every version.
+    ``PurePosixPath.parts`` is NOT the culprit: it is identical across all four
+    versions, collapsing three-or-more leading separators to a single ``/``,
+    which is precisely why the anchor cannot be recovered after parsing.
     """
     raw = str(value)
     if not raw.strip():
         raise WorkspacePatternError(f"{label} must not be empty")
 
-    # Detect a drive or UNC anchor before normalising, using the Windows
-    # flavour: PurePosixPath has no concept of a drive, so it would read
-    # "C:/Windows" as an ordinary relative pattern with a component named "C:".
-    windows_view = PureWindowsPath(raw)
+    normalised_raw = raw.replace("\\", "/")
+
+    # Explicit, version-independent decision about the leading separators. This
+    # runs BEFORE the drive check so that it, rather than the pathlib version,
+    # decides every all-separator anchor -- including the real UNC "//server/share".
+    leading = _leading_separator_count(normalised_raw)
+    if leading >= 2:
+        raise WorkspacePatternError(
+            f"{label} '{raw}' starts with {leading} separators; "
+            "that is either a UNC share or a malformed project-rooted path, and "
+            "the two cannot be told apart. Use a single leading separator for a "
+            "project-rooted pattern, or none for a relative one"
+        )
+
+    # A genuine drive letter ("C:/Windows") has no leading separator at all, so
+    # it survives the check above and still needs the Windows flavour to spot
+    # it: PurePosixPath has no concept of a drive and would read "C:" as an
+    # ordinary component name. This use of `.drive` is version-stable because it
+    # only ever sees zero-or-one-leading-separator input by this point.
+    windows_view = PureWindowsPath(normalised_raw)
     if windows_view.drive:
         raise WorkspacePatternError(
             f"{label} '{raw}' is an absolute filesystem path "
-            f"(drive or UNC anchor '{windows_view.drive}'); "
+            f"(drive anchor '{windows_view.drive}'); "
             "patterns must be relative to a project or workspace root"
         )
 
-    normalised = PurePosixPath(raw.replace("\\", "/"))
+    normalised = PurePosixPath(normalised_raw)
     if _PARENT in normalised.parts:
         raise WorkspacePatternError(
             f"{label} '{raw}' contains a '..' component; "

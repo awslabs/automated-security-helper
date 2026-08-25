@@ -72,18 +72,57 @@ class TestUpConversionProjectRooted:
         assert "//" not in result
         assert result.startswith("project-a/")
 
-    @pytest.mark.parametrize("pattern", ["//src/x.py", "///src/x.py"])
-    def test_a_repeated_leading_separator_is_rejected_as_unc(self, pattern):
-        """Two leading separators is a UNC anchor, and cannot be told from one.
+    # The leading-separator contract, pinned by count. Asserted directly on the
+    # outcome rather than through PureWindowsPath, because that attribute is
+    # exactly what made this version-dependent: PureWindowsPath("///src/x.py")
+    # .drive is '' on 3.10/3.11 and '\\\\\\src' on 3.12+, so a .drive-based test
+    # would agree with a .drive-based implementation on every interpreter and
+    # never catch the divergence. This project supports 3.10 through 3.13.
+    LEADING_SEPARATOR_CONTRACT = [
+        ("src/x.py", "project-a/src/x.py"),
+        ("/src/x.py", "project-a/src/x.py"),
+        ("//src/x.py", None),
+        ("///src/x.py", None),
+        ("////src/x.py", None),
+    ]
 
-        PureWindowsPath('//src/x.py').drive is '\\\\src\\x.py', so the Windows
-        flavour reads a doubled leading separator as a UNC share. A pattern
-        author almost certainly meant a project-rooted path with a stray extra
-        slash, but the two shapes are identical, and rejecting a malformed
-        pattern with an error is safer than guessing which was meant.
+    @pytest.mark.parametrize("pattern,expected", LEADING_SEPARATOR_CONTRACT)
+    def test_leading_separator_count_decides_the_outcome(self, pattern, expected):
+        """Zero or one separator converts; two or more is rejected, on every version.
+
+        Two-or-more cannot be told from a UNC share, and a pattern author almost
+        certainly meant a project-rooted path with a stray extra slash. Rejecting
+        a malformed pattern with an error beats guessing which was meant.
         """
-        with pytest.raises(WorkspacePatternError):
-            to_workspace_pattern(pattern, "project-a")
+        if expected is None:
+            with pytest.raises(WorkspacePatternError) as excinfo:
+                to_workspace_pattern(pattern, "project-a")
+            assert "separator" in str(excinfo.value)
+        else:
+            assert to_workspace_pattern(pattern, "project-a") == expected
+
+    @pytest.mark.parametrize("pattern,expected", LEADING_SEPARATOR_CONTRACT)
+    def test_backslash_separators_follow_the_same_contract(self, pattern, expected):
+        """A Windows-style pattern normalises first, then obeys the same counts."""
+        backslashed = pattern.replace("/", "\\")
+        if expected is None:
+            with pytest.raises(WorkspacePatternError):
+                to_workspace_pattern(backslashed, "project-a")
+        else:
+            assert to_workspace_pattern(backslashed, "project-a") == expected
+
+    def test_a_real_unc_share_is_still_rejected(self):
+        """The separator count subsumes the UNC case rather than bypassing it."""
+        for pattern in ("//server/share/x.py", "\\\\server\\share\\x.py"):
+            with pytest.raises(WorkspacePatternError):
+                to_workspace_pattern(pattern, "project-a")
+
+    def test_a_drive_letter_is_still_rejected(self):
+        """A drive anchor has no leading separator, so it needs its own check."""
+        for pattern in ("C:/Windows/x.dll", "C:\\Windows\\x.dll"):
+            with pytest.raises(WorkspacePatternError) as excinfo:
+                to_workspace_pattern(pattern, "project-a")
+            assert "drive" in str(excinfo.value)
 
     def test_project_rooted_and_relative_agree(self):
         """'/src/x.py' and 'src/x.py' mean the same thing to a project."""
