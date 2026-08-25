@@ -220,10 +220,18 @@ from automated_security_helper.workspace.aggregation import (
     has_finding_at_min_severity,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from automated_security_helper.workspace.reporting import (
+    WorkspaceReportOutcome,
+    emit_workspace_reports,
+    unsupported_reporter_names,
+)
 
 #: How often the outer loop wakes to check per-project deadlines. Small enough
 #: that a timeout is reported promptly, large enough not to spin.
 _DEADLINE_POLL_SECONDS = 0.05
+
+#: The phase name that selects report generation, as ``run_ash_scan`` spells it.
+_REPORT_PHASE = "report"
 
 #: The subtree each project's own output lands in.
 PROJECTS_DIR_NAME = "projects"
@@ -275,6 +283,11 @@ class WorkspaceRunResult:
     exit_code: int
     payload: WorkspaceResults
     project_durations: Dict[str, float] = field(default_factory=dict)
+    #: What the workspace-level report step produced, or ``None`` when the
+    #: operator did not ask for the report phase. ``None`` rather than an empty
+    #: outcome, so a caller can tell "no reports were requested" from "reports
+    #: were requested and every one was withheld".
+    report_outcome: Optional["WorkspaceReportOutcome"] = None
 
 
 @dataclass
@@ -677,6 +690,7 @@ def execute_workspace(
     settings: ProjectScanSettings,
     *,
     orchestrator_factory: Optional[OrchestratorFactory] = None,
+    reporter_classes: Optional[List[type]] = None,
 ) -> WorkspaceRunResult:
     """Scan every active project in *plan* and write the unified results.
 
@@ -687,15 +701,18 @@ def execute_workspace(
         orchestrator_factory: Builds one project's orchestrator. Defaults to
             ``ASHScanOrchestrator.create``; injected only by tests, so production
             callers never pass it.
+        reporter_classes: The reporters the workspace-level report step considers.
+            Defaults to the plugin registry; injected only by tests.
 
     Returns:
         The unified results path, the process exit code, and the payload.
 
     Raises:
         WorkspaceDefinitionError: When a project is not a git repository under
-            ``precommit`` without ``--allow-missing-projects``. Raised rather than
-            recorded because nothing has been scanned yet and the operator's flags
-            are contradictory -- that is an exit-2 refusal, not a project failure.
+            ``precommit`` without ``--allow-missing-projects``, or when an enabled
+            reporter declares itself unsupported in workspace mode. Raised rather
+            than recorded because nothing has been scanned yet -- that is an
+            exit-4 refusal, not a project failure.
     """
     if orchestrator_factory is None:
         from automated_security_helper.core.orchestrator import ASHScanOrchestrator
@@ -736,6 +753,39 @@ def execute_workspace(
     # first project to touch it would otherwise freeze the scanner set for all.
     prewarm_plugin_registry(plan, settings)
 
+    reports_requested = _REPORT_PHASE in settings.phases
+    if reports_requested:
+        # Before the scan, for two reasons. The operator learns immediately
+        # rather than after paying for the whole workspace; and once
+        # ``aggregator.write`` has recorded the exit code *into* the results
+        # file, a refusal could only be surfaced by exiting with a status that
+        # file does not contain -- two answers to one question, which is what
+        # models.workspace's exit-code contract exists to avoid.
+        #
+        # After prewarm_plugin_registry, and that order is load-bearing rather
+        # than incidental: reading the reporter set from a cold registry would
+        # memoise whatever was resolvable at that moment into
+        # ``_resolved_plugins["reporter"]``, and prewarm would then hand every
+        # project the memoised subset. That is exactly the defect prewarm exists
+        # to fix, reintroduced from the other end.
+        #
+        # Gated on the report phase because a reporter that cannot produce a
+        # workspace artefact is not an operator's problem until they ask for one.
+        refusing = unsupported_reporter_names(
+            plan,
+            output_dir,
+            output_formats=settings.output_formats,
+            python_based_plugins_only=settings.python_based_plugins_only,
+            reporter_classes=reporter_classes,
+        )
+        if refusing:
+            raise WorkspaceDefinitionError(
+                f"reporter(s) {', '.join(refusing)} declare that they cannot "
+                f"produce a correct report in workspace mode, and are enabled. "
+                f"Nothing was scanned. Disable them, narrow --output-format to "
+                f"exclude them, or scan the projects separately."
+            )
+
     bound = min(configured_bound, len(active) or 1)
     ASH_LOGGER.info(
         f"Scanning {len(active)} workspace project(s), "
@@ -772,6 +822,23 @@ def execute_workspace(
         max_parallel_projects=configured_bound,
         project_timeout=settings.project_timeout,
     )
+
+    # After the results file, because the merged reporters read it back -- see
+    # "Why the whole model is loaded back" in workspace.reporting. Reading the
+    # written file rather than a parallel in-memory model is what makes it
+    # impossible for the workspace reports to disagree with it.
+    report_outcome: Optional[WorkspaceReportOutcome] = None
+    if reports_requested:
+        report_outcome = emit_workspace_reports(
+            plan=plan,
+            output_dir=output_dir,
+            results_path=results_path,
+            output_formats=settings.output_formats,
+            python_based_plugins_only=settings.python_based_plugins_only,
+            ignore_suppressions=settings.ignore_suppressions,
+            reporter_classes=reporter_classes,
+        )
+
     return WorkspaceRunResult(
         results_path=results_path,
         exit_code=exit_code,
@@ -779,6 +846,7 @@ def execute_workspace(
         project_durations={
             key: entry.outcome.duration_seconds for key, entry in collected.items()
         },
+        report_outcome=report_outcome,
     )
 
 
