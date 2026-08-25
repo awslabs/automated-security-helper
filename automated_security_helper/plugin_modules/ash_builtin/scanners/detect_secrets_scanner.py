@@ -40,6 +40,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
 
 from detect_secrets import SecretsCollection
@@ -129,9 +130,21 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # detect-secrets is a dependency of this Python module and we interact with it
-        # purely through Python. If the Python import got this far then we know we're
-        # in a valid runtime for this scanner.
+        # detect-secrets is a dependency of this Python module and we interact
+        # with it purely through Python. If the Python import got this far then
+        # we know we're in a valid runtime for this scanner.
+        #
+        # We additionally consult the consolidated UV-or-direct-binary
+        # resolver for diagnostic logging only — its return value never gates
+        # the result because the Python import is the authoritative signal.
+        cmd = get_uv_tool_command(
+            "detect-secrets", fallback_binary="detect-secrets"
+        )
+        if cmd is not None:
+            ASH_LOGGER.debug(
+                f"detect-secrets CLI also reachable via {cmd[0]}; "
+                "scanner will continue to use the in-process Python API."
+            )
         return True
 
     def _process_config_options(self):
@@ -288,6 +301,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             except RuntimeError:
                 # Already set — this is fine
                 pass
+
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — DetectSecrets overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
 
     def scan(
         self,

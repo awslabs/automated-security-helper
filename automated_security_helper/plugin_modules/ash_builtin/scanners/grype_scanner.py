@@ -1,6 +1,5 @@
 """Module containing the Grype security scanner implementation."""
 
-import json
 import logging
 import os
 from pathlib import Path
@@ -20,12 +19,12 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.constants import is_offline_mode
-from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
-    ArtifactLocation,
-    Invocation,
     PropertyBag,
+    Run,
     SarifReport,
+    Tool,
+    ToolComponent,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -178,149 +177,63 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
 
         return super()._process_config_options()
 
-    def scan(
+    # Grype exits with 2 when vulnerabilities are found above threshold,
+    # not 1 like most scanners. Override the template-method default.
+    success_exit_codes: ClassVar[set] = {0, 2}
+
+    def _execute_scan(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: GrypeScannerConfig | None = None,
-    ) -> SarifReport | bool:
-        """Execute Grype scan and return results.
-
-        Args:
-            target: Path to scan
-
-        Returns:
-            SarifReport containing the scan findings and metadata
-
-        Raises:
-            ScannerError: If the scan fails or results cannot be parsed
-        """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-        # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
-            message = (
-                f"Target directory {target} is empty or doesn't exist. Skipping scan."
-            )
-            self._plugin_log(
-                message,
-                target_type=target_type,
-                level=logging.INFO,
-                append_to_stream="stderr",
-            )
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return True
-
-        validated = self._pre_scan(
-            target=target,
-            target_type=target_type,
-            config=config,
+        global_ignore_paths: List[IgnorePathWithReason],
+    ):
+        """Resolve final argv, results path, and subprocess env for Grype."""
+        target_results_dir = self.results_dir.joinpath(target_type)
+        results_file = target_results_dir.joinpath("results_sarif.sarif")
+        results_file.parent.mkdir(exist_ok=True, parents=True)
+        final_args = self._resolve_arguments(
+            # Grype expects directory scans to have the target begin with `dir:`
+            target=f"dir:{target.as_posix()}",
+            results_file=results_file,
         )
-        if not validated:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
+        subprocess_env = (
+            {**os.environ, **self.extra_env} if self.extra_env else None
+        )
+        return final_args, results_file, subprocess_env
+
+    def _ensure_runs(self, sarif_report: SarifReport) -> None:
+        """Synthesize a fallback Run when Grype emits a runless SARIF."""
+        if not sarif_report.runs:
+            ASH_LOGGER.warning(
+                "Grype SARIF report has no runs, creating empty run"
             )
-            return False
-
-
-        if not self.dependencies_satisfied:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-        try:
-            target_results_dir = self.results_dir.joinpath(target_type)
-            results_file = target_results_dir.joinpath("results_sarif.sarif")
-            results_file.parent.mkdir(exist_ok=True, parents=True)
-            final_args = self._resolve_arguments(
-                # Grype expects directory scans to have the target begin with `dir:`
-                target=f"dir:{target.as_posix()}",
-                results_file=results_file,
-            )
-            subprocess_env = (
-                {**os.environ, **self.extra_env} if self.extra_env else None
-            )
-            self._run_subprocess(
-                command=final_args,
-                results_dir=target_results_dir,
-                env=subprocess_env,
-            )
-
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-
-            grype_results = {}
-            with open(results_file, mode="r", encoding="utf-8") as f:
-                grype_results = json.load(f)
-
-            ASH_LOGGER.debug(
-                f"Grype results structure: runs count = {len(grype_results.get('runs', []))}"
-            )
-
-            try:
-                sarif_report: SarifReport = SarifReport.model_validate(grype_results)
-
-                # Ensure we have at least one run before accessing it
-                if not sarif_report.runs:
-                    ASH_LOGGER.warning(
-                        "Grype SARIF report has no runs, creating empty run"
-                    )
-                    from automated_security_helper.schemas.sarif_schema_model import (
-                        Run,
-                        Tool,
-                        ToolComponent,
-                    )
-
-                    sarif_report.runs = [
-                        Run(
-                            tool=Tool(
-                                driver=ToolComponent(name="grype", version="unknown")
-                            ),
-                            results=[],
-                        )
-                    ]
-
-                # Safely access the first run
-                first_run = sarif_report.runs[0]
-                first_run.invocations = [
-                    Invocation(
-                        commandLine=final_args[0],
-                        arguments=final_args[1:],
-                        startTimeUtc=self.start_time,
-                        endTimeUtc=self.end_time,
-                        executionSuccessful=(self.exit_code in (0, 2)),
-                        exitCode=self.exit_code,
-                        exitCodeDescription="\n".join(self.errors),
-                        workingDirectory=ArtifactLocation(
-                            uri=get_shortest_name(input=target),
-                        ),
-                        properties=PropertyBag(
-                            tool=first_run.tool,
-                        ),
-                    )
-                ]
-
-                for result in sarif_report.get_all_results():
-                    self._normalize_result_uris(result)
-            except Exception as e:
-                ASH_LOGGER.warning(
-                    f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}"
+            sarif_report.runs = [
+                Run(
+                    tool=Tool(
+                        driver=ToolComponent(name="grype", version="unknown")
+                    ),
+                    results=[],
                 )
-                ASH_LOGGER.debug(f"Grype SARIF processing error details: {e}")
-                # Return the raw results if SARIF processing fails
-                sarif_report = grype_results
+            ]
 
-            return sarif_report
+    def _invocation_extras(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: Path,
+    ) -> dict:
+        """Attach the run's tool to the invocation's properties bag."""
+        if not sarif_report.runs:
+            return {}
+        return {"properties": PropertyBag(tool=sarif_report.runs[0].tool)}
 
-        except Exception as e:
-            # Check if there are useful error details
-            raise ScannerError(f"Grype scan failed: {str(e)}")
+    def _post_process_sarif(
+        self,
+        sarif_report: SarifReport,
+        final_args: List[str],
+        target: Path,
+    ) -> SarifReport:
+        """Strip leading slashes from artifact URIs across all results."""
+        for result in sarif_report.get_all_results():
+            self._normalize_result_uris(result)
+        return sarif_report
