@@ -28,23 +28,39 @@ status check.
 
 How the fixture is built to catch each one
 ------------------------------------------
-Three projects, generated at runtime outside the repository:
+Four projects, generated at runtime outside the repository:
 
 * ``project-a`` -- threshold LOW, with a suppression for one rule at
-  ``src/insecure.py``.
-* ``project-b`` -- threshold LOW, byte-identical ``src/insecure.py``, no
-  suppression. Same threshold as A on purpose, so the two are directly
-  comparable: any difference between them is the suppression and nothing else.
-* ``src`` -- threshold CRITICAL, byte-identical ``src/insecure.py``. Named ``src``
-  deliberately: container mode mounts the workspace root at ``/src``, so this
-  project is ``/src/src``, the shape that re-enters the basename heuristic in
-  ``sarif_utils`` (#361). It also carries the looser threshold, so it produces
-  the same findings as B and a different verdict.
+  ``src/insecure.py``. Marker rule B101.
+* ``project-b`` -- threshold LOW, no suppression. Same threshold as A on purpose,
+  so the two are directly comparable: any difference between them is the
+  suppression and nothing else. Marker rule B311.
+* ``src`` -- threshold CRITICAL. Named ``src`` deliberately: container mode mounts
+  the workspace root at ``/src``, so this project is ``/src/src``, the shape that
+  re-enters the basename heuristic in ``sarif_utils`` (#361). It also carries the
+  looser threshold, so it produces the same shared findings as B and a different
+  verdict. Marker rule B403.
+* ``apps/admin`` -- threshold LOW, and **nested**, so its key (``apps-admin``) is
+  not its path. That distinction is not cosmetic: a check comparing a
+  workspace-relative URI against the project *key* rejects every finding in this
+  project while looking perfectly reasonable, and without a project of this shape
+  in the fixture the bug is invisible. Marker rule B405.
 
-Same file, three times. That is what makes attribution testable at all: if the
-gate used three different files, "the finding is attributed to A" would be
-satisfied by matching on the filename, and a broken attribution that credited
-every finding to the project whose file it came from would pass.
+Every project holds a byte-identical ``src/insecure.py``. That is what makes
+attribution testable at all: with four different files, "the finding is
+attributed to A" would be satisfied by matching on the filename, and a broken
+attribution that credited every finding to the project whose file it came from
+would pass.
+
+The marker rules are the other half, and they exist because identical files alone
+are not enough. Each project also holds ``src/marker.py`` -- same path everywhere,
+different content -- tripping one bandit rule no other project trips. The reason
+is that the aggregator stamps the project key onto the SARIF run and onto every
+result in it from one variable in one loop, so any check comparing those two
+values compares a value with itself. Exchange two runs' attributions and the
+payload stays perfectly self-consistent while every finding is mislabelled. The
+marker's ground truth is source on disk rather than the payload, so nothing in the
+pipeline can move both sides together.
 
 Deliberate choices
 ------------------
@@ -52,12 +68,28 @@ Deliberate choices
   severities move between releases, so asserting "project-b has 4 actionable
   findings" turns an upstream release into a red branch -- which has happened to
   this project before. What cannot move is that CRITICAL is looser than LOW over
-  identical findings, so the gate asserts ``src <= project-b`` and that
-  ``project-b`` is non-zero.
-* Bandit is the only producer. It is Python-only, installed on every runner, and
-  the fixture is Python. No credential-shaped literal appears anywhere, because
-  detect-secrets matches line by line rather than on an AST and this file is
-  itself scanned by ASH's own self-scan.
+  identical findings, so the gate asserts ``src < project-b`` and that
+  ``project-b`` is non-zero. Strictly less, not "no more than": equal counts are
+  what "the threshold was never applied" looks like, and tolerating them made the
+  check unable to fail on its own subject.
+* Every project must report findings, not merely status ``completed``. A project
+  that scanned nothing satisfies every attribution assertion by giving them
+  nothing to inspect, so three of four projects could silently not run.
+* Two producers, and both matter. Bandit carries the marker rules and the
+  suppression, because it is Python-only, installed on every runner, and reports a
+  per-finding ``issue_severity``. Checkov reads the ``.tf`` file and contributes
+  roughly as many findings again; without a second scanner family the rollup check
+  could not show one scanner's count leaking into another's. No credential-shaped
+  literal appears anywhere, because detect-secrets matches line by line rather
+  than on an AST and this file is itself scanned by ASH's own self-scan.
+* Only bandit's findings are thresholdable, which the threshold check depends on.
+  Measured on this fixture: checkov emits no ``properties.issue_severity``, so
+  those findings are gated by SARIF level instead, and the ladder maps ``error`` to
+  CRITICAL -- actionable at every threshold, CRITICAL included. Raising a project
+  to CRITICAL therefore silences bandit's non-critical findings and none of
+  checkov's. Pre-existing behaviour, shared with ``_compute_exit_code``; recorded
+  here because it is the opposite of what "CRITICAL gates almost nothing" suggests
+  and it is what sets the margin the threshold assertion relies on.
 * ``--phases scan`` only. The report phase is the next PR's subject and would add
   minutes without adding signal here.
 * The scan is invoked as ``<python> -m automated_security_helper.cli.main`` with
@@ -178,7 +210,78 @@ FIXTURE_RELATIVE_PATH = "src/insecure.py"
 #: gate. Stated here so nobody reads a green gate as proof of it.
 FIXTURE_TERRAFORM_RELATIVE_PATH = "src/insecure_bucket.tf"
 
-#: Every fixture file, by project-relative path.
+# ---------------------------------------------------------------------------
+# Per-project marker rules: the independent ground truth for attribution
+#
+# Every project holds a file at the SAME relative path, with content that trips
+# exactly one bandit rule no other project trips. That combination is what makes
+# attribution checkable rather than merely self-consistent.
+#
+# The problem it solves. The aggregator stamps the project key onto the SARIF run
+# and onto every result in that run from one local variable in one loop, so
+# comparing "the run says A" against "the result says A" compares a value with
+# itself: the check cannot fail, and it passed for that reason rather than
+# because attribution worked. Swap two runs' attributions and both sides move
+# together, leaving every finding consistently mislabelled and the gate green.
+#
+# A marker rule breaks that. The run's claimed project comes from the payload;
+# the rule that fired comes from source on disk. Nothing in the pipeline can move
+# both, so if project A's run contains B's marker, the scan filed B's file under
+# A -- which is exactly the shape a shared scanner instance produces.
+#
+# Chosen against bandit 1.9.4 and verified not to overlap the shared file's
+# rules, which are B307, B324, B404 and B602. All four markers are LOW severity,
+# so the threshold comparison stays a comparison of like with like.
+# ---------------------------------------------------------------------------
+
+#: Where each project's marker lives. Identical across projects on purpose: a
+#: distinct filename per project would let attribution be satisfied by matching
+#: on the name, which is the hole this fixture is built to close.
+FIXTURE_MARKER_RELATIVE_PATH = "src/marker.py"
+
+#: bandit rule id -> the source that trips it and nothing else in this fixture.
+MARKER_SOURCES: Dict[str, str] = {
+    # B101 assert_used
+    "B101": '"""Marker module. Scan fixture only -- never imported."""\n'
+    "\n"
+    "\n"
+    "def check(value):\n"
+    "    assert value is not None\n"
+    "    return value\n",
+    # B311 random -- not suitable for security or cryptographic purposes
+    "B311": '"""Marker module. Scan fixture only -- never imported."""\n'
+    "\n"
+    "import random\n"
+    "\n"
+    "\n"
+    "def pick() -> float:\n"
+    "    return random.random()\n",
+    # B403 blacklist -- importing pickle
+    "B403": '"""Marker module. Scan fixture only -- never imported."""\n'
+    "\n"
+    "import pickle\n"
+    "\n"
+    "\n"
+    "def name() -> str:\n"
+    "    return pickle.__name__\n",
+    # B405 blacklist -- importing xml.etree.ElementTree
+    "B405": '"""Marker module. Scan fixture only -- never imported."""\n'
+    "\n"
+    "import xml.etree.ElementTree\n"
+    "\n"
+    "\n"
+    "def name() -> str:\n"
+    "    return xml.etree.ElementTree.__name__\n",
+}
+
+#: The rules the shared insecure module trips in every project. Recorded so the
+#: fixture self-check can prove no marker collides with one -- a marker that also
+#: fired everywhere would identify nothing.
+SHARED_FILE_RULE_IDS = frozenset({"B307", "B324", "B404", "B602"})
+
+#: Every fixture file that is identical in every project, by project-relative
+#: path. The marker file is deliberately not here: its path is shared but its
+#: content is per project.
 FIXTURE_FILES: Dict[str, str] = {
     FIXTURE_RELATIVE_PATH: FIXTURE_PYTHON,
     FIXTURE_TERRAFORM_RELATIVE_PATH: FIXTURE_TERRAFORM,
@@ -202,33 +305,82 @@ global_settings:
 #: picked up from the root rather than from a project.
 WORKSPACE_ROOT_CONFIG = """project_name: multi-project-gate
 workspace:
-  max_parallel_projects: 3
+  max_parallel_projects: 4
   project_timeout: 600
 """
 
 
 @dataclass(frozen=True)
 class FixtureProject:
-    """One project in the generated workspace."""
+    """One project in the generated workspace.
+
+    ``key`` and ``relative_path`` are separate fields because they are separate
+    things, and conflating them was a real defect: resolution derives the key from
+    the path by replacing separators with dashes, so a nested project has a key
+    that is not its path. A check written against the key then rejects the
+    project's own perfectly correct workspace-relative paths.
+    """
 
     key: str
+    relative_path: str
     threshold: str
+    marker_rule: str
     suppress_rule: str | None = None
 
 
 FIXTURE_PROJECTS: Tuple[FixtureProject, ...] = (
-    FixtureProject(key="project-a", threshold="LOW", suppress_rule=SUPPRESSED_RULE_ID),
-    FixtureProject(key="project-b", threshold="LOW"),
+    FixtureProject(
+        key="project-a",
+        relative_path="project-a",
+        threshold="LOW",
+        marker_rule="B101",
+        suppress_rule=SUPPRESSED_RULE_ID,
+    ),
+    FixtureProject(
+        key="project-b",
+        relative_path="project-b",
+        threshold="LOW",
+        marker_rule="B311",
+    ),
     # Named 'src' on purpose: the workspace root is /src in container mode, so
     # this is the folder-inside-its-own-name shape from #361.
-    FixtureProject(key="src", threshold="CRITICAL"),
+    FixtureProject(
+        key="src",
+        relative_path="src",
+        threshold="CRITICAL",
+        marker_rule="B403",
+    ),
+    # Nested, so its key ('apps-admin') differs from its path ('apps/admin').
+    # Without a project of this shape, a check comparing a workspace-relative URI
+    # against the project *key* is wrong and still green.
+    FixtureProject(
+        key="apps-admin",
+        relative_path="apps/admin",
+        threshold="LOW",
+        marker_rule="B405",
+    ),
 )
 
-#: The pair whose only difference is the suppression.
-SUPPRESSION_PAIR = ("project-a", "project-b")
+#: The project that configures a suppression. Every other project is compared
+#: against it, rather than one hand-picked partner -- an earlier version named a
+#: single pair and so never looked at two of the projects at all.
+SUPPRESSING_PROJECT = "project-a"
 
 #: The pair whose only difference is the threshold.
 THRESHOLD_PAIR = ("project-b", "src")
+
+#: project key -> the one bandit rule only that project's source trips.
+MARKER_RULE_BY_PROJECT: Dict[str, str] = {
+    project.key: project.marker_rule for project in FIXTURE_PROJECTS
+}
+
+#: project key -> its path relative to the workspace root.
+RELATIVE_PATH_BY_PROJECT: Dict[str, str] = {
+    project.key: project.relative_path for project in FIXTURE_PROJECTS
+}
+
+#: Every marker rule, for asking "does this run contain someone else's marker".
+ALL_MARKER_RULES = frozenset(MARKER_RULE_BY_PROJECT.values())
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +393,7 @@ class ProjectOutcome:
     """One entry of ``workspace.projects``, normalized."""
 
     key: str
+    relative_path: str
     status: str
     threshold: str
     finding_count: int
@@ -348,6 +501,7 @@ def parse_projects(results: Mapping[str, Any]) -> Tuple[ProjectOutcome, ...]:
         outcomes.append(
             ProjectOutcome(
                 key=str(record.get("project") or ""),
+                relative_path=str(record.get("relative_path") or ""),
                 status=str(record.get("status") or "").lower(),
                 threshold=str(record.get("severity_threshold") or ""),
                 finding_count=_as_int(record.get("finding_count")),
@@ -471,7 +625,21 @@ def collect_scanner_statuses(results: Mapping[str, Any]) -> Dict[str, str]:
 
 
 def check_every_project_ran(projects: Sequence[ProjectOutcome]) -> List[str]:
-    """Each fixture project must appear, and must have completed."""
+    """Each fixture project must appear, complete, and have actually found things.
+
+    The findings requirement is the point, not decoration. Status ``completed``
+    with zero findings satisfies every attribution assertion below by giving them
+    nothing to inspect: there is no finding to credit to the wrong project, no
+    suppression to leak, no path to mis-prefix. So a workspace where three of four
+    projects were silently not scanned used to pass. Every fixture project
+    contains known-insecure Python, so zero findings means the scan is broken, not
+    that the project is clean.
+
+    The key and relative_path are checked against the fixture too. Resolution
+    derives the key from the path, and getting that derivation wrong for a nested
+    project is a real failure -- ``apps/admin`` must become ``apps-admin`` and not
+    two directory levels that could collide with a project named ``apps``.
+    """
     by_key = {project.key: project for project in projects}
     violations: List[str] = []
     for fixture in FIXTURE_PROJECTS:
@@ -486,6 +654,21 @@ def check_every_project_ran(projects: Sequence[ProjectOutcome]) -> List[str]:
             violations.append(
                 f"project '{fixture.key}' has status '{outcome.status}' rather "
                 f"than 'completed'" + (f": {outcome.error}" if outcome.error else "")
+            )
+            continue
+        if outcome.finding_count <= 0:
+            violations.append(
+                f"project '{fixture.key}' completed with {outcome.finding_count} "
+                f"finding(s). Its source contains known-insecure Python, so zero "
+                f"means it was not really scanned -- and a project that found "
+                f"nothing satisfies every attribution check below by giving them "
+                f"nothing to look at"
+            )
+        if outcome.relative_path != fixture.relative_path:
+            violations.append(
+                f"project '{fixture.key}' reports relative_path "
+                f"'{outcome.relative_path}' but the workspace declares it at "
+                f"'{fixture.relative_path}'"
             )
     return violations
 
@@ -574,10 +757,18 @@ def check_one_run_per_project(
 def check_findings_are_attributed_to_their_own_project(
     runs: Sequence[RunEvidence],
 ) -> List[str]:
-    """No finding may be credited to a project other than the one it came from.
+    """Internal consistency of the attribution the payload claims.
 
-    The property the job is named for. The fixture puts a byte-identical file in
-    every project, so a broken attribution cannot hide behind distinct filenames.
+    Necessary but not sufficient, and the distinction matters. The aggregator
+    writes the run-level ``workspace_project`` and every result's
+    ``workspace_project`` from one variable in one loop, so the first assertion
+    below compares a value against itself and cannot fail on its own. It is kept
+    because a future change that writes the two separately would make it real, and
+    because it produces a precise message when it does fire.
+
+    The check that can actually fail today is
+    ``check_each_project_shows_only_its_own_marker_rule``. Read that one for the
+    attribution guarantee; this one is a consistency assertion about the payload.
     """
     violations: List[str] = []
     for run in runs:
@@ -601,19 +792,142 @@ def check_findings_are_attributed_to_their_own_project(
                 f"SARIF run {run.index} has findings but none carry a "
                 "workspace_uri, so no finding has a workspace-relative path"
             )
+        # The project's PATH, not its key. A workspace_uri is workspace-relative,
+        # and for a nested project the key ('apps-admin') is not a path component
+        # of it ('apps/admin/src/marker.py'). Comparing against the key reported
+        # every finding in every nested project as misattributed -- a check that
+        # fails on correct output is worse than one that cannot fail, because the
+        # cheapest way to make it green is to delete it.
+        expected_prefix = RELATIVE_PATH_BY_PROJECT.get(
+            run.attributed_project, run.attributed_project
+        )
         wrong_prefix = sorted(
             {
                 uri
                 for uri in run.workspace_uris
-                if not uri.startswith(f"{run.attributed_project}/")
+                if not uri.startswith(f"{expected_prefix}/")
             }
         )
         if wrong_prefix:
             violations.append(
                 f"SARIF run {run.index} is attributed to "
-                f"'{run.attributed_project}' but has workspace_uri value(s) "
-                f"outside that project: {wrong_prefix[:5]}"
+                f"'{run.attributed_project}' (at '{expected_prefix}') but has "
+                f"workspace_uri value(s) outside that project: {wrong_prefix[:5]}"
             )
+    return violations
+
+
+def check_each_project_shows_only_its_own_marker_rule(
+    runs: Sequence[RunEvidence],
+) -> List[str]:
+    """Attribution, checked against the fixture's source rather than the payload.
+
+    This is the load-bearing attribution assertion. Each project holds a file at
+    the same relative path whose content trips one bandit rule no other project
+    trips, so the ground truth lives in source on disk while the claimed project
+    lives in the payload. Nothing in the pipeline can move both.
+
+    That closes the shape every other check here is blind to: exchange two runs'
+    attributions and the payload stays perfectly self-consistent -- run says A,
+    every result in it says A, every path is prefixed A -- while every finding
+    belongs to B. With markers, A's run is holding B's rule and says so.
+    """
+    violations: List[str] = []
+    seen_markers: Dict[str, str] = {}
+
+    for run in runs:
+        if run.attributed_project is None:
+            # check_one_run_per_project reports the missing attribution.
+            continue
+        project = run.attributed_project
+        expected = MARKER_RULE_BY_PROJECT.get(project)
+        if expected is None:
+            violations.append(
+                f"SARIF run {run.index} is attributed to '{project}', which is not "
+                f"a fixture project. Known projects: "
+                f"{sorted(MARKER_RULE_BY_PROJECT)}"
+            )
+            continue
+
+        present = set(run.rules)
+        if expected not in present:
+            violations.append(
+                f"project '{project}' should show its own marker rule {expected} "
+                f"from '{FIXTURE_MARKER_RELATIVE_PATH}', but run {run.index} "
+                f"contains {sorted(present)}. Either the project was not scanned, "
+                f"or its findings were filed under another project"
+            )
+        intruders = sorted((present & ALL_MARKER_RULES) - {expected})
+        if intruders:
+            owners = {
+                rule: owner
+                for owner, rule in MARKER_RULE_BY_PROJECT.items()
+                if rule in intruders
+            }
+            violations.append(
+                f"project '{project}' (run {run.index}) contains marker rule(s) "
+                f"{intruders} belonging to {sorted(owners.values())}. Another "
+                f"project's file was scanned and credited to this one -- the "
+                f"attribution is wrong even though the payload is self-consistent"
+            )
+        if expected in seen_markers and seen_markers[expected] != project:
+            violations.append(
+                f"marker rule {expected} appears in both "
+                f"'{seen_markers[expected]}' and '{project}'. Only one project's "
+                f"source can trip it, so one of the two is holding the other's "
+                f"findings"
+            )
+        if expected in present:
+            seen_markers[expected] = project
+
+    unclaimed = sorted(set(MARKER_RULE_BY_PROJECT.values()) - set(seen_markers))
+    if unclaimed and runs:
+        violations.append(
+            f"marker rule(s) {unclaimed} appear in no run at all. The project(s) "
+            f"that own them contributed nothing, or bandit stopped reporting the "
+            f"rule -- in which case update MARKER_SOURCES rather than deleting "
+            f"this check"
+        )
+    return violations
+
+
+def check_the_fixture_can_discriminate() -> List[str]:
+    """The fixture's own ability to tell the projects apart.
+
+    Every marker assertion is meaningless if two projects share a marker, or if a
+    marker is a rule the shared file trips in every project anyway. Both are a
+    one-line edit away and nothing else would notice, so they are asserted rather
+    than assumed -- the same class of hole as a check comparing a value with
+    itself.
+    """
+    violations: List[str] = []
+    markers = [project.marker_rule for project in FIXTURE_PROJECTS]
+    if len(set(markers)) != len(markers):
+        violations.append(
+            f"two fixture projects share a marker rule ({markers}), so a "
+            f"misattribution between them cannot be detected"
+        )
+    collisions = sorted(set(markers) & SHARED_FILE_RULE_IDS)
+    if collisions:
+        violations.append(
+            f"marker rule(s) {collisions} are also tripped by the shared file "
+            f"'{FIXTURE_RELATIVE_PATH}', which every project holds. A rule that "
+            f"fires everywhere identifies nothing"
+        )
+    missing_sources = sorted(set(markers) - set(MARKER_SOURCES))
+    if missing_sources:
+        violations.append(
+            f"marker rule(s) {missing_sources} have no entry in MARKER_SOURCES, "
+            f"so the project(s) claiming them would be written without a marker"
+        )
+    keys = [project.key for project in FIXTURE_PROJECTS]
+    if len(set(keys)) != len(keys):
+        violations.append(f"two fixture projects share a key: {keys}")
+    if SUPPRESSING_PROJECT not in keys:
+        violations.append(
+            f"SUPPRESSING_PROJECT '{SUPPRESSING_PROJECT}' is not a fixture "
+            f"project, so the suppression scope check compares nothing"
+        )
     return violations
 
 
@@ -685,56 +999,65 @@ def _rule_counts(
 
 
 def check_suppression_is_project_scoped(runs: Sequence[RunEvidence]) -> List[str]:
-    """Project A's suppression must not silence the same rule in project B.
+    """One project's suppression must not silence the same rule in any other.
 
-    Both projects carry a byte-identical file at the same relative path and the
-    same threshold, so the only difference between them is A's suppression. If it
-    leaks, B's copy of the rule goes quiet -- a false negative that leaves no
-    trace anywhere in the output.
+    Every project carries a byte-identical file at the same relative path, so the
+    only difference between the suppressing project and each of the others is the
+    suppression itself. If it leaks, the other project's copy of the rule goes
+    quiet -- a false negative that leaves no trace anywhere in the output.
+
+    Checked against *every* other project, not one hand-picked partner. An earlier
+    version named a single pair and therefore never inspected two of the four
+    projects, so a leak that reached only those two would have passed. The nested
+    project is exactly the one most likely to be reached by a path-matching bug,
+    and it was one of the two going unexamined.
     """
-    suppressing, other = SUPPRESSION_PAIR
     violations: List[str] = []
+    suppressing_rules = _rule_counts(runs, SUPPRESSING_PROJECT)
+    others = [
+        project.key
+        for project in FIXTURE_PROJECTS
+        if project.key != SUPPRESSING_PROJECT
+    ]
+    other_rules = {key: _rule_counts(runs, key) for key in others}
 
-    suppressing_rules = _rule_counts(runs, suppressing)
-    other_rules = _rule_counts(runs, other)
-
-    if not suppressing_rules and not other_rules:
+    if not suppressing_rules and not any(other_rules.values()):
         return [
-            f"neither '{suppressing}' nor '{other}' produced any rule, so the "
-            "suppression assertion could not be evaluated. bandit probably did "
-            "not run"
+            f"neither '{SUPPRESSING_PROJECT}' nor any of {others} produced any "
+            "rule, so the suppression assertion could not be evaluated. bandit "
+            "probably did not run"
         ]
 
-    live_in_other, suppressed_in_other = other_rules.get(SUPPRESSED_RULE_ID, (0, 0))
-    live_in_suppressing, suppressed_in_suppressing = suppressing_rules.get(
-        SUPPRESSED_RULE_ID, (0, 0)
-    )
+    for key in others:
+        rules = other_rules[key]
+        live, suppressed = rules.get(SUPPRESSED_RULE_ID, (0, 0))
+        if live == 0 and suppressed == 0:
+            violations.append(
+                f"rule {SUPPRESSED_RULE_ID} does not appear in '{key}' at all, so "
+                f"the gate cannot tell a working suppression from a rule that no "
+                f"longer fires. Update SUPPRESSED_RULE_ID to a rule the fixture "
+                f"still trips. Rules seen in '{key}': {sorted(rules)}"
+            )
+            continue
+        if suppressed:
+            violations.append(
+                f"rule {SUPPRESSED_RULE_ID} is suppressed in '{key}', which "
+                f"configures no suppression. '{SUPPRESSING_PROJECT}' suppression "
+                f"has leaked across the project boundary -- a silent false "
+                f"negative"
+            )
+        if live == 0:
+            violations.append(
+                f"rule {SUPPRESSED_RULE_ID} has no unsuppressed occurrence in "
+                f"'{key}' even though it fires there. Its finding has been "
+                f"silenced by another project's configuration"
+            )
 
-    if live_in_other == 0 and suppressed_in_other == 0:
-        violations.append(
-            f"rule {SUPPRESSED_RULE_ID} does not appear in '{other}' at all, so "
-            f"the gate cannot tell a working suppression from a rule that no "
-            f"longer fires. Update SUPPRESSED_RULE_ID to a rule the fixture still "
-            f"trips. Rules seen in '{other}': {sorted(other_rules)}"
-        )
-        return violations
-
-    if suppressed_in_other:
-        violations.append(
-            f"rule {SUPPRESSED_RULE_ID} is suppressed in '{other}', which "
-            f"configures no suppression. '{suppressing}' suppression has leaked "
-            f"across the project boundary -- a silent false negative"
-        )
-    if live_in_other == 0:
-        violations.append(
-            f"rule {SUPPRESSED_RULE_ID} has no unsuppressed occurrence in "
-            f"'{other}' even though it fires there. Its finding has been silenced "
-            f"by another project's configuration"
-        )
+    live_in_suppressing, _ = suppressing_rules.get(SUPPRESSED_RULE_ID, (0, 0))
     if live_in_suppressing:
         violations.append(
             f"rule {SUPPRESSED_RULE_ID} has {live_in_suppressing} unsuppressed "
-            f"occurrence(s) in '{suppressing}', which does configure a "
+            f"occurrence(s) in '{SUPPRESSING_PROJECT}', which does configure a "
             f"suppression for it at '{FIXTURE_RELATIVE_PATH}'. The project's own "
             f"suppression did not apply"
         )
@@ -784,13 +1107,35 @@ def check_thresholds_are_per_project(
             f"stricter of the two thresholds at least one finding must qualify"
         )
 
-    if lax.actionable_finding_count > strict.actionable_finding_count:
+    # Strictly fewer, not "no more than". Tolerating equality was the hole: if the
+    # threshold were never applied at all, both projects would report the same
+    # actionable count and the check would pass having proved nothing about
+    # per-project thresholds.
+    #
+    # What makes the strict inequality hold, measured rather than assumed. On this
+    # fixture 'src' at CRITICAL reports 7 actionable of 12, and 'project-b' at LOW
+    # reports 12 of 12. The margin is exactly bandit's five severity-carrying
+    # findings (HIGH x2, MEDIUM x1, LOW x2), which a CRITICAL threshold gates out.
+    # Checkov's seven are NOT gated out, and that is worth knowing rather than
+    # glossing: they carry no properties.issue_severity, so count_actionable_results
+    # falls through to the SARIF level arm, where severity_ladder maps `error` to
+    # CRITICAL -- and CRITICAL is actionable at every threshold including CRITICAL.
+    # A scanner that omits issue_severity therefore cannot be thresholded down at
+    # all. That is pre-existing behaviour shared with _compute_exit_code, not
+    # something workspace mode introduces, but it is why "CRITICAL gates nothing"
+    # is false here and why this comment does not claim it.
+    #
+    # So the inequality breaks only if bandit stops emitting issue_severity or
+    # stops firing on the fixture, and both of those already fail their own checks
+    # above with a clearer message.
+    if lax.actionable_finding_count >= strict.actionable_finding_count:
         violations.append(
             f"'{lax_key}' (threshold {lax.threshold}) has "
-            f"{lax.actionable_finding_count} actionable finding(s), more than "
-            f"'{strict_key}' (threshold {strict.threshold}) with "
-            f"{strict.actionable_finding_count}, over an identical file. The "
-            f"looser threshold cannot gate more findings than the stricter one"
+            f"{lax.actionable_finding_count} actionable finding(s) and "
+            f"'{strict_key}' (threshold {strict.threshold}) has "
+            f"{strict.actionable_finding_count}, over the same shared file. The "
+            f"looser threshold must gate strictly fewer; equal counts mean the "
+            f"per-project threshold was not applied at all"
         )
     return violations
 
@@ -986,7 +1331,8 @@ def check_findings_are_from_the_fixture(
     """
     root = repo_root.resolve()
     expected_basenames = frozenset(
-        PurePosixPath(relative).name for relative in FIXTURE_FILES
+        PurePosixPath(relative).name
+        for relative in (*FIXTURE_FILES, FIXTURE_MARKER_RELATIVE_PATH)
     )
     wrong_basename: List[str] = []
     inside_repository: List[str] = []
@@ -1077,10 +1423,14 @@ def evaluate_results(
     outcome.runs = runs
     outcome.scanner_statuses = statuses
 
+    # The fixture's own discriminating power first: if two projects share a
+    # marker, the attribution checks below cannot fail and say nothing about it.
+    outcome.violations.extend(check_the_fixture_can_discriminate())
     outcome.violations.extend(check_every_project_ran(projects))
     outcome.violations.extend(check_no_scanner_errors(statuses))
     outcome.violations.extend(check_one_run_per_project(projects, runs))
     outcome.violations.extend(check_findings_are_attributed_to_their_own_project(runs))
+    outcome.violations.extend(check_each_project_shows_only_its_own_marker_rule(runs))
     outcome.violations.extend(check_result_paths_resolve_against_their_run_root(runs))
     outcome.violations.extend(check_suppression_is_project_scoped(runs))
     outcome.violations.extend(check_thresholds_are_per_project(projects))
@@ -1172,11 +1522,19 @@ def write_fixture(workspace_root: Path) -> Path:
     workspace_root.mkdir(parents=True, exist_ok=True)
 
     for project in FIXTURE_PROJECTS:
-        project_dir = workspace_root / project.key
+        # relative_path, not key: a nested project must land at 'apps/admin', and
+        # writing it to a directory named after its key would make the workspace
+        # definition point at nothing.
+        project_dir = workspace_root / project.relative_path
         for relative, content in FIXTURE_FILES.items():
             source_file = project_dir / relative
             source_file.parent.mkdir(parents=True, exist_ok=True)
             source_file.write_text(content, encoding="utf-8")
+
+        # Same path in every project, different content: the marker.
+        marker_file = project_dir / FIXTURE_MARKER_RELATIVE_PATH
+        marker_file.parent.mkdir(parents=True, exist_ok=True)
+        marker_file.write_text(MARKER_SOURCES[project.marker_rule], encoding="utf-8")
 
         config_dir = project_dir / ".ash"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -1200,7 +1558,11 @@ def write_fixture(workspace_root: Path) -> Path:
     definition = workspace_root / WORKSPACE_FILENAME
     definition.write_text(
         json.dumps(
-            {"folders": [{"path": project.key} for project in FIXTURE_PROJECTS]},
+            {
+                "folders": [
+                    {"path": project.relative_path} for project in FIXTURE_PROJECTS
+                ]
+            },
             indent=2,
         ),
         encoding="utf-8",
@@ -1369,15 +1731,15 @@ def main(argv: Iterable[str] | None = None) -> int:
         print(
             "  projects:                         "
             + ", ".join(
-                f"{p.key}@{p.threshold}"
+                f"{p.relative_path}@{p.threshold} [{p.marker_rule}]"
                 + (f" (suppresses {p.suppress_rule})" if p.suppress_rule else "")
                 for p in FIXTURE_PROJECTS
             )
         )
-        print(
-            f"  every project holds a byte-identical {FIXTURE_RELATIVE_PATH}, which "
-            "is what makes attribution testable"
-        )
+        print(f"  every project holds a byte-identical {FIXTURE_RELATIVE_PATH}, and a")
+        print(f"  {FIXTURE_MARKER_RELATIVE_PATH} tripping only its own bracketed rule.")
+        print("  Same paths, one distinct rule each: that is what makes attribution")
+        print("  checkable against source rather than against the payload itself.")
         print()
 
         try:
@@ -1417,7 +1779,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         if outcome.passed:
             print(
                 f"PASS: {len(outcome.projects)} project(s), one SARIF run each, "
-                "findings attributed to their own project, one project's "
+                "every project holding only its own marker rule, one project's "
                 "suppression scoped to it, and each verdict from its own threshold"
             )
             succeeded = True
