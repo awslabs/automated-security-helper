@@ -63,33 +63,89 @@ leading separator is unaffected and is prefixed as described above.
 
 Down-conversion: workspace-relative to project-relative
 -------------------------------------------------------
-Used to push a workspace-level policy into one project. Returns ``None`` when
-the pattern cannot possibly match inside that project, so a caller only hands a
-project the patterns that apply to it.
+Used to push a workspace-level policy into one project. The contract is
+behavioural, not textual -- for every project-relative path ``p``::
 
-A pattern whose first component holds a glob metacharacter is not anchored to
-any single project and is returned unchanged. That is deliberately conservative:
-``*/src/x.py`` might match this project, so passing it through over-includes
-rather than silently dropping a policy the operator wrote. Failure modes of a
-too-broad suppression are visible; failure modes of a silently discarded one
-are not.
+    matches(to_project_pattern(P, R), p)  ==  matches(P, R + "/" + p)
+
+A down-converted pattern must reach exactly the files the workspace-level
+pattern reached inside that project. ``None`` means the pattern cannot match
+anything in the project, so the caller applies nothing.
+
+Getting this wrong is not symmetric, and the asymmetry runs the opposite way to
+intuition. These patterns are suppressions. A pattern that matches TOO MUCH
+suppresses findings that should have been reported, and a suppressed finding
+leaves no trace in the output -- nobody sees what is missing. A pattern that
+matches too little, or is dropped entirely, produces extra findings, which are
+visible and merely noisy. So the safe failure is to under-suppress: return
+``None``, or refuse, rather than widen a pattern.
+
+The code follows that. Nothing is passed through on the hope that it might
+apply. Every rewrite below was derived by sweeping candidate rewrites against
+ASH's own ``file_path_matches`` and keeping only those satisfying the contract:
+
+* Anchored to this project (``api/src/x.py`` over ``api``) -- strip the prefix.
+* Anchored elsewhere (``api/src/x.py`` over ``api-v2``) -- ``None``.
+* Naming only the project directory (``api`` over ``api``) -- ``None``.
+  ``file_path_matches("api/src/x.py", "api")`` is False, so this pattern covers
+  no file in the project. Returning ``**`` here would have suppressed a whole
+  project the operator never named.
+* Unbounded leading glob (``*/src/x.py``, ``project-*/src/x.py``) -- becomes
+  ``**/src/x.py``. ``*`` crosses ``/`` in this matcher, so it absorbed the
+  prefix and can absorb further directories; ``**`` is what that means
+  project-side. Returning the pattern unchanged retargeted it: ``*/src/x.py``
+  over project ``api`` stopped matching ``src/x.py``, the file the operator
+  named, while still matching ``sub/src/x.py``.
+* Bounded leading glob (``?roject-a/src/x.py``, ``[pq]roject-a/src/x.py``) --
+  becomes ``src/x.py``, NOT ``**/src/x.py``. ``?`` and ``[...]`` match a fixed
+  number of characters, so the component consumed exactly the prefix and no
+  extra directories. ``**`` would over-suppress ``sub/src/x.py``.
+* Leading glob that cannot absorb the prefix (``api*/src/x.py`` over
+  ``services/api``) -- ``None``.
+* Trailing ``**`` inside the prefix span (``api/**`` over ``api/sub``) -- ``**``.
+
+Fail-closed classes
+-------------------
+Three shapes have no correct single-pattern rewrite, and are rejected with an
+error naming the pattern and the remedy rather than guessed at:
+
+1. A literal component after the leading wildcard that also matches part of the
+   project path (``*/api/src/x.py`` over ``services/api``). The workspace-level
+   match can begin INSIDE the prefix -- ``*`` absorbs ``services`` and ``api``
+   aligns with the prefix's own second component -- which no project-relative
+   pattern expresses.
+2. A wildcard falling inside the project path itself (``api/*/x.py`` over
+   ``api/sub``), where how much of the path it consumes is ambiguous.
+3. A lone fixed-length wildcard (``?????????``). It matches ``api/x.txt`` --
+   nine characters -- while matching neither ``api`` nor ``x.txt``, so the
+   constraint lives in the length of the joined path and cannot survive
+   stripping the prefix.
 
 Failure modes and known limitations
 -----------------------------------
-* Down-conversion compares the prefix case-insensitively, matching how
-  ``file_path_matches`` and ``_path_pattern_matches`` compare paths elsewhere in
-  ASH. On a case-sensitive filesystem two projects differing only in case would
-  therefore both match; ASH has no such case elsewhere, and diverging from the
-  rest of the codebase's comparison rule would be worse.
-* A pattern like ``project-*/src`` is returned unchanged by down-conversion even
-  though the wildcard spans the prefix, so the receiving project sees a pattern
-  still carrying a project-level component. Over-inclusion, per above.
+* The fail-closed test is deliberately coarser than strictly necessary, because
+  it is syntactic. ``*/api/src/x.py`` over project ``api`` does have a valid
+  rewrite, but is refused along with the genuinely ambiguous
+  ``services/api`` case. Refusing a representable pattern costs the operator an
+  error message; accepting an unrepresentable one silently changes which
+  findings are suppressed.
+* Prefix comparison is case-insensitive, matching how ``file_path_matches`` and
+  ``_path_pattern_matches`` compare paths elsewhere in ASH. Two projects
+  differing only in case would therefore both match; ASH has no such case
+  elsewhere, and diverging from the rest of the codebase's comparison rule
+  would be worse.
+* The contract is stated against ``file_path_matches``. If that matcher's glob
+  semantics change -- particularly whether ``*`` crosses ``/`` -- these rewrites
+  must be re-derived. The property test in
+  ``tests/unit/utils/test_workspace_paths.py`` calls the real matcher on both
+  sides for exactly that reason, so such a change fails the suite here.
 * Up-conversion is purely textual. It does not check that the project prefix
   exists; that is :mod:`automated_security_helper.utils.path_containment`'s job.
 """
 
 from __future__ import annotations
 
+import fnmatch
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Optional, Union
 
@@ -154,6 +210,100 @@ def _is_glob_component(component: str) -> bool:
     return any(char in _GLOB_METACHARACTERS for char in component)
 
 
+def _absorbs(prefix_parts: tuple, component: str) -> bool:
+    """True when a leading glob *component* can swallow the whole project prefix.
+
+    ``*`` crosses ``/`` in ASH's matcher, so one component can absorb several
+    path components. Tested against the joined prefix rather than its first
+    component for exactly that reason: ``api*`` absorbs ``api/sub``.
+    """
+    joined = PurePosixPath(*prefix_parts).as_posix()
+    return fnmatch.fnmatch(joined.lower(), component.lower())
+
+
+def _collides_with_prefix(prefix_parts: tuple, component: str) -> bool:
+    """True when *component* could align with a component of the project prefix.
+
+    This is the fail-closed trigger. If the pattern component that follows the
+    leading glob can also match part of the prefix, the workspace-level match
+    may begin INSIDE the prefix, and no project-relative pattern reproduces
+    that -- see the module docstring.
+    """
+    return any(
+        fnmatch.fnmatch(part.lower(), component.lower()) for part in prefix_parts
+    )
+
+
+def _down_convert_unanchored(
+    pattern_parts: tuple, prefix_parts: tuple
+) -> Optional[str]:
+    """Down-convert a pattern whose first component is a glob.
+
+    Returns the project-relative pattern, or None when the pattern cannot match
+    inside this project. Raises when the rewrite would be unsound.
+
+    Every branch below was derived by sweeping candidate rewrites against
+    ASH's own ``file_path_matches`` and keeping only those that satisfy the
+    contract in the module docstring, rather than by reasoning about globs.
+    """
+    leading, rest = pattern_parts[0], pattern_parts[1:]
+
+    # Whether the leading component can stretch. Only `*` is unbounded; `?` and
+    # `[...]` match a FIXED number of characters, so they consume exactly the
+    # prefix and never the extra directories that `**` would allow. Rewriting a
+    # bounded component to `**` over-matches -- the sweep caught it on
+    # "?roject-a/src/x.py", which must not suppress "sub/src/x.py".
+    unbounded = "*" in leading
+
+    if not rest:
+        # A single-component pattern constrains the whole path, not a directory.
+        if leading.startswith("*"):
+            # A leading `.*` absorbs the "<prefix>/" itself, so it carries over.
+            return leading
+        if unbounded:
+            # Anchored at the workspace root but stretchy, e.g. "api*" over
+            # project "api": every path inside the project matches. When it
+            # cannot absorb the prefix it can never match inside the project.
+            return _WHOLE_PROJECT if _absorbs(prefix_parts, leading) else None
+        # Bounded and alone, e.g. "?????????". Whether it matches depends on the
+        # TOTAL length of "<prefix>/<path>", so stripping the prefix changes the
+        # answer: it matches "api/x.txt" (nine characters) while matching
+        # neither "api" nor "x.txt". A project-relative pattern cannot carry a
+        # constraint that depends on the prefix's length, so fail closed.
+        raise WorkspacePatternError(
+            f"pattern '{leading}' cannot be rewritten for project "
+            f"'{PurePosixPath(*prefix_parts).as_posix()}': it is a single "
+            f"fixed-length wildcard with no '*', so whether it matches depends "
+            f"on the length of the full workspace-relative path and no "
+            f"project-relative pattern reproduces it. Use '*' or name a path."
+        )
+
+    if not _absorbs(prefix_parts, leading):
+        return None
+
+    if _collides_with_prefix(prefix_parts, rest[0]):
+        pattern = PurePosixPath(*pattern_parts).as_posix()
+        prefix = PurePosixPath(*prefix_parts).as_posix()
+        raise WorkspacePatternError(
+            f"pattern '{pattern}' cannot be rewritten for project '{prefix}': "
+            f"the component '{rest[0]}' after the leading wildcard can also "
+            f"match part of the project path, so the pattern may match across "
+            f"the project boundary and no single project-relative pattern "
+            f"reproduces it. Anchor the pattern with '**/' or name the "
+            f"project explicitly."
+        )
+
+    if unbounded:
+        # The leading glob absorbed the prefix and can absorb an arbitrary
+        # number of leading path components with it, which is what `**` means
+        # project-side.
+        return PurePosixPath(_WHOLE_PROJECT, *rest).as_posix()
+
+    # Bounded: the leading component consumed exactly the prefix and nothing
+    # more, so what remains is the pattern as written from the project root.
+    return PurePosixPath(*rest).as_posix()
+
+
 def to_workspace_pattern(pattern: PathLike, project_prefix: PathLike) -> str:
     """Rebase a project-relative *pattern* onto the workspace root.
 
@@ -191,15 +341,24 @@ def to_project_pattern(pattern: PathLike, project_prefix: PathLike) -> Optional[
         pattern: A workspace-relative pattern.
         project_prefix: The project's workspace-relative path.
 
+    Satisfies, for every project-relative path ``p``::
+
+        matches(to_project_pattern(P, R), p) == matches(P, R + "/" + p)
+
+    where ``matches`` is ``suppression_matcher.file_path_matches``. See the
+    module docstring for the per-shape rewrites and why over-suppression is the
+    dangerous direction.
+
     Returns:
         The project-relative pattern, or ``None`` when the pattern cannot match
-        inside this project. A pattern naming exactly the project root becomes
-        ``**``, the whole project. A pattern whose first component is a glob is
-        returned unchanged, since it is not anchored to any one project.
+        anything inside this project -- including when it names only the project
+        directory, which covers no file within it.
 
     Raises:
         WorkspacePatternError: On the same malformed inputs as
-            :func:`to_workspace_pattern`.
+            :func:`to_workspace_pattern`, and on the three shapes that have no
+            correct single-pattern rewrite (see "Fail-closed classes" in the
+            module docstring). The message names the pattern and the remedy.
     """
     prefix_parts = _relative_parts(_normalise(project_prefix, label="project prefix"))
     if not prefix_parts:
@@ -209,22 +368,46 @@ def to_project_pattern(pattern: PathLike, project_prefix: PathLike) -> Optional[
     if not pattern_parts:
         raise WorkspacePatternError("pattern must name at least one component")
 
-    # An unanchored pattern may match inside any project, so it passes through
-    # untouched rather than being tested against this prefix.
     if _is_glob_component(pattern_parts[0]):
-        return PurePosixPath(*pattern_parts).as_posix()
+        return _down_convert_unanchored(pattern_parts, prefix_parts)
 
-    if len(pattern_parts) < len(prefix_parts):
-        return None
+    # Walk the span the project prefix occupies, component by component and
+    # case-insensitively, to match how the rest of ASH compares paths. A string
+    # prefix test would wrongly accept "project-abc" as inside "project-a".
+    for index, prefix_part in enumerate(prefix_parts):
+        if index >= len(pattern_parts):
+            # The pattern runs out inside the prefix span, so it names an
+            # ancestor of the project rather than anything within it.
+            return None
 
-    # Component-wise comparison, case-insensitive to match how the rest of ASH
-    # compares paths. A string prefix test would wrongly accept "project-abc"
-    # as being inside "project-a".
-    head = pattern_parts[: len(prefix_parts)]
-    if [part.lower() for part in head] != [part.lower() for part in prefix_parts]:
-        return None
+        pattern_part = pattern_parts[index]
+        if not _is_glob_component(pattern_part):
+            if pattern_part.lower() != prefix_part.lower():
+                return None
+            continue
+
+        # A glob inside the prefix span. The one shape that is both common and
+        # soundly rewritable is a trailing `**`, which covers everything below
+        # this point and therefore the whole project: "api/**" over project
+        # "api/sub". Anything else would need glob algebra to align a stretchy
+        # component against the remaining prefix, so fail closed.
+        if pattern_parts[index:] == (_WHOLE_PROJECT,):
+            return _WHOLE_PROJECT
+        raise WorkspacePatternError(
+            f"pattern '{PurePosixPath(*pattern_parts).as_posix()}' cannot be "
+            f"rewritten for project "
+            f"'{PurePosixPath(*prefix_parts).as_posix()}': the wildcard "
+            f"'{pattern_part}' falls inside the project path itself, so how "
+            f"much of that path it consumes is ambiguous. Anchor the pattern "
+            f"with '**/' or name the project path explicitly."
+        )
 
     remainder = pattern_parts[len(prefix_parts) :]
     if not remainder:
-        return _WHOLE_PROJECT
+        # The pattern names the project directory and nothing below it. In
+        # ASH's matcher "api" matches the path "api", not "api/src/x.py", so no
+        # file inside the project is covered and the pattern does not apply.
+        # Returning `**` here would suppress the entire project -- the
+        # contract sweep caught exactly that.
+        return None
     return PurePosixPath(*remainder).as_posix()

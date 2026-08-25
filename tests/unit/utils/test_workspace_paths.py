@@ -12,6 +12,7 @@ cannot possibly match inside that project.
 import pytest
 
 from automated_security_helper.core.exceptions import WorkspacePatternError
+from automated_security_helper.utils.suppression_matcher import file_path_matches
 from automated_security_helper.utils.workspace_paths import (
     to_project_pattern,
     to_workspace_pattern,
@@ -230,10 +231,18 @@ class TestDownConversionAnchored:
         assert to_project_pattern("Project-A/src/x.py", "project-a") == "src/x.py"
         assert to_project_pattern("project-a/src/x.py", "PROJECT-A") == "src/x.py"
 
-    def test_the_project_directory_itself_becomes_everything(self):
-        """A pattern naming exactly the project means the whole project."""
-        assert to_project_pattern("project-a", "project-a") == "**"
-        assert to_project_pattern("project-a/", "project-a") == "**"
+    def test_a_pattern_naming_only_the_project_directory_does_not_apply(self):
+        """ "project-a" matches the directory, not the files inside it.
+
+        An earlier version returned "**" here on the reading that naming a
+        project means "all of it". The contract sweep disproved that:
+        file_path_matches("project-a/src/x.py", "project-a") is False, so
+        returning "**" would have suppressed a whole project that the
+        workspace-level pattern never covered.
+        """
+        assert file_path_matches("project-a/src/x.py", "project-a") is False
+        assert to_project_pattern("project-a", "project-a") is None
+        assert to_project_pattern("project-a/", "project-a") is None
 
 
 class TestDownConversionNotApplicable:
@@ -267,24 +276,39 @@ class TestDownConversionWildcardFirstComponent:
     """A wildcard first component is not anchored to any one project."""
 
     @pytest.mark.parametrize(
-        "pattern",
+        "pattern,expected",
         [
-            "**/test_*.py",
-            "**",
-            "*/src/x.py",
-            "*.py",
-            "?roject-a/src/x.py",
-            "[pq]roject-a/src/x.py",
+            # An UNBOUNDED leading glob ("*") becomes "**": it absorbed the
+            # project prefix and can absorb further directories with it.
+            ("*/src/x.py", "**/src/x.py"),
+            ("project-*/src/x.py", "**/src/x.py"),
+            ("**/src/x.py", "**/src/x.py"),
+            ("**/test_*.py", "**/test_*.py"),
+            # A BOUNDED leading glob ("?", "[...]") matches a fixed number of
+            # characters, so it consumed exactly the prefix and nothing more.
+            # Rewriting these to "**" would suppress "sub/src/x.py" too.
+            ("?roject-a/src/x.py", "src/x.py"),
+            ("[pq]roject-a/src/x.py", "src/x.py"),
+            # A single component starting with "*" absorbs the "<prefix>/"
+            # itself, so it carries over unchanged.
+            ("*", "*"),
+            ("**", "**"),
+            ("*.py", "*.py"),
+            # Anchored at the workspace root but stretchy: everything in the
+            # project matches.
+            ("project-a*", "**"),
         ],
     )
-    def test_returned_unchanged(self, pattern):
-        """Conservative: over-include rather than silently drop a policy."""
-        assert to_project_pattern(pattern, "project-a") == pattern.lstrip("/")
+    def test_leading_glob_rewrites(self, pattern, expected):
+        assert to_project_pattern(pattern, "project-a") == expected
 
-    def test_a_wildcard_inside_the_prefix_span_is_still_unanchored(self):
-        assert to_project_pattern("project-*/src/x.py", "project-a") == (
-            "project-*/src/x.py"
-        )
+    def test_a_leading_glob_that_cannot_reach_the_project_is_none(self):
+        """ "api*" cannot match a project whose first component is "services"."""
+        assert to_project_pattern("api*/src/x.py", "services/api") is None
+
+    def test_a_trailing_double_star_inside_the_prefix_span_covers_the_project(self):
+        """ "api/**" covers everything below "api", so all of "api/sub"."""
+        assert to_project_pattern("api/**", "api/sub") == "**"
 
 
 class TestDownConversionRejections:
@@ -316,6 +340,196 @@ class TestDownConversionRejections:
 # ---------------------------------------------------------------------------
 # Tests: the two directions are inverses
 # ---------------------------------------------------------------------------
+
+
+class TestDownConversionContract:
+    """The behavioural contract, asserted through ASH's own matcher.
+
+    For every project-relative path p::
+
+        matches(to_project_pattern(P, R), p)  ==  matches(P, R + "/" + p)
+
+    A down-converted pattern has to reach exactly the files the workspace-level
+    pattern reached inside that project -- no more, no less. Identity
+    assertions cannot express this, which is why the earlier version of these
+    tests passed while the conversion silently retargeted patterns.
+
+    Where to_project_pattern returns None, no pattern is applied and the
+    left-hand side is False for every path, so the contract still holds only if
+    the workspace pattern matched nothing in the project either.
+
+    A pattern that raises is excluded from the equality check by construction --
+    it is the fail-closed class. TestFailClosedIsNecessary below proves each
+    raise is earned rather than convenient.
+    """
+
+    PATTERNS = [
+        "*/src/x.py",
+        "api*/src/x.py",
+        "*/*.py",
+        "**/src/x.py",
+        "api/src/x.py",
+        "*",
+        "**",
+        # Beyond the reviewer's matrix: classes the sweep found and fixed.
+        "*.py",
+        "?roject-a/src/x.py",
+        "[pq]roject-a/src/x.py",
+        "project-*/src/x.py",
+        "api*",
+        "api/**",
+        "api/sub/**",
+        "**/*.py",
+        "**/test_*.py",
+        "api",
+        "api/sub",
+        "services/api",
+        "src/*.py",
+        "*x.py",
+    ]
+    PREFIXES = ["api", "api-v2", "services/api", "api/sub", "project-a"]
+    PATHS = [
+        "src/x.py",
+        "sub/src/x.py",
+        "deep/sub/src/x.py",
+        "x.py",
+        "other/y.py",
+        # Beyond the reviewer's matrix: paths that discriminate the fixes.
+        "x.txt",
+        "api/src/x.py",
+        "src/api/x.py",
+        "asrc/x.py",
+        "srcx.py",
+        "test_a.py",
+        "sub/test_a.py",
+        "sub",
+    ]
+
+    @pytest.mark.parametrize("prefix", PREFIXES)
+    @pytest.mark.parametrize("pattern", PATTERNS)
+    def test_contract_holds(self, pattern, prefix):
+        try:
+            project_pattern = to_project_pattern(pattern, prefix)
+        except WorkspacePatternError:
+            pytest.skip("fail-closed class; covered by TestFailClosedIsNecessary")
+
+        for path in self.PATHS:
+            in_project = (
+                False
+                if project_pattern is None
+                else file_path_matches(path, project_pattern)
+            )
+            in_workspace = file_path_matches(f"{prefix}/{path}", pattern)
+            assert in_project == in_workspace, (
+                f"pattern={pattern!r} prefix={prefix!r} "
+                f"rewritten={project_pattern!r} path={path!r}: "
+                f"project says {in_project}, workspace says {in_workspace}"
+            )
+
+    def test_the_reported_regression(self):
+        """The exact case from review: "*/src/x.py" over project "api"."""
+        rewritten = to_project_pattern("*/src/x.py", "api")
+        # Was returned unchanged, which stopped matching the named file.
+        assert file_path_matches("src/x.py", rewritten) is True
+        assert file_path_matches("api/src/x.py", "*/src/x.py") is True
+
+    def test_the_matrix_is_not_silently_narrowed(self):
+        assert len(self.PATTERNS) == 21
+        assert len(self.PREFIXES) == 5
+        assert len(self.PATHS) == 13
+
+    def test_both_verdicts_occur(self):
+        """A conversion that matched nothing would satisfy the contract vacuously."""
+        verdicts = set()
+        for pattern in self.PATTERNS:
+            for prefix in self.PREFIXES:
+                try:
+                    rewritten = to_project_pattern(pattern, prefix)
+                except WorkspacePatternError:
+                    continue
+                if rewritten is None:
+                    verdicts.add(False)
+                    continue
+                for path in self.PATHS:
+                    verdicts.add(file_path_matches(path, rewritten))
+        assert verdicts == {True, False}
+
+
+class TestFailClosedIsNecessary:
+    """Each fail-closed class is unrepresentable, not merely inconvenient.
+
+    For every pattern below, no single project-relative pattern reproduces the
+    workspace verdict, so raising is the only honest option. Each test proves
+    that by exhibiting a path where every candidate rewrite gets it wrong.
+    """
+
+    CANDIDATE_REWRITES = staticmethod(
+        lambda pattern: [
+            None,
+            pattern,
+            "**",
+            "**/" + "/".join(pattern.split("/")[1:]),
+            "/".join(pattern.split("/")[1:]),
+        ]
+    )
+
+    PROBE_PATHS = [
+        "src/x.py",
+        "sub/src/x.py",
+        "x.py",
+        "x.txt",
+        "api/src/x.py",
+        "deep/sub/src/x.py",
+    ]
+
+    @pytest.mark.parametrize(
+        "pattern,prefix",
+        [
+            # A literal component after the leading wildcard also matches part
+            # of the project path, so the workspace match can begin INSIDE the
+            # prefix -- unrepresentable once the prefix is stripped.
+            ("*/api/src/x.py", "services/api"),
+            ("**/api/src/x.py", "services/api"),
+            ("*/sub/x.py", "api/sub"),
+            # A wildcard falling inside the project path itself.
+            ("api/*/x.py", "api/sub"),
+        ],
+    )
+    def test_no_single_rewrite_satisfies_the_contract(self, pattern, prefix):
+        with pytest.raises(WorkspacePatternError):
+            to_project_pattern(pattern, prefix)
+
+        # Prove the raise is earned: every candidate rewrite is wrong somewhere.
+        for rewrite in self.CANDIDATE_REWRITES(pattern):
+            wrong = [
+                path
+                for path in self.PROBE_PATHS
+                if (False if rewrite is None else file_path_matches(path, rewrite))
+                != file_path_matches(f"{prefix}/{path}", pattern)
+            ]
+            assert wrong, (
+                f"rewrite {rewrite!r} actually satisfies the contract for "
+                f"{pattern!r} over {prefix!r} -- the fail-closed is unnecessary"
+            )
+
+    def test_a_fixed_length_wildcard_alone_is_rejected(self):
+        """ "?????????" matches "api/x.txt" by length coincidence alone.
+
+        It matches neither "api" nor "x.txt", so the constraint lives in the
+        length of the joined path and cannot survive stripping the prefix.
+        """
+        assert file_path_matches("api/x.txt", "?????????") is True
+        assert file_path_matches("x.txt", "?????????") is False
+        with pytest.raises(WorkspacePatternError):
+            to_project_pattern("?????????", "api")
+
+    def test_the_error_names_the_pattern_and_the_remedy(self):
+        with pytest.raises(WorkspacePatternError) as excinfo:
+            to_project_pattern("*/api/src/x.py", "services/api")
+        message = str(excinfo.value)
+        assert "*/api/src/x.py" in message
+        assert "services/api" in message
+        assert "**/" in message
 
 
 class TestRoundTrip:
