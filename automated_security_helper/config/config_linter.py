@@ -617,8 +617,9 @@ class ConfigLinter:
                         category=LintCategory.SUPPRESSION_LINE_RANGE,
                         message=(
                             f"Suppression has 'line_start' ({line_start}) but "
-                            f"missing 'line_end' - it matches every finding from "
-                            f"line {line_start} to the end of the file"
+                            f"missing 'line_end' - it matches any finding that "
+                            f"ends at or after line {line_start}, including a "
+                            f"multi-line finding that starts before it"
                         ),
                         path=path_prefix,
                         fixable=True,

@@ -123,13 +123,26 @@ class TestTheWarningDescribesWhatHappens:
             "the claim that did not match _line_range_matches."
         )
 
-    def test_the_message_says_it_matches_to_the_end_of_the_file(self, tmp_path):
+    def test_the_message_states_the_actual_predicate(self, tmp_path):
+        """ "To the end of the file" was close but not what the matcher does.
+
+        The comparison is `finding_end >= line_start`, so it also matches a
+        multi-line finding that *starts before* line_start and spans it -- a
+        finding at lines 10-50 is matched by `line_start: 30`.
+        test_base_plugins_regression pins that behaviour. Describing the range as
+        "from line N to the end of the file" omits it, so someone auditing a
+        suppression would not expect the earlier finding to be covered.
+        """
         issue = _range_issue(_write_config(tmp_path))
 
         lowered = issue.message.lower()
-        assert "end of the file" in lowered or "end of file" in lowered, (
-            f"The warning does not tell the user the suppression is open-ended: "
+        assert "ends at or after" in lowered, (
+            f"The warning does not state the matcher's actual predicate: "
             f"{issue.message!r}"
+        )
+        assert "multi-line" in lowered, (
+            "The warning does not mention that a finding starting before "
+            f"line_start is also matched: {issue.message!r}"
         )
 
     def test_the_fix_is_described_as_narrowing(self, tmp_path):
