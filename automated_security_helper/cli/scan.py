@@ -3,7 +3,7 @@
 
 import os
 from rich import print
-from typing import Annotated, List, Optional
+from typing import Annotated, List, NoReturn, Optional
 import typer
 from pathlib import Path
 
@@ -17,11 +17,91 @@ from automated_security_helper.core.enums import (
     ExecutionStrategy,
     RunMode,
 )
+from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
+    WorkspaceDefinitionError,
+)
 from automated_security_helper.interactions.run_ash_scan import (
     run_ash_scan,
 )
 from automated_security_helper.core.enums import ExportFormat
+from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.workspace.resolver import resolve_workspace
+from automated_security_helper.workspace.workspace_file import (
+    WORKSPACE_AUTO,
+    discover_workspace_file,
+)
+
+
+def _fail_workspace(
+    message: str,
+    code: WorkspaceExitCode = WorkspaceExitCode.WORKSPACE_ERROR,
+) -> NoReturn:
+    """Report a workspace-mode refusal and exit with its contract code.
+
+    Written with ``typer.echo`` rather than the Rich ``print`` imported above,
+    because these messages quote operator-supplied paths and Rich would read a
+    bracketed fragment in one as a style name and fail while rendering the error.
+    """
+    typer.echo(message, err=True)
+    raise typer.Exit(code)
+
+
+def _handle_workspace_mode(
+    workspace: str,
+    source_dir: str | None,
+    allow_missing_projects: bool,
+    dry_run: bool,
+) -> NoReturn:
+    """Resolve a workspace, print the plan, and exit. Never scans.
+
+    Phase 1 of workspace mode resolves and validates only, so every path out of
+    this function is an exit: 0 after printing a plan for ``--dry-run``, 2 for a
+    workspace definition or policy problem, 3 for a project whose own config is
+    invalid.
+
+    Argument validation happens before any filesystem work, so an operator who
+    passed a contradictory pair of flags is told that rather than being sent to
+    debug their workspace file first.
+    """
+    if source_dir is not None:
+        _fail_workspace(
+            "--workspace and --source-dir are mutually exclusive. In workspace "
+            "mode the directory holding the workspace file is the scan root, so "
+            "honouring both would leave it ambiguous which tree was scanned. "
+            "Note that --source-dir is also set by the ASH_SOURCE_DIR "
+            "environment variable, which counts as setting it."
+        )
+
+    if not dry_run:
+        # Falling through to a single-directory scan would scan the workspace
+        # root as one project and exit 0, reporting a result for a scan nobody
+        # asked for.
+        _fail_workspace(
+            "Workspace mode currently resolves and validates a workspace but "
+            "does not run the scans; execution arrives in a later release. "
+            "Re-run with '--dry-run' to inspect the resolved plan, or scan a "
+            "single directory with '--source-dir'."
+        )
+
+    try:
+        workspace_file = (
+            discover_workspace_file(Path.cwd())
+            if workspace == WORKSPACE_AUTO
+            else Path(workspace)
+        )
+        plan = resolve_workspace(
+            workspace_file, allow_missing_projects=allow_missing_projects
+        )
+    except WorkspaceDefinitionError as exc:
+        _fail_workspace(str(exc))
+    except ASHConfigValidationError as exc:
+        _fail_workspace(str(exc), code=WorkspaceExitCode.INVALID_PROJECT_CONFIG)
+    else:
+        typer.echo(plan.render())
+
+    raise typer.Exit(WorkspaceExitCode.SUCCESS)
 
 
 def run_ash_scan_cli_command(
@@ -228,6 +308,29 @@ def run_ash_scan_cli_command(
             envvar="ASH_BASE_REF",
         ),
     ] = "origin/main",
+    ### WORKSPACE-RELATED OPTIONS
+    workspace: Annotated[
+        str | None,
+        typer.Option(
+            "--workspace",
+            help="Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '*.code-workspace' file in the current directory. Mutually exclusive with --source-dir.",
+            envvar="ASH_WORKSPACE",
+        ),
+    ] = None,
+    allow_missing_projects: Annotated[
+        bool,
+        typer.Option(
+            "--allow-missing-projects",
+            help="In workspace mode, skip project folders that are absent or unreadable instead of failing. Skipped projects are recorded in the plan. Without this, a missing project fails the whole workspace, so a typo or an un-cloned repository cannot pass as a clean scan.",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="In workspace mode, print the resolved execution plan and exit without scanning anything.",
+        ),
+    ] = False,
     ### CONTAINER-RELATED OPTIONS
     build: Annotated[
         bool,
@@ -316,6 +419,33 @@ def run_ash_scan_cli_command(
     if version:
         typer.echo(f"awslabs/automated-security-helper v{get_ash_version()}")
         raise typer.Exit()
+
+    # Workspace mode is handled before any cwd-based default is applied, because
+    # --workspace and --source-dir are mutually exclusive and defaulting
+    # source_dir first would make every invocation look like it had both.
+    if workspace is None and (dry_run or allow_missing_projects):
+        # Neither flag means anything outside workspace mode. Silently ignoring
+        # --dry-run would run a full scan for someone who asked for none.
+        offending = [
+            flag
+            for flag, given in (
+                ("--dry-run", dry_run),
+                ("--allow-missing-projects", allow_missing_projects),
+            )
+            if given
+        ]
+        _fail_workspace(
+            f"{' and '.join(offending)} only applies in workspace mode; pass "
+            f"'--workspace <file>' or '--workspace auto' as well."
+        )
+
+    if workspace is not None:
+        _handle_workspace_mode(
+            workspace=workspace,
+            source_dir=source_dir,
+            allow_missing_projects=allow_missing_projects,
+            dry_run=dry_run,
+        )
 
     # Rebind list defaults to fresh empty lists at call time so each CLI
     # invocation gets its own collection (typer will populate them if the

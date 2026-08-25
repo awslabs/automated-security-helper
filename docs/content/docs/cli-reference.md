@@ -115,6 +115,46 @@ ash [options]
 | `--use-existing`              | Use existing results file                               | `False`               |                         |
 | `--phases`                    | Phases to run: `convert`, `scan`, `report`, `inspect`   | `convert,scan,report` |                         |
 | `--inspect`                   | Enable inspection of SARIF fields                       | `False`               |                         |
+| `--workspace`                 | Path to a `.code-workspace` file, or `auto` to find the one in the current directory. Mutually exclusive with `--source-dir` | None | `ASH_WORKSPACE` |
+| `--allow-missing-projects`    | Skip workspace projects that are absent or unreadable   | `False`               |                         |
+| `--dry-run`                   | Print the resolved workspace plan and exit without scanning | `False`           |                         |
+
+### Workspace Mode
+
+A [VS Code workspace file](https://code.visualstudio.com/docs/editor/workspaces) lists several project folders. Passing it to `--workspace` tells ASH to treat each folder as its own project, with its own configuration, rather than as one directory tree:
+
+```json
+{
+  "folders": [
+    { "path": "services/api" },
+    { "path": "shared-infra" }
+  ]
+}
+```
+
+Folder paths are relative to the directory holding the workspace file, which becomes the workspace root. Each project gets a key derived from its path below that root — `services/api` becomes `services-api` — and that key is what output paths and per-project attribution use. ASH reads only the `folders` array; the `settings` block is ignored, because ASH configuration belongs in ASH's own config file.
+
+`--workspace` and `--source-dir` cannot be combined. Note that `ASH_SOURCE_DIR` counts as setting `--source-dir`.
+
+`--dry-run` resolves and validates the workspace, prints the resulting plan, and exits 0 without scanning anything. In this release that is the only supported use of `--workspace`; running the scans arrives in a later release.
+
+#### Fail-closed validation
+
+Workspace resolution refuses the whole workspace rather than scanning part of it, because a partial scan exits 0 and the projects that did run supply a passing result for code nothing examined. A workspace is refused when:
+
+- a folder does not exist, or exists but is not readable
+- a folder resolves outside the workspace root, or a path contains `..`
+- a folder entry is a symlink
+- two entries resolve to the same directory, or one is nested inside another
+- two entries reduce to the same project key
+- two projects pin incompatible `tool_version` constraints for the same scanner
+- the `folders` list is empty, or the file is not valid JSON
+
+`--allow-missing-projects` opts out of the first item only. Projects skipped that way are recorded in the plan's `skipped_projects` payload with a reason, not just logged. Nothing opts out of the others: they are problems with the definition rather than with the machine, so they are wrong everywhere.
+
+Workspace mode uses its own exit codes: `0` success, `1` internal error, `2` workspace definition or policy error, `3` a project whose own configuration is invalid.
+
+Comments are not supported in the workspace file. VS Code tolerates them; ASH reads strict JSON and reports a commented file as malformed.
 
 ### Examples
 
@@ -139,6 +179,15 @@ ash --mode precommit
 
 # Scan with custom plugins
 ash --ash-plugin-modules my_custom_plugin_module
+
+# Inspect the plan for a workspace, without scanning
+ash --workspace ./dev.code-workspace --dry-run
+
+# Use the single .code-workspace file in the current directory
+ash --workspace auto --dry-run
+
+# Tolerate project folders that have not been cloned on this machine
+ash --workspace ./dev.code-workspace --allow-missing-projects --dry-run
 ```
 
 ## Config Command
