@@ -217,6 +217,39 @@ class TestMultilineReasonIsFixed:
         ("one\r\ntwo", "one two"),
         ("trailing newline\n", "trailing newline"),
         ("  padded \n out  ", "padded out"),
+        ("leading\n\nnewlines", "leading newlines"),
+        (None, ""),
+        ("", ""),
+    ],
+)
+def test_the_reporter_flattens_the_reason_on_render(raw, expected):
+    """The linter warning is advisory; this is where the bug is actually fixed.
+
+    The defect is in the reporter: it interpolates the reason into a single
+    markdown bullet, so a newline ends that bullet. Fixing it here repairs the
+    report for every config that already exists, without asking anyone to edit
+    their file or run `--fix` (which re-dumps the config and drops its comments).
+
+    Note this also handles the *leading*-newline case, which the linter's check
+    deliberately does not flag: `reason.strip()` tolerates newlines at either end
+    so the common trailing-newline-from-a-block-scalar does not warn, but a
+    leading newline still breaks the bullet. Fixing it at the render point covers
+    both without making the warning noisier.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+        _one_line,
+    )
+
+    assert _one_line(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("one\ntwo", "one two"),
+        ("one\r\ntwo", "one two"),
+        ("trailing newline\n", "trailing newline"),
+        ("  padded \n out  ", "padded out"),
         ("collapse\n\n\nruns", "collapse runs"),
         ("already fine", "already fine"),
     ],
