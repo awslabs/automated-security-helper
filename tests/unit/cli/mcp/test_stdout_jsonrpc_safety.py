@@ -33,12 +33,56 @@ and then fails validation a few lines later, which covers the banner without
 blocking on a server.
 """
 
+import os
 from unittest.mock import patch
 
 import pytest
 import typer
 
 from automated_security_helper.cli.mcp import mcp_command
+from automated_security_helper.utils.log import get_logger
+
+
+class TestTheLoggerHonoursTheStderrSwitch:
+    """The logger is the larger stdout source, and it only attaches during a scan."""
+
+    def test_records_go_to_stderr_when_the_switch_is_set(self, capsys):
+        original = os.environ.get("ASH_LOG_TO_STDERR")
+        os.environ["ASH_LOG_TO_STDERR"] = "1"
+        try:
+            # A fresh name each time: loggers are cached, so reusing one would
+            # reuse the handler built under the previous setting.
+            get_logger(name="ash-stderr-probe", show_progress=False).info("MARKER")
+        finally:
+            if original is None:
+                os.environ.pop("ASH_LOG_TO_STDERR", None)
+            else:
+                os.environ["ASH_LOG_TO_STDERR"] = original
+
+        captured = capsys.readouterr()
+        assert "MARKER" not in captured.out, (
+            "A log record reached stdout with ASH_LOG_TO_STDERR set, so it would "
+            "corrupt the JSON-RPC stream."
+        )
+        assert "MARKER" in captured.err
+
+    def test_the_cli_default_is_unchanged(self, capsys):
+        """Guard against over-correcting.
+
+        CLI users' logs belong on stdout where they have always been; only the MCP
+        path opts in. Moving everyone to stderr would be a silent behaviour change
+        for every non-MCP consumer.
+        """
+        original = os.environ.get("ASH_LOG_TO_STDERR")
+        os.environ.pop("ASH_LOG_TO_STDERR", None)
+        try:
+            get_logger(name="ash-stdout-probe", show_progress=False).info("MARKER")
+        finally:
+            if original is not None:
+                os.environ["ASH_LOG_TO_STDERR"] = original
+
+        captured = capsys.readouterr()
+        assert "MARKER" in captured.out
 
 
 class _Ctx:
@@ -102,6 +146,41 @@ class TestNothingIsWrittenToStdout:
         assert exc.exit_code == 3
         assert captured.out == ""
         assert "quiet" in captured.err.lower()
+
+    def test_the_command_redirects_the_logger_away_from_stdout(self, capsys):
+        """The banner was never the biggest source of stdout writes.
+
+        The MCP server runs scans *in-process*: mcp_tools hands run_ash_scan to
+        loop.run_in_executor, a thread in this same process. That scan calls
+        get_logger, which attaches a RichHandler to the shared "ash" logger. Before
+        this, that handler's Console was bound to stdout, so from the moment a scan
+        started every record from the scan phase, suppression matching and the
+        reporters went into the JSON-RPC stream.
+
+        Gating the command's own prints on --quiet could never have covered that,
+        because the handler does not exist until a scan begins. Asserted on the
+        command rather than on the logger so the wiring cannot be dropped.
+        """
+        original = os.environ.get("ASH_LOG_TO_STDERR")
+        try:
+            os.environ.pop("ASH_LOG_TO_STDERR", None)
+            _run(transport="not-a-transport")
+
+            assert os.environ.get("ASH_LOG_TO_STDERR", "").upper() in (
+                "YES",
+                "1",
+                "TRUE",
+            ), (
+                "The mcp command does not redirect logging to stderr, so an "
+                "in-process scan will write its log records into the JSON-RPC "
+                "stream."
+            )
+        finally:
+            if original is None:
+                os.environ.pop("ASH_LOG_TO_STDERR", None)
+            else:
+                os.environ["ASH_LOG_TO_STDERR"] = original
+        capsys.readouterr()
 
     def test_missing_dependency_guidance_avoids_stdout(self, capsys):
         """This path had no `quiet` gate at all, so the gate was never the fix."""

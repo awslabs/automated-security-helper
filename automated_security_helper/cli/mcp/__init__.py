@@ -17,6 +17,7 @@ supports multiple transports:
 
 from __future__ import annotations
 
+import os
 from typing import Annotated, Optional
 import typer
 from rich.console import Console
@@ -300,6 +301,17 @@ def mcp_command(
     # Handle resilient parsing for command discovery
     if ctx.resilient_parsing:
         return
+
+    # The MCP server runs scans in-process: mcp_tools hands run_ash_scan to
+    # loop.run_in_executor, which is a thread in this same process. That scan calls
+    # get_logger and attaches a RichHandler to the shared "ash" logger, so without
+    # this every log record from the scan phase, suppression matching and the
+    # reporters would be written to stdout -- inside the JSON-RPC stream on the
+    # stdio transport, which is the reported "Expecting value" failure.
+    #
+    # Set before the transport is chosen so it also covers the HTTP transports,
+    # where it is harmless, and before any scan can start.
+    os.environ["ASH_LOG_TO_STDERR"] = "1"
 
     # Check for MCP dependencies using our validation function
     if not validate_mcp_dependencies():
