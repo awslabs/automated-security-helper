@@ -55,6 +55,24 @@ An empty ``folders`` list is a refusal rather than a no-op scan for the reason
 that runs through all of workspace mode: a scan of zero projects exits 0, which
 in CI is indistinguishable from a scan that found nothing wrong.
 
+A null character is judged on the raw text, not by pathlib
+----------------------------------------------------------
+An entry containing ``\\x00`` is rejected here, by inspecting the string, rather
+than being left for the filesystem to refuse. Two reasons, and the second is the
+one that matters:
+
+1. ``os.lstat`` raises ``ValueError`` rather than ``OSError`` for a null byte,
+   and ``ValueError`` is not part of this package's contract. It escaped
+   ``resolve_workspace`` uncaught, so a malformed workspace file produced a
+   traceback and exit 1 -- an internal error -- instead of the exit 2 that says
+   "your workspace file is wrong".
+2. The wording is version-dependent: Python 3.10 says ``embedded null byte``
+   and 3.13 says ``lstat: embedded null character in path``. Anything asserting
+   on it passes on one supported interpreter and fails on another. This project
+   supports 3.10 through 3.13, so no behaviour may rest on pathlib's handling of
+   an unusual input; such inputs are decided from the raw string, where the
+   answer is the same everywhere.
+
 Failure modes and known limitations
 -----------------------------------
 * JSON only, not JSONC. VS Code tolerates ``//`` comments and trailing commas in
@@ -94,6 +112,9 @@ WORKSPACE_AUTO = "auto"
 
 _FOLDERS_KEY = "folders"
 _PATH_KEY = "path"
+
+# Rejected from the raw text, before any pathlib call. See the module docstring.
+_NULL_CHARACTER = "\x00"
 
 # Substrings that mean "this is probably JSONC, not JSON". Used only to improve
 # the error message after json has already refused the content, never to decide
@@ -211,6 +232,14 @@ def _parse_folders(document: Any, workspace_file: Path) -> Tuple[WorkspaceFolder
             problems.append(
                 f"entry {index} has no usable '{_PATH_KEY}'; it must be a "
                 f"non-empty string, found {value!r}"
+            )
+            continue
+        if _NULL_CHARACTER in value:
+            # Decided on the raw text so the verdict cannot depend on the
+            # interpreter's pathlib. See the module docstring.
+            problems.append(
+                f"entry {index} contains a null character in its "
+                f"'{_PATH_KEY}'; no filesystem accepts one"
             )
             continue
         folders.append(WorkspaceFolder(path=value))

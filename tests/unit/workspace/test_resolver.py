@@ -518,6 +518,58 @@ def test_malformed_workspace_file_is_refused(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Cross-version behaviour: no input may escape as anything but a workspace error
+# ---------------------------------------------------------------------------
+
+
+def test_a_null_character_entry_is_a_workspace_error_not_a_value_error(tmp_path):
+    """Exit 2, on every supported Python version.
+
+    Left to pathlib this raised an uncaught ValueError, which the CLI does not
+    catch -- so a malformed workspace file produced a traceback and exit 1
+    instead of the fail-closed exit 2, with a message that differed between 3.10
+    and 3.13.
+    """
+    _project(tmp_path, "api")
+    workspace = _workspace(tmp_path, ["api", "bad\x00entry"])
+
+    with pytest.raises(WorkspaceDefinitionError, match="null character"):
+        resolve_workspace(workspace)
+
+
+def test_an_unexpected_path_error_is_reported_as_a_workspace_error(
+    tmp_path, monkeypatch
+):
+    """The fail-closed net behind the explicit checks.
+
+    Folder entries are untrusted text handed to pathlib, and pathlib's set of
+    refusals has changed between supported Python versions. Any surprise from
+    the containment check has to land on exit 2 naming the entry, rather than as
+    a traceback and exit 1.
+    """
+    _project(tmp_path, "api")
+    workspace = _workspace(tmp_path, ["api"])
+
+    def _explode(candidate, root, **kwargs):
+        raise ValueError("some future pathlib refusal")
+
+    monkeypatch.setattr(
+        "automated_security_helper.workspace.resolver.validate_contained_path",
+        _explode,
+    )
+
+    with pytest.raises(WorkspaceDefinitionError) as excinfo:
+        resolve_workspace(workspace)
+
+    message = str(excinfo.value)
+    assert "api" in message
+    assert "ValueError" in message
+    # The platform's wording is deliberately not quoted, so the message is
+    # identical on every supported Python version.
+    assert "some future pathlib refusal" not in message
+
+
+# ---------------------------------------------------------------------------
 # 13. Config resolution per project
 # ---------------------------------------------------------------------------
 

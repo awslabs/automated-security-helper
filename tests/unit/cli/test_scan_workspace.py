@@ -220,6 +220,17 @@ def test_malformed_workspace_file_exits_two(tmp_path, no_scan):
     assert not no_scan
 
 
+def test_a_null_character_folder_entry_exits_two(tmp_path, no_scan):
+    """Not exit 1 with a traceback, which is what pathlib's ValueError produced."""
+    _project(tmp_path, "api")
+    workspace = _workspace(tmp_path, ["api", "bad\x00entry"])
+
+    result = _invoke("--workspace", str(workspace), "--dry-run")
+
+    assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
+    assert not no_scan
+
+
 def test_absent_workspace_file_exits_two(tmp_path, no_scan):
     result = _invoke("--workspace", str(tmp_path / "gone.code-workspace"), "--dry-run")
 

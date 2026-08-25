@@ -84,6 +84,22 @@ literally named ``a-b`` both key to ``a-b``, so "unique by construction" does no
 hold once overlaps are excluded. Two projects sharing a key would share an output
 path, so the collision is refused, naming both paths.
 
+Nothing may escape as anything but a workspace error
+----------------------------------------------------
+Folder entries are untrusted text from a file, handed to pathlib. Which inputs
+pathlib refuses, and with which exception type, has changed across the Python
+versions this project supports (3.10 through 3.13) -- a null byte, for instance,
+raised ``ValueError`` straight out of ``os.lstat``, escaped uncaught, and turned
+a malformed workspace file into a traceback and exit 1 rather than exit 2. So the
+containment call is wrapped, and any ``OSError`` or ``ValueError`` from it becomes
+a named entry in the exit-2 list. Only the exception's type is reported, never its
+message, because the message is the platform's wording and differs by version.
+
+The wrap is a net, not the mechanism: inputs known to be unusable are rejected
+from their raw text in
+:mod:`automated_security_helper.workspace.workspace_file`, where the verdict does
+not depend on the interpreter at all.
+
 Failure modes and known limitations
 -----------------------------------
 * Validation is point-in-time. Every path is checked here and used later; a
@@ -248,7 +264,20 @@ def _validate_containment(
     candidates: List[_Candidate] = []
 
     for folder in definition.folders:
-        result = validate_contained_path(folder.path, definition.root)
+        try:
+            result = validate_contained_path(folder.path, definition.root)
+        except (OSError, ValueError) as exc:
+            # Folder entries are untrusted text handed to pathlib, and which
+            # inputs pathlib refuses -- and with what exception type -- has
+            # changed between the Python versions this project supports. Any
+            # surprise has to land on exit 2 naming the entry rather than as a
+            # traceback and exit 1. Only the exception's type is reported: its
+            # message is the platform's wording and differs across versions.
+            problems.append(
+                f"'{folder.path}' could not be resolved as a path "
+                f"({type(exc).__name__} from the filesystem layer)"
+            )
+            continue
         if not result.ok:
             # Parentheses, not brackets: these messages are echoed by callers
             # that may render Rich markup, where '[outside-root]' would be read

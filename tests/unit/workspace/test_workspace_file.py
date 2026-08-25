@@ -188,6 +188,34 @@ def test_folder_entry_with_blank_path_is_rejected(tmp_path):
         load_workspace_file(path)
 
 
+@pytest.mark.parametrize("entry", ["api\x00evil", "\x00", "\x00api"])
+def test_folder_entry_containing_a_null_character_is_rejected(tmp_path, entry):
+    """Caught from the raw text, before pathlib sees it.
+
+    A null byte reaches ``os.lstat`` and raises ValueError, whose message differs
+    between Python versions ("embedded null byte" on 3.10, "lstat: embedded null
+    character in path" on 3.13). Letting it through would turn a malformed
+    workspace file into an unhandled exception and exit 1 rather than exit 2, and
+    would do it with a version-dependent message.
+    """
+    path = _write(tmp_path, {"folders": [{"path": entry}]})
+
+    with pytest.raises(WorkspaceDefinitionError, match="null character"):
+        load_workspace_file(path)
+
+
+def test_a_null_character_rejection_does_not_quote_the_platform_error(tmp_path):
+    """The message must be identical on every supported Python version."""
+    path = _write(tmp_path, {"folders": [{"path": "api\x00evil"}]})
+
+    with pytest.raises(WorkspaceDefinitionError) as excinfo:
+        load_workspace_file(path)
+
+    message = str(excinfo.value)
+    assert "embedded null byte" not in message
+    assert "lstat" not in message
+
+
 def test_missing_workspace_file_is_rejected(tmp_path):
     with pytest.raises(WorkspaceDefinitionError, match="does not exist"):
         load_workspace_file(tmp_path / "absent.code-workspace")
