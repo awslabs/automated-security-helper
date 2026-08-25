@@ -289,10 +289,12 @@ class TestDownConversionWildcardFirstComponent:
             # Rewriting these to "**" would suppress "sub/src/x.py" too.
             ("?roject-a/src/x.py", "src/x.py"),
             ("[pq]roject-a/src/x.py", "src/x.py"),
-            # A single component starting with "*" absorbs the "<prefix>/"
-            # itself, so it carries over unchanged.
-            ("*", "*"),
+            # An all-stars leading matches anything, so the whole project.
+            ("*", "**"),
             ("**", "**"),
+            # One leading "*" then a literal: the constraint is "ends with .py",
+            # which the project-relative part decides on its own, so it carries
+            # over unchanged.
             ("*.py", "*.py"),
             # Anchored at the workspace root but stretchy: everything in the
             # project matches.
@@ -512,6 +514,53 @@ class TestFailClosedIsNecessary:
                 f"{pattern!r} over {prefix!r} -- the fail-closed is unnecessary"
             )
 
+    @pytest.mark.parametrize("prefix", ["api", "api-v2", "services/api"])
+    @pytest.mark.parametrize("path", ["sub/src/x.py", "deep/sub/src/x.py"])
+    def test_the_two_matcher_semantics_regression(self, prefix, path):
+        """The six triples from review: "*/sub/*.py" cannot become "**/sub/*.py".
+
+        A pattern with no "**" is matched by fnmatch, where the trailing "*.py"
+        crosses "/" and so covers "sub/src/x.py". Prefixing "**" routes the
+        pattern to _recursive_glob_match instead, which pins "*.py" to the final
+        component -- so the rewritten pattern stopped covering the same files.
+        Rewriting one glob silently re-interpreted the others.
+        """
+        # The workspace-level pattern does cover this path.
+        assert file_path_matches(f"{prefix}/{path}", "*/sub/*.py") is True
+        # The rewrite that would have been produced does not.
+        assert file_path_matches(path, "**/sub/*.py") is False
+        # So the conversion must refuse rather than silently narrow the pattern.
+        with pytest.raises(WorkspacePatternError):
+            to_project_pattern("*/sub/*.py", prefix)
+
+    def test_a_single_component_remainder_still_converts(self):
+        """ "*/*.py" is unaffected and must not be rejected reflexively.
+
+        With one component there is nothing for "**" to re-anchor, so the
+        rewrite is meaning-preserving.
+        """
+        assert to_project_pattern("*/*.py", "api") == "**/*.py"
+        for path in ["x.py", "sub/x.py", "deep/sub/x.py"]:
+            assert file_path_matches(path, "**/*.py") == file_path_matches(
+                f"api/{path}", "*/*.py"
+            )
+
+    def test_an_all_literal_remainder_still_converts(self):
+        """A literal suffix means the same thing under either matcher."""
+        assert to_project_pattern("*/src/x.py", "api") == "**/src/x.py"
+
+    def test_a_wildcard_before_a_literal_is_rejected(self):
+        """ "*v2/src" can land the "v2" inside another component's name."""
+        assert file_path_matches("apiv2/xv2/src", "*v2/src") is True
+        assert file_path_matches("xv2/src", "src") is False
+        with pytest.raises(WorkspacePatternError):
+            to_project_pattern("*v2/src", "apiv2")
+
+    def test_a_wildcard_between_literals_is_rejected(self):
+        """ "a*b" is pinned to neither end, so its span is ambiguous."""
+        with pytest.raises(WorkspacePatternError):
+            to_project_pattern("a*b/src", "a/b")
+
     def test_a_fixed_length_wildcard_alone_is_rejected(self):
         """ "?????????" matches "api/x.txt" by length coincidence alone.
 
@@ -529,7 +578,7 @@ class TestFailClosedIsNecessary:
         message = str(excinfo.value)
         assert "*/api/src/x.py" in message
         assert "services/api" in message
-        assert "**/" in message
+        assert "**" in message, "the message must name the remedy"
 
 
 class TestRoundTrip:
