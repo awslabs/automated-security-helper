@@ -38,8 +38,10 @@ Module map
 
 Exit codes and failure modes are the ones modelled in
 :mod:`automated_security_helper.models.workspace`; this package raises
-``WorkspaceDefinitionError`` for code 2 and lets ``ASHConfigValidationError``
-through for code 3, and never returns a partially-valid plan.
+``WorkspaceDefinitionError`` for code 4 and lets ``ASHConfigValidationError``
+through for code 3, and never returns a partially-valid plan. Code 4 rather than
+the 2 an earlier draft used: 2 already means "a scan ran and found actionable
+findings", and a workspace that never ran must not be reported the same way.
 
 There are deliberately no re-exports here. Callers import from the submodule they
 need, which keeps ``workspace_file`` importable without dragging in config

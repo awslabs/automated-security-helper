@@ -57,9 +57,10 @@ def _handle_workspace_mode(
     """Resolve a workspace, print the plan, and exit. Never scans.
 
     Phase 1 of workspace mode resolves and validates only, so every path out of
-    this function is an exit: 0 after printing a plan for ``--dry-run``, 2 for a
+    this function is an exit: 0 after printing a plan for ``--dry-run``, 4 for a
     workspace definition or policy problem, 3 for a project whose own config is
-    invalid.
+    invalid. Never 2 -- that code means a scan ran and found actionable findings,
+    which is the opposite of what any exit from here reports.
 
     Argument validation happens before any filesystem work, so an operator who
     passed a contradictory pair of flags is told that rather than being sent to

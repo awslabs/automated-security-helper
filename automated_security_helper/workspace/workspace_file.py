@@ -42,7 +42,7 @@ What this module deliberately ignores, and why
   rather than rejected, because a real workspace file will carry them and
   rejecting an unknown key would make ASH refuse ordinary files.
 
-Every rejection here is exit code 2
+Every rejection here is exit code 4
 -----------------------------------
 The file is either usable or it is not; there is nothing to partially accept, so
 every problem below raises ``WorkspaceDefinitionError`` and nothing is scanned:
@@ -64,7 +64,7 @@ one that matters:
 1. ``os.lstat`` raises ``ValueError`` rather than ``OSError`` for a null byte,
    and ``ValueError`` is not part of this package's contract. It escaped
    ``resolve_workspace`` uncaught, so a malformed workspace file produced a
-   traceback and exit 1 -- an internal error -- instead of the exit 2 that says
+   traceback and exit 1 -- an internal error -- instead of the exit 4 that says
    "your workspace file is wrong".
 2. The wording is version-dependent: Python 3.10 says ``embedded null byte``
    and 3.13 says ``lstat: embedded null character in path``. Anything asserting
@@ -269,7 +269,7 @@ def load_workspace_file(workspace_file: PathLike) -> WorkspaceDefinition:
 
     Raises:
         WorkspaceDefinitionError: For every unusable input. See "Every rejection
-            here is exit code 2" in the module docstring for the full list.
+            here is exit code 4" in the module docstring for the full list.
     """
     candidate = Path(workspace_file)
 

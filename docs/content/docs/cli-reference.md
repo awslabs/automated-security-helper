@@ -152,7 +152,7 @@ Workspace resolution refuses the whole workspace rather than scanning part of it
 
 `--allow-missing-projects` opts out of the first item only. Projects skipped that way are recorded in the plan's `skipped_projects` payload with a reason, not just logged. Nothing opts out of the others: they are problems with the definition rather than with the machine, so they are wrong everywhere.
 
-Workspace mode uses its own exit codes: `0` success, `1` internal error, `2` workspace definition or policy error, `3` a project whose own configuration is invalid.
+Workspace mode does not introduce a separate exit-code vocabulary; it uses the codes in [Exit Codes](#exit-codes). Every refusal listed above is code `4` — the workspace definition could not be used, so nothing was scanned. That is deliberately distinct from code `2`, which means a scan ran and found issues above the threshold.
 
 Comments are not supported in the workspace file. VS Code tolerates them; ASH reads strict JSON and reports a commented file as malformed.
 

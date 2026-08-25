@@ -90,9 +90,9 @@ Folder entries are untrusted text from a file, handed to pathlib. Which inputs
 pathlib refuses, and with which exception type, has changed across the Python
 versions this project supports (3.10 through 3.13) -- a null byte, for instance,
 raised ``ValueError`` straight out of ``os.lstat``, escaped uncaught, and turned
-a malformed workspace file into a traceback and exit 1 rather than exit 2. So the
+a malformed workspace file into a traceback and exit 1 rather than exit 4. So the
 containment call is wrapped, and any ``OSError`` or ``ValueError`` from it becomes
-a named entry in the exit-2 list. Only the exception's type is reported, never its
+a named entry in the exit-4 list. Only the exception's type is reported, never its
 message, because the message is the platform's wording and differs by version.
 
 The wrap is a net, not the mechanism: inputs known to be unusable are rejected
@@ -270,7 +270,7 @@ def _validate_containment(
             # Folder entries are untrusted text handed to pathlib, and which
             # inputs pathlib refuses -- and with what exception type -- has
             # changed between the Python versions this project supports. Any
-            # surprise has to land on exit 2 naming the entry rather than as a
+            # surprise has to land on exit 4 naming the entry rather than as a
             # traceback and exit 1. Only the exception's type is reported: its
             # message is the platform's wording and differs across versions.
             problems.append(
@@ -540,7 +540,7 @@ def resolve_workspace(
         one entry per folder in the definition, skipped ones included.
 
     Raises:
-        WorkspaceDefinitionError: Exit code 2. The definition is malformed, or an
+        WorkspaceDefinitionError: Exit code 4. The definition is malformed, or an
             entry escapes the workspace root, is a symlink, names the root, does
             not exist, is unreadable, overlaps another entry, collides on its
             key, or pins a scanner version irreconcilable with another project's.
