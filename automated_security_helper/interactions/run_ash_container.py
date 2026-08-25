@@ -548,8 +548,21 @@ def _assemble_run_command(
     strategy,
     ctx,
     container_network: str = "bridge",
+    workspace_relative_file: str | None = None,
+    allow_missing_projects: bool = False,
 ) -> List[str]:
     """Assemble the full `docker run` command list.
+
+    Args:
+        workspace_relative_file: In workspace mode, the workspace definition's
+            path relative to *source_dir* -- which is the workspace root, and is
+            what gets mounted at ``/src``. The in-container invocation then uses
+            ``--workspace /src/<that>`` instead of ``--source-dir /src``, because
+            the two flags are mutually exclusive and the container has to resolve
+            the workspace itself: there is exactly one bind mount, so every
+            project has to be reachable below ``/src``.
+        allow_missing_projects: Passed through so a workspace with an
+            uncloned project behaves the same inside the container as outside.
 
     Returns:
         A list of strings representing the complete run command.
@@ -598,8 +611,17 @@ def _assemble_run_command(
     cmd.append(image_name)
     cmd.append("ash")
 
-    # Core ASH path arguments
-    cmd.extend(["--source-dir", "/src", "--output-dir", "/out"])
+    # Core ASH path arguments. In workspace mode --source-dir is omitted, because
+    # it is mutually exclusive with --workspace and the workspace root is already
+    # the mount point.
+    if workspace_relative_file is not None:
+        cmd.extend(
+            ["--workspace", f"/src/{workspace_relative_file}", "--output-dir", "/out"]
+        )
+        if allow_missing_projects:
+            cmd.append("--allow-missing-projects")
+    else:
+        cmd.extend(["--source-dir", "/src", "--output-dir", "/out"])
 
     # Build ash_args from context + parameters
     ash_args: List[str] = []
@@ -727,6 +749,8 @@ def run_ash_container(
     custom_build_arg: List[str] | None = None,
     ash_plugin_modules: List[str] | None = None,
     container_network: str = "bridge",
+    workspace_relative_file: str | None = None,
+    allow_missing_projects: bool = False,
 ):
     """Build and run the ASH container image.
 
@@ -747,6 +771,11 @@ def run_ash_container(
         verbose: Enable verbose logging
         debug: Enable debug logging
         color: Enable/disable colorized output
+        workspace_relative_file: In workspace mode, the workspace definition's
+            path relative to source_dir. source_dir is then the workspace root
+            rather than a project, and the container resolves the workspace and
+            scans each project below the single /src mount.
+        allow_missing_projects: Passed through to the in-container invocation.
 
     Returns:
         CompletedProcess: The result of the container execution
@@ -963,6 +992,8 @@ def run_ash_container(
             strategy=strategy,
             ctx=ctx,
             container_network=container_network,
+            workspace_relative_file=workspace_relative_file,
+            allow_missing_projects=allow_missing_projects,
         )
 
         return _execute_container(run_cmd, debug=debug)

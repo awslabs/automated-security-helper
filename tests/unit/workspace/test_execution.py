@@ -654,6 +654,52 @@ class TestWorkspaceOutput:
         assert Path(outcome.payload.workspace_root) == root
 
 
+class TestFolderNamedSrc:
+    """A workspace containing a project literally named ``src``.
+
+    In container mode the workspace root is mounted at ``/src``, so this project
+    becomes ``/src/src`` -- the shape that re-enters the #361 basename heuristic.
+    The path handling in ``sarif_utils`` is covered per project in
+    ``tests/unit/interactions/test_workspace_container_mode.py``; what is checked
+    here is that the workspace layer keeps such a project distinct from its
+    siblings all the way through attribution and output.
+    """
+
+    def test_a_project_named_src_gets_its_own_subtree(self, tmp_path):
+        _, plan = _make_workspace(tmp_path, ("src", "MEDIUM"), ("api", "MEDIUM"))
+        _run(tmp_path, plan)
+        for key in ("src", "api"):
+            assert (tmp_path / "out" / "projects" / key).is_dir()
+
+    def test_findings_in_src_are_attributed_to_src(self, tmp_path):
+        _, plan = _make_workspace(tmp_path, ("src", "MEDIUM"), ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["src"] = {"sarif": _sarif(uri="app.py")}
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(uri="app.py")}
+        outcome = _run(tmp_path, plan)
+        parsed = json.loads(outcome.results_path.read_text(encoding="utf-8"))
+        pairs = {
+            (
+                result["properties"]["workspace_project"],
+                result["properties"]["workspace_uri"],
+            )
+            for run in parsed["sarif"]["runs"]
+            for result in run["results"]
+        }
+        assert pairs == {("src", "src/app.py"), ("api", "api/app.py")}
+
+    def test_the_two_projects_do_not_share_a_sarif_run(self, tmp_path):
+        _, plan = _make_workspace(tmp_path, ("src", "MEDIUM"), ("api", "MEDIUM"))
+        for key in ("src", "api"):
+            FakeOrchestrator.behaviour[key] = {"sarif": _sarif()}
+        outcome = _run(tmp_path, plan)
+        parsed = json.loads(outcome.results_path.read_text(encoding="utf-8"))
+        roots = {
+            run["originalUriBaseIds"]["PROJECTROOT"]["uri"]
+            for run in parsed["sarif"]["runs"]
+        }
+        assert len(roots) == 2
+
+
 class TestSettingsDefaults:
     def test_the_settings_object_is_immutable(self, tmp_path):
         """The same settings are read from several threads; mutation is a data race."""

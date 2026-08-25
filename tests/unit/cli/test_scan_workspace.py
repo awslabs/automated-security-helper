@@ -3,9 +3,11 @@
 
 """Unit tests for the workspace-mode CLI surface of ``ash scan``.
 
-Phase 1 resolves and validates; it never scans. These tests assert that from
-the outside -- by checking that the scan entry point is not reached and that no
-output directory appears -- rather than by reading the implementation.
+Resolution failures never reach the scan, and these tests assert that from the
+outside -- by checking that the scan entry point is not reached and that no
+output directory appears -- rather than by reading the implementation. The
+success path now does reach it, so the same recorder proves the opposite: that
+the resolved plan, and the workspace root as the scan root, arrive intact.
 
 Exit codes come from ``models.workspace.WorkspaceExitCode``: 4 for a workspace
 definition or policy error, 3 for a project whose own config is invalid. Every
@@ -17,6 +19,7 @@ the specific regression of collapsing 4 back onto 2.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -359,24 +362,83 @@ def test_dry_run_works_through_the_default_callback_too(tmp_path, no_scan):
 
 
 # ---------------------------------------------------------------------------
-# Workspace mode without --dry-run must not fall through to a single-dir scan
+# Workspace mode without --dry-run runs the scans, scoped to the plan
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_without_dry_run_refuses_rather_than_scanning_one_directory(
-    tmp_path, no_scan
-):
-    """Phase 1 ships no execution. Falling through would scan the workspace
-    root as one project and exit 0, reporting a result for a scan nobody asked
-    for."""
+def test_workspace_without_dry_run_reaches_the_scan_entry_point(tmp_path, no_scan):
+    """Phase 2a executes. Falling through to a single-directory scan of the
+    workspace root would report a result for a scan nobody asked for, so the
+    plan has to arrive at the scan entry point."""
     _project(tmp_path, "api")
     workspace = _workspace(tmp_path, ["api"])
 
     result = _invoke("--workspace", str(workspace))
 
+    assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
+    assert len(no_scan) == 1
+    assert no_scan[0]["workspace_plan"] is not None
+
+
+def test_the_scan_root_is_the_workspace_root_not_a_project(tmp_path, no_scan):
+    """Container mode mounts source_dir at /src, and every project has to be
+    reachable below it."""
+    _project(tmp_path, "api")
+    _project(tmp_path, "web")
+    workspace = _workspace(tmp_path, ["api", "web"])
+
+    _invoke("--workspace", str(workspace))
+
+    assert Path(no_scan[0]["source_dir"]).resolve() == tmp_path.resolve()
+
+
+def test_the_plan_handed_to_the_scan_is_the_one_dry_run_would_print(tmp_path, no_scan):
+    """Resolved once. Re-resolving for execution would let the two drift, which
+    is the whole reason --dry-run exists."""
+    _project(tmp_path, "services/api", "project_name: Payments API\n")
+    _project(tmp_path, "shared-infra")
+    workspace = _workspace(tmp_path, ["services/api", "shared-infra"])
+
+    _invoke("--workspace", str(workspace))
+
+    plan = no_scan[0]["workspace_plan"]
+    assert [p.key for p in plan.projects] == ["services-api", "shared-infra"]
+    assert plan.projects[0].label == "Payments API"
+
+
+def test_allow_missing_projects_reaches_the_scan_entry_point(tmp_path, no_scan):
+    _project(tmp_path, "api")
+    workspace = _workspace(tmp_path, ["api", "not-cloned-yet"])
+
+    result = _invoke("--workspace", str(workspace), "--allow-missing-projects")
+
+    assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
+    assert no_scan[0]["allow_missing_projects"] is True
+    plan = no_scan[0]["workspace_plan"]
+    assert [e.project for e in plan.skipped_projects] == ["not-cloned-yet"]
+
+
+def test_a_definition_error_still_refuses_before_scanning(tmp_path, no_scan):
+    """Execution must not weaken the fail-closed set."""
+    _project(tmp_path, "api")
+    workspace = _workspace(tmp_path, ["api", "not-cloned-yet"])
+
+    result = _invoke("--workspace", str(workspace))
+
     assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
-    assert "--dry-run" in result.output
     assert not no_scan
+
+
+def test_no_source_dir_is_passed_alongside_the_workspace_plan(tmp_path, no_scan):
+    """The CLI derives source_dir from the plan; it must not also forward the
+    operator's --source-dir, which is rejected earlier anyway."""
+    _project(tmp_path, "api")
+    workspace = _workspace(tmp_path, ["api"])
+
+    _invoke("--workspace", str(workspace))
+
+    call = no_scan[0]
+    assert call["source_dir"] == call["workspace_plan"].workspace_root
 
 
 def test_dry_run_without_workspace_is_an_error(tmp_path, no_scan):

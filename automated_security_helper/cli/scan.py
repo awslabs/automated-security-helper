@@ -27,6 +27,7 @@ from automated_security_helper.interactions.run_ash_scan import (
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
 from automated_security_helper.workspace.workspace_file import (
     WORKSPACE_AUTO,
@@ -53,14 +54,19 @@ def _handle_workspace_mode(
     source_dir: str | None,
     allow_missing_projects: bool,
     dry_run: bool,
-) -> NoReturn:
-    """Resolve a workspace, print the plan, and exit. Never scans.
+) -> "WorkspacePlan":
+    """Resolve a workspace and return the plan, or exit.
 
-    Phase 1 of workspace mode resolves and validates only, so every path out of
-    this function is an exit: 0 after printing a plan for ``--dry-run``, 4 for a
-    workspace definition or policy problem, 3 for a project whose own config is
-    invalid. Never 2 -- that code means a scan ran and found actionable findings,
-    which is the opposite of what any exit from here reports.
+    Every failure path is an exit, because a workspace that will not resolve has
+    nothing to scan: 4 for a workspace definition or policy problem, 3 for a
+    project whose own config is invalid. Never 2 -- that code means a scan ran and
+    found actionable findings, which is the opposite of what any exit from here
+    reports. ``--dry-run`` also exits, at 0, after printing the plan.
+
+    The success path returns rather than exiting, and the caller runs the scans
+    from the same plan object the operator would have inspected. Re-resolving for
+    execution would let the two drift, which is exactly what ``--dry-run`` exists
+    to rule out.
 
     Argument validation happens before any filesystem work, so an operator who
     passed a contradictory pair of flags is told that rather than being sent to
@@ -73,17 +79,6 @@ def _handle_workspace_mode(
             "honouring both would leave it ambiguous which tree was scanned. "
             "Note that --source-dir is also set by the ASH_SOURCE_DIR "
             "environment variable, which counts as setting it."
-        )
-
-    if not dry_run:
-        # Falling through to a single-directory scan would scan the workspace
-        # root as one project and exit 0, reporting a result for a scan nobody
-        # asked for.
-        _fail_workspace(
-            "Workspace mode currently resolves and validates a workspace but "
-            "does not run the scans; execution arrives in a later release. "
-            "Re-run with '--dry-run' to inspect the resolved plan, or scan a "
-            "single directory with '--source-dir'."
         )
 
     try:
@@ -99,10 +94,12 @@ def _handle_workspace_mode(
         _fail_workspace(str(exc))
     except ASHConfigValidationError as exc:
         _fail_workspace(str(exc), code=WorkspaceExitCode.INVALID_PROJECT_CONFIG)
-    else:
-        typer.echo(plan.render())
 
-    raise typer.Exit(WorkspaceExitCode.SUCCESS)
+    if dry_run:
+        typer.echo(plan.render())
+        raise typer.Exit(WorkspaceExitCode.SUCCESS)
+
+    return plan
 
 
 def run_ash_scan_cli_command(
@@ -440,13 +437,18 @@ def run_ash_scan_cli_command(
             f"'--workspace <file>' or '--workspace auto' as well."
         )
 
+    workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
-        _handle_workspace_mode(
+        workspace_plan = _handle_workspace_mode(
             workspace=workspace,
             source_dir=source_dir,
             allow_missing_projects=allow_missing_projects,
             dry_run=dry_run,
         )
+        # The workspace root is the scan root: it is what container mode mounts at
+        # /src, and what every workspace-relative finding path is relative to.
+        # Individual projects get their own source_dir inside the executor.
+        source_dir = workspace_plan.workspace_root
 
     # Rebind list defaults to fresh empty lists at call time so each CLI
     # invocation gets its own collection (typer will populate them if the
@@ -576,4 +578,6 @@ def run_ash_scan_cli_command(
         ash_revision_to_install=ash_revision_to_install,
         custom_containerfile=custom_containerfile,
         custom_build_arg=custom_build_arg,
+        workspace_plan=workspace_plan,
+        allow_missing_projects=allow_missing_projects,
     )
