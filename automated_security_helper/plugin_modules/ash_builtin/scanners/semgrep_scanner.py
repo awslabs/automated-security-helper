@@ -1,36 +1,30 @@
-"""Module containing the Semgrep security scanner implementation."""
+"""Module containing the Semgrep security scanner implementation.
 
-import json
+The bulk of the logic (arg-building, offline cache, SARIF post-processing)
+lives in :mod:`_grep_scanner_base`. This module only customises:
+
+- the binary command (`semgrep`) and uv-tool resolution
+- semgrep-specific dependency validation (Windows skip + UV-tool fallback)
+- the cache env var and `SEMGREP_RULES` env propagation for subprocess
+"""
+
 import logging
 import os
-from pathlib import Path
 import platform
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, List, Literal
 
 from pydantic import Field
+
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.constants import ASH_ASSETS_DIR, is_offline_mode
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.constants import is_offline_mode
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.core import ToolArgs
-from automated_security_helper.models.core import (
-    IgnorePathWithReason,
-    ToolExtraArg,
+from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
+    GrepScannerBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.base.scanner_plugin import (
-    ScannerPluginBase,
-)
-from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.schemas.sarif_schema_model import (
-    ArtifactLocation,
-    Invocation,
-    SarifReport,
-)
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.sarif_utils import attach_scanner_details
-from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
 class SemgrepScannerConfigOptions(ScannerOptionsBase):
@@ -50,9 +44,7 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
 
     exclude_rule: Annotated[
         List[str],
-        Field(
-            description="Skip any rule with the given id.",
-        ),
+        Field(description="Skip any rule with the given id."),
     ] = []
 
     severity: Annotated[
@@ -100,10 +92,8 @@ class SemgrepScannerConfig(ScannerPluginConfigBase):
 
 
 @ash_scanner_plugin
-class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
+class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
     """SemgrepScanner implements code scanning using Semgrep."""
-
-    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     def model_post_init(self, context):
         if self.config is None:
@@ -113,10 +103,7 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         self.subcommands = ["scan"]
         self.tool_type = ScannerToolType.SAST
 
-        # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
-
-        # Update tool version detection to work with explicit installation
         self.tool_version = self._get_uv_tool_version("semgrep")
         self.args = ToolArgs(
             format_arg=None,
@@ -127,29 +114,36 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
         )
         super().model_post_init(context)
 
-    def _get_tool_version_constraint(self) -> str | None:
-        """Get version constraint for semgrep installation.
+    # ---------------------------------------------------------------
+    # GrepScannerBase hooks
+    # ---------------------------------------------------------------
 
-        Returns:
-            Version constraint string for semgrep (e.g., ">=1.125.0") or None for latest
-        """
-        # Use configured tool version if available, otherwise use default
+    def cache_dir_env_var(self) -> str:
+        return "SEMGREP_RULES_CACHE_DIR"
+
+    def cache_dir_name(self) -> str:
+        return "Semgrep"
+
+    def default_rulesets(self) -> List[str]:
+        return ["p/ci"]
+
+    def extra_subprocess_env(self) -> dict | None:
+        """Propagate `SEMGREP_RULES` from the cache dir for offline runs."""
+        if self.config.options.offline and "SEMGREP_RULES_CACHE_DIR" in os.environ:
+            return {"SEMGREP_RULES": f"{os.environ['SEMGREP_RULES_CACHE_DIR']}/*"}
+        return None
+
+    # ---------------------------------------------------------------
+    # Semgrep-specific UV-tool dependency resolution
+    # ---------------------------------------------------------------
+
+    def _get_tool_version_constraint(self) -> str | None:
+        """semgrep 1.125.0+ has improved stability."""
         if self.config and self.config.options.tool_version:
             return self.config.options.tool_version
-
-        # Use semgrep-specific version constraint - semgrep 1.125.0+ has improved stability
         return ">=1.125.0,<2.0.0"
 
     def validate_plugin_dependencies(self) -> bool:
-        """Validate the scanner configuration and requirements.
-
-        Returns:
-            True if validation passes, False otherwise
-
-        Raises:
-            ScannerError: If validation fails
-        """
-        # Check if running on Windows (Semgrep doesn't support Windows)
         if platform.system().lower() == "windows":
             self._plugin_log(
                 "Semgrep is not supported on Windows and will be skipped",
@@ -157,32 +151,22 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
             )
             return False
 
-        # First validate UV tool availability if required
         if not self._validate_uv_tool_availability():
-            # If UV tool is not available, try direct executable fallback
+            # UV missing — defer to consolidated resolver: if the tool is on
+            # PATH directly we can still run it.
+            if get_uv_tool_command(self.command) is not None:
+                self.use_uv_tool = False
+                self.dependencies_satisfied = True
+                return True
             self._plugin_log(
-                "UV tool not available, attempting direct executable detection",
-                level=logging.WARNING,
+                "UV tool validation failed - UV is not available but required",
+                level=logging.ERROR,
             )
-            found = find_executable(self.command)
-            if found is None:
-                return False
-            # If direct executable is found, disable UV tool for this instance
-            self.use_uv_tool = False
-            self._plugin_log(
-                f"Using direct semgrep execution at {found}",
-                level=logging.WARNING,
-            )
-            self.dependencies_satisfied = True
-            return True
+            return False
 
-        # For UV tool-based scanners, attempt explicit installation if needed
         if self.use_uv_tool:
-            # Check if tool is already available (UV-installed or pre-installed)
             installation_info = self._get_tool_installation_info()
-
             if installation_info.get("available"):
-                # Tool is available either via UV or pre-installed
                 source = installation_info.get("preferred_source", "unknown")
                 if source == "uv":
                     self._plugin_log("Semgrep already installed via UV tool")
@@ -193,12 +177,9 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 self.dependencies_satisfied = True
                 return True
 
-            # Tool not available, attempt installation
             self._plugin_log(
                 "Semgrep not found via UV tool, attempting explicit installation..."
             )
-
-            # Attempt explicit tool installation with configured timeout
             timeout = (
                 getattr(self.config.options, "install_timeout", 300)
                 if self.config
@@ -208,300 +189,17 @@ class SemgrepScanner(ScannerPluginBase[SemgrepScannerConfig]):
                 self._plugin_log("Successfully installed semgrep via UV tool")
                 self.dependencies_satisfied = True
                 return True
-            else:
-                self._plugin_log(
-                    "UV tool installation failed for semgrep, trying direct executable detection",
-                    level=logging.WARNING,
-                )
-                # Enhanced fallback logic: try direct executable detection
-                found = find_executable(self.command)
-                if found is None:
-                    self._plugin_log(
-                        "Direct executable detection also failed for semgrep",
-                        level=logging.ERROR,
-                    )
-                    return False
-                # If direct executable is found, disable UV tool for this instance
+            # Last resort — consolidated resolver handles the
+            # "uv missing → direct binary → None" fallback.
+            if get_uv_tool_command(self.command) is not None:
                 self.use_uv_tool = False
-                self._plugin_log(
-                    f"Using direct semgrep execution at {found} as fallback",
-                    level=logging.WARNING,
-                )
+                self.dependencies_satisfied = True
+                return True
+            self._plugin_log(
+                "Direct executable detection also failed for semgrep",
+                level=logging.ERROR,
+            )
+            return False
 
         self.dependencies_satisfied = True
         return True
-
-    def _process_config_options(self):
-        ash_stargrep_rules = [
-            item
-            for item in ASH_ASSETS_DIR.joinpath("ash_stargrep_rules").glob("*")
-            if (item.as_posix().endswith(".yaml") or item.as_posix().endswith(".yml"))
-        ]
-        if ash_stargrep_rules:
-            ASH_LOGGER.verbose(f"Found ASH *grep rulesets: {ash_stargrep_rules}")
-            self.args.extra_args.extend(
-                [
-                    ToolExtraArg(
-                        key="--config",
-                        value=item.as_posix(),
-                    )
-                    for item in ash_stargrep_rules
-                ]
-            )
-        if self.config.options.offline:
-            # In offline mode, use metrics=off
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--metrics",
-                    value="off",
-                )
-            )
-
-            # Validate offline mode requirements
-            from automated_security_helper.utils.offline_mode_validator import (
-                OfflineModeValidator,
-            )
-
-            offline_valid, offline_messages = OfflineModeValidator.validate_cache_directory(
-                cache_dir=os.environ.get("SEMGREP_RULES_CACHE_DIR", ""),
-                file_extensions=[".yaml", ".yml"],
-                scanner_name="Semgrep",
-            )
-            if not offline_valid:
-                raise ScannerError(
-                    "Semgrep is running in offline mode but no rule cache was found. "
-                    "Set $SEMGREP_RULES_CACHE_DIR to a directory containing .yaml/.yml rule files. "
-                    "Run `ash build-image --offline` to pre-warm the cache via Dockerfile, "
-                    "or download rulesets manually with `semgrep --config p/ci --dryrun` "
-                    "while online and copy to cache."
-                )
-
-            # Use cached rules directory with --no-rewrite-rule-ids to produce
-            # clean rule IDs (the rule's own id field, no path-derived prefix).
-            semgrep_rules_cache_dir = os.environ.get("SEMGREP_RULES_CACHE_DIR")
-            ASH_LOGGER.info(
-                f"Semgrep offline mode: using cached rules from {semgrep_rules_cache_dir}"
-            )
-            self.args.extra_args.append(
-                ToolExtraArg(key="--config", value=semgrep_rules_cache_dir)
-            )
-            self.args.extra_args.append(
-                ToolExtraArg(key="--no-rewrite-rule-ids", value="")
-            )
-        else:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--config",
-                    value=self.config.options.config,
-                )
-            )
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--metrics",
-                    value=self.config.options.metrics,
-                )
-            )
-
-        # Add exclude patterns
-        for exclude_pattern in self.config.options.exclude:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--exclude",
-                    value=exclude_pattern,
-                )
-            )
-
-        # Add exclude rules
-        for exclude_rule in self.config.options.exclude_rule:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--exclude-rule",
-                    value=exclude_rule,
-                )
-            )
-
-        # Add severity filters
-        for severity in self.config.options.severity:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--severity",
-                    value=severity,
-                )
-            )
-
-        # Add SARIF output format
-        self.args.extra_args.append(
-            ToolExtraArg(
-                key="--sarif",
-                value="",
-            )
-        )
-
-        return super()._process_config_options()
-
-    def scan(
-        self,
-        target: Path,
-        target_type: Literal["source", "converted"],
-        global_ignore_paths: List[IgnorePathWithReason] | None = None,
-        config: SemgrepScannerConfig | None = None,
-    ) -> SarifReport | bool | None:
-        """Execute Semgrep scan and return results.
-
-        Args:
-            target: Path to scan
-            target_type: Type of target (source or converted)
-            global_ignore_paths: List of paths to ignore
-            config: Scanner configuration
-
-        Returns:
-            SarifReport containing the scan findings and metadata
-
-        Raises:
-            ScannerError: If the scan fails or results cannot be parsed
-        """
-        if global_ignore_paths is None:
-            global_ignore_paths = []
-        # Check if the target directory is empty or doesn't exist
-        if not target.exists() or not any(target.iterdir()):
-            message = (
-                f"Target directory {target} is empty or doesn't exist. Skipping scan."
-            )
-            self._plugin_log(
-                message,
-                target_type=target_type,
-                level=logging.INFO,
-                append_to_stream="stderr",
-            )
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return True
-
-        validated = self._pre_scan(
-            target=target,
-            target_type=target_type,
-            config=config,
-        )
-        if not validated:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-
-        if not self.dependencies_satisfied:
-            self._post_scan(
-                target=target,
-                target_type=target_type,
-            )
-            return False
-
-        try:
-            target_results_dir = self.results_dir.joinpath(target_type)
-            results_file = target_results_dir.joinpath("results_sarif.sarif")
-            target_results_dir.mkdir(exist_ok=True, parents=True)
-
-            final_args = self._resolve_arguments(
-                target=target,
-                results_file=results_file,
-            )
-
-            # Semgrep expects the target directory at the end of the command
-            # final_args.append(str(target))
-            self._plugin_log(
-                f"Running command: {' '.join(final_args)}",
-                target_type=target_type,
-                level=logging.VERBOSE,
-            )
-
-            # Build a local environment with offline-mode additions. Do
-            # not mutate os.environ: scanners run concurrently in thread
-            # pools and share the parent process env.
-            env_vars = {}
-            if self.config.options.offline and "SEMGREP_RULES_CACHE_DIR" in os.environ:
-                env_vars["SEMGREP_RULES"] = f"{os.environ['SEMGREP_RULES_CACHE_DIR']}/*"
-
-            subprocess_env = {**os.environ, **env_vars} if env_vars else None
-            self._run_subprocess(
-                command=final_args,
-                results_dir=target_results_dir,
-                env=subprocess_env,
-            )
-
-            semgrep_results = {}
-            if Path(results_file).exists():
-                with open(results_file, mode="r", encoding="utf-8") as f:
-                    semgrep_results = json.load(f)
-                try:
-                    sarif_report: SarifReport = SarifReport.model_validate(
-                        semgrep_results
-                    )
-
-                    # Attach scanner details for proper identification
-                    sarif_report = attach_scanner_details(
-                        sarif_report=sarif_report,
-                        scanner_name=self.config.name,
-                        scanner_version=getattr(self, "tool_version", None),
-                        invocation_details={
-                            "command_line": " ".join(final_args),
-                            "arguments": final_args[1:],
-                            "working_directory": get_shortest_name(input=target),
-                            "start_time": self.start_time.isoformat()
-                            if self.start_time
-                            else None,
-                            "end_time": self.end_time.isoformat()
-                            if self.end_time
-                            else None,
-                            "exit_code": self.exit_code,
-                        },
-                    )
-
-                    if sarif_report.runs:
-                        sarif_report.runs[0].invocations = [
-                            Invocation(
-                                commandLine=" ".join(final_args),
-                                arguments=final_args[1:],
-                                startTimeUtc=self.start_time,
-                                endTimeUtc=self.end_time,
-                                executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
-                                exitCode=self.exit_code,
-                                exitCodeDescription="\n".join(self.errors),
-                                workingDirectory=ArtifactLocation(
-                                    uri=get_shortest_name(input=target),
-                                ),
-                            )
-                        ]
-                    self._post_scan(
-                        target=target,
-                        target_type=target_type,
-                    )
-                    return sarif_report
-                except Exception as e:
-                    self._plugin_log(
-                        f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
-                        target_type=target_type,
-                        level=logging.ERROR,
-                        append_to_stream="stderr",
-                    )
-                    self._post_scan(
-                        target=target,
-                        target_type=target_type,
-                    )
-            else:
-                self._plugin_log(
-                    f"No results file found at {results_file}",
-                    target_type=target_type,
-                    level=logging.WARNING,
-                    append_to_stream="stderr",
-                )
-                self._post_scan(
-                    target=target,
-                    target_type=target_type,
-                )
-
-        except Exception as e:
-            # Check if there are useful error details
-            raise ScannerError(f"Semgrep scan failed: {str(e)}")

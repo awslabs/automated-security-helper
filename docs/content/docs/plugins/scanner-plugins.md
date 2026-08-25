@@ -6,20 +6,66 @@ Scanner plugins perform security scans on files and generate findings. They are 
 
 ## Scanner Plugin Interface
 
-Scanner plugins must implement the `ScannerPluginBase` interface:
+`ScannerPluginBase.scan()` is a template method. It runs a fixed sequence —
+preamble, tool invocation, read the result file, attach the SARIF invocation,
+postamble — and calls into your plugin for the one part that is tool-specific.
+That hook is `_execute_scan()`, and it is abstract: every subclass must define
+it, even one that does not use the template.
+
+`_execute_scan()` returns a three-tuple of `(argv, results_file, subprocess_env)`.
+The template runs `argv`, then reads SARIF from `results_file`, so a plugin that
+fits this shape does not implement `scan()` at all:
 
 ```python
+from pathlib import Path
+from typing import List, Literal, Optional, Tuple
+
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase, ScannerPluginConfigBase
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 
 @ash_scanner_plugin
-class MyScanner(ScannerPluginBase):
+class MyScanner(ScannerPluginBase[MyScannerConfig]):
     """My custom scanner implementation"""
 
-    def scan(self, target, target_type, global_ignore_paths=None, config=None):
-        """Implement your scanning logic here"""
-        # Your code here
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths,
+    ) -> Tuple[List[str], Path, Optional[dict]]:
+        """Return the argv to run, where it writes SARIF, and any extra env."""
+        results_file = self.results_dir.joinpath(target_type, "results_sarif.sarif")
+        results_file.parent.mkdir(parents=True, exist_ok=True)
+        argv = ["my-scanner-tool", "--sarif", "--output", str(results_file), str(target)]
+        return argv, results_file, None
 ```
+
+Hooks such as `_process_config_options()`, `_resolve_arguments()`, `_pre_scan()`,
+`_post_scan()` and `_post_process_sarif()` let you adjust individual steps
+without replacing the template.
+
+### Overriding scan() directly
+
+A scanner whose workflow does not fit the template — one that calls a Python API
+instead of a subprocess, for example — overrides `scan()` and returns a
+`SarifReport`. Because `_execute_scan()` is abstract, such a plugin still has to
+declare it, so give it a stub that says why it is unreachable:
+
+```python
+@ash_scanner_plugin
+class ApiScanner(ScannerPluginBase[ApiScannerConfig]):
+    def _execute_scan(self, target, target_type, global_ignore_paths):
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
+
+    def scan(self, target, target_type, global_ignore_paths=None, config=None):
+        ...
+```
+
+Omitting the stub makes the class abstract, and it fails at instantiation rather
+than at scan time. `examples/ash_plugins_example/my_ash_plugins/scanner.py`
+follows this pattern.
 
 ## Scanner Plugin Configuration
 

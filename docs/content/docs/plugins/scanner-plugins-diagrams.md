@@ -75,11 +75,14 @@ classDiagram
     }
 
     class ScannerPluginBase {
-        +scan(target, target_type, global_ignore_paths, config) ScanResultsContainer
+        +scan(target, target_type, global_ignore_paths, config) SarifReport
         +results_dir: Path
-        #_create_sarif_report(findings, tool_name) dict
-        #_write_sarif_report(sarif_report, filename) Path
+        #_execute_scan(target, target_type, global_ignore_paths)* Tuple
+        #_pre_scan(target, target_type)
+        #_post_scan(target, target_type)
+        #_post_process_sarif(sarif_report) SarifReport
     }
+    note for ScannerPluginBase "scan() is a template method.\n_execute_scan() is abstract and\nsupplies (argv, results_file, env)."
 
     class ScannerPluginConfigBase {
         +name: str
@@ -93,7 +96,7 @@ classDiagram
     }
 
     class CustomScanner {
-        +scan(target, target_type, global_ignore_paths, config) ScanResultsContainer
+        #_execute_scan(target, target_type, global_ignore_paths) Tuple
     }
 
     PluginBase <|-- ScannerPluginBase
