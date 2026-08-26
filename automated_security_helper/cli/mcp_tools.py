@@ -70,11 +70,31 @@ async def mcp_scan_directory(
     Returns:
         Dictionary with scan ID and status information
     """
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         validate_directory_path,
         validate_severity_threshold,
         validate_config_path,
     )
+
+    # Check the root policy before anything else looks at the target. This runs
+    # ahead of the existence check so that a refused target is reported as
+    # refused rather than as a missing directory, and ahead of the output
+    # directory creation below so that a refused target is not written into.
+    target_error = validate_scan_target(directory_path, session_id=session_id)
+    if target_error:
+        return create_error_response(
+            error=target_error,
+            operation="scan_directory",
+            suggestions=[
+                f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the MCP "
+                "server should be able to scan it",
+                "Verify that the path is correct",
+            ],
+        )
 
     # Validate directory path
     dir_error = validate_directory_path(directory_path)
@@ -375,6 +395,10 @@ async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
     Returns:
         Dictionary with scan results information
     """
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         validate_directory_path,
     )
@@ -403,6 +427,22 @@ async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
 
         # Log the resolved path for debugging
         _logger.info(f"Using absolute output directory: {resolved_output_dir}")
+
+        # Results are read from a caller-named directory, so the same roots that
+        # bound what may be scanned bound what may be read back. A legitimate
+        # output directory sits at <source_dir>/.ash/ash_output, beneath the scan
+        # target, so a root that permits the scan permits its results too.
+        target_error = validate_scan_target(resolved_output_dir)
+        if target_error:
+            return create_error_response(
+                error=target_error,
+                operation="get_scan_results",
+                suggestions=[
+                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                    "MCP server should be able to read results from it",
+                    "Verify that the path is correct",
+                ],
+            )
 
         # Validate that the directory exists and is accessible
         error = validate_directory_path(resolved_output_dir)
@@ -651,6 +691,32 @@ def mcp_explain_finding(
         ``success: False`` with an ``error`` key when the ID is not found.
     """
     import json as _json
+
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
+
+    # Same roots as the other results readers: this reads
+    # ash_aggregated_results.json out of a caller-named output directory. The
+    # directory is derived from results_path exactly as
+    # _load_flat_vulns_for_explain derives it, so the path checked is the path
+    # read.
+    if results_path is not None:
+        _candidate = Path(results_path)
+        target_error = validate_scan_target(
+            _candidate if _candidate.is_dir() else _candidate.parent
+        )
+        if target_error:
+            return create_error_response(
+                error=target_error,
+                operation="explain_finding",
+                suggestions=[
+                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                    "MCP server should be able to read results from it",
+                    "Verify that the path is correct",
+                ],
+            )
 
     try:
         flat_vulns = _load_flat_vulns_for_explain(results_path)
