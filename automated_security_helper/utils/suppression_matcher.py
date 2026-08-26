@@ -22,15 +22,11 @@ from automated_security_helper.utils.log import ASH_LOGGER
 # Supported formats (slash-style for JS/TS/Java/C#/Go):
 #   // ash-ignore: RULE-ID [reason]
 #   // ash-ignore-next-line: RULE-ID [reason]
-_HASH_INLINE_PATTERN = re.compile(
-    r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
-)
+_HASH_INLINE_PATTERN = re.compile(r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
 _HASH_NEXT_LINE_PATTERN = re.compile(
     r"#\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
 )
-_SLASH_INLINE_PATTERN = re.compile(
-    r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
-)
+_SLASH_INLINE_PATTERN = re.compile(r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
 _SLASH_NEXT_LINE_PATTERN = re.compile(
     r"//\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
 )

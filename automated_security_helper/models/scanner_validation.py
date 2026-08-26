@@ -598,6 +598,44 @@ class ValidationCheckpointer:
             },
         )
 
+    def report_execution_discrepancies(
+        self, execution_checkpoint: ValidationCheckpoint
+    ) -> Dict[str, Any]:
+        """Summarise an execution-completion checkpoint for the scan report.
+
+        A pure function of *execution_checkpoint*: it reads the checkpoint and
+        touches no state on ``self``. It lives here rather than on
+        ``ValidationCheckpoint`` because that is where the caller expects it --
+        ``ScanPhase._validate_execution_completion`` calls it through the
+        manager facade -- and moving it would change a call site this commit is
+        restoring rather than redesigning.
+
+        Note that ``has_discrepancies`` mirrors ``checkpoint.has_issues()``,
+        which reports recorded discrepancies and errors. A missing scanner does
+        NOT by itself set that flag, so ``has_discrepancies`` can be False while
+        ``missing_count`` is non-zero. That asymmetry predates this restoration
+        and is preserved deliberately: the counts are the field to test.
+
+        Args:
+            execution_checkpoint: The checkpoint from
+                :meth:`validate_execution_completion`.
+
+        Returns:
+            The discrepancy report stored on
+            ``AshAggregatedResults.metadata.execution_discrepancy_report``.
+        """
+        missing_scanners = execution_checkpoint.get_missing_scanners()
+        unexpected_scanners = execution_checkpoint.get_unexpected_scanners()
+
+        return {
+            "has_discrepancies": execution_checkpoint.has_issues(),
+            "missing_scanners": missing_scanners,
+            "unexpected_scanners": unexpected_scanners,
+            "missing_count": len(missing_scanners),
+            "unexpected_count": len(unexpected_scanners),
+            "total_discrepancies": len(missing_scanners) + len(unexpected_scanners),
+        }
+
     def ensure_complete_results(
         self, aggregated_results: "AshAggregatedResults"
     ) -> ValidationCheckpoint:
@@ -769,6 +807,29 @@ class ValidationCheckpointer:
             self.logger.verbose("Result completeness validation passed without issues")
 
         return checkpoint
+
+    def report_result_completeness(
+        self, completeness_checkpoint: ValidationCheckpoint
+    ) -> Dict[str, Any]:
+        """Summarise a result-completeness checkpoint for the scan report.
+
+        The counterpart to :meth:`report_execution_discrepancies`, and pure in
+        the same way. It carries no counts, because the adjustment total the
+        caller reports is derived from the scanner lists directly.
+
+        Args:
+            completeness_checkpoint: The checkpoint from
+                :meth:`ensure_complete_results`.
+
+        Returns:
+            The completeness report stored on
+            ``AshAggregatedResults.metadata.result_completeness_report``.
+        """
+        return {
+            "has_adjustments": completeness_checkpoint.has_issues(),
+            "missing_scanners": completeness_checkpoint.get_missing_scanners(),
+            "unexpected_scanners": completeness_checkpoint.get_unexpected_scanners(),
+        }
 
     def validate_task_queue(self, queue_contents: List[tuple]) -> ValidationCheckpoint:
         """Validate that all expected scanners have tasks in the queue.
@@ -1018,10 +1079,20 @@ class ScannerValidationManager:
     ) -> ValidationCheckpoint:
         return self._checkpointer.validate_execution_completion(completed_scanners)
 
+    def report_execution_discrepancies(
+        self, execution_checkpoint: ValidationCheckpoint
+    ) -> Dict[str, Any]:
+        return self._checkpointer.report_execution_discrepancies(execution_checkpoint)
+
     def ensure_complete_results(
         self, aggregated_results: "AshAggregatedResults"
     ) -> ValidationCheckpoint:
         return self._checkpointer.ensure_complete_results(aggregated_results)
+
+    def report_result_completeness(
+        self, completeness_checkpoint: ValidationCheckpoint
+    ) -> Dict[str, Any]:
+        return self._checkpointer.report_result_completeness(completeness_checkpoint)
 
     def validate_task_queue(self, queue_contents: List[tuple]) -> ValidationCheckpoint:
         return self._checkpointer.validate_task_queue(queue_contents)

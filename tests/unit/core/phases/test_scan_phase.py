@@ -18,6 +18,9 @@ from automated_security_helper.models.asharp_model import (
     ScannerStatusInfo,
 )
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
+from automated_security_helper.models.scanner_validation import (
+    ScannerValidationManager,
+)
 
 # Pydantic forward references need explicit rebuild for models with deferred refs
 AshConfig.model_rebuild()
@@ -106,11 +109,25 @@ def _make_scanner_class(name="test_scanner", enabled=True, deps_satisfied=True, 
 
 @pytest.fixture
 def scan_phase(mock_plugin_context, mock_progress_display):
-    """ScanPhase with mocked dependencies."""
+    """ScanPhase with mocked dependencies.
+
+    ``spec=ScannerValidationManager`` is load-bearing, not tidiness. This was a
+    bare ``MagicMock()``, which fabricates any attribute that is touched, and it
+    had accumulated stubs for three methods that do not exist on the real class:
+    ``report_execution_discrepancies`` and ``report_result_completeness`` (both
+    dropped by the StateTracker/Checkpointer split and since restored) and
+    ``validate_result_completeness``, which was never a method at all -- the real
+    facade calls it ``ensure_complete_results``. The suite was therefore
+    "covering" two live AttributeErrors in scan_phase.py against a double that
+    agreed with everything.
+
+    With a spec, setting an attribute the real class lacks raises here, in the
+    fixture, instead of passing and letting production fail.
+    """
     with patch(
         "automated_security_helper.core.phases.scan_phase.ScannerValidationManager"
     ) as MockValMgr:
-        mock_val_mgr = MagicMock()
+        mock_val_mgr = MagicMock(spec=ScannerValidationManager)
         mock_val_mgr.validate_registered_scanners.return_value = None
         mock_val_mgr.validate_scanner_enablement.return_value = None
 
@@ -128,8 +145,11 @@ def scan_phase(mock_plugin_context, mock_progress_display):
 
         mock_val_mgr.validate_task_queue.return_value = checkpoint
         mock_val_mgr.validate_execution_completion.return_value = checkpoint
-        mock_val_mgr.validate_result_completeness.return_value = checkpoint
+        # ensure_complete_results, not validate_result_completeness: the latter
+        # was a phantom the bare Mock accepted for as long as it existed here.
+        mock_val_mgr.ensure_complete_results.return_value = checkpoint
         mock_val_mgr.report_execution_discrepancies.return_value = {}
+        mock_val_mgr.report_result_completeness.return_value = {}
         MockValMgr.return_value = mock_val_mgr
 
         phase = ScanPhase(
