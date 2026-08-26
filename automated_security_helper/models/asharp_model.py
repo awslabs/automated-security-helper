@@ -10,6 +10,7 @@ from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import ExportFormat, ScannerStatus
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.workspace import WorkspaceResults
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from typing import TYPE_CHECKING, Annotated, Dict, Any, Optional, Union, List
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -444,6 +445,18 @@ class AshAggregatedResults(BaseModel):
             default_factory=set,
         ),
     ]
+    workspace: Annotated[
+        Optional[WorkspaceResults],
+        Field(
+            None,
+            description=(
+                "Per-project attribution for a workspace-mode scan: one entry "
+                "per project, the skipped-project payload, and the exit code the "
+                "run produced. Null for a single-directory scan, which is how a "
+                "consumer tells the two shapes apart."
+            ),
+        ),
+    ] = None
 
     # Private cache for to_flat_vulnerabilities() — the method mutates
     # summary_stats.suppressed and scanner_results as a side effect, so

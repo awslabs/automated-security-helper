@@ -266,6 +266,78 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
+  # Multi-project attribution: assert a workspace scan keeps its projects apart.
+  #
+  # The sibling of external-target-scan, one dimension up. That job proves ASH
+  # can scan a directory that is not its working directory and asserts on what
+  # came back; this one proves that scanning N projects at once does not mix them.
+  # The four regressions it exists for all produce a complete, well-formed results
+  # file, so none of them can be caught by an exit status:
+  #
+  #   - a finding from project A reported against project B
+  #   - project A's suppression silencing the same rule at the same relative path
+  #     in project B, which is a silent false negative
+  #   - both projects judged against one threshold, so one verdict is wrong
+  #   - two projects sharing an output directory, the second overwriting the first
+  #
+  # The fixture puts a byte-identical file in all three projects, which is what
+  # makes attribution testable: with three different files, "attributed to A"
+  # would be satisfied by matching on the filename. One project is named 'src' on
+  # purpose -- container mode mounts the workspace root at /src, so that project
+  # is /src/src, the basename-collision shape from #361.
+  #
+  # Windows is in the matrix deliberately: this project's path, encoding and
+  # console bugs concentrate there, and workspace mode adds a whole path space.
+  # ---------------------------------------------------------------------------
+  multi-project-attribution:
+    name: "multi-project attribution (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    # Keep in step with JOB_TIMEOUT_BUDGET_SECONDS in the script, which a unit
+    # test ties to this number. DEFAULT_SCAN_TIMEOUT_SECONDS must stay below it so
+    # the script's own diagnostics win the race against a job cancellation.
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "true"
+      # bandit is the only producer this gate asserts on. Installing it here means
+      # an install flake fails as a failed install step with its own log, rather
+      # than surfacing as "the fixture produced zero findings".
+      - name: Install scanner dependencies
+        shell: bash
+        run: ash dependencies install
+      - name: Verify a workspace scan keeps its projects apart
+        shell: bash
+        # The gate builds its workspace with tempfile.mkdtemp(). Pointing the temp
+        # dir at the runner's scratch space makes the tree's location predictable
+        # enough to upload below. All three names because tempfile checks TMPDIR
+        # first and TEMP/TMP on Windows. This sits on the step rather than the job
+        # because the runner context does not exist in job-level env -- a workflow
+        # using it there is rejected outright, with no jobs and no annotation.
+        env:
+          TMPDIR: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: python scripts/verify_multi_project_attribution.py --timeout 1200
+      - name: Collect the kept workspace and scan output
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: multi-project-attribution-evidence-${{ matrix.os }}
+          path: ${{ runner.temp }}/ash-multi-project-*
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
   # ---------------------------------------------------------------------------
   install-validation:

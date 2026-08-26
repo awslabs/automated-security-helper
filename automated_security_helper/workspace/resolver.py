@@ -500,6 +500,87 @@ def _validate_scanner_pins(
         )
 
 
+def _project_plugin_modules(config: AshConfig) -> List[str]:
+    """The plugin modules a project's config asks for, split and normalised.
+
+    Split on commas because ``ScanExecutionEngine`` does the same before loading
+    them, so ``["a,b"]`` and ``["a", "b"]`` are the same request and must not
+    read as a conflict. Sorted and de-duplicated for the same reason: order and
+    repetition do not change which plugins get registered.
+    """
+    declared = getattr(config, "ash_plugin_modules", None) or []
+    return sorted(
+        {
+            part.strip()
+            for entry in declared
+            if entry is not None
+            for part in str(entry).split(",")
+            if part.strip()
+        }
+    )
+
+
+def _validate_plugin_modules(
+    definition: WorkspaceDefinition, projects: List[ProjectPlan]
+) -> None:
+    """Refuse a workspace whose projects ask for different plugin module sets.
+
+    Why this is a refusal and not a merge
+    -------------------------------------
+    Plugin registration is process-global.
+    ``ScanExecutionEngine.__init__`` reads *the project's own*
+    ``ash_plugin_modules`` and registers them into the module-level
+    ``plugin_library``, then reads the scanner set back through
+    ``ash_plugin_manager.plugin_modules()``, which memoises into
+    ``_resolved_plugins``. So the first project to build its engine decides the
+    scanner set for every project in the run, and measured on two real projects
+    neither ordering is correct:
+
+    * project-without-the-plugin first -- the project that DECLARED it loses it.
+      A silent false negative: fewer findings than ``ash --source-dir`` would
+      report, with no warning anywhere.
+    * project-with-the-plugin first -- the other project gains a scanner it never
+      declared.
+
+    Merging the sets would make the second case the defined behaviour for
+    everyone, which is the wrong direction for a security tool: a project would
+    be scanned by plugins its operator did not choose, and an operator who
+    deliberately keeps a noisy or slow plugin out of one project has that
+    decision silently reversed. Refusing costs an error message they can act on.
+
+    This is the same call the RFC already makes for irreconcilable scanner
+    version pins, and for the same reason, so the two refusals are shaped alike.
+
+    Per-execution scoping of the registry is the real fix and is deliberately not
+    attempted here: ``plugin_library`` and ``_resolved_plugins`` predate this
+    feature and every single-directory scan depends on them.
+
+    Only projects that will actually be scanned are compared; a skipped project
+    cannot conflict with one that runs.
+    """
+    by_modules: Dict[Tuple[str, ...], List[str]] = {}
+    for project in projects:
+        by_modules.setdefault(tuple(project.ash_plugin_modules), []).append(project.key)
+
+    if len(by_modules) <= 1:
+        return
+
+    problems = [
+        f"{', '.join(sorted(keys))}: "
+        + (", ".join(modules) if modules else "no plugin modules")
+        for modules, keys in sorted(by_modules.items())
+    ]
+    raise _refuse(
+        f"Workspace '{definition.path.as_posix()}' cannot be scanned: its "
+        f"projects ask for different 'ash_plugin_modules'. Plugin registration "
+        f"is process-global, so one run registers one set -- whichever project "
+        f"resolves first would decide it for all of them, either dropping a "
+        f"plugin a project declared or applying one it did not. Give every "
+        f"project the same list, or scan them separately:",
+        problems,
+    )
+
+
 def _assign_display_labels(projects: List[ProjectPlan]) -> None:
     """Decorate a label with its project key when a sibling shares the label.
 
@@ -595,12 +676,13 @@ def resolve_workspace(
                 scanners=scanners,
                 severity_threshold=config.global_settings.severity_threshold,
                 scanner_pins=pins,
+                ash_plugin_modules=_project_plugin_modules(config),
             )
         )
 
-    _validate_scanner_pins(
-        definition, [project for project in projects if not project.skipped]
-    )
+    active = [project for project in projects if not project.skipped]
+    _validate_scanner_pins(definition, active)
+    _validate_plugin_modules(definition, active)
     _assign_display_labels(projects)
 
     return WorkspacePlan(
