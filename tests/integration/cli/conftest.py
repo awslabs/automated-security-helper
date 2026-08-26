@@ -222,9 +222,10 @@ def pytest_collection_modifyitems(config, items):
     below were unscoped, so any test anywhere in the repository whose name
     contained "workflow", "lifecycle" or "end_to_end" was marked slow -- and
     ``tests/conftest.py`` then skips slow tests unless ``--run-slow`` is passed.
-    Six unit tests were silently not running in a full-suite run as a result,
-    including two CI gates whose whole job is to fail when a workflow drifts from
-    its documented budget. All six pass when actually executed, so nothing was
+    Any unit test whose name matched was therefore silently not running in a
+    full-suite run, including CI gates whose whole job is to fail when a workflow
+    drifts from its documented budget. Every affected test passes when executed
+    directly, which is how they were verified when written, so nothing was
     hiding a real failure; they were simply providing no coverage while appearing
     to.
 

@@ -12,9 +12,10 @@ to any test whose name contained "workflow", "lifecycle" or "end_to_end" -- with
 no path scoping. ``tests/conftest.py`` then skips slow tests unless ``--run-slow``
 is passed.
 
-The result was six unit tests that silently did not run in a full-suite run,
-including two CI gates whose entire job is to fail when a GitHub workflow drifts
-from its documented timeout budget. All six passed when executed, so nothing was
+The result was that any unit test whose name matched silently did not run in a
+full-suite run, including CI gates whose entire job is to fail when a GitHub
+workflow drifts from its documented timeout budget. Every affected test passes
+when executed directly, which is how they were verified when written, so nothing was
 hiding a real failure -- they were simply providing no coverage while appearing to.
 
 It is worth guarding rather than just fixing, because the failure is invisible
