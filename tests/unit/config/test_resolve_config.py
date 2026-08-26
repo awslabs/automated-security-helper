@@ -1,7 +1,6 @@
 """Tests for config/resolve_config.py — covers override parsing, resolve_config, and apply_config_overrides."""
 
 from pathlib import Path
-from unittest.mock import patch
 import pytest
 
 from automated_security_helper.config.resolve_config import (
@@ -11,6 +10,8 @@ from automated_security_helper.config.resolve_config import (
     resolve_config,
 )
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 
 
 class TestParseConfigValue:
@@ -111,35 +112,19 @@ class TestApplyConfigOverrides:
         result = apply_config_overrides(config, ["project_name=updated"])
         assert result.project_name == "updated"
 
-    def test_invalid_format_logs_warning(self):
+    def test_invalid_format_raises(self):
         config = AshConfig(project_name="test")
-        # Invalid format (no =) should not crash
-        result = apply_config_overrides(config, ["invalid_no_equals"])
-        assert result.project_name == "test"
+        # Invalid format (no =) is refused rather than skipped, so the scan
+        # cannot proceed with settings the operator did not choose.
+        with pytest.raises(ASHConfigValidationError, match="invalid_no_equals"):
+            apply_config_overrides(config, ["invalid_no_equals"])
 
-    def test_validation_error_returns_original(self):
-        from pydantic import ValidationError
-
-        config = AshConfig(project_name="test")
-        # Apply an override that makes the model invalid
-        with patch(
-            "automated_security_helper.config.resolve_config.AshConfig.model_validate",
-            side_effect=ValidationError.from_exception_data(
-                title="AshConfig",
-                line_errors=[
-                    {
-                        "type": "value_error",
-                        "loc": ("project_name",),
-                        "msg": "invalid",
-                        "input": "bad",
-                        "ctx": {"error": ValueError("test")},
-                    }
-                ],
-            ),
-        ):
-            result = apply_config_overrides(config, ["project_name=new"])
-            # Should return original config on validation error
-            assert result.project_name == "test"
+    def test_validation_error_raises(self):
+        config = get_default_config()
+        # A real override that makes the merged model invalid, rather than a
+        # mocked model_validate — this exercises the branch it claims to.
+        with pytest.raises(ASHConfigValidationError, match="bogus_key"):
+            apply_config_overrides(config, ["global_settings.bogus_key=1"])
 
 
 class TestResolveConfig:

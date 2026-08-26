@@ -22,15 +22,11 @@ from automated_security_helper.utils.log import ASH_LOGGER
 # Supported formats (slash-style for JS/TS/Java/C#/Go):
 #   // ash-ignore: RULE-ID [reason]
 #   // ash-ignore-next-line: RULE-ID [reason]
-_HASH_INLINE_PATTERN = re.compile(
-    r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
-)
+_HASH_INLINE_PATTERN = re.compile(r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
 _HASH_NEXT_LINE_PATTERN = re.compile(
     r"#\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
 )
-_SLASH_INLINE_PATTERN = re.compile(
-    r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
-)
+_SLASH_INLINE_PATTERN = re.compile(r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
 _SLASH_NEXT_LINE_PATTERN = re.compile(
     r"//\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
 )
@@ -124,6 +120,17 @@ def _line_range_matches(
 
     # If only start line is specified in suppression
     if suppression.line_start is not None and suppression.line_end is None:
+        # Open-ended on purpose: a suppression with line_start and no line_end
+        # matches every finding from that line to the end of the file, including
+        # findings that do not exist yet. It does not mean "just this line".
+        #
+        # This is the documented contract, not an oversight. The linter used to
+        # describe it as defaulting to a single line, which was the reverse of
+        # what happens here; the message was corrected rather than this
+        # comparison, because narrowing it would stop existing single-line
+        # suppressions from covering the range they cover today. Tests in
+        # tests/unit/config/test_open_ended_suppression_range.py pin it.
+        #
         # Match if finding overlaps with the suppression start line:
         # either the finding starts at/after suppression start, or the
         # finding spans across the suppression start (multi-line finding).

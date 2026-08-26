@@ -71,6 +71,19 @@ global_settings:
       line_end: 15  # Optional ending line number
       reason: 'False positive due to test mock'  # Reason for suppression
       expiration: '2025-12-31'  # Optional expiration date (YYYY-MM-DD)
+```
+
+Omitting `line_end` does **not** suppress only `line_start`. A suppression with
+`line_start` and no `line_end` matches every finding from that line to the end of
+the file, including findings introduced later. To suppress a single line, set
+`line_end` to the same value as `line_start`:
+
+```yaml
+    - rule_id: 'RULE-123'
+      path: 'src/example.py'
+      line_start: 10
+      line_end: 10  # Without this, lines 10 onwards are all suppressed
+      reason: 'False positive due to test mock'
     - rule_id: 'RULE-456'
       path: 'src/*.js'  # Glob pattern matching all JS files in src/
       reason: 'Known issue, planned for fix in v2.0'
