@@ -185,8 +185,18 @@ def resolve_config(
     try:
         # Start with default config
         config = get_default_config() if fallback_to_default else None
-        if source_dir is None and fallback_to_default:
-            ASH_LOGGER.verbose("source_dir is null, returning the default config")
+        # An explicit config_path has to survive a missing source_dir. source_dir
+        # only drives *discovery* of a config file; when the caller already named
+        # one, there is nothing to discover and no reason to bail out to the
+        # default. Testing source_dir alone here meant `ash report --config
+        # <file>` accepted the option and then reported against default settings,
+        # because cli/report.py passes config_path with no source_dir (as does
+        # cli/config.py). Below, source_dir falls back to Path.cwd(), which is
+        # only used to resolve a relative config_path at that point.
+        if source_dir is None and config_path is None and fallback_to_default:
+            ASH_LOGGER.verbose(
+                "source_dir and config_path are both null, returning the default config"
+            )
             # Apply overrides to default config if provided
             if config_overrides:
                 return apply_config_overrides(config, config_overrides)

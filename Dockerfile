@@ -107,12 +107,18 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 #
-# Install nodejs@20 using latest recommended method
+# Install nodejs using latest recommended method.
+#
+# The major version has to satisfy the package managers cached below. pnpm 11
+# declares engines.node >=22.13 (pnpm 9 and 10 were >=18.12), and `corepack
+# prepare pnpm@latest` caches whatever the current major is, so Node 20 left the
+# image with a pnpm it could not run. tests/unit/test_dockerfile_node_toolchain.py
+# fails if this drops back below what pnpm needs.
 #
 RUN set -uex; \
     mkdir -p /etc/apt/keyrings; \
     with-retry 'curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg'; \
-    NODE_MAJOR=20; \
+    NODE_MAJOR=22; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
@@ -161,6 +167,18 @@ RUN echo "gem: --no-document" >> /etc/gemrc && \
 # JavaScript: corepack manages npm/yarn/pnpm versions via package.json engines
 # Prepare at build time so binaries are cached for offline runtime use
 #
+# A scanned repository pins its own version through `packageManager`, and corepack
+# honours that at runtime. When the pinned version is not the one cached above,
+# corepack asks before fetching it ("Do you want to continue? [Y/n]"). No tty is
+# attached here, so that prompt blocks on stdin indefinitely and the scan looks
+# like a hung `pnpm audit` rather than a failure. Setting this to 0 turns the
+# prompt into a decision corepack makes on its own, so the audit either runs or
+# fails with a message.
+#
+# ENV rather than a build-time export: the npm-audit scanner invokes pnpm at
+# runtime, which is the case that reported the hang.
+#
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && corepack prepare pnpm@latest --activate'
 
 
