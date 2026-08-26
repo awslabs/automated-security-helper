@@ -40,6 +40,11 @@ from abc import abstractmethod
 _VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*(=.*)?$")
 from pathlib import Path
 
+# How much of a tool's stderr goes into the failure message. The full text stays
+# in the stderr log file, whose path the message names, so this bounds the
+# exception without losing anything.
+_STDERR_EXCERPT_LIMIT = 2000
+
 
 class ScannerPluginConfigBase(PluginConfigBase):
     options: Annotated[ScannerOptionsBase, Field(description="Scanner options")] = (
@@ -386,10 +391,25 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _read_results_file(self, results_file: "Path") -> Optional[dict]:
         """Read and parse the scanner results file as JSON.
 
-        Default reads the file as JSON. Subclasses may override to add
-        empty-file detection or alternative parsing. Return None to signal
-        an empty/missing result that should be replaced with the default
-        empty SARIF report (see ``_handle_empty_results``).
+        Returns ``None`` for a file that exists and is EMPTY, which
+        ``scan()`` replaces with the default empty SARIF report (see
+        ``_handle_empty_results``).
+
+        A **missing** file must raise, and that is a constraint rather than an
+        accident of this implementation. Returning ``None`` for it would route a
+        scanner that produced no output at all into ``_handle_empty_results()``,
+        which yields an empty SARIF and lets the scan **succeed** -- reporting a
+        clean result for a tool that died. That is a false negative in a security
+        scanner, so the missing case must stay an exception. ``scan()``'s handler
+        enriches it with the exit code and the tool's stderr; see
+        ``_describe_scan_failure``.
+
+        An earlier version of this docstring said ``None`` signalled an
+        "empty/missing" result, which the code has never done for missing. The
+        wording is corrected here rather than the behaviour.
+
+        Subclasses may override to add their own empty-file detection or
+        alternative parsing, but must preserve the missing-file raise.
         """
         with open(results_file, mode="r", encoding="utf-8") as fh:
             content = fh.read()
@@ -496,6 +516,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             self._post_scan(target=target, target_type=target_type)
             return False
 
+        # Bound before the try so the failure handler can name the stderr log
+        # even when _execute_scan itself is what raised.
+        results_file = None
+
         try:
             final_args, results_file, subprocess_env = self._execute_scan(
                 target=target,
@@ -542,7 +566,89 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return sarif_report
 
         except Exception as e:
-            raise ScannerError(f"{self.__class__.__name__} scan failed: {e}")
+            raise ScannerError(self._describe_scan_failure(e, results_file))
+
+    def _describe_scan_failure(
+        self, exc: Exception, results_file: Optional["Path"]
+    ) -> str:
+        """Build the failure message, naming the cause rather than the symptom.
+
+        Why this exists
+        ---------------
+        A tool that exits non-zero raises nothing:
+        ``run_command_with_output_handling`` passes ``check=False``, so
+        ``_run_subprocess`` returns ``{"returncode": 7}`` normally. ``scan()``
+        then reads a results file the tool never wrote, and the FileNotFoundError
+        from THAT is what surfaced -- two steps from the cause, in a different
+        function, as a different exception type. Two opengrep runs failed in CI
+        this way and the reported error was ``[Errno 2] No such file or
+        directory``, which says nothing about why.
+
+        The stderr was not lost. ``_run_subprocess`` defaults to
+        ``stderr_preference="write"``, so it went to
+        ``<results_dir>/<ClassName>.stderr.log`` and never into ``self.errors``
+        -- ``_process_command_response`` only populates that from a RETURNED
+        stderr, and only 3 of the 8 call sites ask for one. So this reads the log
+        file when ``self.errors`` is empty, which is the common case rather than
+        the exotic one.
+
+        Why the exit code needs a verdict, not just a value
+        --------------------------------------------------
+        ``success_exit_codes`` is ``{0, 1}`` and bandit deliberately exits 1 when
+        it finds issues, so "non-zero" does not mean "failed". The message states
+        the code AND whether this scanner accepts it, because that pair is what
+        separates "the tool ran and signalled findings" from "the tool died". It
+        is also why nothing here branches on ``exit_code != 0``: this method only
+        describes a failure that has already happened and changes no control
+        flow.
+
+        Failure modes
+        -------------
+        * Reading the log is best-effort. If it cannot be read the message says
+          where it looked, so the reader can tell "stderr was empty" from
+          "stderr was not where we checked".
+        * stderr is truncated to keep a scanner that wrote megabytes from
+          swamping the error; the full text stays in the log file, which is
+          named.
+        """
+        detail = f"{self.__class__.__name__} scan failed: {exc}"
+
+        accepted = self.exit_code in self.success_exit_codes
+        verdict = (
+            "an accepted exit code for this scanner"
+            if accepted
+            else f"not an accepted exit code; success_exit_codes="
+            f"{sorted(self.success_exit_codes)}"
+        )
+        detail += f" (exit code {self.exit_code}: {verdict})"
+
+        stderr_text = "\n".join(self.errors).strip()
+        log_path = None
+        if results_file is not None:
+            log_path = (
+                Path(results_file).parent / f"{self.__class__.__name__}.stderr.log"
+            )
+
+        if not stderr_text and log_path is not None:
+            try:
+                stderr_text = log_path.read_text(
+                    encoding="utf-8", errors="replace"
+                ).strip()
+            except OSError:
+                stderr_text = ""
+
+        if stderr_text:
+            if len(stderr_text) > _STDERR_EXCERPT_LIMIT:
+                stderr_text = (
+                    stderr_text[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
+                )
+            detail += f". Stderr: {stderr_text}"
+        elif log_path is not None:
+            detail += f". No stderr captured; checked {log_path.as_posix()}"
+        else:
+            detail += ". No stderr captured."
+
+        return detail
 
     ### Methods that require implementation by plugins.
     def validate_plugin(self) -> bool:
