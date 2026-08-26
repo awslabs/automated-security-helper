@@ -116,6 +116,7 @@ ash [options]
 | `--phases`                    | Phases to run: `convert`, `scan`, `report`, `inspect`   | `convert,scan,report` |                         |
 | `--inspect`                   | Enable inspection of SARIF fields                       | `False`               |                         |
 | `--workspace`                 | Path to a `.code-workspace` file, or `auto` to find the one in the current directory. Mutually exclusive with `--source-dir` | None | `ASH_WORKSPACE` |
+| `--workspace-config`          | Path to the workspace policy file. Defaults to `ash-workspace.{yaml,yml,json}` in the workspace root or its `.ash` directory | None | `ASH_WORKSPACE_CONFIG` |
 | `--allow-missing-projects`    | Skip workspace projects that are absent or unreadable   | `False`               |                         |
 | `--dry-run`                   | Print the resolved workspace plan and exit without scanning | `False`           |                         |
 
@@ -137,6 +138,39 @@ Folder paths are relative to the directory holding the workspace file, which bec
 `--workspace` and `--source-dir` cannot be combined. Note that `ASH_SOURCE_DIR` counts as setting `--source-dir`.
 
 `--dry-run` resolves and validates the workspace, prints the resulting plan, and exits 0 without scanning anything. Without it, the same plan is what gets scanned — resolved once, so what you inspect is what runs.
+
+#### Workspace policy
+
+Each project is judged against its own configuration, so there is nowhere in a project's config to say something about the workspace as a whole. That goes in a workspace policy file, which ASH looks for at `ash-workspace.yaml` (or `.yml`/`.json`) in the workspace root or its `.ash` directory. Having none is not an error.
+
+```yaml
+workspace:
+  # The LOOSEST threshold any project may use. A stricter project keeps its own.
+  max_severity_threshold: MEDIUM
+  # Paths are workspace-relative and are rewritten per project.
+  suppressions:
+    - path: services/api/src/legacy.py
+      rule_id: B101
+      reason: tracked in TICKET-1
+  ignore_paths:
+    - path: '**/vendor'
+      reason: third-party code
+  # Additive: a project cannot be made to run fewer scanners than it enables.
+  additional_scanners:
+    - bandit
+  # Whether findings from scanners added above affect a project's exit code.
+  policy_scanners_gate: false
+```
+
+The policy file must be a **different file** from any project's ASH config. When the workspace root is itself a project, `.ash/ash.yaml` there is that project's config and keeps meaning exactly that; policy goes in `.ash/ash-workspace.yaml`, or in any file named with `--workspace-config`. Pointing `--workspace-config` at a project's config exits 4 and names the file, because workspace policy governs every project and reading one project's config as policy would apply its settings to its siblings.
+
+`max_severity_threshold` is a ceiling on permissiveness, not on severity. The strictness order is `ALL` (strictest) through `CRITICAL` (loosest), so *raising* this value loosens it. A project's effective threshold is whichever of its own setting and this ceiling is stricter: a project at `CRITICAL` under a `MEDIUM` ceiling is judged at `MEDIUM`, while a project already at `LOW` is left alone. `--dry-run` prints both values for any project the ceiling moved, so you can see what it changed before running a scan.
+
+One limitation is worth knowing before relying on the ceiling. It tightens findings that carry a severity. A finding that carries only a SARIF `error` level is treated as critical and stays actionable at every threshold, so no ceiling excludes it — this is not specific to workspace mode, and `severity_threshold` behaves the same way in a single-project scan. In practice it means the ceiling cannot quieten checkov, which reports no per-finding severity.
+
+Suppressions and ignore paths are written workspace-relative and pushed down into each project's own coordinates. A pattern that cannot match inside a project is not applied there, so `services/api/src/legacy.py` silences nothing in `shared-infra`. A pattern with no exact per-project equivalent is refused with exit 4 rather than approximated, because a suppression that matches more than intended hides findings and leaves nothing in the output to show what went missing. `**/vendor` works; `**/vendor/**` is refused, and the error names the pattern and the project.
+
+Scanners in `additional_scanners` that a project already enables run under that project's own configuration and their findings are the project's. Scanners only the policy adds run with default configuration, are reported separately as `origin: workspace-policy`, and do not affect the project's exit code unless `policy_scanners_gate: true`.
 
 #### What each project gets
 

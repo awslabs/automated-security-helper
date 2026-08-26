@@ -71,6 +71,10 @@ from typing import Annotated, Dict, List, Optional
 
 from pydantic import BaseModel, Field, computed_field
 
+from automated_security_helper.models.core import (
+    AshSuppression,
+    IgnorePathWithReason,
+)
 from automated_security_helper.models.workspace import (
     SkippedProject,
     SkippedProjectReason,
@@ -158,13 +162,84 @@ class ProjectPlan(BaseModel):
         Field(
             None,
             description=(
-                "The project's own global_settings.severity_threshold. A "
-                "workspace-level ceiling is a later phase; when one exists the "
-                "effective value becomes severity_ladder.stricter_of(this, "
-                "ceiling)."
+                "The project's own global_settings.severity_threshold, exactly as "
+                "its config declared it. Kept alongside "
+                "effective_severity_threshold rather than being overwritten, so "
+                "an operator can see what a workspace ceiling changed instead of "
+                "only its result."
             ),
         ),
     ] = None
+    effective_severity_threshold: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "The threshold this project is actually judged against: "
+                "severity_ladder.stricter_of(severity_threshold, the workspace "
+                "ceiling). Equal to severity_threshold when there is no policy, "
+                "or when the project was already stricter than the ceiling."
+            ),
+        ),
+    ] = None
+    threshold_tightened_by_policy: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether the workspace ceiling actually moved this project's "
+                "threshold. Recorded rather than left to be re-derived, so "
+                "--dry-run and the reporters can state where policy took effect "
+                "without comparing two fields and reaching their own conclusion."
+            ),
+        ),
+    ] = False
+    policy_suppressions: Annotated[
+        List[AshSuppression],
+        Field(
+            default_factory=list,
+            description=(
+                "Workspace-level suppressions rewritten into THIS project's "
+                "coordinates. Only those whose pattern can match inside it; a "
+                "workspace suppression naming a sibling is absent here rather "
+                "than present and inert."
+            ),
+        ),
+    ]
+    policy_ignore_paths: Annotated[
+        List[IgnorePathWithReason],
+        Field(
+            default_factory=list,
+            description=(
+                "Workspace-level ignore paths, rewritten for this project on the "
+                "same terms as policy_suppressions."
+            ),
+        ),
+    ]
+    policy_scanners: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "Scanners the workspace policy adds that this project does not "
+                "itself enable. These run with ASH's default config and their "
+                "findings are tagged 'origin: workspace-policy'. A scanner the "
+                "project already declares is absent here, because it runs under "
+                "the project's own config and its findings are the project's."
+            ),
+        ),
+    ]
+    policy_scanners_gate: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether findings from policy_scanners affect this project's exit "
+                "code. Carried per project so no consumer has to reach back into "
+                "the policy to interpret policy_scanners."
+            ),
+        ),
+    ] = False
     scanner_pins: Annotated[
         Dict[str, str],
         Field(
@@ -267,6 +342,18 @@ class WorkspacePlan(BaseModel):
             ),
         ),
     ] = False
+    workspace_config_source: Annotated[
+        Optional[str],
+        Field(
+            None,
+            description=(
+                "Path of the workspace policy file that was applied, or null when "
+                "the workspace declares no policy. Recorded because a ceiling "
+                "changes verdicts, so which file imposed it has to be answerable "
+                "from the output rather than by re-running discovery."
+            ),
+        ),
+    ] = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -299,8 +386,14 @@ class WorkspacePlan(BaseModel):
             f"{len(self.active_projects)} to scan, {len(skipped)} skipped",
             f"{_INDENT}{'missing ok:':<{_FIELD_WIDTH}}"
             f"{'yes' if self.allow_missing_projects else 'no'}",
-            "",
         ]
+        # Only shown when there is policy. A "policy: none" line on every plan
+        # would train the reader to skip the line that matters.
+        if self.workspace_config_source:
+            lines.append(
+                f"{_INDENT}{'policy:':<{_FIELD_WIDTH}}{self.workspace_config_source}"
+            )
+        lines.append("")
 
         for position, project in enumerate(self.projects, start=1):
             suffix = ""
@@ -326,14 +419,34 @@ class WorkspacePlan(BaseModel):
                 f"{_INDENT}{'config:':<{_FIELD_WIDTH}}"
                 f"{project.config_source or 'ASH default config'}"
             )
-            lines.append(
-                f"{_INDENT}{'threshold:':<{_FIELD_WIDTH}}"
-                f"{project.severity_threshold or 'none'}"
-            )
+            # Both values when policy moved the threshold, so the reader can see
+            # what was declared and what will be enforced. One value otherwise:
+            # printing "CRITICAL -> CRITICAL" everywhere would bury the real cases.
+            declared = project.severity_threshold or "none"
+            if project.threshold_tightened_by_policy:
+                effective = project.effective_severity_threshold or "none"
+                lines.append(
+                    f"{_INDENT}{'threshold:':<{_FIELD_WIDTH}}"
+                    f"{effective}  (workspace policy tightened {declared})"
+                )
+            else:
+                lines.append(f"{_INDENT}{'threshold:':<{_FIELD_WIDTH}}{declared}")
             lines.append(
                 f"{_INDENT}{'scanners:':<{_FIELD_WIDTH}}"
                 f"{', '.join(project.scanners) or 'none enabled'}"
             )
+            if project.policy_scanners:
+                gating = "gating" if project.policy_scanners_gate else "not gating"
+                lines.append(
+                    f"{_INDENT}{'+policy:':<{_FIELD_WIDTH}}"
+                    f"{', '.join(project.policy_scanners)} ({gating})"
+                )
+            if project.policy_suppressions or project.policy_ignore_paths:
+                lines.append(
+                    f"{_INDENT}{'policy:':<{_FIELD_WIDTH}}"
+                    f"{len(project.policy_suppressions)} suppression(s), "
+                    f"{len(project.policy_ignore_paths)} ignore path(s)"
+                )
             if project.scanner_pins:
                 pins = ", ".join(
                     f"{scanner} {pin}"
