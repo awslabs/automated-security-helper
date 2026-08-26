@@ -347,6 +347,135 @@ class TestPerProjectThresholds:
         assert entry.actionable_finding_count == 1
         assert entry.severity_threshold == "LOW"
 
+    def test_the_per_scanner_rollup_agrees_with_the_project_total_under_a_ceiling(
+        self, tmp_path
+    ):
+        """Two derivations of one number must not disagree once policy applies.
+
+        The project's actionable count is computed from the effective threshold,
+        while the workspace rollup splits it per scanner. If the split is derived
+        from the DECLARED threshold instead, the two disagree the moment a ceiling
+        tightens anything -- the per-scanner numbers sum to 0 while the project
+        says 1, and a reader has no rule for which to trust.
+
+        This is the failure the ceiling wiring introduces if the split is missed,
+        so it is asserted as an equality between the two payloads rather than
+        against a literal.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="warning")}
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        # Control: the ceiling really did make this actionable, or the equality
+        # below would hold trivially at 0 == 0 and prove nothing.
+        assert entry.actionable_finding_count == 1
+
+        # Read the written file: scanner_results is a top-level key of the
+        # aggregated report, not a field of WorkspaceResults, and the file is what
+        # a consumer actually reads.
+        written = json.loads(
+            (tmp_path / "out" / "ash_aggregated_results.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        rollup = {
+            name: (value or {}).get("actionable_finding_count", 0)
+            for name, value in (written.get("scanner_results") or {}).items()
+        }
+        assert sum(rollup.values()) == entry.actionable_finding_count, rollup
+
+    def test_a_tightened_project_discloses_findings_the_ceiling_could_not_reach(
+        self, tmp_path
+    ):
+        """The mechanised form of the documented limitation, on the outcome.
+
+        A level-only `error` is read as critical by both threshold gates, so
+        tightening CRITICAL to MEDIUM changes nothing for it. The project still
+        fails -- correctly -- but the operator needs to know the ceiling is not
+        what made it fail, or they will conclude the ceiling works on findings it
+        never touched.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="error")}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+        assert entry.ceiling_unreachable_findings == {"bandit": 1}
+
+    def test_an_untightened_project_discloses_nothing(self, tmp_path):
+        """Load-bearing only. The same finding, no ceiling, no disclosure.
+
+        Without this the disclosure would appear on every scan carrying a
+        level-only finding, and a message that always appears is one nobody
+        reads.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="error")}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+        # Control: the finding IS present and actionable, so the empty disclosure
+        # is a decision rather than an absence of input.
+        assert entry.actionable_finding_count == 1
+        assert entry.ceiling_unreachable_findings == {}
+
+    def test_the_disclosure_follows_the_tightened_flag_not_just_the_thresholds(
+        self, tmp_path
+    ):
+        """Pins the execution-level guard, which is otherwise indistinguishable.
+
+        ceiling_unreachable_counts short-circuits on equal thresholds, so for any
+        plan resolve_workspace builds -- where the flag and the two thresholds are
+        set together and cannot disagree -- either guard alone suffices, and
+        removing the one in execution.py leaves every other test green. That was
+        measured, not assumed.
+
+        This constructs the one state where they disagree: differing thresholds
+        with the flag false, which plan.py's docstring says a hand-built plan may
+        hold. The flag is the record of whether policy moved this project, so it
+        is what the disclosure follows.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = False
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="error")}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        # Control: the finding is present and the thresholds DO differ, so the
+        # empty disclosure is the flag's doing and not a missing input.
+        assert entry.actionable_finding_count == 1
+        assert project.severity_threshold != project.effective_severity_threshold
+        assert entry.ceiling_unreachable_findings == {}
+
+    def test_a_tightened_project_whose_findings_the_ceiling_reached_discloses_nothing(
+        self, tmp_path
+    ):
+        """The other load-bearing arm: tightening happened AND it worked.
+
+        A severity-carrying MEDIUM finding is exactly what the ceiling is for, so
+        there is nothing to qualify. Distinguishes "we disclose whenever tightened"
+        from "we disclose when tightening fell short".
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        sarif = _sarif(level="warning")
+        sarif["runs"][0]["results"][0]["properties"]["issue_severity"] = "MEDIUM"
+        FakeOrchestrator.behaviour["api"] = {"sarif": sarif}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+        assert entry.actionable_finding_count == 1
+        assert entry.ceiling_unreachable_findings == {}
+
     def test_the_aggregate_exit_code_reflects_the_strictest_failing_project(
         self, tmp_path
     ):

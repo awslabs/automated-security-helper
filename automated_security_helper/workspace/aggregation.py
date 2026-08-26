@@ -638,8 +638,13 @@ class WorkspaceAggregator:
         # project's own total.
         if outcome.actionable_finding_count:
             for name, results in by_scanner.items():
+                # gate_threshold, matching what the project's own verdict was
+                # computed from. Using severity_threshold here made the two
+                # derivations of one number disagree the moment a workspace
+                # ceiling tightened anything: the project reported 1 actionable
+                # and this split summed to 0, with no rule for which to trust.
                 actionable = count_actionable_results(
-                    results, project.severity_threshold
+                    results, project.gate_threshold
                 )
                 self._scanner_actionable[name] = (
                     self._scanner_actionable.get(name, 0) + actionable
