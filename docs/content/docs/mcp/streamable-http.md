@@ -118,6 +118,40 @@ Any of these triggers an immediate failure. Out-of-order sequences, checksum mis
 
 `mcp__ash__clear_source` wipes the session workspace and resets `source_dir` if you need to reload.
 
+### Restricting scan targets
+
+`run_ash_scan` also accepts a server-side path directly, and ASH writes its
+output tree inside whatever directory it is given. `ASH_MCP_ALLOWED_ROOTS` bounds
+that: it holds a list of directories, separated by the platform path separator,
+and a scan target must resolve to one of them or to something beneath one.
+
+```bash
+ASH_MCP_ALLOWED_ROOTS=/srv/repos
+```
+
+Targets are resolved before the comparison, so a symlink sitting inside an
+allowed root but pointing outside it is refused.
+
+A session that has delivered source over the protocol also gets its own
+workspace directory, `ASH_MCP_WORKSPACE_ROOT/<session_id>`, so
+`set_source_git` and `set_source_zip_finalize` keep working regardless of what
+the variable names — you do not need to list `ASH_MCP_WORKSPACE_ROOT` yourself.
+Only the calling session's own directory is allowed, not the shared root, so one
+tenant cannot name another tenant's workspace as a scan target.
+
+Because setting the variable replaces the default list, list every directory the
+server legitimately scans. In the container images that means including the
+source mount `/src` alongside any workspace path, or a no-argument
+`run_ash_scan()` — which defaults to the working directory — will be refused.
+
+Set this on any deployment where clients are not fully trusted. Without it, ASH
+falls back to refusing a short fixed list of system directories (`/boot`,
+`/dev`, `/etc`, `/proc`, `/root`, `/sys`, the filesystem root, and the Windows
+equivalents), which is a safety net rather than a boundary: every other
+directory the server process can reach stays a valid target. Naming a directory
+in `ASH_MCP_ALLOWED_ROOTS` replaces that list, which is also how you arrange a
+deliberate scan of a system path.
+
 ## Runtime config overrides
 
 The runtime-override surface is the security boundary that lets clients tweak a profile without giving them the whole config (Track 10.4). It is gated by a Pydantic-declared allowlist on `AshConfigGlobalSettingsSection.mcp.runtime_overrides`.
@@ -227,6 +261,7 @@ docker run \
   -p 8000:8000 \
   -v /etc/ash:/etc/ash:ro \
   -e ASH_MCP_WORKSPACE_ROOT=/var/cache/ash-mcp \
+  -e ASH_MCP_ALLOWED_ROOTS=/src:/var/cache/ash-mcp \
   ash mcp \
     --transport streamable-http \
     --host 0.0.0.0 \
@@ -257,6 +292,7 @@ services:
       - ash-workspace:/var/cache/ash-mcp
     environment:
       ASH_MCP_WORKSPACE_ROOT: /var/cache/ash-mcp
+      ASH_MCP_ALLOWED_ROOTS: /src:/var/cache/ash-mcp
     expose:
       - "8000"
 
@@ -281,6 +317,7 @@ The nginx config is responsible for TLS termination and for injecting `x-ash-tok
 The streamable-HTTP transport puts the MCP server on the network. A few invariants to keep in mind:
 
 - **The auth header is the only built-in gate.** There is no per-tool RBAC, no per-tenant rate limiting, no audit log beyond standard logging. Anything more sophisticated belongs in a fronting proxy.
+- **Set `ASH_MCP_ALLOWED_ROOTS`.** Scan targets are confined to the roots it names, plus the per-session workspace. The fallback when it is unset refuses only a short list of system directories and leaves the rest of the server's filesystem available as a scan target, so on a network-reachable deployment it is not a substitute for naming the roots yourself. See [Restricting scan targets](#restricting-scan-targets).
 - **Always run behind TLS in production.** ASH does not terminate TLS itself. Use nginx, traefik, an API gateway, or a service mesh sidecar.
 - **The runtime-override allowlist defaults to disabled.** A profile must explicitly set `mcp.runtime_overrides.enabled: true` and enumerate `allowed_paths` for any client patching to succeed. Leaving it off is the safe default — clients can still pick profiles, just not modify them.
 - **Source-upload limits are per-session, not per-tenant.** A misbehaving tenant can still consume their session quota. Pair the transport with upstream rate limits if untrusted clients can connect.
