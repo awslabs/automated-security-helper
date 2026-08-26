@@ -232,20 +232,37 @@ def pytest_collection_modifyitems(config, items):
     test file gives no hint it will be skipped, and the conftest that skips it
     lives in an unrelated directory the author had no reason to read. A green
     suite plus a skip count nobody diffs is all the signal there was.
+
+    The same defect survived that fix in the ``integration`` marker, which kept
+    testing ``"integration" in str(item.fspath)`` while only the slow rules were
+    scoped -- with a comment saying the substring form would reach the whole repo
+    again. It did: a unit test at
+    ``tests/unit/workspace/test_workspace_policy_resolution.py``, originally
+    named ``..._integration.py``, had all fourteen of its tests skipped in a full
+    run while passing when the file was run on its own. Fixing one instance of a
+    pattern and documenting it is not the same as removing the pattern, so the
+    ``integration`` marker now hangs off the same path scoping as everything
+    else. Detected by diffing the skipped-test IDs against a baseline, which is
+    the only signal this failure emits.
     """
     integration_root = Path(__file__).resolve().parent.parent
 
     for item in items:
-        path = str(item.fspath)
-        if "integration" in path:
-            item.add_marker(pytest.mark.integration)
-
-        # Scoped to the integration tree, which is what these heuristics are
+        # Scoped to the integration tree, which is what every heuristic below is
         # about. Compared against a resolved path rather than by substring: a
-        # substring test is how the unscoped version reached the whole repo, and
-        # "integration" appears in enough unrelated paths to do it again.
+        # substring test is how the unscoped version reached the whole repo.
         if not Path(item.fspath).resolve().is_relative_to(integration_root):
             continue
+
+        # What makes a test an integration test is living in this tree, not
+        # having "integration" in its path. The previous version tested the
+        # substring and so marked -- and therefore skipped -- any test anywhere
+        # in the repository whose path happened to contain the word. That is the
+        # same defect this hook's docstring describes for the slow marker, left
+        # in place when that one was fixed; a unit test named
+        # test_workspace_policy_integration.py hit it and its fourteen tests
+        # were silently skipped in the full suite while passing in isolation.
+        item.add_marker(pytest.mark.integration)
 
         # Add slow marker to tests that might take longer
         if any(
