@@ -1381,13 +1381,25 @@ class ScanPhase(EnginePhase):
                         f"Unexpected scanner completions ({len(unexpected_scanners)}): {', '.join(unexpected_scanners)}"
                     )
 
-                # Add discrepancy report to aggregated results for debugging
-                if not hasattr(
-                    aggregated_results.metadata, "execution_discrepancy_report"
-                ):
-                    aggregated_results.metadata.execution_discrepancy_report = (
-                        discrepancy_report
-                    )
+                # Add discrepancy report to aggregated results for debugging.
+                #
+                # Assigned unconditionally. This was guarded by
+                # `if not hasattr(metadata, "execution_discrepancy_report")`,
+                # which could never be true: ReportMetadata DECLARES that field
+                # with a default of {}, so hasattr is always True and the
+                # assignment was dead code. The report would have stayed {} even
+                # once report_execution_discrepancies existed again.
+                #
+                # Note the asymmetry with result_completeness_report below, which
+                # is NOT a declared field, so its identical-looking guard did
+                # fire. Restoring the two methods without this change would have
+                # left one report populated and the other permanently empty.
+                #
+                # There is nothing to preserve by guarding: this method runs once
+                # per scan and recomputes the report from the checkpoint.
+                aggregated_results.metadata.execution_discrepancy_report = (
+                    discrepancy_report
+                )
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
@@ -1581,15 +1593,19 @@ class ScanPhase(EnginePhase):
                         f"Found unexpected scanners ({len(unexpected_scanners)}): {', '.join(unexpected_scanners)}"
                     )
 
-                # Add completeness report to aggregated results for debugging
-                if not hasattr(
-                    aggregated_results.metadata, "result_completeness_report"
-                ):
-                    setattr(
-                        aggregated_results.metadata,
-                        "result_completeness_report",
-                        completeness_report,
-                    )
+                # Add completeness report to aggregated results for debugging.
+                #
+                # Also unconditional, for the same reason and for symmetry with
+                # the execution report above. This guard did fire today, because
+                # result_completeness_report is not a declared field on
+                # ReportMetadata -- but relying on that is relying on the absence
+                # of a field declaration, which the next person to add one would
+                # silently break. Same one-run-per-scan argument applies.
+                setattr(
+                    aggregated_results.metadata,
+                    "result_completeness_report",
+                    completeness_report,
+                )
 
             # Add validation results to aggregated results for debugging
             checkpoint_dict = {
