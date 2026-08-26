@@ -375,6 +375,7 @@ def get_logger(
     simple_format: bool = False,
     file_log_level: str | int | None = None,
     truncate_log: bool = True,
+    use_stderr: bool = False,
 ) -> "ASHLogger":
     # Make the console able to encode what ASH emits before anything is written.
     configure_windows_safe_logging()
@@ -443,7 +444,27 @@ def get_logger(
     if os.environ.get("ASH_IN_CONTAINER", "NO").upper() in ["YES", "1", "TRUE"]:
         console_base_params["width"] = 150
 
-    custom_console_params = {"console": Console(**console_base_params)}
+    # The stdio MCP transport uses stdout as its JSON-RPC channel, and the MCP
+    # server runs scans in-process (mcp_tools hands run_ash_scan to
+    # loop.run_in_executor, i.e. a thread in the same process). So once a scan
+    # starts, every record this handler emits would land inside the JSON-RPC
+    # stream and the client fails to parse it -- the reported "Expecting value".
+    # Routing the command's own banner to stderr is not enough; the logger is the
+    # larger source, and it only attaches once a scan begins.
+    #
+    # Read from the environment rather than threaded through as a parameter,
+    # because the caller that knows (the mcp command) is several layers above the
+    # caller that configures logging (run_ash_scan._setup_logger), and the
+    # in-process scan inherits the same environment.
+    log_to_stderr = use_stderr or os.environ.get("ASH_LOG_TO_STDERR", "NO").upper() in [
+        "YES",
+        "1",
+        "TRUE",
+    ]
+
+    custom_console_params = {
+        "console": Console(stderr=log_to_stderr, **console_base_params)
+    }
     if SHOW_DEBUG_INFO:
         handler = RichHandler(
             show_level=not simple_format,

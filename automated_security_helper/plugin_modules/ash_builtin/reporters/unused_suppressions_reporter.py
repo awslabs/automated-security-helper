@@ -17,6 +17,26 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.models.core import AshSuppression
 
 
+def _one_line(text: str | None) -> str:
+    """Flatten prose so it survives being interpolated into a markdown bullet.
+
+    A newline in a suppression reason ends its bullet, and the remainder renders
+    as loose body text detached from the suppression it describes.
+
+    Collapsing at the point of rendering fixes the report for every existing
+    config, with no edit to anyone's file. The config linter also warns about a
+    multi-line reason and offers to collapse it, but that only helps someone who
+    runs the linter and accepts the fix -- and `ash config lint --fix` re-dumps
+    the whole config, dropping every comment in it. A hand-written block-scalar
+    reason is a strong signal of a hand-commented config, which is exactly the
+    file you least want rewritten.
+
+    str.split() with no argument splits on newlines, carriage returns and tabs,
+    so this handles a CRLF config as well as a YAML block scalar.
+    """
+    return " ".join((text or "").split())
+
+
 class UnusedSuppressionsReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Unused Suppressions reporter."""
 
@@ -176,7 +196,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 else:
                     lines.append("- **Lines**: Any")
 
-                lines.append(f"- **Reason**: {suppression.reason}")
+                lines.append(f"- **Reason**: {_one_line(suppression.reason)}")
 
                 if suppression.expiration:
                     lines.append(f"- **Expiration**: {suppression.expiration}")

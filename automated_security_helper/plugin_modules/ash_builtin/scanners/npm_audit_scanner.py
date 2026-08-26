@@ -263,9 +263,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # created above.  Build a minimal result from vuln_info.
                 if not has_dict_via and via_items:
                     vuln_id = f"npm-audit-transitive-{pkg_name}"
-                    via_refs = ", ".join(
-                        v for v in via_items if isinstance(v, str)
-                    )
+                    via_refs = ", ".join(v for v in via_items if isinstance(v, str))
                     title = f"Transitive vulnerability in {pkg_name} (via {via_refs})"
                     description = title
 
@@ -334,7 +332,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                            executionSuccessful=(
+                                self.exit_code == 0 or self.exit_code == 1
+                            ),
                             exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target_path)
@@ -354,7 +354,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — NpmAudit overrides scan() directly; this is unreachable."""
-        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
 
     def scan(
         self,
@@ -394,7 +396,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                            executionSuccessful=(
+                                self.exit_code == 0 or self.exit_code == 1
+                            ),
                             exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target)
@@ -432,7 +436,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 target_type=target_type,
             )
             return False
-
 
         if not self.dependencies_satisfied:
             self._post_scan(
@@ -539,6 +542,26 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     "npm audit offline mode validation failed, but continuing with scan"
                                 )
 
+                        # Corepack resolves the package manager version from the
+                        # repository's `packageManager` field, and fetches it if the
+                        # image has a different one cached. The Dockerfile sets
+                        # COREPACK_ENABLE_DOWNLOAD_PROMPT=0 so that fetch cannot
+                        # block on a stdin prompt that no one can answer -- but
+                        # disabling the prompt only stops the *asking*, not the
+                        # download.
+                        #
+                        # In offline mode a download is the wrong outcome twice
+                        # over: there is no network, so it fails, and it fails
+                        # instead of using the package manager already cached in the
+                        # image. COREPACK_ENABLE_NETWORK=0 makes corepack fall back
+                        # to the cached version rather than reach out.
+                        subprocess_env = None
+                        if self.config.options.offline:
+                            subprocess_env = {
+                                **os.environ,
+                                "COREPACK_ENABLE_NETWORK": "0",
+                            }
+
                         # Run from the lock file's parent directory so
                         # that pnpm (and yarn) can locate their lock
                         # files (#99).
@@ -548,6 +571,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             stdout_preference="both",
                             stderr_preference="both",
                             cwd=package_dir,
+                            env=subprocess_env,
                         )
                         ASH_LOGGER.info(result)
 
@@ -634,7 +658,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             invocations=[
                                 Invocation(
                                     commandLine="npm audit --json",
-                                    executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                                    executionSuccessful=(
+                                        self.exit_code == 0 or self.exit_code == 1
+                                    ),
                                     exitCode=self.exit_code,
                                     workingDirectory=ArtifactLocation(
                                         uri=get_shortest_name(input=target)

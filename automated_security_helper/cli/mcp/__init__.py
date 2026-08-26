@@ -17,9 +17,10 @@ supports multiple transports:
 
 from __future__ import annotations
 
+import os
 from typing import Annotated, Optional
 import typer
-from rich import print
+from rich.console import Console
 
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
@@ -35,6 +36,14 @@ except ImportError:  # pragma: no cover - exercised only when MCP missing
 
 # Configure module logger
 _logger = ASH_LOGGER
+
+# Everything this command writes goes to stderr. On the stdio transport stdout is
+# the JSON-RPC channel, so one human-readable line there makes the client fail to
+# parse the stream -- the reported symptom was "Expecting value". Binding the
+# console to stderr makes that structural instead of depending on each call site
+# remembering to check --quiet, which the dependency-missing and validation-error
+# paths never did. --quiet still controls *whether* to write, not where.
+_stderr = Console(stderr=True)
 
 # Valid --transport values. Kept as a tuple so typer can render help cleanly
 # without forcing an Enum class on the public CLI surface.
@@ -124,7 +133,10 @@ def _build_auth_middleware(header_name: str, header_value: str):
                 received.encode("latin-1", errors="replace"), expected_value_bytes
             ):
                 return JSONResponse(
-                    {"error": "unauthorized", "detail": "missing or invalid auth header"},
+                    {
+                        "error": "unauthorized",
+                        "detail": "missing or invalid auth header",
+                    },
                     status_code=401,
                 )
             return await call_next(request)
@@ -290,33 +302,48 @@ def mcp_command(
     if ctx.resilient_parsing:
         return
 
+    # The MCP server runs scans in-process: mcp_tools hands run_ash_scan to
+    # loop.run_in_executor, which is a thread in this same process. That scan calls
+    # get_logger and attaches a RichHandler to the shared "ash" logger, so without
+    # this every log record from the scan phase, suppression matching and the
+    # reporters would be written to stdout -- inside the JSON-RPC stream on the
+    # stdio transport, which is the reported "Expecting value" failure.
+    #
+    # Set before the transport is chosen so it also covers the HTTP transports,
+    # where it is harmless, and before any scan can start.
+    os.environ["ASH_LOG_TO_STDERR"] = "1"
+
     # Check for MCP dependencies using our validation function
     if not validate_mcp_dependencies():
-        print("[red]Error: MCP dependencies are not available.[/red]")
-        print()
-        print("MCP support is included by default in ASH v3. Try reinstalling ASH:")
-        print("  [cyan]pip install --force-reinstall automated-security-helper[/cyan]")
-        print("  [cyan]uv sync --reinstall[/cyan]")
-        print()
-        print(
+        _stderr.print("[red]Error: MCP dependencies are not available.[/red]")
+        _stderr.print()
+        _stderr.print(
+            "MCP support is included by default in ASH v3. Try reinstalling ASH:"
+        )
+        _stderr.print(
+            "  [cyan]pip install --force-reinstall automated-security-helper[/cyan]"
+        )
+        _stderr.print("  [cyan]uv sync --reinstall[/cyan]")
+        _stderr.print()
+        _stderr.print(
             "If the issue persists, check your Python environment and ASH installation."
         )
         raise typer.Exit(1)
 
     # If we reach here, MCP dependencies are available
     if not quiet:
-        print("[green]MCP dependencies found. Starting MCP server...[/green]")
+        _stderr.print("[green]MCP dependencies found. Starting MCP server...[/green]")
 
     # Validate command options for consistency
     try:
         validate_command_options(verbose, debug, quiet)
         _validate_auth_options(auth_header_name, auth_header_value)
     except ASHValidationError as e:
-        print(f"[red]Validation Error: {str(e)}[/red]")
+        _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
         raise typer.Exit(3)
 
     if transport not in _VALID_TRANSPORTS:
-        print(
+        _stderr.print(
             f"[red]Validation Error: --transport must be one of {_VALID_TRANSPORTS}, got '{transport}'.[/red]"
         )
         raise typer.Exit(3)
@@ -344,7 +371,7 @@ def mcp_command(
                 auth_header_value=auth_header_value,
             )
             if not quiet:
-                print(
+                _stderr.print(
                     f"[green]Streamable-HTTP MCP server listening on "
                     f"http://{host}:{port}{mount_path}[/green]"
                 )
@@ -360,7 +387,7 @@ def mcp_command(
                 auth_header_value=auth_header_value,
             )
             if not quiet:
-                print(
+                _stderr.print(
                     f"[green]SSE MCP server listening on "
                     f"http://{host}:{port}{sse_path}[/green]"
                 )
@@ -368,30 +395,30 @@ def mcp_command(
     except KeyboardInterrupt:
         _logger.info("MCP server shutdown requested by user")
         if not quiet:
-            print("\n[yellow]MCP server shutdown requested by user[/yellow]")
+            _stderr.print("\n[yellow]MCP server shutdown requested by user[/yellow]")
         raise typer.Exit(0)
     except ScannerError as e:
         _logger.error(f"ASH Scanner Error: {str(e)}")
         if not quiet:
-            print(f"[red]ASH Scanner Error: {str(e)}[/red]")
-            print(
+            _stderr.print(f"[red]ASH Scanner Error: {str(e)}[/red]")
+            _stderr.print(
                 "[yellow]This indicates an issue with ASH configuration or dependencies.[/yellow]"
             )
         raise typer.Exit(2)
     except ASHValidationError as e:
         _logger.error(f"ASH Validation Error: {str(e)}")
         if not quiet:
-            print(f"[red]ASH Validation Error: {str(e)}[/red]")
-            print(
+            _stderr.print(f"[red]ASH Validation Error: {str(e)}[/red]")
+            _stderr.print(
                 "[yellow]This indicates invalid configuration or parameters.[/yellow]"
             )
         raise typer.Exit(3)
     except Exception as e:
         _logger.exception(f"Unexpected error starting MCP server: {str(e)}")
         if not quiet:
-            print(f"[red]Unexpected error starting MCP server: {str(e)}[/red]")
-            print(f"[red]Error type: {type(e).__name__}[/red]")
-            print(
+            _stderr.print(f"[red]Unexpected error starting MCP server: {str(e)}[/red]")
+            _stderr.print(f"[red]Error type: {type(e).__name__}[/red]")
+            _stderr.print(
                 "[yellow]Please check system resources and ASH installation.[/yellow]"
             )
         raise typer.Exit(1)
