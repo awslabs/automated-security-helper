@@ -16,6 +16,7 @@ The three properties these tests exist to hold:
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -225,15 +226,55 @@ class TestAbsoluteScannerUris:
 
 
 class TestProjectRootUri:
-    def test_the_root_uri_ends_with_a_separator(self):
+    """Why these take ``tmp_path`` instead of a POSIX literal.
+
+    ``project_root_uri`` calls ``Path.as_uri()``, which refuses any path its own
+    platform reads as relative. ``/w/api`` is absolute on POSIX but on Windows it
+    has a root and no drive, and the Windows flavour's ``is_absolute()`` requires
+    both -- so the literal raised ``ValueError: relative path can't be expressed
+    as a file URI`` on all four windows-latest rows of the matrix while every
+    POSIX row passed.
+
+    Production never supplies that shape. The one caller is
+    ``rebase_run_for_project``, which passes ``project.path``; the resolver sets
+    that from ``candidate.resolved.as_posix()`` and ``resolved`` comes from
+    ``Path.resolve()``, which on Windows is always drive-qualified. So the bug was
+    in the fixture, and anchoring the input with ``.absolute()`` or ``.resolve()``
+    inside ``project_root_uri`` would have been the wrong repair twice over: it
+    would silently bind a rootless path to whatever the current drive happens to
+    be, and it would stop ``as_uri()`` rejecting a genuinely relative path.
+
+    ``tmp_path`` is drive-qualified on Windows and rooted on POSIX, which is the
+    shape production supplies on both.
+    """
+
+    def test_the_root_uri_ends_with_a_separator(self, tmp_path):
         """SARIF wants a directory URI, and a consumer joins onto it."""
-        assert project_root_uri("/w/api").endswith("/")
+        assert project_root_uri((tmp_path / "api").as_posix()).endswith("/")
 
-    def test_the_root_uri_carries_the_file_scheme(self):
-        assert project_root_uri("/w/api").startswith("file://")
+    def test_the_root_uri_carries_the_file_scheme(self, tmp_path):
+        assert project_root_uri((tmp_path / "api").as_posix()).startswith("file://")
 
-    def test_a_trailing_separator_is_not_doubled(self):
-        assert not project_root_uri("/w/api/").endswith("//")
+    def test_a_root_path_uri_is_not_given_a_second_separator(self, tmp_path):
+        """The filesystem anchor is the only input that reaches the guard.
+
+        ``as_uri()`` normalises a trailing separator away -- ``/w/api/`` and
+        ``/w/api`` both give ``file:///w/api`` -- so a directory spelled with a
+        trailing slash exercises the branch that *appends*, never the branch that
+        declines to. This test used to pass ``/w/api/`` and was named for the
+        trailing separator, and it held with the guard deleted: it could not fail.
+        The anchor is the one input whose URI already ends in a separator,
+        ``file:///`` on POSIX and ``file:///C:/`` on Windows, so it is the only
+        input the guard is there for.
+
+        Asserted as equality with ``as_uri()`` rather than as ``not
+        endswith("//")``. The POSIX anchor's correct URI *is* ``file:///``, which
+        ends with two separators -- joining onto it gives ``file:///src/app.py``,
+        exactly right -- so the old spelling would report a violation here on
+        Linux while staying green on Windows, inverting the split it is meant to
+        close.
+        """
+        assert project_root_uri(tmp_path.anchor) == Path(tmp_path.anchor).as_uri()
 
 
 class TestRebaseRun:

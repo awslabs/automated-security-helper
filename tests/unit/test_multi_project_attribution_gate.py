@@ -998,6 +998,24 @@ class TestScanCommand:
         index = command.index("--phases")
         assert command[index + 1] == "scan"
 
+    def test_the_scan_is_restricted_to_the_scanners_the_gate_reads(self, tmp_path):
+        """A network-dependent producer this gate asserts nothing about made it red.
+
+        opengrep and semgrep default to the ``p/ci`` ruleset, fetched from a rule
+        registry over the network. Four projects run concurrently, so the gate made
+        four concurrent fetches; a lost fetch is scanner status ERROR, which
+        ``check_no_scanner_errors`` refuses to tolerate. Pinned as a test because
+        the flake reproduces about one run in three and a re-run hides it.
+        """
+        command = gate.build_scan_command(tmp_path / "w.code-workspace", tmp_path / "o")
+        selected = [
+            command[i + 1]
+            for i, token in enumerate(command[:-1])
+            if token == "--scanners"
+        ]
+        assert set(selected) == {"bandit", "checkov"}
+        assert selected == list(gate.GATE_SCANNERS)
+
 
 class TestWorkflowWiring:
     """The job exists, on both platforms, with its timeouts in step.
