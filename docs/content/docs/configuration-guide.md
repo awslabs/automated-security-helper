@@ -117,53 +117,92 @@ scanners:
   bandit:
     enabled: true
     options:
-      confidence_level: high
-      severity_level: medium
+      confidence_level: high     # all | low | medium | high (lowercase)
+      severity_threshold: MEDIUM # ALL | LOW | MEDIUM | HIGH | CRITICAL (uppercase)
 
   semgrep:
     enabled: true
     options:
-      rules: ['p/ci']
-      tool_version: null  # Version constraint (e.g., '>=1.125.0')
+      config: 'p/ci'        # Ruleset, directory, or URL passed to --config
+      exclude_rule: []      # Rule IDs to skip
+      tool_version: null    # Version constraint (e.g., '>=1.125.0')
       install_timeout: 300  # Timeout in seconds for tool installation
 
   detect-secrets:
     enabled: true
     options:
-      exclude_lines: []
+      baseline_file: null   # Path to a detect-secrets baseline, relative to the source directory
 
   checkov:
     enabled: true
     options:
-      framework: ['all']
-      tool_version: null  # Version constraint (e.g., '>=3.2.0,<4.0.0')
+      frameworks: ['all']   # Note the plural; 'framework' is not a field
+      skip_path: []         # Paths to skip, matched as regular expressions
+      tool_version: null    # Version constraint (e.g., '>=3.2.0,<4.0.0')
       install_timeout: 300  # Timeout in seconds for tool installation
 
   cfn-nag:
     enabled: true
     options:
-      profile_path: null
+      severity_threshold: MEDIUM
 
   cdk-nag:
     enabled: true
     options:
-      nag_packs: ['AWS_SOLUTIONS']
+      nag_packs:            # An object of per-pack booleans, not a list
+        AwsSolutionsChecks: true
+        HIPAASecurityChecks: false
 
   npm-audit:
     enabled: true
     options:
-      audit_level: moderate
+      severity_threshold: MEDIUM
 
   grype:
     enabled: true
     options:
-      severity: medium
+      severity_threshold: MEDIUM
 
   syft:
     enabled: true
     options:
-      scope: squashed
+      exclude: []           # Paths to skip, matched as regular expressions
 ```
+
+Two conventions differ between fields, and both are enforced: `severity_threshold`
+accepts only uppercase (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`), while bandit's
+`confidence_level` accepts only lowercase (`all`, `low`, `medium`, `high`). The wrong
+case is rejected with a validation error rather than coerced.
+
+#### An unrecognized option is accepted and ignored
+
+Scanner option models allow extra keys, so a misspelled or invented option does not
+raise an error -- it is stored and never read. `severity_level: medium` on bandit
+validates cleanly and changes nothing, because bandit reads `severity_threshold`.
+When a setting appears to have no effect, check the option name against
+[the built-in scanner reference](plugins/builtin/scanners.md) before assuming the
+scanner ignored the value.
+
+#### Bounding how long a scanner may run
+
+Every scanner accepts `scan_timeout`, the number of seconds its tool invocation may
+run before it is killed. The default is `1800` (30 minutes). Set it to `null` to leave
+a scanner unbounded:
+
+```yaml
+scanners:
+  semgrep:
+    options:
+      scan_timeout: 3600  # An hour for a large repository
+  syft:
+    options:
+      scan_timeout: null  # No limit
+```
+
+A scanner killed by its timeout produces no results file, so the scan fails with an
+error naming the scanner rather than silently reporting zero findings for it.
+`scan_timeout` bounds the scan itself; `install_timeout` separately bounds tool
+installation and defaults to `300`.
 
 ### Reporters Configuration
 
@@ -266,13 +305,19 @@ scanners:
   bandit:
     enabled: true
     options:
-      confidence_level: HIGH  # Options: LOW, MEDIUM, HIGH
-      severity_level: medium  # Options: low, medium, high
-      skip_tests: []  # List of test IDs to skip
-      include_tests: []  # List of test IDs to include
-      # Note: Bandit is automatically installed via UV tool management
-      # with version constraint >=1.7.0 for enhanced SARIF support
+      confidence_level: high      # all | low | medium | high -- lowercase only
+      severity_threshold: MEDIUM  # ALL | LOW | MEDIUM | HIGH | CRITICAL -- uppercase only
+      ignore_nosec: false         # true scans lines carrying a '# nosec' comment anyway
+      excluded_paths: []          # Paths to exclude, each with a reason
+      config_file: null           # Explicit .bandit file, relative to the source directory
+      scan_timeout: 1800          # Seconds before the bandit invocation is killed
+      # Bandit is installed via UV tool management with the constraint
+      # '>=1.7.0,<2.0.0' for SARIF support.
 ```
+
+Selecting individual bandit tests is done in a bandit configuration file rather than
+through ASH options: point `config_file` at one, or rely on the discovery described
+below.
 
 If you have been using Bandit separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.bandit```, ```.bandit.toml```, or ```.bandit.yaml```, and will use the settings found in the file if it is detected. For more details on using a Bandit configuration file, refer to the Bandit [documentation](https://bandit.readthedocs.io/en/latest/config.html).
 
@@ -283,11 +328,14 @@ scanners:
   semgrep:
     enabled: true
     options:
-      rules: ['p/ci']  # Rulesets to use
-      timeout: 300  # Timeout in seconds
-      max_memory: 0  # Max memory in MB (0 = no limit)
-      exclude_rules: []  # Rules to exclude
-      tool_version: null  # Version constraint (e.g., '>=1.125.0')
+      config: 'p/ci'        # Ruleset, directory of YAML rules, or URL, passed to --config
+      exclude: ['*-converted.py', '*_report_result.txt']  # Paths to skip
+      exclude_rule: []      # Rule IDs to skip (singular; 'exclude_rules' is not a field)
+      severity: []          # Report only findings from rules of these severities
+      metrics: 'auto'       # How usage metrics are sent to the Semgrep server
+      offline: false        # Use locally cached rules only
+      scan_timeout: 1800    # Seconds before the semgrep invocation is killed
+      tool_version: null    # Version constraint (e.g., '>=1.125.0')
       install_timeout: 300  # Timeout in seconds for tool installation
 ```
 
@@ -298,10 +346,14 @@ scanners:
   detect-secrets:
     enabled: true
     options:
-      exclude_lines: []  # Lines to exclude
-      exclude_files: []  # Files to exclude
-      custom_plugins: []  # Custom plugins to use
+      baseline_file: null   # Explicit .secrets.baseline path, relative to the source directory
+      scan_timeout: 1800    # Seconds before the detect-secrets invocation is killed
 ```
+
+Which plugins and filters run, and which findings are already accepted, live in the
+detect-secrets baseline rather than in ASH options. Point `baseline_file` at one, or
+rely on the discovery described below. The `scan_settings` option takes the same
+structure as a baseline's own settings block if you would rather inline it.
 
 If you have been using detect-secrets separately and have an existing baseline file you would like to use with ASH, ASH can automatically use it. ASH automatically searches your current directory and the ```.ash``` directory for a ```.secrets.baseline``` file. For more details on baseline files, refer to the detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
 
@@ -312,8 +364,9 @@ scanners:
   checkov:
     enabled: true
     options:
-      framework: ['all']  # Frameworks to scan
+      frameworks: ['all']  # Frameworks to scan (plural; 'framework' is not a field)
       skip_frameworks: []  # Frameworks to exclude
+      skip_path: []  # Paths to skip, matched as regular expressions
       offline: false  # Run in offline mode
       additional_formats: ['cyclonedx_json']  # Additional output formats
       tool_version: null  # Version constraint (e.g., '>=3.2.0,<4.0.0')
@@ -345,10 +398,12 @@ scanners:
   syft:
     enabled: true
     options:
-      config_file: .grype.yaml # Specific path to grype configuration file
-      exclude: ['tests'] # List of files and directories to exclude from scans
-      additional_outputs: ["syft-json"] # List of additional output formats for Syft. Options: 
-      # "cyclonedx-json", "cyclonedx-xml","github-json", "spdx-json", 
+      config_file: .syft.yaml # Specific path to the Syft configuration file
+      exclude:                # Each entry needs a path and a reason
+        - path: 'tests'
+          reason: 'Test fixtures are not shipped'
+      additional_outputs: ["syft-json"] # List of additional output formats for Syft. Options:
+      # "cyclonedx-json", "cyclonedx-xml","github-json", "spdx-json",
       # "spdx-tag-value", "syft-json", "syft-table", "syft-text"
 ```
 

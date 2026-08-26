@@ -314,6 +314,145 @@ def check_suppression_field_name() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Check 8: documented scanner options exist and validate
+# ---------------------------------------------------------------------------
+
+
+def _scanner_option_models() -> dict[str, type]:
+    """Map each built-in scanner's config name to its options model.
+
+    Keyed on the ``name`` Literal of the scanner's config class, because that is
+    the string a user actually writes under ``scanners:`` -- ``npm-audit``, not
+    ``NpmAuditScanner``.
+    """
+    import importlib
+    import pkgutil
+
+    from automated_security_helper import plugin_modules
+    from automated_security_helper.base.options import ScannerOptionsBase
+
+    models: dict[str, type] = {}
+    for mod in pkgutil.walk_packages(
+        plugin_modules.__path__, plugin_modules.__name__ + "."
+    ):
+        if not mod.name.endswith("_scanner"):
+            continue
+        try:
+            module = importlib.import_module(mod.name)
+        except Exception:  # noqa: BLE001, S112 - see below
+            # Deliberately broad and deliberately silent. A scanner module whose
+            # optional dependency is missing in this environment is not a
+            # documentation problem, and failing the docs gate on it would make
+            # the gate depend on which extras happen to be installed.
+            continue
+
+        config_name = None
+        options_cls = None
+        for attr in dir(module):
+            obj = getattr(module, attr)
+            if not isinstance(obj, type):
+                continue
+            if attr.endswith("ScannerConfig") and hasattr(obj, "model_fields"):
+                field = obj.model_fields.get("name")
+                if field is not None and field.default:
+                    config_name = field.default
+            elif attr.endswith("ConfigOptions") and issubclass(obj, ScannerOptionsBase):
+                options_cls = obj
+
+        if config_name and options_cls is not None:
+            models[config_name] = options_cls
+
+    return models
+
+
+def check_scanner_option_keys() -> list[str]:
+    """Every documented scanners.<name>.options block must validate.
+
+    Why this check exists
+    ---------------------
+    ``ScannerOptionsBase`` sets ``extra="allow"``, so an option name that does not
+    exist is accepted and then never read. A reader who copies it gets no error and
+    no effect. That let 46 invented option keys accumulate across the configuration
+    guide and the built-in plugin pages -- ``severity_level`` for bandit (the field
+    is ``severity_threshold``), ``rules`` and ``timeout`` for semgrep (``config`` and
+    ``scan_timeout``), ``framework`` for checkov (``frameworks``), and others.
+
+    Validating rather than only checking key names also catches wrong *values*,
+    which fail loudly at runtime instead of silently: ``confidence_level`` is
+    lowercase-only while ``severity_threshold`` is uppercase-only, and cdk-nag's
+    ``nag_packs`` is an object of per-pack booleans rather than a list.
+
+    Only blocks that parse as a mapping with a ``scanners`` key are considered, and
+    only for scanners this build knows about, so a snippet documenting a third-party
+    scanner is skipped rather than reported.
+    """
+    import yaml
+    from pydantic import ValidationError
+
+    failures: list[str] = []
+    models = _scanner_option_models()
+    if not models:
+        return ["Could not import any built-in scanner options model"]
+
+    fence = re.compile(r"```ya?ml\n(.*?)```", re.DOTALL)
+
+    for md_file in collect_md_files():
+        content = read_text(md_file)
+        rel_path = md_file.relative_to(REPO_ROOT)
+
+        for block in fence.finditer(content):
+            body = block.group(1)
+            line_no = content[: block.start()].count("\n") + 2
+            try:
+                parsed = yaml.safe_load(body)
+            except yaml.YAMLError:
+                # Deliberately-invalid YAML is documented on purpose in places.
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            scanners = parsed.get("scanners")
+            if not isinstance(scanners, dict):
+                continue
+
+            for scanner_name, scanner_cfg in scanners.items():
+                if not isinstance(scanner_cfg, dict):
+                    continue
+                options = scanner_cfg.get("options")
+                if not isinstance(options, dict):
+                    continue
+                model = models.get(scanner_name)
+                if model is None:
+                    continue
+
+                for key in options:
+                    if key not in model.model_fields:
+                        failures.append(
+                            f"{rel_path}:~{line_no} scanners.{scanner_name}"
+                            f".options.{key} is not a field on "
+                            f"{model.__name__}; extra='allow' means it is "
+                            f"accepted and ignored"
+                        )
+
+                try:
+                    model.model_validate(options)
+                except ValidationError as exc:
+                    detail = next(
+                        (
+                            ln.strip()
+                            for ln in str(exc).splitlines()[1:]
+                            if ln.strip() and "further information" not in ln
+                        ),
+                        str(exc).splitlines()[0],
+                    )
+                    failures.append(
+                        f"{rel_path}:~{line_no} scanners.{scanner_name}.options "
+                        f"does not validate against {model.__name__}: {detail}"
+                    )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -327,6 +466,7 @@ def main() -> int:
         ("Version consistency", check_version_consistency),
         ("Config file path consistency", check_config_path),
         ("Suppression field name", check_suppression_field_name),
+        ("Scanner options in docs exist and validate", check_scanner_option_keys),
     ]
 
     all_failures: list[tuple[str, list[str]]] = []
