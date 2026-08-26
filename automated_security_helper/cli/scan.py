@@ -55,6 +55,7 @@ def _handle_workspace_mode(
     allow_missing_projects: bool,
     dry_run: bool,
     workspace_config: str | None = None,
+    config_overrides: tuple[str, ...] = (),
 ) -> "WorkspacePlan":
     """Resolve a workspace and return the plan, or exit.
 
@@ -94,6 +95,10 @@ def _handle_workspace_mode(
             workspace_config=(
                 Path(workspace_config) if workspace_config is not None else None
             ),
+            # Resolution needs these so each project's DECLARED threshold
+            # reflects an override. The ceiling applies to that, and --dry-run
+            # prints the value the scan will actually enforce.
+            config_overrides=config_overrides,
         )
     except WorkspaceDefinitionError as exc:
         _fail_workspace(str(exc))
@@ -455,6 +460,22 @@ def run_ash_scan_cli_command(
             f"'--workspace <file>' or '--workspace auto' as well."
         )
 
+    # Built HERE, above the workspace block, rather than with the other
+    # None-to-empty normalisations below. Workspace resolution needs the COMPLETE
+    # override list, because a threshold override changes what each project
+    # declares and therefore what --dry-run must print. Normalising afterwards
+    # would hand resolution an empty list and the plan would report a threshold
+    # the scan does not enforce.
+    #
+    # --compact-report is why this is not just a None check: it synthesises an
+    # override, so config_overrides is non-empty for an operator who never passed
+    # --config-overrides. Leaving that below the workspace block would omit it
+    # from the plan while the scan applied it.
+    if config_overrides is None:
+        config_overrides = []
+    if compact_report:
+        config_overrides.append("reporters.markdown.options.compact=true")
+
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
         workspace_plan = _handle_workspace_mode(
@@ -463,6 +484,7 @@ def run_ash_scan_cli_command(
             allow_missing_projects=allow_missing_projects,
             dry_run=dry_run,
             workspace_config=workspace_config,
+            config_overrides=tuple(config_overrides),
         )
         # The workspace root is the scan root: it is what container mode mounts at
         # /src, and what every workspace-relative finding path is relative to.
@@ -478,8 +500,8 @@ def run_ash_scan_cli_command(
         exclude_scanners = []
     if ash_plugin_modules is None:
         ash_plugin_modules = []
-    if config_overrides is None:
-        config_overrides = []
+    # config_overrides is normalised above the workspace block; see the comment
+    # there for why it cannot happen here.
     if output_formats is None:
         output_formats = []
     if phases is None:
@@ -532,9 +554,9 @@ def run_ash_scan_cli_command(
         ]
     )
 
-    # Translate --compact-report into the markdown reporter config override
-    if compact_report:
-        config_overrides.append("reporters.markdown.options.compact=true")
+    # --compact-report is translated into its config override above the workspace
+    # block, so that workspace resolution sees it. Appending here as well would
+    # apply it twice.
 
     # Parse comma-separated output formats
     parsed_output_formats = []

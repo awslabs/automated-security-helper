@@ -548,14 +548,20 @@ def _scan_one_project(
     project_output.mkdir(parents=True, exist_ok=True)
 
     try:
+        resolved_config = _project_config_with_policy(project, settings)
+
         orchestrator = orchestrator_factory(
             source_dir=Path(project.path),
             output_dir=project_output,
             work_dir=project_output / ASH_WORK_DIR_NAME,
             enabled_scanners=list(settings.enabled_scanners),
             excluded_scanners=list(settings.excluded_scanners),
-            config_path=project.config_source,
-            config_overrides=list(settings.config_overrides),
+            # A pre-resolved config, and NOT config_path or config_overrides
+            # alongside it -- the orchestrator refuses that combination, because
+            # those are inputs to a resolution it is being told to skip. The
+            # `Configuration path:` line it used to log from config_path is
+            # emitted by _project_config_with_policy instead.
+            resolved_config=resolved_config,
             verbose=settings.verbose or settings.debug,
             debug=settings.debug,
             strategy=(
@@ -679,6 +685,73 @@ def _scan_one_project(
         ceiling_unreachable_findings=unreachable,
     )
     return _ProjectRun(outcome=outcome, run=run)
+
+
+def _project_config_with_policy(
+    project: ProjectPlan, settings: ProjectScanSettings
+) -> Any:
+    """One project's config, with CLI overrides applied and policy merged in.
+
+    DO NOT copy ``resolver.py``'s ``resolve_config`` call to write this
+    ---------------------------------------------------------------------
+    That call is the shape this function must NOT have, and the mistake is
+    invisible. The resolver historically resolved without ``config_overrides``,
+    so a version of this function that imitates it drops every
+    ``--config-overrides`` value silently. The orchestrator skips its own
+    resolution when handed a ``resolved_config``, so there is no second chance
+    and no error -- the scan simply runs with settings the operator did not
+    choose and reports success.
+
+    Note the plan carries only ``config_source``, a path, and not the resolver's
+    ``AshConfig`` object. So there is nothing to reuse, which means the wrong
+    implementation looks like deliberate re-resolution rather than a shortcut.
+
+    Policy is merged, not substituted
+    ---------------------------------
+    ``policy_suppressions`` and ``policy_ignore_paths`` are appended to whatever
+    the project declared. Replacing either list would silently un-suppress
+    findings the project's own config had suppressed -- a security-relevant
+    regression that raises no error.
+
+    Args:
+        project: The resolved plan entry, carrying the pushed-down policy.
+        settings: The run's settings, for ``config_overrides``.
+
+    Returns:
+        The ``AshConfig`` to hand the orchestrator as ``resolved_config``.
+
+    Raises:
+        ASHConfigValidationError: When the project's config is invalid or an
+            override cannot be applied. Fatal rather than dropped; the caller
+            records the project FAILED and the run exits 3.
+    """
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    config = resolve_config(
+        config_path=project.config_source,
+        source_dir=Path(project.path),
+        fallback_to_default=True,
+        # Load-bearing. See the warning above.
+        config_overrides=list(settings.config_overrides),
+    )
+
+    # Preserves the diagnostic the orchestrator used to emit from config_path,
+    # which is the only thing dropping that argument costs.
+    ASH_LOGGER.verbose(
+        f"Project '{project.key}' configuration path: "
+        f"{project.config_source or 'ASH default config'}"
+    )
+
+    if project.policy_suppressions:
+        config.global_settings.suppressions = list(
+            config.global_settings.suppressions
+        ) + list(project.policy_suppressions)
+    if project.policy_ignore_paths:
+        config.global_settings.ignore_paths = list(
+            config.global_settings.ignore_paths
+        ) + list(project.policy_ignore_paths)
+
+    return config
 
 
 def _extract_run(results: Any) -> Optional[Dict[str, Any]]:
