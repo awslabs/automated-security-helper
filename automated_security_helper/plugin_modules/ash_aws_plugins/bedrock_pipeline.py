@@ -10,6 +10,7 @@ Three focused classes replace the monolithic reporter internals:
 """
 
 import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -17,6 +18,51 @@ from typing import Any, Dict, List, Optional
 import botocore.exceptions
 
 from automated_security_helper.utils.log import ASH_LOGGER
+
+# Bedrock reports a rejected inference parameter by name, e.g.
+# "The model returned the following errors: `temperature` is deprecated for this
+# model." Reading the name out of the error is what lets a request be repaired
+# from the response instead of from a hardcoded table of which models deprecate
+# what -- a table that is wrong the day a model ships, and whose failure mode is
+# the one already reported: a silent fallback to a different model.
+_DEPRECATED_PARAM_PATTERN = re.compile(
+    r"`(?P<name>[A-Za-z0-9_]+)`\s+is\s+deprecated", re.IGNORECASE
+)
+
+
+def _normalize_param_name(name: str) -> str:
+    """Compare parameter names across spellings.
+
+    Bedrock names ``top_k`` with an underscore while the inferenceConfig key is
+    ``topP`` in camelCase, so a literal comparison finds one and misses the
+    other. Missing it would resend an identical request until the retry bound
+    gave up.
+    """
+    return name.replace("_", "").lower()
+
+
+def _drop_parameter(converse_args: Dict[str, Any], name: str) -> bool:
+    """Remove one named inference parameter. Returns whether anything changed.
+
+    The return value is load-bearing: it is what stops the retry loop from
+    resending a byte-identical request when the parameter Bedrock named is not
+    one we sent.
+    """
+    target = _normalize_param_name(name)
+    for container_key in ("inferenceConfig", "additionalModelRequestFields"):
+        container = converse_args.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for key in list(container):
+            if _normalize_param_name(key) != target:
+                continue
+            del container[key]
+            # Bedrock rejects an empty additionalModelRequestFields, so drop the
+            # container once its last entry is gone.
+            if not container:
+                converse_args.pop(container_key, None)
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -76,45 +122,83 @@ class BedrockModelClient:
         if "claude" in self._model_id.lower():
             converse_args["additionalModelRequestFields"] = {"top_k": 200}
 
-        try:
-            ASH_LOGGER.debug(f"Invoking Bedrock model {self._model_id}")
-            response = self._runtime.converse(**converse_args)
+        # A model can reject more than one parameter, and it reports them one at a
+        # time: the issue saw temperature rejected, then top_k on the next call.
+        # One attempt per parameter that could be dropped, plus the first, so the
+        # loop terminates even if every one of them is refused.
+        max_attempts = (
+            1
+            + len(inference_config)
+            + len(converse_args.get("additionalModelRequestFields") or {})
+        )
 
-            if response and "output" in response and "message" in response["output"]:
-                message = response["output"]["message"]
-                content_list = message.get("content", [])
-                full_text = "".join(
-                    item["text"] for item in content_list if "text" in item
+        for _ in range(max_attempts):
+            try:
+                ASH_LOGGER.debug(f"Invoking Bedrock model {self._model_id}")
+                response = self._runtime.converse(**converse_args)
+
+                if (
+                    response
+                    and "output" in response
+                    and "message" in response["output"]
+                ):
+                    message = response["output"]["message"]
+                    content_list = message.get("content", [])
+                    full_text = "".join(
+                        item["text"] for item in content_list if "text" in item
+                    )
+                    if full_text:
+                        ASH_LOGGER.debug(
+                            f"Model {self._model_id} responded successfully"
+                        )
+                        return full_text
+
+                ASH_LOGGER.warning(
+                    f"Invalid or empty response from model {self._model_id}"
                 )
-                if full_text:
-                    ASH_LOGGER.debug(f"Model {self._model_id} responded successfully")
-                    return full_text
+                return "*Error: Unable to generate content from Bedrock response.*"
 
-            ASH_LOGGER.warning(f"Invalid or empty response from model {self._model_id}")
-            return "*Error: Unable to generate content from Bedrock response.*"
+            except botocore.exceptions.ClientError as exc:
+                code = exc.response.get("Error", {}).get("Code", "")
+                msg = exc.response.get("Error", {}).get("Message", str(exc))
+                ASH_LOGGER.warning(
+                    f"Bedrock API error ({code}) with model {self._model_id}: {msg}"
+                )
+                if code == "AccessDeniedException":
+                    return f"*Error: Access denied to model {self._model_id}. Check IAM permissions.*"
+                if code == "ResourceNotFoundException":
+                    return f"*Error: Model {self._model_id} not found. Check model ID and region.*"
+                if code == "ValidationException":
+                    # Retry only when the model named a parameter we actually
+                    # sent. Anything else -- an over-long prompt, say -- cannot be
+                    # fixed by dropping a field, so retrying only adds latency.
+                    match = _DEPRECATED_PARAM_PATTERN.search(msg)
+                    if match and _drop_parameter(converse_args, match.group("name")):
+                        ASH_LOGGER.verbose(
+                            f"Model {self._model_id} rejected "
+                            f"'{match.group('name')}' as deprecated; retrying "
+                            "without it"
+                        )
+                        continue
+                    return (
+                        f"*Error: Validation error with model {self._model_id}: {msg}*"
+                    )
+                if code in ("ThrottlingException", "TooManyRequestsException"):
+                    return f"*Error: Rate limit exceeded for model {self._model_id}. Try again later.*"
+                return f"*Error: {msg}*"
 
-        except botocore.exceptions.ClientError as exc:
-            code = exc.response.get("Error", {}).get("Code", "")
-            msg = exc.response.get("Error", {}).get("Message", str(exc))
-            ASH_LOGGER.warning(
-                f"Bedrock API error ({code}) with model {self._model_id}: {msg}"
-            )
-            if code == "AccessDeniedException":
-                return f"*Error: Access denied to model {self._model_id}. Check IAM permissions.*"
-            if code == "ResourceNotFoundException":
-                return f"*Error: Model {self._model_id} not found. Check model ID and region.*"
-            if code == "ValidationException":
-                return f"*Error: Validation error with model {self._model_id}: {msg}*"
-            if code in ("ThrottlingException", "TooManyRequestsException"):
-                return f"*Error: Rate limit exceeded for model {self._model_id}. Try again later.*"
-            return f"*Error: {msg}*"
+            except Exception as exc:
+                error_type = type(exc).__name__
+                ASH_LOGGER.warning(
+                    f"Error calling Bedrock model {self._model_id}: {error_type}: {exc}",
+                )
+                return f"*Error generating content with model {self._model_id}: {error_type}: {exc}*"
 
-        except Exception as exc:
-            error_type = type(exc).__name__
-            ASH_LOGGER.warning(
-                f"Error calling Bedrock model {self._model_id}: {error_type}: {exc}",
-            )
-            return f"*Error generating content with model {self._model_id}: {error_type}: {exc}*"
+        # Every droppable parameter was refused in turn.
+        return (
+            f"*Error: Model {self._model_id} rejected every supported inference "
+            "parameter as deprecated.*"
+        )
 
 
 # ---------------------------------------------------------------------------
