@@ -45,6 +45,7 @@ class LintCategory(str, Enum):
     SUPPRESSION_LINE_RANGE = "suppression-line-range"
     SUPPRESSION_EXPIRED = "suppression-expired"
     SUPPRESSION_UNUSED = "suppression-unused"
+    SUPPRESSION_MULTILINE_REASON = "suppression-multiline-reason"
     IGNORE_PATH_ISSUE = "ignore-path-issue"
     LEGACY_NAME_VARIANT = "legacy-name-variant"
     LEGACY_NAME_CONFLICT = "legacy-name-conflict"
@@ -216,6 +217,10 @@ class ConfigLinter:
 
             elif issue.category == LintCategory.SUPPRESSION_LINE_RANGE:
                 if cls._fix_suppression_line_range(config_data, issue):
+                    fixed_issues.append(issue)
+
+            elif issue.category == LintCategory.SUPPRESSION_MULTILINE_REASON:
+                if cls._fix_suppression_reason_newline(config_data, issue):
                     fixed_issues.append(issue)
 
             elif issue.category == LintCategory.LEGACY_NAME_VARIANT:
@@ -603,6 +608,40 @@ class ConfigLinter:
                         path=path_prefix,
                         fixable=True,
                         fix_description=f"Set line_end = {line_start} (same as line_start)",
+                    )
+                )
+
+            # Check: reason spanning multiple lines. The unused-suppressions
+            # reporter emits it as a single markdown bullet
+            # (`- **Reason**: {reason}`), so an embedded newline ends the bullet
+            # and the remainder renders as loose body text, detached from the
+            # suppression it describes.
+            #
+            # Only *interior* newlines are flagged. A YAML block scalar always
+            # ends with one under default clip chomping, so `reason: > ...` and
+            # single-line `reason: | ...` both carry a trailing newline while
+            # rendering perfectly well. Flagging those would warn on the common
+            # case for no benefit.
+            #
+            # A block scalar is a reasonable way to write a long justification,
+            # so this is a fixable warning rather than a validation error.
+            reason = suppression.get("reason")
+            if isinstance(reason, str) and (
+                "\n" in reason.strip() or "\r" in reason.strip()
+            ):
+                result.issues.append(
+                    LintIssue(
+                        severity=LintSeverity.WARNING,
+                        category=LintCategory.SUPPRESSION_MULTILINE_REASON,
+                        message=(
+                            "Suppression 'reason' spans multiple lines, which breaks "
+                            "its bullet in ash.unused-suppressions.md - the text "
+                            "after the first newline renders detached from the "
+                            "suppression"
+                        ),
+                        path=path_prefix,
+                        fixable=True,
+                        fix_description="Collapse the reason onto a single line",
                     )
                 )
 
@@ -1037,6 +1076,48 @@ class ConfigLinter:
                 suppression["line_end"] = suppression["line_start"]
                 return True
         return False
+
+    @staticmethod
+    def _collapse_reason_whitespace(reason: str) -> str:
+        """Collapse a reason onto one line.
+
+        Every run of whitespace becomes a single space and the result is
+        stripped. str.split() with no argument already splits on newlines,
+        carriage returns and tabs, which is what makes this safe for a CRLF file
+        as well as a YAML block scalar. Block scalars always end in a newline, so
+        the strip is load-bearing rather than cosmetic.
+        """
+        return " ".join(reason.split())
+
+    @classmethod
+    def _fix_suppression_reason_newline(
+        cls, config_data: Dict[str, Any], issue: LintIssue
+    ) -> bool:
+        """Collapse a multi-line suppression reason onto a single line."""
+        idx = cls._parse_suppression_index(issue.path)
+        if idx is None:
+            return False
+
+        suppressions = config_data.get("global_settings", {}).get("suppressions", [])
+        if idx >= len(suppressions):
+            return False
+
+        suppression = suppressions[idx]
+        if not isinstance(suppression, dict):
+            return False
+
+        reason = suppression.get("reason")
+        if not isinstance(reason, str):
+            return False
+
+        collapsed = cls._collapse_reason_whitespace(reason)
+        if collapsed == reason:
+            # Nothing to do. Reporting success here would make
+            # `ash config lint --fix` claim a fix it did not make.
+            return False
+
+        suppression["reason"] = collapsed
+        return True
 
     @classmethod
     def _fix_expired_suppression(
