@@ -84,7 +84,7 @@ async def mcp_scan_directory(
     # ahead of the existence check so that a refused target is reported as
     # refused rather than as a missing directory, and ahead of the output
     # directory creation below so that a refused target is not written into.
-    target_error = validate_scan_target(directory_path)
+    target_error = validate_scan_target(directory_path, session_id=session_id)
     if target_error:
         return create_error_response(
             error=target_error,
@@ -691,6 +691,32 @@ def mcp_explain_finding(
         ``success: False`` with an ``error`` key when the ID is not found.
     """
     import json as _json
+
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
+
+    # Same roots as the other results readers: this reads
+    # ash_aggregated_results.json out of a caller-named output directory. The
+    # directory is derived from results_path exactly as
+    # _load_flat_vulns_for_explain derives it, so the path checked is the path
+    # read.
+    if results_path is not None:
+        _candidate = Path(results_path)
+        target_error = validate_scan_target(
+            _candidate if _candidate.is_dir() else _candidate.parent
+        )
+        if target_error:
+            return create_error_response(
+                error=target_error,
+                operation="explain_finding",
+                suggestions=[
+                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                    "MCP server should be able to read results from it",
+                    "Verify that the path is correct",
+                ],
+            )
 
     try:
         flat_vulns = _load_flat_vulns_for_explain(results_path)

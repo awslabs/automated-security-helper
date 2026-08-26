@@ -126,14 +126,23 @@ that: it holds a list of directories, separated by the platform path separator,
 and a scan target must resolve to one of them or to something beneath one.
 
 ```bash
-ASH_MCP_ALLOWED_ROOTS=/srv/repos:/var/cache/ash-mcp
+ASH_MCP_ALLOWED_ROOTS=/srv/repos
 ```
 
 Targets are resolved before the comparison, so a symlink sitting inside an
-allowed root but pointing outside it is refused. The per-session workspace root
-is always allowed, so `set_source_git` and `set_source_zip_finalize` keep
-working regardless of what the variable names — you do not need to list
-`ASH_MCP_WORKSPACE_ROOT` yourself.
+allowed root but pointing outside it is refused.
+
+A session that has delivered source over the protocol also gets its own
+workspace directory, `ASH_MCP_WORKSPACE_ROOT/<session_id>`, so
+`set_source_git` and `set_source_zip_finalize` keep working regardless of what
+the variable names — you do not need to list `ASH_MCP_WORKSPACE_ROOT` yourself.
+Only the calling session's own directory is allowed, not the shared root, so one
+tenant cannot name another tenant's workspace as a scan target.
+
+Because setting the variable replaces the default list, list every directory the
+server legitimately scans. In the container images that means including the
+source mount `/src` alongside any workspace path, or a no-argument
+`run_ash_scan()` — which defaults to the working directory — will be refused.
 
 Set this on any deployment where clients are not fully trusted. Without it, ASH
 falls back to refusing a short fixed list of system directories (`/boot`,
@@ -252,7 +261,7 @@ docker run \
   -p 8000:8000 \
   -v /etc/ash:/etc/ash:ro \
   -e ASH_MCP_WORKSPACE_ROOT=/var/cache/ash-mcp \
-  -e ASH_MCP_ALLOWED_ROOTS=/var/cache/ash-mcp \
+  -e ASH_MCP_ALLOWED_ROOTS=/src:/var/cache/ash-mcp \
   ash mcp \
     --transport streamable-http \
     --host 0.0.0.0 \
@@ -283,7 +292,7 @@ services:
       - ash-workspace:/var/cache/ash-mcp
     environment:
       ASH_MCP_WORKSPACE_ROOT: /var/cache/ash-mcp
-      ASH_MCP_ALLOWED_ROOTS: /var/cache/ash-mcp
+      ASH_MCP_ALLOWED_ROOTS: /src:/var/cache/ash-mcp
     expose:
       - "8000"
 

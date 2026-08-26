@@ -170,6 +170,76 @@ class TestGetScanResultPathsConfinement:
         assert result["error_type"] == "scan_target_not_permitted"
 
 
+class TestExplainFindingConfinement:
+    """``explain_finding`` also takes a caller-named results directory."""
+
+    @pytest.mark.asyncio
+    async def test_results_path_outside_the_roots_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.cli.mcp_tools import mcp_explain_finding
+
+        output_dir = _completed_output_dir(tmp_path / "project")
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(allowed))
+
+        result = mcp_explain_finding(finding_id="x", results_path=str(output_dir))
+
+        assert result["success"] is False
+        assert result["error_category"] == "invalid_path"
+
+    @pytest.mark.asyncio
+    async def test_same_results_path_flips_on_the_variable_alone(
+        self, tmp_path, monkeypatch
+    ):
+        """The refusal is the policy's, not the loader's.
+
+        Both halves fail -- the fixture holds no real findings -- so asserting
+        ``success is False`` would prove nothing. What separates them is *which*
+        failure: a policy refusal carries ``invalid_path``, while a path the
+        policy allowed gets past it and fails later in the loader. Only the
+        allowlist changes between the two halves.
+        """
+        from automated_security_helper.cli.mcp_tools import mcp_explain_finding
+
+        project = tmp_path / "project"
+        output_dir = _completed_output_dir(project)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(elsewhere))
+        refused = mcp_explain_finding(finding_id="x", results_path=str(output_dir))
+        assert refused.get("error_category") == "invalid_path"
+
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(project))
+        allowed = mcp_explain_finding(finding_id="x", results_path=str(output_dir))
+        assert allowed.get("error_category") != "invalid_path"
+
+    @pytest.mark.asyncio
+    async def test_a_file_inside_the_output_dir_is_judged_by_its_directory(
+        self, tmp_path, monkeypatch
+    ):
+        """``results_path`` may name the results file rather than its directory.
+
+        ``_load_flat_vulns_for_explain`` accepts either and takes ``.parent``
+        for a file, so the policy has to resolve the same way or the two would
+        disagree about which path is being read.
+        """
+        from automated_security_helper.cli.mcp_tools import mcp_explain_finding
+
+        output_dir = _completed_output_dir(tmp_path / "project")
+        results_file = output_dir / "ash_aggregated_results.json"
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(allowed))
+
+        result = mcp_explain_finding(finding_id="x", results_path=str(results_file))
+
+        assert result["success"] is False
+        assert result["error_category"] == "invalid_path"
+
+
 class TestProgressPollingIsUnaffected:
     """Polling must keep working, with and without an allowlist."""
 

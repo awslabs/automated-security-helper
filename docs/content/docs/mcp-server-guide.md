@@ -446,12 +446,20 @@ source code, and it does not restrict anything else — home directories, `/usr`
 that is where code lives. If you need the scan surface actually bounded, set
 `ASH_MCP_ALLOWED_ROOTS`; it is the only setting here that does that.
 
-The same roots apply to the tools that read results back — `get_scan_results`,
-`get_scan_summary` and `get_scan_result_paths` — since those also take a
-caller-supplied directory. An output directory for a permitted scan lives at
+The same roots apply to the tools that take a caller-supplied results
+*directory*: `get_scan_results`, `get_scan_summary`, `get_scan_result_paths` and
+`explain_finding`. An output directory for a permitted scan lives at
 `<source_dir>/.ash/ash_output`, beneath the target, so a root that allows a scan
 already allows its results to be read; you do not list output directories
 separately.
+
+The roots do not govern the tools that take a path to an individual *file* —
+`config_path` on `get_config`, `validate_config` and `run_ash_scan`, and the two
+result files `diff_scan_results` compares. Those are a separate surface with
+different requirements: profile configs are conventionally kept outside the
+scanned tree (the deployment guide puts them in `/etc/ash/`), so applying the
+scan roots to them would refuse the documented layout. If you need those
+restricted, restrict them at the filesystem or with a fronting proxy.
 
 `get_scan_progress` is not affected. It takes a scan ID, and the output
 directory comes from the scan registry rather than from the caller, so polling a

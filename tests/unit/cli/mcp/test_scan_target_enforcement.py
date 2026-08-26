@@ -71,6 +71,8 @@ class TestRunAshScanEnforcement:
             result = await run_ash_scan(ctx=mock_ctx, source_dir=str(project))
 
         assert result["success"] is False
+        assert result["error_type"] == "scan_target_not_permitted"
+        assert result["error_category"] == "invalid_path"
         mock_scan.assert_not_called()
 
     @pytest.mark.asyncio
@@ -215,6 +217,38 @@ class TestMcpScanDirectoryEnforcement:
 
         assert result["success"] is False
         assert result["error_category"] == "file_not_found"
+
+    @pytest.mark.asyncio
+    async def test_session_id_reaches_the_policy(self, tmp_path, monkeypatch):
+        """The session id is passed through, not dropped on the floor.
+
+        A session's own workspace is scannable only if ``mcp_scan_directory``
+        hands its ``session_id`` to the policy. Testing the policy directly
+        cannot see that wiring: the same target has to be refused without the
+        id and accepted with it, through this function.
+        """
+        from automated_security_helper.cli.mcp_tools import mcp_scan_directory
+
+        workspace = tmp_path / "cache" / "ash-mcp"
+        session = workspace / "session-7"
+        session.mkdir(parents=True)
+        repos = tmp_path / "repos"
+        repos.mkdir()
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(workspace))
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(repos))
+
+        with patch(
+            "automated_security_helper.cli.mcp_tools.asyncio.create_task"
+        ) as mock_task:
+            mock_task.return_value = MagicMock()
+            without = await mcp_scan_directory(directory_path=str(session))
+            with_id = await mcp_scan_directory(
+                directory_path=str(session), session_id="session-7"
+            )
+
+        assert without["success"] is False
+        assert without["error_category"] == "invalid_path"
+        assert with_id["success"] is True
 
     @pytest.mark.asyncio
     async def test_allowed_target_starts_a_scan(self, tmp_path, monkeypatch):

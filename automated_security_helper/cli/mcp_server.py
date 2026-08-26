@@ -129,6 +129,10 @@ async def run_ash_scan(
                 "success": False,
                 "error": str(target_error),
                 "error_type": "scan_target_not_permitted",
+                # Mirrors the category create_error_response sets on the
+                # mcp_tools side, so one key identifies a refusal from any entry
+                # point rather than two depending on which tool was called.
+                "error_category": target_error.context["error_category"],
             }
 
         await ctx.info(f"Starting scan for directory: {source_dir}")
@@ -491,6 +495,10 @@ async def get_scan_result_paths(
                 "success": False,
                 "error": str(target_error),
                 "error_type": "scan_target_not_permitted",
+                # Mirrors the category create_error_response sets on the
+                # mcp_tools side, so one key identifies a refusal from any entry
+                # point rather than two depending on which tool was called.
+                "error_category": target_error.context["error_category"],
             }
 
         await ctx.info(f"Getting scan result paths from: {output_dir}")

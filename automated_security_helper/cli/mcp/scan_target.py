@@ -11,12 +11,17 @@ for the operator to say which parts of its filesystem are in play.
 
 ``ASH_MCP_ALLOWED_ROOTS`` is that control. It holds an ``os.pathsep``-separated
 list of directories; when it is set, a scan target must resolve to one of those
-directories or something beneath it, and everything else is refused. The
-per-session MCP workspace root is always allowed alongside it, because
-``set_source_git`` and ``set_source_zip_finalize`` clone or extract into that
-workspace and hand the caller the resulting path to scan -- an allowlist naming
-only the operator's own repositories would otherwise refuse every uploaded
-tree.
+directories or something beneath it, and everything else is refused.
+
+A caller that supplies a ``session_id`` additionally gets its own session
+workspace, ``<workspace_root>/<session_id>``, because ``set_source_git`` and
+``set_source_zip_finalize`` clone or extract into that workspace and hand the
+caller the resulting path to scan -- an allowlist naming only the operator's own
+repositories would otherwise refuse every uploaded tree. Only that one session's
+directory is allowed, never the shared workspace root: the root holds every
+other session's uploaded source, and ``_session_workspace`` exists in
+``source_delivery`` precisely to stop one session reaching a sibling's. A caller
+with no ``session_id`` gets no workspace allowance at all.
 
 When ``ASH_MCP_ALLOWED_ROOTS`` is unset, a short fixed list of system
 directories is refused instead. That default is a safety net, not a security
@@ -51,6 +56,9 @@ from automated_security_helper.core.resource_management.error_handling import (
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
+from automated_security_helper.utils.log import ASH_LOGGER
+
+_logger = ASH_LOGGER
 
 ASH_MCP_ALLOWED_ROOTS_ENV = "ASH_MCP_ALLOWED_ROOTS"
 
@@ -77,6 +85,11 @@ _WINDOWS_DENIED_ROOT_ENV_VARS = (
     ("SystemRoot", r"C:\Windows"),
     ("ProgramFiles", r"C:\Program Files"),
     ("ProgramFiles(x86)", None),
+    # Under 32-bit Python on 64-bit Windows, WOW64 rewrites ProgramFiles to the
+    # x86 directory, so the 64-bit one is only reachable through ProgramW6432.
+    # Without this entry a 32-bit interpreter would leave C:\Program Files
+    # unrefused.
+    ("ProgramW6432", None),
     ("ProgramData", r"C:\ProgramData"),
 )
 
@@ -167,10 +180,20 @@ def _allowed_roots() -> List[Path]:
 
 
 def _refusal(directory_path: object, resolved: Path) -> MCPResourceError:
+    remedy = (
+        f"Set {ASH_MCP_ALLOWED_ROOTS_ENV} to the directories the MCP server may scan."
+    )
+    if _is_filesystem_root(resolved):
+        # Reached most often by omitting the directory entirely: the tool falls
+        # back to the process working directory, and a server launched by an
+        # editor or agent frequently has "/" for a cwd. Telling that caller to
+        # configure an allowlist points at the wrong lever.
+        remedy = (
+            "Pass the directory to scan explicitly; the default is the server's "
+            f"working directory, which here is the filesystem root. {remedy}"
+        )
     return MCPResourceError(
-        f"Scan target is outside the permitted roots: {directory_path}. "
-        f"Set {ASH_MCP_ALLOWED_ROOTS_ENV} to the directories the MCP server "
-        f"may scan.",
+        f"Scan target is outside the permitted roots: {directory_path}. {remedy}",
         context={
             "cwd": str(Path.cwd()),
             "directory_path": str(directory_path),
@@ -180,13 +203,46 @@ def _refusal(directory_path: object, resolved: Path) -> MCPResourceError:
     )
 
 
+def _session_workspace_root(session_id: str) -> Optional[Path]:
+    """Return this session's own workspace directory, or None if unavailable.
+
+    Scoped to the single session rather than to the shared workspace root, which
+    holds every other session's uploaded source.
+    """
+
+    from automated_security_helper.cli.mcp.source_delivery import (
+        _session_workspace,
+        resolve_workspace_root,
+    )
+
+    try:
+        root = resolve_workspace_root().expanduser().resolve()
+        return _session_workspace(root, session_id)
+    except (OSError, RuntimeError, ValueError) as exc:
+        # A workspace root that cannot be resolved (no home directory) or a
+        # session id carrying path separators must not take the configured roots
+        # down with it -- the allowlist still applies, this session just gets no
+        # extra allowance. ValueError is _session_workspace rejecting the id.
+        _logger.debug(
+            "MCP scan-target policy: no workspace allowance for session %r (%s)",
+            session_id,
+            exc,
+        )
+        return None
+
+
 def validate_scan_target(
     directory_path: str | Path,
+    session_id: Optional[str] = None,
 ) -> Optional[MCPResourceError]:
     """Check a scan target against the configured roots.
 
     Args:
         directory_path: Caller-supplied scan target, absolute or relative.
+        session_id: MCP session id, when the call is made on behalf of one.
+            Permits that session's own workspace directory in addition to the
+            configured roots, so a source tree delivered over the protocol
+            stays scannable. Sibling sessions' workspaces are not permitted.
 
     Returns:
         None if the target is permitted, otherwise an
@@ -207,17 +263,11 @@ def validate_scan_target(
 
     allowed = _allowed_roots()
     if allowed:
-        from automated_security_helper.cli.mcp.source_delivery import (
-            resolve_workspace_root,
-        )
-
         roots = list(allowed)
-        try:
-            roots.append(resolve_workspace_root().expanduser().resolve())
-        except (OSError, RuntimeError):
-            # A workspace root that cannot be resolved (no home directory, for
-            # instance) must not take the configured roots down with it.
-            pass
+        if session_id:
+            session_root = _session_workspace_root(session_id)
+            if session_root is not None:
+                roots.append(session_root)
 
         if any(resolved == root or resolved.is_relative_to(root) for root in roots):
             return None

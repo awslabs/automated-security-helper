@@ -54,7 +54,9 @@ class TestDefaultPolicy:
         assert validate_scan_target(project) is None
 
     @pytest.mark.skipif(platform.system() == "Windows", reason="POSIX system paths")
-    @pytest.mark.parametrize("denied", ["/etc", "/proc", "/root"])
+    @pytest.mark.parametrize(
+        "denied", ["/boot", "/dev", "/etc", "/proc", "/root", "/sys"]
+    )
     def test_named_system_directory_is_refused(self, denied):
         """A refused directory named directly is refused."""
         error = validate_scan_target(denied)
@@ -95,7 +97,11 @@ class TestDefaultPolicy:
         depth = len(tmp_path.resolve().parts) - 1
         traversal = os.path.join(*([".."] * depth), "etc")
 
-        assert Path(traversal).resolve() == Path("/etc")
+        # Compare resolved against resolved. On macOS /etc is a symlink to
+        # /private/etc, so resolve() of the traversal yields /private/etc while
+        # the bare literal Path("/etc") does not -- comparing against the
+        # literal would fail there for a reason unrelated to the policy.
+        assert Path(traversal).resolve() == Path("/etc").resolve()
         assert validate_scan_target(traversal) is not None
 
     def test_nonexistent_path_is_still_judged_by_policy(self, tmp_path):
@@ -336,14 +342,52 @@ class TestConfiguredAllowlist:
         assert validate_scan_target("/etc/ssl") is None
         assert validate_scan_target(tmp_path) is not None
 
-    def test_session_workspace_root_is_allowed_implicitly(self, tmp_path, monkeypatch):
+    def test_own_session_workspace_is_allowed(self, tmp_path, monkeypatch):
         """Source-delivery trees stay scannable when an allowlist is set.
 
         ``set_source_git`` and ``set_source_zip_finalize`` clone or extract
-        into the per-session MCP workspace and hand the caller that path to
-        scan. An allowlist that named only the operator's own repositories
+        into the calling session's MCP workspace and hand the caller that path
+        to scan. An allowlist that named only the operator's own repositories
         would otherwise refuse every uploaded tree.
         """
+        workspace = tmp_path / "cache" / "ash-mcp"
+        session = workspace / "session-1"
+        (session / "repo").mkdir(parents=True)
+        repos = tmp_path / "repos"
+        repos.mkdir()
+
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(workspace))
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(repos))
+
+        assert validate_scan_target(session, session_id="session-1") is None
+        assert validate_scan_target(session / "repo", session_id="session-1") is None
+
+    def test_another_sessions_workspace_is_refused(self, tmp_path, monkeypatch):
+        """The workspace allowance is one session wide, not the whole root.
+
+        The shared workspace root holds every session's uploaded source, so
+        allowing the root would let one caller name a sibling's directory as a
+        scan target -- reading their source and writing an output tree into it.
+        ``source_delivery._session_workspace`` exists to prevent exactly that
+        reach, and this allowance must not undo it.
+        """
+        workspace = tmp_path / "cache" / "ash-mcp"
+        mine = workspace / "session-mine"
+        theirs = workspace / "session-theirs"
+        mine.mkdir(parents=True)
+        theirs.mkdir(parents=True)
+        repos = tmp_path / "repos"
+        repos.mkdir()
+
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(workspace))
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(repos))
+
+        assert validate_scan_target(mine, session_id="session-mine") is None
+        assert validate_scan_target(theirs, session_id="session-mine") is not None
+        assert validate_scan_target(workspace, session_id="session-mine") is not None
+
+    def test_no_session_id_gets_no_workspace_allowance(self, tmp_path, monkeypatch):
+        """A caller that names no session gets only the configured roots."""
         workspace = tmp_path / "cache" / "ash-mcp"
         session = workspace / "session-1"
         session.mkdir(parents=True)
@@ -353,7 +397,31 @@ class TestConfiguredAllowlist:
         monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(workspace))
         monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(repos))
 
-        assert validate_scan_target(session) is None
+        assert validate_scan_target(session) is not None
+
+    def test_session_id_with_separators_gets_no_allowance(self, tmp_path, monkeypatch):
+        """A session id shaped like a path grants nothing rather than escaping.
+
+        ``_session_workspace`` rejects separators outright; this pins that the
+        rejection degrades to "no extra allowance" instead of propagating and
+        taking the configured roots down with it.
+        """
+        workspace = tmp_path / "cache" / "ash-mcp"
+        (workspace / "session-theirs").mkdir(parents=True)
+        repos = tmp_path / "repos"
+        repos.mkdir()
+
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(workspace))
+        monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(repos))
+
+        assert (
+            validate_scan_target(
+                workspace / "session-theirs", session_id="../session-theirs"
+            )
+            is not None
+        )
+        # The configured root still works, so the rejection was contained.
+        assert validate_scan_target(repos, session_id="../session-theirs") is None
 
 
 class TestAllowlistParsing:
