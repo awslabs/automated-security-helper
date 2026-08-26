@@ -10,7 +10,7 @@ dependencies = [
  "uv>=0.9.21,<0.12",
  "requests>=2.28.0,<3.0.0",
  "attrs>=26.1.0,<27.0.0",
- "jsonschema>=4.17.0,<5.0.0",
+ "jsonschema>=4.26.0,<5.0.0",
  "importlib-metadata>=9.0.0,<10.0.0",
  "cattrs>=26.1.0,<27.0.0",
  "docker>=7.2.0,<8.0.0",
@@ -18,7 +18,7 @@ dependencies = [
  "gitdb>=4.0.12,<5.0.0",
  "pyrsistent>=0.20.0,<1.0.0",
  "pydantic[email]>=2.11.3,<2.14",
- "typer>=0.16.0,<0.26",
+ "typer>=0.27.1,<0.28",
  "rich>=15.0.0,<16",
  "igittigitt>=2.2.3,<3.0.0",
  "defusedxml>=0.7.1,<0.8",
@@ -29,7 +29,7 @@ dependencies = [
  "cfn-flip>=1.3.0,<2",
  "mcp>=2.0.0,<3",
  "toml>=0.10.2,<1.0.0",
- "python-multipart>=0.0.28,<0.1",
+ "python-multipart>=0.0.32,<0.1",
  # Transitive via pyjwt[crypto] <- mcp[crypto]; pinned to patch GHSA-g6cj-pr64-35w5
  "cryptography>=50.0.0,<51",
  "uvicorn>=0.27,<1",
@@ -82,7 +82,7 @@ dev = [
  "mkdocs>=1.6.1,<2.0.0",
  "mkdocs-material>=9.7.6,<10.0.0",
  "pymdown-extensions>=11.0.1,<12.0.0",
- "mkdocstrings[python]>=0.29.1,<1.0.0",
+ "mkdocstrings[python]>=1.0.6,<2.0.0",
  "mkdocs-autorefs>=1.4.1,<2.0.0",
  "pytest-asyncio>=0.26.0,<2.0.0",
  "types-boto3[essential, logs, s3, securityhub, securitylake, sts]>=1.43.72,<2.0.0",
@@ -93,7 +93,7 @@ dev = [
  "hatchling>=1.31.0",
  "mcp>=2.0.0",
  "commitizen>=4.17.0",
- "httpx>=0.27.1,<1.0.0",
+ "httpx>=0.28.1,<1.0.0",
 ]
 
 [build-system]
@@ -111,7 +111,11 @@ automated-security-helper = "automated_security_helper.cli.main:app"
 [tool.commitizen]
 name = "cz_conventional_commits"
 version = "3.6.0"
-version_files = ["pyproject.toml:^version"]
+# Formula/ash.rb pins the git tag Homebrew builds from. It was absent here, so
+# releases bumped the package and left the tap on an older tag until `brew
+# install` broke. The `tag:` pattern matches the url line; commitizen rewrites
+# the version substring within it and leaves the leading "v" alone.
+version_files = ["pyproject.toml:^version", "Formula/ash.rb:tag:"]
 tag_format = "v$version"
 changelog_file = "CHANGELOG.md"
 update_changelog_on_bump = true

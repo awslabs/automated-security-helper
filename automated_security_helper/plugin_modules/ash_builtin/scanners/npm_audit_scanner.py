@@ -542,6 +542,26 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     "npm audit offline mode validation failed, but continuing with scan"
                                 )
 
+                        # Corepack resolves the package manager version from the
+                        # repository's `packageManager` field, and fetches it if the
+                        # image has a different one cached. The Dockerfile sets
+                        # COREPACK_ENABLE_DOWNLOAD_PROMPT=0 so that fetch cannot
+                        # block on a stdin prompt that no one can answer -- but
+                        # disabling the prompt only stops the *asking*, not the
+                        # download.
+                        #
+                        # In offline mode a download is the wrong outcome twice
+                        # over: there is no network, so it fails, and it fails
+                        # instead of using the package manager already cached in the
+                        # image. COREPACK_ENABLE_NETWORK=0 makes corepack fall back
+                        # to the cached version rather than reach out.
+                        subprocess_env = None
+                        if self.config.options.offline:
+                            subprocess_env = {
+                                **os.environ,
+                                "COREPACK_ENABLE_NETWORK": "0",
+                            }
+
                         # Run from the lock file's parent directory so
                         # that pnpm (and yarn) can locate their lock
                         # files (#99).
