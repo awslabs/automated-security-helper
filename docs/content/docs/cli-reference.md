@@ -147,14 +147,38 @@ Output is laid out per project, with a workspace-level roll-up beside it:
 ```
 .ash/ash_output/
   ash_aggregated_results.json      # unified, with per-project attribution
+  reports/
+    workspace-reports.json         # what every reporter did, and where
+    ash.<ext>                       # workspace-level reports (see below)
   projects/<project-key>/
     ash_aggregated_results.json    # this project alone
+    reports/ash.<ext>              # this project's own reports
     scanners/<scanner>/<target>/   # raw scanner output
 ```
 
 The unified `ash_aggregated_results.json` carries a `workspace` block: one entry per project with its threshold, finding counts, verdict and `sarif_run_index`, plus the `skipped_projects` payload.
 
 Its SARIF holds one `run` per project. Each run declares its own project root under `originalUriBaseIds`, and result paths inside a run stay relative to that root — so a consumer that ingests SARIF against a single repository root, such as GitHub code scanning, still resolves every path correctly. Selecting one run gives you a valid single-root SARIF document for one project. Each result also carries `properties.workspace_project` and `properties.workspace_uri`, the workspace-relative path, for consumers that want one flat coordinate space.
+
+#### Which reports are written where
+
+Not every format can be merged across projects, so each reporter declares what it does with a multi-project scan. Three answers:
+
+| Behaviour | Reporters | What you get |
+| --- | --- | --- |
+| Merged | `sarif`, `html`, `markdown`, `text`, `csv`, `flat-json`, `yaml`, `junitxml`, `ocsf` | One workspace-level artefact under `reports/`, carrying the project on every finding |
+| Per project | `github-ghas`, `gitlab-sast`, `cyclonedx`, `gitlab-cyclonedx`, `spdx`, and the AWS reporters | No workspace-level artefact. The files under `projects/<key>/reports/` are the answer |
+| Workspace-scoped | `unused-suppressions` | A workspace-level artefact covering workspace-level state only, not a merge of the projects |
+
+Where the project appears depends on the format: a `workspace_project` column in `csv`, a field of the same name in `flat-json`, a per-project section in `html`, `markdown` and `text`, a `<project>/<scanner>` testsuite name in `junitxml`, and a `workspace_project:<key>` entry in `metadata.labels` for `ocsf`. Single-directory output is unchanged in every case.
+
+A reporter is per project when merging would be wrong rather than merely unimplemented. `github-ghas` and `gitlab-sast` produce documents their consumers resolve against a single repository root, so a merged one would mis-locate findings. The three SBOM formats describe one deliverable each, and a workspace of independently versioned projects is N SBOMs. The AWS reporters publish side effects, which a second invocation would duplicate.
+
+`reports/workspace-reports.json` accounts for all of them, including the ones that deliberately produced nothing: what each reporter's behaviour is, the path of its workspace-level artefact or `null`, the per-project paths that replace it, which of those are missing, and why a reporter was not considered at all — `disabled`, `not-in-requested-output-formats`, or unsatisfied dependencies. A missing report is never silent.
+
+Reporter enablement at the workspace level comes from ASH's default configuration plus `--output-format`, not from any single project's config, because there is no workspace-level configuration yet. So a project that disables `html` still contributes to the workspace-level `html` report; its own `projects/<key>/reports/` respects its config as usual.
+
+If a reporter declares that it cannot produce a correct workspace-level artefact at all, the scan is refused before anything is scanned, with exit code `4` naming the reporter. No reporter shipped with ASH is in that state. Disable it or narrow `--output-format` to proceed.
 
 #### Changed files and precommit
 
