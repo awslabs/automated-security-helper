@@ -999,9 +999,50 @@ class TestWorkspaceOutput:
         assert outcome.payload.project_timeout == pytest.approx(42.0)
 
     def test_the_payload_records_wall_clock(self, tmp_path):
+        """The field is populated with a real, non-negative measurement.
+
+        Deliberately ``>= 0`` and not ``> 0``. ``wall_clock`` is
+        ``time.monotonic() - started``, so a strict comparison asserts that the
+        run outlasted the host's clock granularity rather than asserting
+        anything about this code. On Windows that granularity is coarse enough
+        that a fully-faked run can finish inside one tick, making the delta
+        exactly ``0.0``; the strict form failed one CI row out of four while
+        passing on every other platform and version. The exact value is pinned
+        by the test below, against a clock this test controls.
+        """
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
-        assert outcome.payload.wall_clock_seconds > 0
+        assert outcome.payload.wall_clock_seconds is not None
+        assert outcome.payload.wall_clock_seconds >= 0
+
+    def test_the_wall_clock_is_the_elapsed_time_not_a_constant(
+        self, tmp_path, monkeypatch
+    ):
+        """Pin the arithmetic by driving the clock instead of racing it.
+
+        The first ``monotonic()`` call in ``execute_workspace`` is the start
+        stamp; every later call here returns a fixed later instant, so the
+        recorded wall clock must be exactly the difference. ``calls`` is the
+        control: if the start stamp were ever *not* the first call, or the clock
+        were consulted only once, the subtraction below would be meaningless, so
+        the count is asserted rather than assumed.
+        """
+        calls: List[float] = []
+
+        def fake_monotonic() -> float:
+            value = 100.0 if not calls else 142.5
+            calls.append(value)
+            return value
+
+        monkeypatch.setattr(
+            "automated_security_helper.workspace.execution.time.monotonic",
+            fake_monotonic,
+        )
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        outcome = _run(tmp_path, plan)
+        assert len(calls) >= 2, "the clock was consulted too few times to subtract"
+        assert calls[0] == 100.0
+        assert outcome.payload.wall_clock_seconds == pytest.approx(42.5)
 
     def test_the_payload_status_is_completed(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
