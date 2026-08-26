@@ -77,7 +77,7 @@ ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reaso
 6. Configure multiple scanner options:
    ```bash
    ash \
-     --config-overrides 'scanners.bandit.options.confidence_level=HIGH' \
+     --config-overrides 'scanners.bandit.options.confidence_level=high' \
      --config-overrides 'scanners.bandit.options.ignore_nosec=true'
    ```
 
@@ -103,7 +103,7 @@ scanners:
   bandit:
     enabled: true
     options:
-      confidence_level: HIGH
+      confidence_level: high
 reporters:
   markdown:
     enabled: true
@@ -176,7 +176,7 @@ ash config validate
 You can also validate with overrides:
 
 ```bash
-ash config validate --config-overrides 'scanners.bandit.options.confidence_level=HIGH'
+ash config validate --config-overrides 'scanners.bandit.options.confidence_level=high'
 ```
 
 ### Custom Plugins
@@ -198,6 +198,11 @@ ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
 
 - Configuration overrides are applied after loading the configuration file
 - Overrides work with both default and explicit configurations
-- If validation fails after applying overrides, the original configuration will be used
+- An override that cannot be parsed, or that produces a configuration failing
+  validation, stops the run with exit code 3 (`invalid config`). Nothing is
+  scanned, because continuing would mean scanning with settings you did not
+  choose. Note that a top-level key ASH does not recognise is still ignored
+  rather than rejected, for compatibility with configuration files written
+  against other ASH versions.
 - For complex values, use valid JSON syntax
 - Environment variables can be referenced in YAML configuration files using `!ENV ${VAR_NAME:default_value}` syntax
