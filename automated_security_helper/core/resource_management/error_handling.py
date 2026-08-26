@@ -228,9 +228,19 @@ def validate_directory_path(
     """
     Validate a directory path with comprehensive error handling.
 
-    Resolves symlinks and '..' components via Path.resolve() before checking
-    existence and directory status. This prevents path traversal via symlinks
-    even in stdio-only contexts like MCP.
+    Path.resolve() canonicalizes the path first, collapsing '..' components and
+    following symlinks, so the existence and is-a-directory checks below apply
+    to the real target rather than to the name the caller supplied.
+
+    Canonicalization says nothing about *where* the result lands. A resolved
+    path is not constrained to any root, prefix or allowlist, so this function
+    accepts any existing directory it is given. Callers that need the target
+    confined to particular directories have to enforce that themselves; for MCP
+    scan targets, automated_security_helper.cli.mcp.scan_target does it, and
+    runs before this function.
+
+    This is also used to validate output directories, which is why no root
+    policy belongs here.
 
     Args:
         directory_path: Path to validate
