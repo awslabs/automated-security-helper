@@ -111,7 +111,11 @@ automated-security-helper = "automated_security_helper.cli.main:app"
 [tool.commitizen]
 name = "cz_conventional_commits"
 version = "3.6.0"
-version_files = ["pyproject.toml:^version"]
+# Formula/ash.rb pins the git tag Homebrew builds from. It was absent here, so
+# releases bumped the package and left the tap on an older tag until `brew
+# install` broke. The `tag:` pattern matches the url line; commitizen rewrites
+# the version substring within it and leaves the leading "v" alone.
+version_files = ["pyproject.toml:^version", "Formula/ash.rb:tag:"]
 tag_format = "v$version"
 changelog_file = "CHANGELOG.md"
 update_changelog_on_bump = true
