@@ -168,6 +168,14 @@ The policy file must be a **different file** from any project's ASH config. When
 
 One limitation is worth knowing before relying on the ceiling. It tightens findings that carry a severity. A finding that carries only a SARIF `error` level is treated as critical and stays actionable at every threshold, so no ceiling excludes it — this is not specific to workspace mode, and `severity_threshold` behaves the same way in a single-project scan. In practice it means the ceiling cannot quieten checkov, which reports no per-finding severity.
 
+Rather than leave that as a caveat to remember, ASH measures it. When the ceiling tightens a project and some of that project's findings were beyond the tightening's reach, the project's entry in `ash_aggregated_results.json` carries `ceiling_unreachable_findings` — a count per scanner:
+
+```json
+"ceiling_unreachable_findings": { "checkov": 7 }
+```
+
+Read it as a statement about those findings, not about the scanner: seven findings in this project carry no severity, so the ceiling did not change their verdict. It is recomputed on every scan from the findings actually present, so it disappears if a scanner starts reporting severity, and it is absent entirely when the ceiling either did not tighten the project or reached everything it needed to.
+
 Suppressions and ignore paths are written workspace-relative and pushed down into each project's own coordinates. A pattern that cannot match inside a project is not applied there, so `services/api/src/legacy.py` silences nothing in `shared-infra`. A pattern with no exact per-project equivalent is refused with exit 4 rather than approximated, because a suppression that matches more than intended hides findings and leaves nothing in the output to show what went missing. `**/vendor` works; `**/vendor/**` is refused, and the error names the pattern and the project.
 
 Scanners in `additional_scanners` that a project already enables run under that project's own configuration and their findings are the project's. Scanners only the policy adds run with default configuration, are reported separately as `origin: workspace-policy`, and do not affect the project's exit code unless `policy_scanners_gate: true`.

@@ -248,6 +248,7 @@ from automated_security_helper.workspace.aggregation import (
     has_finding_at_min_severity,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from automated_security_helper.workspace.policy import ceiling_unreachable_counts
 from automated_security_helper.workspace.reporting import (
     WorkspaceReportOutcome,
     emit_workspace_reports,
@@ -650,6 +651,19 @@ def _scan_one_project(
 
     _write_project_results(project_output, results)
 
+    # Where the ceiling could not reach, computed from the findings actually
+    # present rather than asserted about a scanner. Only when the ceiling really
+    # did tighten this project: a disclosure printed on every scan is noise, and
+    # noise gets skipped. ceiling_unreachable_counts returns {} when the two
+    # thresholds are equal, so this is belt and braces rather than the only guard.
+    unreachable: Dict[str, int] = {}
+    if project.threshold_tightened_by_policy:
+        unreachable = ceiling_unreachable_counts(
+            results_list,
+            declared_threshold=project.severity_threshold,
+            effective_threshold=threshold,
+        )
+
     outcome = WorkspaceProjectResult(
         project=project.key,
         relative_path=project.relative_path,
@@ -662,6 +676,7 @@ def _scan_one_project(
         duration_seconds=time.monotonic() - started,
         output_path=output_path,
         scanners=_scanner_statuses(results),
+        ceiling_unreachable_findings=unreachable,
     )
     return _ProjectRun(outcome=outcome, run=run)
 

@@ -23,13 +23,20 @@ What it asserts, and why each one is here
    the assertion that fails if the ceiling is decorative.
 2. **A stricter project is untouched.** Its actionable count is the same in both
    runs. Without this, "the ceiling replaced every threshold" would pass (1).
-3. **A workspace suppression is pushed into one project and not another.**
+3. **The ceiling's reach is disclosed where it fell short.** The iac project's
+   checkov findings carry no severity, so they are judged from the SARIF level
+   and stay actionable at every threshold; the ceiling cannot reach them and
+   ``ceiling_unreachable_findings`` says so per scanner. The baseline run must
+   disclose nothing, and so must the project the ceiling did reach -- a
+   disclosure that appears unconditionally is noise and gets ignored.
+4. **A workspace suppression is pushed into one project and not another.**
    Checked on the resolved plan, because the suppression list is per project
    there; see the limitation below for why it is not yet checked on findings.
-4. **An unrewritable pattern refuses with exit 4** and names the pattern.
+5. **An unrewritable pattern refuses with exit 4** and names the pattern, as
+   does a project config passed as the policy file.
 
-The positive control
---------------------
+Two positive controls
+---------------------
 Assertion 1 is only meaningful if the lax project HAS findings that sit between
 the two thresholds. A fixture that produced no findings at all would satisfy
 "passes without the ceiling" trivially and then fail (1) for the wrong reason, or
@@ -38,21 +45,29 @@ found a non-zero number of findings in the lax project and that its actionable
 count is zero; if either is untrue it reports the fixture as broken rather than
 reporting a policy result.
 
+Assertion 3 has the same hazard from the other direction: with no checkov
+findings, "the ceiling could not reach them" and "there was nothing to reach"
+are indistinguishable. So the disclosure checks are skipped with a printed note
+when checkov reports nothing, rather than passing on an empty set.
+
 Known limitations
 -----------------
-* Assertion 3 stops at the plan. ``workspace.suppressions`` do not yet reach the
+* Assertion 4 stops at the plan. ``workspace.suppressions`` do not yet reach the
   scanners -- see "Where policy enters" in ``workspace/execution.py`` for the
   orchestrator constraint -- so a findings-level check would fail for a reason
   that is not about the push-down.
 * ``additional_scanners`` is not exercised end to end for the same reason.
-* The fixture uses bandit only, because it is the scanner ASH ships that emits
-  ``properties.issue_severity``. A ceiling cannot tighten a level-only scanner
-  such as checkov (see ``utils/severity_ladder.py``), so building the fixture on
-  checkov would measure the limitation instead of the feature.
-* Findings come from real bandit rules, so a bandit release can change the
-  counts. The script asserts relationships between the two runs rather than
-  absolute numbers, so a version bump changes what is scanned but not whether the
-  assertions hold.
+* Two scanners are used, and which one is deliberate. bandit is the ASH-shipped
+  scanner that emits ``properties.issue_severity``, so it measures the ceiling
+  working; checkov emits none, so it measures the ceiling's limit. Building every
+  assertion on one of them would measure only half the behaviour.
+* Findings come from real bandit and checkov rules, so a release of either can
+  change the counts. The script asserts relationships between the two runs, and
+  the presence rather than the size of the disclosure, so a version bump changes
+  what is scanned but not whether the assertions hold.
+* checkov must be installed for assertion 3 to run. It is skipped with a note
+  rather than failed when checkov reports nothing, so an environment without it
+  does not produce a false failure -- but it also does not produce a false pass.
 """
 
 from __future__ import annotations
@@ -88,6 +103,16 @@ def run(target):
     return subprocess.call("echo " + target, shell=True)
 """
 
+# Terraform checkov flags, used to exercise the level-only case. checkov emits no
+# properties.issue_severity, so these findings are judged from the SARIF level,
+# where `error` is read as critical and stays actionable at every threshold. That
+# is what the ceiling cannot reach, and what the disclosure has to report.
+IAC_SOURCE = """\
+resource "aws_s3_bucket" "example" {
+  bucket = "policy-verification-fixture"
+}
+"""
+
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,47 +120,61 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def _project_config(threshold: str) -> str:
-    """A project config at *threshold* running bandit only.
+_ALL_SCANNERS = [
+    "bandit",
+    "cdk-nag",
+    "cfn-nag",
+    "checkov",
+    "detect-secrets",
+    "grype",
+    "npm-audit",
+    "opengrep",
+    "semgrep",
+    "syft",
+]
 
-    Every other scanner is disabled to keep the run short and the finding set
-    attributable to one tool.
+
+def _project_config(threshold: str, keep: str = "bandit") -> str:
+    """A project config at *threshold* running only the *keep* scanner.
+
+    Everything else is disabled to keep the run short and the finding set
+    attributable to one tool -- which also makes the per-scanner disclosure
+    unambiguous.
     """
-    disabled = [
-        "cdk-nag",
-        "cfn-nag",
-        "checkov",
-        "detect-secrets",
-        "grype",
-        "npm-audit",
-        "opengrep",
-        "semgrep",
-        "syft",
-    ]
     lines = [
         "global_settings:",
         f"  severity_threshold: {threshold}",
         "scanners:",
-        "  bandit:",
-        "    enabled: true",
     ]
-    for name in disabled:
+    for name in _ALL_SCANNERS:
         lines.append(f"  {name}:")
-        lines.append("    enabled: false")
+        lines.append(f"    enabled: {'true' if name == keep else 'false'}")
     return "\n".join(lines) + "\n"
 
 
 def build_fixture(root: Path) -> Path:
-    """Create a two-project workspace: one lax at CRITICAL, one strict at LOW."""
+    """Create the three-project workspace the assertions are written against.
+
+    lax at CRITICAL with a severity-carrying bandit finding -- the ceiling reaches
+    it. strict at LOW -- the ceiling must not loosen it. iac at CRITICAL with
+    level-only checkov findings -- the ceiling cannot reach those, which is what
+    the disclosure has to report.
+    """
     _write(root / "lax" / "src" / "runner.py", LAX_SOURCE)
     _write(root / "lax" / ".ash" / "ash.yaml", _project_config("CRITICAL"))
 
     _write(root / "strict" / "src" / "runner.py", STRICT_SOURCE)
     _write(root / "strict" / ".ash" / "ash.yaml", _project_config("LOW"))
 
+    _write(root / "iac" / "main.tf", IAC_SOURCE)
+    _write(
+        root / "iac" / ".ash" / "ash.yaml",
+        _project_config("CRITICAL", keep="checkov"),
+    )
+
     workspace = root / "fixture.code-workspace"
     workspace.write_text(
-        json.dumps({"folders": [{"path": "lax"}, {"path": "strict"}]}),
+        json.dumps({"folders": [{"path": "lax"}, {"path": "strict"}, {"path": "iac"}]}),
         encoding="utf-8",
     )
     return workspace
@@ -306,6 +345,43 @@ def main() -> int:
             strict_b.get("severity_threshold") == "LOW",
             f"reported={strict_b.get('severity_threshold')}",
         )
+
+        # 2b. The ceiling's reach, disclosed from the findings actually present.
+        iac_a = projects_a.get("iac", {})
+        iac_b = projects_b.get("iac", {})
+        unreachable_b = iac_b.get("ceiling_unreachable_findings") or {}
+        unreachable_a = iac_a.get("ceiling_unreachable_findings") or {}
+
+        if not iac_a.get("finding_count"):
+            print(
+                "FIXTURE NOTE: checkov produced no findings for the iac project; "
+                "skipping the disclosure checks rather than asserting vacuously"
+            )
+            print(f"        iac finding_count={iac_a.get('finding_count')}")
+        else:
+            check(
+                "level-only findings stay actionable at CRITICAL (the limitation)",
+                (iac_a.get("actionable_finding_count") or 0) > 0,
+                f"at declared CRITICAL: actionable="
+                f"{iac_a.get('actionable_finding_count')} of "
+                f"{iac_a.get('finding_count')} findings",
+            )
+            check(
+                "the ceiling could not tighten them, and says so per scanner",
+                bool(unreachable_b) and "checkov" in unreachable_b,
+                f"ceiling_unreachable_findings={unreachable_b}",
+            )
+            check(
+                "no disclosure without a ceiling, so it stays load-bearing",
+                unreachable_a == {},
+                f"baseline run disclosure={unreachable_a}",
+            )
+            check(
+                "the project the ceiling DID reach discloses nothing",
+                (projects_b.get("lax", {}).get("ceiling_unreachable_findings") or {})
+                == {},
+                "lax carries severity, so there is nothing to qualify",
+            )
 
         # 3. Suppression scoping, on the resolved plan.
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

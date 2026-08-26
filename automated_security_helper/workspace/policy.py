@@ -101,9 +101,10 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import ValidationError
@@ -120,7 +121,11 @@ from automated_security_helper.models.core import (
     AshSuppression,
     IgnorePathWithReason,
 )
-from automated_security_helper.utils.severity_ladder import stricter_of
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITIES,
+    sarif_level_fails_threshold,
+    stricter_of,
+)
 from automated_security_helper.utils.workspace_paths import to_project_pattern
 
 # Written as `str | Path` rather than `Union[...]` -- evaluated eagerly at import,
@@ -176,6 +181,83 @@ class ProjectPolicy:
 
 def _refuse(message: str) -> WorkspaceDefinitionError:
     return WorkspaceDefinitionError(message)
+
+
+def ceiling_unreachable_counts(
+    results: Iterable[Mapping[str, Any]],
+    declared_threshold: str | None,
+    effective_threshold: str | None,
+) -> dict[str, int]:
+    """Per scanner, how many findings the severity ceiling could not affect.
+
+    This is the mechanised form of the limitation described in the module
+    docstring. Rather than documenting "the ceiling does not apply to checkov",
+    which goes stale the moment checkov starts emitting severity, it counts the
+    findings actually present for which tightening the threshold changed nothing,
+    and lets a reporter state that as an observation about those findings.
+
+    A finding counts when BOTH hold:
+
+    * It carries no usable ``properties.issue_severity``, so it is judged from
+      the SARIF ``level``. This is the discriminator, and it is why a genuinely
+      CRITICAL severity-carrying finding is NOT counted: that finding is
+      actionable at both thresholds too, but correctly so, and reporting it would
+      tell the operator the ceiling failed at something it never claimed.
+    * Its actionable verdict is identical at both thresholds, so the tightening
+      did not reach it. A level-only ``note`` under a CRITICAL-to-LOW tightening
+      IS reached, and so is not counted.
+
+    Suppressed findings are skipped: they are not actionable at any threshold, so
+    the ceiling is irrelevant to them.
+
+    Args:
+        results: The project's SARIF results.
+        declared_threshold: The threshold the project's own config asked for.
+        effective_threshold: The threshold after the workspace ceiling.
+
+    Returns:
+        Scanner name to count, for scanners with at least one such finding.
+        Empty when the two thresholds are equal -- no tightening means there is
+        no claim to qualify, which is what keeps this disclosure load-bearing
+        rather than printed on every scan.
+    """
+    if declared_threshold == effective_threshold:
+        return {}
+
+    counts: dict[str, int] = {}
+    for result in results:
+        if not isinstance(result, Mapping):
+            continue
+        if result.get("suppressions"):
+            continue
+
+        properties = result.get("properties")
+        issue_severity = ""
+        if isinstance(properties, Mapping):
+            issue_severity = str(properties.get("issue_severity") or "").upper()
+        if issue_severity in SEVERITIES:
+            # The ceiling reaches severity-carrying findings; nothing to disclose.
+            continue
+
+        level = result.get("level")
+        if sarif_level_fails_threshold(
+            level, declared_threshold
+        ) != sarif_level_fails_threshold(level, effective_threshold):
+            # The tightening changed this finding's verdict, so it was reached.
+            continue
+        if not sarif_level_fails_threshold(level, effective_threshold):
+            # Not actionable either way -- below both thresholds, not beyond reach.
+            continue
+
+        scanner = None
+        if isinstance(properties, Mapping):
+            scanner = properties.get("scanner_name")
+        # "unattributed" matches the name the aggregator uses for a finding with
+        # no scanner_name, so the two payloads agree on what to call it.
+        name = str(scanner) if scanner else "unattributed"
+        counts[name] = counts.get(name, 0) + 1
+
+    return counts
 
 
 def _normalise_scanner_name(name: str) -> str:

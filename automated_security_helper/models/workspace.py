@@ -354,6 +354,24 @@ class WorkspaceProjectResult(BaseModel):
             description="Final status per scanner name, for this project alone.",
         ),
     ]
+    ceiling_unreachable_findings: Annotated[
+        Dict[str, int],
+        Field(
+            default_factory=dict,
+            description=(
+                "Per scanner, how many of this project's findings the workspace "
+                "severity ceiling could not affect, because they carry no "
+                "properties.issue_severity and are therefore judged from the "
+                "SARIF level -- where `error` is read as critical and so is "
+                "actionable at every threshold. Populated only when the ceiling "
+                "actually tightened this project AND some of its findings were "
+                "beyond that tightening's reach, so an empty mapping means the "
+                "ceiling did what it says. An observation about these findings, "
+                "not a claim about the scanner: it is recomputed every scan, so "
+                "it stops appearing if a scanner starts emitting severity."
+            ),
+        ),
+    ]
     skip_reason: Annotated[
         Optional[SkippedProjectReason],
         Field(None, description="Why the project was skipped, when it was."),

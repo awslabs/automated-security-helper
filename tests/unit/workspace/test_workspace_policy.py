@@ -38,6 +38,7 @@ from automated_security_helper.models.core import (
 )
 from automated_security_helper.workspace.policy import (
     WORKSPACE_POLICY_FILE_NAMES,
+    ceiling_unreachable_counts,
     policy_for_project,
     resolve_workspace_policy,
 )
@@ -579,6 +580,158 @@ def test_a_policy_file_with_an_unknown_key_is_refused_naming_the_file(tmp_path):
     with pytest.raises(WorkspaceDefinitionError) as excinfo:
         resolve_workspace_policy(tmp_path)
     assert path.name in str(excinfo.value)
+
+
+def test_an_unsubstituted_env_placeholder_refuses_rather_than_disabling_the_gate(
+    tmp_path,
+):
+    """The policy loader does no ${VAR} substitution, and that must fail CLOSED.
+
+    AshConfig.from_file resolves ${VAR} in its YAML; this loader deliberately
+    does not, because a ceiling an environment variable can loosen is not a
+    ceiling. The danger is the failure MODE, not the missing feature: if
+    '${THRESH}' were accepted and then read as an unrecognised threshold, the
+    ladder would gate it like CRITICAL -- the loosest setting -- and the operator
+    would have no ceiling while believing they had one. It must refuse instead.
+    """
+    _write(
+        tmp_path / ".ash" / "ash-workspace.yaml",
+        "workspace:\n  max_severity_threshold: ${ASH_THRESHOLD}\n",
+    )
+
+    with pytest.raises(WorkspaceDefinitionError) as excinfo:
+        resolve_workspace_policy(tmp_path)
+
+    message = str(excinfo.value)
+    assert "ash-workspace.yaml" in message
+    # The message has to show the value that was rejected, or an operator with a
+    # templated CI config cannot tell substitution never happened.
+    assert "ASH_THRESHOLD" in message
+
+
+def test_an_env_placeholder_is_not_silently_substituted_from_the_environment(
+    tmp_path, monkeypatch
+):
+    """Companion to the above: even with the variable SET, it must not expand.
+
+    Without this, the previous test would pass for the wrong reason on a machine
+    where the variable happens to be unset, and the loader could quietly gain
+    substitution later without any test noticing.
+    """
+    monkeypatch.setenv("ASH_THRESHOLD", "CRITICAL")
+    _write(
+        tmp_path / ".ash" / "ash-workspace.yaml",
+        "workspace:\n  max_severity_threshold: ${ASH_THRESHOLD}\n",
+    )
+
+    with pytest.raises(WorkspaceDefinitionError):
+        resolve_workspace_policy(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# 6. The ceiling's reach, disclosed from the findings actually present
+# ---------------------------------------------------------------------------
+
+
+def _finding(level="error", issue_severity=None, scanner="checkov"):
+    result = {"ruleId": "R1", "level": level, "properties": {}}
+    if scanner is not None:
+        result["properties"]["scanner_name"] = scanner
+    if issue_severity is not None:
+        result["properties"]["issue_severity"] = issue_severity
+    return result
+
+
+def test_a_level_only_error_finding_is_reported_as_beyond_the_ceilings_reach():
+    """The measured limitation, disclosed per scanner from the findings.
+
+    An `error` with no issue_severity is treated as CRITICAL by both threshold
+    gates, so it is actionable at every threshold and tightening CRITICAL to
+    MEDIUM changes nothing for it.
+    """
+    counts = ceiling_unreachable_counts(
+        [_finding(level="error", scanner="checkov")],
+        declared_threshold="CRITICAL",
+        effective_threshold="MEDIUM",
+    )
+    assert counts == {"checkov": 1}
+
+
+def test_a_severity_carrying_finding_is_not_reported():
+    """The ceiling reaches it, so there is nothing to disclose.
+
+    bandit's MEDIUM finding is not actionable at CRITICAL and is actionable at
+    MEDIUM, so the tightening did exactly what it says.
+    """
+    counts = ceiling_unreachable_counts(
+        [_finding(level="warning", issue_severity="MEDIUM", scanner="bandit")],
+        declared_threshold="CRITICAL",
+        effective_threshold="MEDIUM",
+    )
+    assert counts == {}
+
+
+def test_a_genuinely_critical_finding_is_not_reported_as_unreachable():
+    """It is actionable at both thresholds, but that is correct, not a limitation.
+
+    Reporting it would tell the operator the ceiling failed on a finding the
+    ceiling was never meant to change. The discriminator is the ABSENCE of
+    issue_severity, not sameness of verdict alone.
+    """
+    counts = ceiling_unreachable_counts(
+        [_finding(level="error", issue_severity="CRITICAL", scanner="bandit")],
+        declared_threshold="CRITICAL",
+        effective_threshold="MEDIUM",
+    )
+    assert counts == {}
+
+
+def test_nothing_is_reported_when_the_ceiling_did_not_tighten():
+    """Load-bearing only: no tightening means there is no claim to qualify."""
+    counts = ceiling_unreachable_counts(
+        [_finding(level="error", scanner="checkov")],
+        declared_threshold="MEDIUM",
+        effective_threshold="MEDIUM",
+    )
+    assert counts == {}
+
+
+def test_a_suppressed_finding_is_not_reported():
+    """It is not actionable at any threshold, so the ceiling is irrelevant to it."""
+    suppressed = _finding(level="error", scanner="checkov")
+    suppressed["suppressions"] = [{"kind": "external"}]
+    counts = ceiling_unreachable_counts(
+        [suppressed],
+        declared_threshold="CRITICAL",
+        effective_threshold="MEDIUM",
+    )
+    assert counts == {}
+
+
+def test_counts_are_split_per_scanner_and_unattributed_findings_are_named():
+    counts = ceiling_unreachable_counts(
+        [
+            _finding(scanner="checkov"),
+            _finding(scanner="checkov"),
+            _finding(scanner="cfn-nag"),
+            _finding(scanner=None),
+        ],
+        declared_threshold="CRITICAL",
+        effective_threshold="MEDIUM",
+    )
+    assert counts == {"checkov": 2, "cfn-nag": 1, "unattributed": 1}
+
+
+def test_a_note_level_finding_the_ceiling_does_reach_is_not_reported():
+    """Not every level-only finding is beyond reach; only those whose verdict is
+    unchanged. A `note` is not actionable at CRITICAL and is actionable at LOW,
+    so tightening CRITICAL to LOW does affect it."""
+    counts = ceiling_unreachable_counts(
+        [_finding(level="note", scanner="checkov")],
+        declared_threshold="CRITICAL",
+        effective_threshold="LOW",
+    )
+    assert counts == {}
 
 
 def test_a_json_policy_file_is_read(tmp_path):
