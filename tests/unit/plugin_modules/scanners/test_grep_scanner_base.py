@@ -126,9 +126,7 @@ class TestOfflineCacheDiscovery:
         rule_file.write_text("rules: []")
         monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(tmp_path))
 
-        config = SemgrepScannerConfig(
-            options=SemgrepScannerConfigOptions(offline=True)
-        )
+        config = SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=True))
         scanner = SemgrepScanner(context=test_plugin_context, config=config)
 
         pairs = _extra_arg_pairs(scanner)
@@ -225,8 +223,13 @@ def _run_post_scan_pipeline(scanner, target: Path, sarif_dict: dict) -> dict:
 
     captured: dict = {}
 
-    def fake_run_subprocess(self, command, results_dir, env=None):
+    # **kwargs rather than an explicit timeout parameter: this double stands in
+    # for _run_subprocess, and pinning its exact signature made three tests fail
+    # when the real method gained a `timeout` argument. The double only cares
+    # about command and results_dir, so it should ignore the rest.
+    def fake_run_subprocess(self, command, results_dir, env=None, **kwargs):
         captured["command"] = command
+        captured["kwargs"] = kwargs
         results_file = Path(results_dir) / "results_sarif.sarif"
         results_file.write_text(json.dumps(sarif_dict))
         self.exit_code = 0

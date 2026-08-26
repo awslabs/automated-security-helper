@@ -55,8 +55,18 @@ jobs:
         run: python -m automated_security_helper.schemas.generate_schemas
       - name: Check schemas are up to date
         run: |
-          if ! git diff --exit-code automated_security_helper/schemas/*.json; then
+          # git diff compares the index to the worktree, so it cannot see a file
+          # git has never heard of. Generating a schema for a newly registered
+          # model produces an untracked .json, which a diff-based check reports
+          # as clean -- so the schema would silently never be committed.
+          # git status --porcelain reports untracked files too. The pathspec is
+          # quoted so git does the matching rather than the shell, which is what
+          # lets it match files that do not exist in the index yet.
+          changed="$(git status --porcelain -- 'automated_security_helper/schemas/*.json')"
+          if [ -n "$changed" ]; then
             echo "::error::JSON schemas are out of date. Run 'python -m automated_security_helper.schemas.generate_schemas' and commit the result."
+            echo "$changed"
+            git diff -- 'automated_security_helper/schemas/*.json'
             exit 1
           fi
       - name: Verify documentation freshness

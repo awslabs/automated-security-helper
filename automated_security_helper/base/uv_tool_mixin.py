@@ -110,6 +110,7 @@ class UVToolMixin:
         stdout_preference: str = "write",
         stderr_preference: str = "write",
         env: Optional[Dict[str, str]] = None,
+        timeout: Optional[float] = None,
     ) -> Optional[Dict[str, str]]:
         """Attempt to execute command using UV tool run.
 
@@ -165,6 +166,7 @@ class UVToolMixin:
                 stderr_preference=stderr_preference,
                 class_name=self.__class__.__name__,
                 env=env,
+                timeout=timeout,
             )
 
             response = {

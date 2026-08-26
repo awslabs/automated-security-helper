@@ -160,7 +160,11 @@ def get(
     if config_path is not None and not Path(config_path).exists():
         typer.secho(f"Config file does not exist at {config_path}", fg=typer.colors.RED)
         raise typer.Exit(1)
-    config = resolve_config(config_path, config_overrides=config_overrides)
+    try:
+        config = resolve_config(config_path, config_overrides=config_overrides)
+    except ASHConfigValidationError as e:
+        typer.secho(f"Invalid configuration: {e}", fg=typer.colors.RED)
+        raise typer.Exit(3)
     print(
         Syntax(
             code=yaml.dump(
