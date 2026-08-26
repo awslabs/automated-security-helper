@@ -416,6 +416,36 @@ mcp-resource-management:
 - `max_message_size_bytes`: Maximum message size in bytes
 - `max_directory_size_mb`: Maximum directory size in MB
 
+### Restricting which directories can be scanned
+
+An MCP client names the directory it wants scanned, and ASH writes its output
+tree inside that directory (`<target>/.ash/ash_output`). `ASH_MCP_ALLOWED_ROOTS`
+controls which directories the server will accept. It takes a list separated by
+the platform path separator (`:` on Linux and macOS, `;` on Windows):
+
+```bash
+ASH_MCP_ALLOWED_ROOTS=/srv/repos:/home/build/work ash mcp
+```
+
+With it set, a scan target must resolve to one of those directories or
+something beneath it; anything else is refused. Symlinks and `..` components are
+resolved before the comparison, so a link inside an allowed root that points
+outside it is refused. The per-session MCP workspace root is always allowed as
+well, so source trees delivered over the protocol stay scannable.
+
+With it unset, ASH refuses a short fixed list of system directories as scan
+targets — on Linux and macOS `/boot`, `/dev`, `/etc`, `/proc`, `/root`, `/sys`
+and the filesystem root; on Windows the Windows directory, `Program Files`,
+`ProgramData` and a bare drive root. To scan one of these deliberately, name it
+in `ASH_MCP_ALLOWED_ROOTS`, which replaces the list rather than adding to it.
+
+That default is a safety net, not a security boundary. It declines a handful of
+directories that hold host configuration and kernel interfaces rather than
+source code, and it does not restrict anything else — home directories, `/usr`,
+`/var` and the rest of the filesystem all remain valid scan targets, because
+that is where code lives. If you need the scan surface actually bounded, set
+`ASH_MCP_ALLOWED_ROOTS`; it is the only setting here that does that.
+
 ## Best Practices
 
 When using the ASH MCP server, follow these best practices:

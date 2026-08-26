@@ -70,11 +70,31 @@ async def mcp_scan_directory(
     Returns:
         Dictionary with scan ID and status information
     """
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         validate_directory_path,
         validate_severity_threshold,
         validate_config_path,
     )
+
+    # Check the root policy before anything else looks at the target. This runs
+    # ahead of the existence check so that a refused target is reported as
+    # refused rather than as a missing directory, and ahead of the output
+    # directory creation below so that a refused target is not written into.
+    target_error = validate_scan_target(directory_path)
+    if target_error:
+        return create_error_response(
+            error=target_error,
+            operation="scan_directory",
+            suggestions=[
+                f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the MCP "
+                "server should be able to scan it",
+                "Verify that the path is correct",
+            ],
+        )
 
     # Validate directory path
     dir_error = validate_directory_path(directory_path)

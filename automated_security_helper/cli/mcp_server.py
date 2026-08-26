@@ -47,6 +47,7 @@ from automated_security_helper.core.resource_management.result_filters import (
     add_findings_list,
 )
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
+from automated_security_helper.cli.mcp.scan_target import validate_scan_target
 from automated_security_helper.utils.log import ASH_LOGGER
 
 logger = ASH_LOGGER
@@ -115,6 +116,20 @@ async def run_ash_scan(
         await ctx.info(f"run_ash_scan tool called in cwd: {Path.cwd()}")
         if not Path(source_dir).is_absolute():
             source_dir = str(Path.cwd() / source_dir)
+
+        # Check the root policy before acting on the target in any way. The
+        # clean_output branch below deletes a file inside the caller-named
+        # directory, so it must not run for a target the policy refuses.
+        # mcp_scan_directory checks this again for callers that reach it
+        # directly.
+        target_error = validate_scan_target(source_dir)
+        if target_error:
+            await ctx.error(str(target_error))
+            return {
+                "success": False,
+                "error": str(target_error),
+                "error_type": "scan_target_not_permitted",
+            }
 
         await ctx.info(f"Starting scan for directory: {source_dir}")
 
