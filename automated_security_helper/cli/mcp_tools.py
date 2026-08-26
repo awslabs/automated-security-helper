@@ -395,6 +395,10 @@ async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
     Returns:
         Dictionary with scan results information
     """
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         validate_directory_path,
     )
@@ -423,6 +427,22 @@ async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
 
         # Log the resolved path for debugging
         _logger.info(f"Using absolute output directory: {resolved_output_dir}")
+
+        # Results are read from a caller-named directory, so the same roots that
+        # bound what may be scanned bound what may be read back. A legitimate
+        # output directory sits at <source_dir>/.ash/ash_output, beneath the scan
+        # target, so a root that permits the scan permits its results too.
+        target_error = validate_scan_target(resolved_output_dir)
+        if target_error:
+            return create_error_response(
+                error=target_error,
+                operation="get_scan_results",
+                suggestions=[
+                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                    "MCP server should be able to read results from it",
+                    "Verify that the path is correct",
+                ],
+            )
 
         # Validate that the directory exists and is accessible
         error = validate_directory_path(resolved_output_dir)

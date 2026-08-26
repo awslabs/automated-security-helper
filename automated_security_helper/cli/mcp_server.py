@@ -480,6 +480,19 @@ async def get_scan_result_paths(
         output_path = Path(output_dir)
         reports_dir = output_path / "reports"
 
+        # Same roots as the scan tools: this returns paths from a caller-named
+        # directory, and an output directory for a permitted scan lives beneath
+        # the permitted target. Checked before the existence branch below so a
+        # refusal is not reported as a missing directory.
+        target_error = validate_scan_target(output_path)
+        if target_error:
+            await ctx.error(str(target_error))
+            return {
+                "success": False,
+                "error": str(target_error),
+                "error_type": "scan_target_not_permitted",
+            }
+
         await ctx.info(f"Getting scan result paths from: {output_dir}")
 
         if not output_path.exists():

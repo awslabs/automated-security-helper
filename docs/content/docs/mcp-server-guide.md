@@ -446,6 +446,17 @@ source code, and it does not restrict anything else — home directories, `/usr`
 that is where code lives. If you need the scan surface actually bounded, set
 `ASH_MCP_ALLOWED_ROOTS`; it is the only setting here that does that.
 
+The same roots apply to the tools that read results back — `get_scan_results`,
+`get_scan_summary` and `get_scan_result_paths` — since those also take a
+caller-supplied directory. An output directory for a permitted scan lives at
+`<source_dir>/.ash/ash_output`, beneath the target, so a root that allows a scan
+already allows its results to be read; you do not list output directories
+separately.
+
+`get_scan_progress` is not affected. It takes a scan ID, and the output
+directory comes from the scan registry rather than from the caller, so polling a
+running scan works regardless of what the roots name.
+
 ## Best Practices
 
 When using the ASH MCP server, follow these best practices:
