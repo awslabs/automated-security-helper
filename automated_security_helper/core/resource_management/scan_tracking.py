@@ -10,6 +10,7 @@ and parse scan result files to extract progress information. It implements a mor
 reliable approach to track scan progress and completion than event-based tracking.
 """
 
+import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -487,6 +488,88 @@ def parse_scanner_result_file(
             f"Available keys: {list(data.keys()) if data else 'None'}"
         )
         return []
+
+
+def summarize_scanner_statuses(output_dir: Path) -> Dict[str, Any]:
+    """Read the authoritative per-scanner statuses for a scan.
+
+    A scanner skipped for missing dependencies used to be indistinguishable from
+    one that ran and found nothing, which for a security tool is the whole
+    answer. The information was never lost in the core -- scan_phase records
+    ``ScannerStatusInfo(status=ScannerStatus.MISSING, ...)`` in
+    ``scanner_results`` -- but the MCP progress view rebuilt its own map by
+    globbing ``scanners/*/*/ASH.ScanResults.json``. A scanner that never ran
+    writes no such file, so it fell out of the map entirely and the remaining
+    entries looked like the complete set.
+
+    This reads ``scanner_results`` instead of re-deriving it from whatever
+    happens to be on disk.
+
+    Returns a dict with two keys, both always present:
+
+    ``scanner_statuses``
+        Every scanner ASH considered, including those that never ran.
+    ``skipped_scanners``
+        Only those that did not run, each with a machine-readable ``reason`` so a
+        caller can tell a missing tool from a deliberate exclusion.
+
+    Returns empty collections rather than raising. ``get_scan_progress`` polls
+    this while a scan is still running, when the aggregated file does not exist
+    yet, so absence is the ordinary case and not an error.
+    """
+    empty: Dict[str, Any] = {"scanner_statuses": {}, "skipped_scanners": []}
+
+    results_path = Path(output_dir) / "ash_aggregated_results.json"
+    try:
+        raw = results_path.read_text(encoding="utf-8")
+    except OSError:
+        return empty
+
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        # A poll can land midway through the file being written.
+        return empty
+
+    if not isinstance(data, dict):
+        return empty
+
+    scanner_results = data.get("scanner_results")
+    if not isinstance(scanner_results, dict):
+        return empty
+
+    statuses: Dict[str, Any] = {}
+    skipped: List[Dict[str, Any]] = []
+
+    for scanner_name, info in scanner_results.items():
+        if not isinstance(info, dict):
+            continue
+
+        status = info.get("status")
+        excluded = bool(info.get("excluded", False))
+        dependencies_satisfied = bool(info.get("dependencies_satisfied", True))
+
+        statuses[scanner_name] = {
+            "status": status,
+            "excluded": excluded,
+            "dependencies_satisfied": dependencies_satisfied,
+        }
+
+        # FAILED and ERROR are deliberately not included. Those scanners ran;
+        # reporting them as skipped would send a user looking for a missing tool.
+        if status not in ("MISSING", "SKIPPED"):
+            continue
+
+        if not dependencies_satisfied:
+            reason = "missing_dependencies"
+        elif excluded:
+            reason = "excluded_by_configuration"
+        else:
+            reason = "skipped"
+
+        skipped.append({"scanner": scanner_name, "status": status, "reason": reason})
+
+    return {"scanner_statuses": statuses, "skipped_scanners": skipped}
 
 
 def parse_aggregated_results(
