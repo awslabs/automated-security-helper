@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Annotated, ClassVar, Dict, List, Literal, Any
 
@@ -572,6 +573,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             stderr_preference="both",
                             cwd=package_dir,
                             env=subprocess_env,
+                            timeout=self._effective_scan_timeout(),
                         )
                         ASH_LOGGER.info(result)
 

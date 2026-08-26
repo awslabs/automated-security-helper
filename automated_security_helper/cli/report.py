@@ -12,6 +12,7 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.enums import AshLogLevel, ExportFormat
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
@@ -124,7 +125,13 @@ def report_command(
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # Load the ASH configuration
-    ash_config = resolve_config(config_path=config, config_overrides=config_overrides)
+    try:
+        ash_config = resolve_config(
+            config_path=config, config_overrides=config_overrides
+        )
+    except ASHConfigValidationError as e:
+        print(f"[red]Invalid configuration: {e}[/red]")
+        raise typer.Exit(3)
 
     # Create plugin context
     plugin_context = PluginContext(

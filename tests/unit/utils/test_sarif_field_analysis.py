@@ -73,7 +73,13 @@ class TestAnalyzeSarifFieldsLogic:
 
         # analyze_sarif_fields raises typer.Exit on unexpected missing fields;
         # patch generate_html_report to avoid filesystem side-effects in HTML gen.
-        import click
+        #
+        # Catch typer.Exit rather than click.exceptions.Exit. Those named the same
+        # class until typer 0.27, which vendored click as typer._click -- typer.Exit
+        # is now typer._click.exceptions.Exit and is not a subclass of the
+        # standalone click's Exit, so catching click's let the exception escape.
+        # typer.Exit is the public API and is correct on either side of that change.
+        import typer
 
         with patch(
             "automated_security_helper.utils.sarif_field_analysis.generate_html_report"
@@ -83,7 +89,7 @@ class TestAnalyzeSarifFieldsLogic:
                     sarif_dir=str(sarif_dir),
                     output_dir=str(output_dir),
                 )
-            except click.exceptions.Exit:
+            except typer.Exit:
                 # Exit(1) means unexpected-missing-fields — that's fine for this test;
                 # we just verify the output files were written correctly.
                 result = None
