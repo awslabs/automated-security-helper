@@ -20,7 +20,10 @@ from automated_security_helper.config.ash_config import (
     ReporterConfigSegment,
     ScannerConfigSegment,
 )
-from automated_security_helper.config.resolve_config import find_config_file, resolve_config
+from automated_security_helper.config.resolve_config import (
+    find_config_file,
+    resolve_config,
+)
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import get_logger
@@ -418,7 +421,7 @@ def lint(
         bool,
         typer.Option(
             "--fix",
-            help="Auto-fix fixable issues (internal fields, missing line_end, expired suppressions)",
+            help="Auto-fix fixable issues (internal fields, missing line_end, expired suppressions, multi-line suppression reasons)",
         ),
     ] = False,
     fix_unused: Annotated[
@@ -453,10 +456,11 @@ def lint(
     - Duplicate field definitions
     - Suppressions with line_start but missing line_end
     - Expired suppressions
+    - Suppression reasons spanning multiple lines
     - Unused suppressions (from last scan report)
 
     Use --fix to auto-fix common issues (removes internal fields, sets missing
-    line_end, removes expired suppressions).
+    line_end, removes expired suppressions, collapses multi-line reasons).
 
     Use --fix-unused to remove suppressions that are no longer matching any
     findings (based on the unused suppressions report from the last scan).
@@ -683,8 +687,6 @@ def _apply_unused_fixes(
     )
 
 
-
-
 def _get_scanner_names() -> List[tuple]:
     """Return (python_name, display_name) tuples for built-in scanners.
 
@@ -848,8 +850,10 @@ def wizard(
         "  Offline mode skips tool installation. Set the ASH_OFFLINE "
         "environment variable at runtime to activate it."
     )
-    current_offline = (
-        os.environ.get("ASH_OFFLINE", "NO").upper() in ("YES", "TRUE", "1")
+    current_offline = os.environ.get("ASH_OFFLINE", "NO").upper() in (
+        "YES",
+        "TRUE",
+        "1",
     )
     enable_offline = typer.confirm(
         "  Set ASH_OFFLINE=YES in the generated config comments as a reminder?",
@@ -911,7 +915,9 @@ def wizard(
         "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json",
     ]
     if enable_offline:
-        config_strings.append("# Reminder: export ASH_OFFLINE=YES before running ASH for offline mode")
+        config_strings.append(
+            "# Reminder: export ASH_OFFLINE=YES before running ASH for offline mode"
+        )
 
     config_strings.append(
         yaml.dump(
@@ -945,8 +951,6 @@ def wizard(
 
 if __name__ == "__main__":
     config_app()
-
-
 
 
 if __name__ == "__main__":
