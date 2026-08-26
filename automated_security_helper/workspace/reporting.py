@@ -123,6 +123,7 @@ PROJECTS_DIR_NAME = "projects"
 #: somewhere different: to the config, to ``--output-format``, or to the
 #: reporter's own missing dependencies.
 SKIP_DISABLED = "disabled"
+SKIP_UNSATISFIED_DEPENDENCIES = "dependencies-unsatisfied"
 SKIP_NOT_REQUESTED = "not-in-requested-output-formats"
 SKIP_NOT_PYTHON_ONLY = "non-python-dependencies-excluded"
 
@@ -183,18 +184,32 @@ def _report_filename(instance: ReporterPluginBase) -> str:
     return f"ash.{extension}" if extension else "ash.txt"
 
 
-def _is_enabled(instance: ReporterPluginBase) -> bool:
+def _disabled_by_config(instance: ReporterPluginBase) -> bool:
+    """Whether the operator turned this reporter off. Cheap, and never touches IO."""
     config = getattr(instance, "config", None)
-    if config is not None and getattr(config, "enabled", True) is False:
-        return False
+    return config is not None and getattr(config, "enabled", True) is False
+
+
+def _dependencies_unsatisfied(instance: ReporterPluginBase) -> bool:
+    """Whether the reporter's own dependency check refuses.
+
+    Separate from :func:`_disabled_by_config`, and reported as a different reason,
+    because the two send the operator somewhere different: the config, versus
+    credentials or an install. Conflating them told an operator with no AWS
+    credentials that they had disabled the reporter.
+
+    Also separate because this one performs IO. ``SecurityHubReporter`` and
+    ``BedrockSummaryReporter`` call AWS inside it, so it must not be on any path
+    that runs before a scan -- see :func:`unsupported_reporter_names`.
+    """
     try:
-        return bool(instance.validate_plugin_dependencies())
+        return not instance.validate_plugin_dependencies()
     except Exception as exc:  # noqa: BLE001 -- a broken check must not stop the step
         ASH_LOGGER.warning(
             f"Reporter {_reporter_name(instance)} raised while validating its "
             f"dependencies and is treated as unavailable: {exc}"
         )
-        return False
+        return True
 
 
 def _matches_requested_formats(
@@ -287,8 +302,15 @@ def _selected_reporters(
     output_formats: Sequence[str],
     python_based_plugins_only: bool,
     reporter_classes: Optional[Sequence[type]],
+    check_dependencies: bool = True,
 ):
-    """Every reporter that would run at workspace level, with its declared behaviour.
+    """Every constructible reporter, with its declared behaviour and skip reason.
+
+    Yields ``(instance, behaviour, skipped)``. ``skipped`` is ``None`` for a
+    reporter that will run, and otherwise one of the ``SKIP_*`` reasons -- yielded
+    rather than filtered out, because the manifest has to account for those too.
+    Filtering them here is what made six of the nineteen shipped reporters absent
+    from a real run's manifest with nothing to say why.
 
     One place, because two callers need exactly the same selection and a
     divergence between them would be invisible: :func:`unsupported_reporter_names`
@@ -320,11 +342,14 @@ def _selected_reporters(
         # the config, not-requested means widen --output-format, and unavailable
         # means the reporter's own dependencies are unsatisfied.
         skipped: Optional[str] = None
-        if not _is_enabled(instance):
+        if _disabled_by_config(instance):
             skipped = SKIP_DISABLED
-        elif python_based_plugins_only and not instance.is_python_only():
-            skipped = SKIP_NOT_PYTHON_ONLY
-        elif not _matches_requested_formats(instance, output_formats):
+        elif check_dependencies and _dependencies_unsatisfied(instance):
+            skipped = SKIP_UNSATISFIED_DEPENDENCIES
+        if skipped is None and python_based_plugins_only:
+            if not instance.is_python_only():
+                skipped = SKIP_NOT_PYTHON_ONLY
+        if skipped is None and not _matches_requested_formats(instance, output_formats):
             skipped = SKIP_NOT_REQUESTED
 
         if skipped is not None:
@@ -376,8 +401,22 @@ def unsupported_reporter_names(
     """Enabled reporters that declare they cannot work in workspace mode.
 
     Answered from declarations and config alone -- no model, no results file, no
-    scan. That is what makes it usable as a pre-flight check, and the reason it is
-    one:
+    scan, and deliberately no dependency validation.
+
+    That last exclusion is not an optimisation. ``SecurityHubReporter`` and
+    ``BedrockSummaryReporter`` call AWS inside
+    ``validate_plugin_dependencies``, so validating here would put live API calls
+    on the path *before every workspace scan* -- latency and log noise on a run
+    they cannot affect, since a reporter whose dependencies are unsatisfied is
+    already skipped by :func:`emit_workspace_reports`. It also means the two
+    answers differ in one narrow case, on purpose: a reporter that is enabled,
+    declares ``UNSUPPORTED``, and has unsatisfied dependencies refuses the run
+    here rather than being quietly skipped later. That is the right direction --
+    the operator's configuration asks for something the format cannot do, and
+    telling them so does not depend on whether an unrelated credential happens to
+    be present.
+
+    Why a pre-flight at all:
 
     An operator who has enabled a reporter that cannot produce a correct artefact
     for a workspace should be told before ASH spends the scan, not after. Failing
@@ -402,6 +441,7 @@ def unsupported_reporter_names(
             output_formats=output_formats,
             python_based_plugins_only=python_based_plugins_only,
             reporter_classes=reporter_classes,
+            check_dependencies=False,
         )
         # ``skipped is None`` is what makes disabling the documented way out
         # actually work: a reporter the operator turned off must not refuse a run

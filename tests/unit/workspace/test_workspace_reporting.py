@@ -547,6 +547,59 @@ class TestUnsupportedReportersAreRefusedBeforeAnythingIsScanned:
             == ()
         )
 
+    def test_the_pre_flight_does_not_validate_reporter_dependencies(
+        self, workspace, tmp_path
+    ):
+        """It runs before every workspace scan, so it must not perform IO.
+
+        ``SecurityHubReporter`` and ``BedrockSummaryReporter`` call AWS inside
+        ``validate_plugin_dependencies``. Validating here would put live API calls
+        on the path before every workspace scan -- and it did, in the first version
+        of this, which is how it was noticed: two unit tests that only read
+        declarations were reaching a real account and logging "Security Hub is not
+        enabled in this region".
+
+        Asserted by counting calls rather than by timing or by patching the network,
+        because zero is the only number that cannot regress quietly.
+        """
+        from automated_security_helper.workspace.reporting import (
+            unsupported_reporter_names,
+        )
+
+        calls: list[str] = []
+
+        class _ValidatingConfig(ReporterPluginConfigBase):
+            name: str = "fake-validating"
+            extension: str = "validating.txt"
+            enabled: bool = True
+
+        class FakeValidatingReporter(ReporterPluginBase[_ValidatingConfig]):
+            workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+
+            def model_post_init(self, context):
+                if self.config is None:
+                    self.config = _ValidatingConfig()
+                return super().model_post_init(context)
+
+            def validate_plugin_dependencies(self) -> bool:
+                calls.append("validated")
+                return True
+
+            def report(self, model) -> str:
+                return "content"
+
+        plan, _, _ = workspace
+        unsupported_reporter_names(
+            plan, tmp_path / "never-written", reporter_classes=[FakeValidatingReporter]
+        )
+        assert calls == []
+
+        # The companion assertion: the report step *does* validate, because it has
+        # to decide whether to invoke. Without this, deleting the check outright
+        # would satisfy the assertion above.
+        _emit(workspace, FakeValidatingReporter)
+        assert calls == ["validated"]
+
     def test_no_shipped_reporter_declares_itself_unsupported(self, workspace, tmp_path):
         """Recorded as a fact about the shipped set, not as an assumption.
 
@@ -670,25 +723,99 @@ class TestTheManifestIsExhaustive:
         declaration and be untested for the four an operator has to opt into --
         which are precisely the four that publish side effects.
 
-        Artefacts are deliberately not asserted. The AWS reporters' dependency
-        checks fail without credentials, so they are recorded as not considered,
-        which is the right outcome and not the subject here.
+        Dependency validation is stubbed to succeed, and that is not merely to
+        avoid flakiness. The four AWS reporters' real ``validate_plugin_dependencies``
+        calls Bedrock and Security Hub, so without the stub this unit test reached a
+        live AWS account -- slow, dependent on ambient credentials, and touching
+        someone's real region to decide the outcome of a test about declarations.
+        Stubbing it also makes the assertion stronger: all nineteen are *considered*,
+        so each one's behaviour is exercised through the branch that acts on it
+        rather than through the skip branch.
+
+        Artefacts are not asserted. The four AWS reporters are all PER_PROJECT, so
+        being considered does not invoke them -- which is what makes stubbing their
+        dependency check safe rather than a way of triggering a publish.
         """
+        from contextlib import ExitStack
+        from unittest.mock import patch
+
         from tests.unit.workspace.test_reporter_workspace_behaviour import (
             EXPECTED_BEHAVIOURS,
             _iter_reporter_classes,
         )
 
         _, output_dir, _ = workspace
-        _emit(workspace, *_iter_reporter_classes().values())
+        classes = list(_iter_reporter_classes().values())
 
-        recorded = {
-            name: entry["behaviour"]
-            for name, entry in _manifest(output_dir)["reporters"].items()
-        }
-        assert recorded == {
+        # Patched on every class that *defines* the method, not on the base.
+        # Patching the base alone silently does nothing for the four AWS
+        # reporters, because each overrides it -- and the first version of this
+        # test did exactly that and went on calling Bedrock and Security Hub for
+        # real while appearing to be isolated.
+        definers = [
+            cls for cls in classes if "validate_plugin_dependencies" in cls.__dict__
+        ]
+        assert definers, "no reporter overrides validate_plugin_dependencies"
+
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(
+                    ReporterPluginBase,
+                    "validate_plugin_dependencies",
+                    return_value=True,
+                )
+            )
+            for cls in definers:
+                stack.enter_context(
+                    patch.object(cls, "validate_plugin_dependencies", return_value=True)
+                )
+            _emit(workspace, *classes)
+
+        entries = _manifest(output_dir)["reporters"]
+        assert {name: entry["behaviour"] for name, entry in entries.items()} == {
             name: behaviour.value for name, behaviour in EXPECTED_BEHAVIOURS.items()
         }
+        not_considered = sorted(
+            name for name, entry in entries.items() if not entry["considered"]
+        )
+        # yaml and spdx ship disabled; nothing else should be turned away once
+        # dependencies are satisfied.
+        assert not_considered == ["spdx", "yaml"]
+
+    def test_unsatisfied_dependencies_are_distinguished_from_disabled(self, workspace):
+        """Two reasons, two knobs: credentials or an install, versus the config.
+
+        Collapsing them told an operator with no AWS credentials that they had
+        disabled the reporter, which sends them to edit a file that is already
+        correct. Asserted with a double rather than by letting a real AWS reporter
+        fail its own check, so the test needs no account and cannot flake.
+        """
+        _, output_dir, _ = workspace
+
+        class _UnavailableConfig(ReporterPluginConfigBase):
+            name: str = "fake-unavailable"
+            extension: str = "unavailable.txt"
+            enabled: bool = True
+
+        class FakeUnavailableReporter(ReporterPluginBase[_UnavailableConfig]):
+            workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
+
+            def model_post_init(self, context):
+                if self.config is None:
+                    self.config = _UnavailableConfig()
+                return super().model_post_init(context)
+
+            def validate_plugin_dependencies(self) -> bool:
+                return False
+
+            def report(self, model) -> str:  # pragma: no cover - never invoked
+                raise AssertionError("an unavailable reporter must not be invoked")
+
+        _emit(workspace, FakeUnavailableReporter, FakeDisabledReporter)
+        entries = _manifest(output_dir)["reporters"]
+
+        assert entries["fake-unavailable"]["skipped"] == "dependencies-unsatisfied"
+        assert entries["fake-disabled"]["skipped"] == "disabled"
 
     def test_the_manifest_records_the_workspace_root(self, workspace):
         plan, output_dir, _ = workspace
