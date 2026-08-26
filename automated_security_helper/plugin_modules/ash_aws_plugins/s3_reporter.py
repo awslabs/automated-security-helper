@@ -156,11 +156,26 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         if isinstance(self.config, dict):
             self.config = S3ReporterConfig.model_validate(self.config)
 
-        # Create a unique key for the S3 object
+        # Create a unique key for the S3 object.
+        #
+        # In a workspace, every project's scan runs this reporter with the same
+        # configured key_prefix, and the only other component is a start
+        # timestamp. Projects run concurrently by default, so two of them
+        # starting within the same resolution of that value produced the same
+        # key -- and PutObject overwrites, so one project's report was silently
+        # lost. The project segment closes that.
+        #
+        # Read from metadata rather than from model.workspace: a project inside a
+        # workspace is scanned as a complete single-project run, so its own
+        # model's workspace is None. ASHScanOrchestrator._apply_metadata is what
+        # puts the project there.
         timestamp = model.metadata.summary_stats.start
         file_extension = "json" if self.config.options.file_format == "json" else "yaml"
+        project = getattr(model.metadata, "workspace_project", None)
+        project_segment = f"{project}/" if isinstance(project, str) and project else ""
         s3_key = (
-            f"{self.config.options.key_prefix}ash-report-{timestamp}.{file_extension}"
+            f"{self.config.options.key_prefix}{project_segment}"
+            f"ash-report-{timestamp}.{file_extension}"
         )
 
         # Format the results based on the specified format

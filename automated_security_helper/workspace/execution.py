@@ -546,7 +546,15 @@ def _scan_one_project(
             python_based_plugins_only=settings.python_based_plugins_only,
             ignore_suppressions=settings.ignore_suppressions,
             ash_plugin_modules=list(settings.ash_plugin_modules),
-            metadata=None,
+            # The project's own identity, so that its per-project reports can say
+            # which project they describe. Ten of the nineteen reporters are ruled
+            # PER_PROJECT, and that ruling is only honest if the N artefacts are
+            # distinguishable -- which for the four that publish to a shared
+            # destination they were not. See ASHScanOrchestrator._apply_metadata.
+            metadata={
+                "project_name": project.display_label,
+                "workspace_project": project.key,
+            },
         )
         results = orchestrator.execute_scan(phases=list(settings.phases))
     except ASHConfigValidationError as exc:

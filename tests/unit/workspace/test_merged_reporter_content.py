@@ -318,15 +318,47 @@ class TestYamlCarriesTheWholeWorkspaceShape:
 
 
 class TestMarkdownHasAPerProjectSection:
+    @staticmethod
+    def _row(report: str, key: str) -> list[str]:
+        """The cells of one project's markdown table row."""
+        for line in report.splitlines():
+            if line.startswith(f"| {key} |"):
+                return [cell.strip() for cell in line.strip("|").split("|")]
+        raise AssertionError(f"no table row for project {key!r} in:\n{report}")
+
     def test_every_project_appears_with_its_verdict(self, workspace_model, context):
+        """The verdict, not just the name.
+
+        The fixture is deliberately asymmetric: ``web`` has a finding but zero
+        *actionable* findings, so it passes. A renderer that decided PASSED/FAILED
+        from ``finding_count`` instead of from the project's recorded
+        ``exceeds_threshold`` would call it FAILED -- and would be applying one
+        threshold to projects that are independently configured, disagreeing with
+        the exit code for the same run. Asserting only that "web" appears somewhere
+        misses that entirely, which a mutation run showed it did.
+        """
         from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
             MarkdownReporter,
         )
 
         report = _report(MarkdownReporter, workspace_model, context)
         assert "## Projects" in report
-        for key in PROJECTS:
-            assert f"| {key} |" in report
+        assert self._row(report, "api")[-1] == "FAILED"
+        assert self._row(report, "web")[-1] == "PASSED"
+
+    def test_the_row_carries_the_counts_and_the_threshold(
+        self, workspace_model, context
+    ):
+        """So a reader can see *why* a project failed, not only that it did."""
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
+            MarkdownReporter,
+        )
+
+        report = _report(MarkdownReporter, workspace_model, context)
+        api = self._row(report, "api")
+        assert api[2] == "1"  # findings
+        assert api[3] == "1"  # actionable
+        assert api[4] == "MEDIUM"  # threshold
 
     def test_the_section_survives_compact_mode(self, workspace_model, context):
         """Compact exists for PR comments, which is where this matters most.
