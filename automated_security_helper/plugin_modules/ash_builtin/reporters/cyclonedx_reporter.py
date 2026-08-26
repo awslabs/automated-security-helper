@@ -8,6 +8,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
@@ -25,7 +26,30 @@ class CycloneDXReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class CycloneDXReporter(ReporterPluginBase[CycloneDXReporterConfig]):
-    """Formats results as CycloneDX."""
+    """Formats results as CycloneDX.
+
+    Workspace mode: per project. A workspace of independently versioned
+    deliverables is N SBOMs, not one.
+
+    A CycloneDX document describes the bill of materials of a single subject, and
+    its ``metadata.component`` names that subject. Concatenating N projects'
+    components under one subject produces a document that is true of nothing an
+    operator can ship, sign, or hand to a downstream consumer: two projects
+    pinning different versions of the same library appear as one deliverable
+    depending on both.
+
+    There is also a mechanical consequence worth naming, because it is what makes
+    the ruling safe rather than merely principled. The unified workspace file
+    carries no ``cyclonedx`` at all -- ``WorkspaceAggregator`` omits it for
+    exactly the reason above -- so ``model.cyclonedx.model_dump_json()`` here
+    would raise ``AttributeError`` on ``None``. ``ReportPhase`` catches reporter
+    exceptions and logs them, so at workspace level this would have produced no
+    artefact and no clear reason, which is the silence this contract exists to
+    prevent. Declaring per project means the reporter is never invoked with that
+    model, so the crash is unreachable rather than merely unlikely.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
 
     def model_post_init(self, context):
         if self.config is None:

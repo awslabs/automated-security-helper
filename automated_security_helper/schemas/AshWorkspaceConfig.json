@@ -1,0 +1,189 @@
+{
+  "$defs": {
+    "AshSuppression": {
+      "description": "Represents a finding suppression rule.",
+      "properties": {
+        "expiration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Expiration date (YYYY-MM-DD)",
+          "title": "Expiration"
+        },
+        "line_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Ending line number",
+          "title": "Line End"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Starting line number",
+          "title": "Line Start"
+        },
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
+        },
+        "rule_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Rule ID to suppress",
+          "title": "Rule Id"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "AshSuppression",
+      "type": "object"
+    },
+    "IgnorePathWithReason": {
+      "description": "Represents a path exclusion entry.",
+      "properties": {
+        "expiration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Expiration date (YYYY-MM-DD)",
+          "title": "Expiration"
+        },
+        "path": {
+          "description": "Path or pattern to exclude",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Reason for exclusion",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "IgnorePathWithReason",
+      "type": "object"
+    },
+    "WorkspacePolicyConfig": {
+      "additionalProperties": false,
+      "description": "Workspace-wide policy: the ``workspace`` block of the policy file.\n\nEvery field here can change a project's verdict, which is why they live in\ntheir own file rather than beside the execution knobs in\n``AshConfig.workspace``.",
+      "properties": {
+        "additional_scanners": {
+          "default": [],
+          "description": "Scanners every project must run, in addition to whatever it enables itself. Additive only -- this cannot disable a scanner a project enabled. A scanner the project already declares runs under the project's own config and its findings are the project's; a scanner added only by this policy runs with default config and its findings are tagged 'origin: workspace-policy' and reported separately.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Additional Scanners",
+          "type": "array"
+        },
+        "ignore_paths": {
+          "default": [],
+          "description": "Paths excluded across the workspace. Workspace-relative and pushed down per project, exactly as 'suppressions' are.",
+          "items": {
+            "$ref": "#/$defs/IgnorePathWithReason"
+          },
+          "title": "Ignore Paths",
+          "type": "array"
+        },
+        "max_severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The LOOSEST severity threshold any project may use. A project configuring something stricter keeps it; a project configuring something looser is tightened to this value. 'max' refers to permissiveness, not to severity: the strictness order is ALL < LOW < MEDIUM < HIGH < CRITICAL, so raising this value LOOSENS the ceiling. Unset means no ceiling. Case-sensitive.",
+          "title": "Max Severity Threshold"
+        },
+        "policy_scanners_gate": {
+          "default": false,
+          "description": "Whether findings from policy-added scanners affect a project's exit code. Default false: a workspace that adds a scanner to gather visibility should not thereby fail projects that never opted into it, and turning it on is the operator saying they have triaged what the new scanner reports.",
+          "title": "Policy Scanners Gate",
+          "type": "boolean"
+        },
+        "suppressions": {
+          "default": [],
+          "description": "Suppressions that apply across the workspace. Paths are WORKSPACE-relative (e.g. 'api/src/legacy.py') and are rewritten into each project's own coordinates before being applied. A suppression that cannot match inside a project is not passed to it; one that cannot be rewritten soundly refuses the workspace.",
+          "items": {
+            "$ref": "#/$defs/AshSuppression"
+          },
+          "title": "Suppressions",
+          "type": "array"
+        }
+      },
+      "title": "WorkspacePolicyConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The whole workspace policy file.\n\nA thin wrapper over one block, kept as its own model so the file has a\nversionable top-level schema and so ``workspace:`` reads the same here as it\ndoes in a project config.",
+  "properties": {
+    "workspace": {
+      "$ref": "#/$defs/WorkspacePolicyConfig",
+      "default": {
+        "additional_scanners": [],
+        "ignore_paths": [],
+        "max_severity_threshold": null,
+        "policy_scanners_gate": false,
+        "suppressions": []
+      },
+      "description": "Workspace-wide policy. Distinct from AshConfig.workspace, which holds execution scheduling knobs in a project config; nothing here can be set from a project's own file."
+    }
+  },
+  "title": "AshWorkspaceConfig",
+  "type": "object"
+}

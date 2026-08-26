@@ -12,7 +12,9 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.models.core import AshSuppression
 
@@ -36,7 +38,33 @@ class UnusedSuppressionsReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterConfig]):
-    """Identifies and reports suppressions that were not applied to any findings."""
+    """Identifies and reports suppressions that were not applied to any findings.
+
+    Workspace mode: ``WORKSPACE_SCOPED``. The per-project artefacts under
+    ``projects/<key>/reports/`` answer the per-project question, and the
+    workspace-level artefact reports only on *workspace-level* suppressions.
+
+    Not ``MERGED``, and the distinction is the difference between an incomplete
+    report and a false one. This reporter subtracts ``model.used_suppressions``
+    from the suppressions its own config declares. The unified workspace file
+    carries ``used_suppressions: []`` -- suppression matching happened inside each
+    project's own scan, against that project's own config -- so a merged run
+    would find nothing used and declare *every* suppression unused. An operator
+    acting on that would delete suppressions that are load-bearing.
+
+    Not ``PER_PROJECT`` either, because a workspace-level suppression that matched
+    nothing in any project is a real thing to report and no per-project file can
+    see it: each project only knows its own config.
+
+    In this phase there are no workspace-level suppressions -- workspace-level
+    config arrives in Phase 3 -- so the workspace artefact states a count of zero
+    and says where the per-project reports are. It says that explicitly rather
+    than being absent, because "no file" and "no findings" are the two readings a
+    security report must never leave ambiguous, and this is the slot Phase 3 fills
+    without changing the contract.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.WORKSPACE_SCOPED
 
     def model_post_init(self, context):
         if self.config is None:
@@ -76,6 +104,32 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                 self._suppression_to_dict(s) for s in unused_suppressions
             ],
         }
+
+        # In workspace mode the scope has to be stated, because the numbers above
+        # are honest only about workspace-level suppressions. Read as a merge,
+        # "unused_suppressions: 0" would mean "nothing unused anywhere in the
+        # workspace"; what it means is "no workspace-level suppression went
+        # unused", and the per-project answers live in the per-project reports.
+        # Leaving that implicit would let an operator conclude their per-project
+        # suppressions are all in use on the strength of no evidence at all.
+        if is_workspace_scan(model):
+            workspace = model.workspace
+            report_data["scope"] = "workspace"
+            report_data["scope_detail"] = (
+                "Counts cover workspace-level suppressions only. Each project's "
+                "own suppressions were matched during that project's scan, "
+                "against that project's own config, and are reported under "
+                "per_project_reports."
+            )
+            report_data["per_project_reports"] = [
+                {
+                    "project": project.project,
+                    "path": (
+                        f"{project.output_path}/reports/ash.{self.config.extension}"
+                    ),
+                }
+                for project in workspace.projects
+            ]
 
         # Check if we should generate both formats
         output_format = getattr(self.config.options, "output_format", "both")

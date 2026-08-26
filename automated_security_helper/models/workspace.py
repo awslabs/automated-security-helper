@@ -143,7 +143,7 @@ skipped, and does affect the status.
 from __future__ import annotations
 
 from enum import Enum, IntEnum
-from typing import Annotated, Dict, Iterable, List, Literal, Optional
+from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -354,6 +354,24 @@ class WorkspaceProjectResult(BaseModel):
             description="Final status per scanner name, for this project alone.",
         ),
     ]
+    ceiling_unreachable_findings: Annotated[
+        Dict[str, int],
+        Field(
+            default_factory=dict,
+            description=(
+                "Per scanner, how many of this project's findings the workspace "
+                "severity ceiling could not affect, because they carry no "
+                "properties.issue_severity and are therefore judged from the "
+                "SARIF level -- where `error` is read as critical and so is "
+                "actionable at every threshold. Populated only when the ceiling "
+                "actually tightened this project AND some of its findings were "
+                "beyond that tightening's reach, so an empty mapping means the "
+                "ceiling did what it says. An observation about these findings, "
+                "not a claim about the scanner: it is recomputed every scan, so "
+                "it stops appearing if a scanner starts emitting severity."
+            ),
+        ),
+    ]
     skip_reason: Annotated[
         Optional[SkippedProjectReason],
         Field(None, description="Why the project was skipped, when it was."),
@@ -480,6 +498,25 @@ class WorkspaceResults(BaseModel):
         """
         entries = (project.as_skipped_project() for project in self.projects)
         return [entry for entry in entries if entry is not None]
+
+
+def is_workspace_scan(model: Any) -> bool:
+    """Whether *model* is the result of a workspace scan rather than one directory.
+
+    The single discriminator every reporter uses to decide whether to emit
+    workspace attribution. ``model.workspace`` is ``None`` for a single-directory
+    scan, which is the contract ``AshAggregatedResults.workspace`` documents.
+
+    Checked with ``isinstance`` rather than ``is not None``, and that is not
+    defensiveness. Reporters are widely tested against ``MagicMock`` models, where
+    ``getattr(model, "workspace")`` returns a truthy ``Mock`` -- so a truthiness
+    test silently reads every mocked single-directory scan as a workspace one. The
+    observable symptom was a ``KeyError`` on a column that had been added to a
+    header but not to the rows, which is a loud failure; the same weakness in a
+    reporter that tolerates a missing key would instead have added an empty
+    project column to real single-directory output and gone unnoticed.
+    """
+    return isinstance(getattr(model, "workspace", None), WorkspaceResults)
 
 
 def workspace_exit_code(
