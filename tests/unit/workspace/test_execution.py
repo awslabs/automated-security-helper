@@ -280,6 +280,73 @@ class TestPerProjectThresholds:
         verdicts = {p.project: p.exceeds_threshold for p in outcome.payload.projects}
         assert verdicts == {"strict": True, "lax": False}
 
+    def test_a_workspace_ceiling_makes_a_lax_project_fail(self, tmp_path):
+        """The ceiling has to change the VERDICT, not just the plan.
+
+        api declares CRITICAL, so on its own a warning-level finding is not
+        actionable -- test_a_project_below_its_own_threshold_passes above is that
+        exact case. Under a MEDIUM ceiling the same finding must fail. If
+        execution read severity_threshold instead of the effective value, this
+        test would see exit 0 and the ceiling would be decorative.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="warning")}
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.actionable_finding_count == 1
+        assert entry.exceeds_threshold is True
+        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        # The reported threshold is the one actually enforced, or a reader
+        # comparing the finding against it would conclude ASH had miscounted.
+        assert entry.severity_threshold == "MEDIUM"
+
+    def test_a_ceiling_does_not_loosen_a_stricter_project(self, tmp_path):
+        """The other direction, since a ceiling that replaced would pass here.
+
+        strict declares LOW and the ceiling is CRITICAL. stricter_of keeps LOW,
+        so the warning stays actionable. An implementation that let the ceiling
+        win would report exit 0 for a project the operator set to LOW.
+        """
+        _, plan = _make_workspace(tmp_path, ("strict", "LOW"))
+        project = plan.projects[0]
+        # What resolution produces for a project already stricter than the
+        # ceiling: unchanged, and not flagged as tightened.
+        project.effective_severity_threshold = "LOW"
+        project.threshold_tightened_by_policy = False
+        FakeOrchestrator.behaviour["strict"] = {"sarif": _sarif(level="warning")}
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.actionable_finding_count == 1
+        assert entry.exceeds_threshold is True
+        assert entry.severity_threshold == "LOW"
+
+    def test_a_plan_with_no_effective_threshold_falls_back_to_the_projects_own(
+        self, tmp_path
+    ):
+        """Plans built outside resolve_workspace never set the effective value.
+
+        plan.py's docstring says a hand-built plan can hold states resolution
+        would not produce, and the executor is given plans by tests and by
+        callers that predate this field. Falling back keeps those judged by their
+        own threshold rather than by None, which would turn the gate off.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "LOW"))
+        assert plan.projects[0].effective_severity_threshold is None
+
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="warning")}
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.actionable_finding_count == 1
+        assert entry.severity_threshold == "LOW"
+
     def test_the_aggregate_exit_code_reflects_the_strictest_failing_project(
         self, tmp_path
     ):

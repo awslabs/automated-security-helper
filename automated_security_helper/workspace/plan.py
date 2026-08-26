@@ -279,6 +279,27 @@ class ProjectPlan(BaseModel):
         Field(None, description="Human-readable explanation of the skip."),
     ] = None
 
+    @property
+    def gate_threshold(self) -> Optional[str]:
+        """The threshold this project's verdict must actually be judged against.
+
+        One accessor rather than each call site choosing, because a call site
+        that reads ``severity_threshold`` directly silently ignores the workspace
+        ceiling -- the ceiling would appear in the plan and in ``--dry-run`` while
+        changing no verdict, which is worse than not having it.
+
+        Falls back to ``severity_threshold`` when the effective value was never
+        computed. That happens for plans not built by ``resolve_workspace`` --
+        which this module's docstring says can exist -- and for skipped projects.
+        The fallback is not a silent default: when policy HAS been applied the
+        effective value is always set, equal to the declared one where the
+        ceiling did not bite. Returning ``None`` instead would turn the gate off
+        for those plans, which is the one failure direction that must not happen.
+        """
+        if self.effective_severity_threshold is not None:
+            return self.effective_severity_threshold
+        return self.severity_threshold
+
     def as_skipped_project(self) -> Optional[SkippedProject]:
         """This project as a ``skipped_projects`` payload entry, or None.
 
