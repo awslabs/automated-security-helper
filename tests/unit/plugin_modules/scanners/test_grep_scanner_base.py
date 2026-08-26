@@ -126,9 +126,7 @@ class TestOfflineCacheDiscovery:
         rule_file.write_text("rules: []")
         monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(tmp_path))
 
-        config = SemgrepScannerConfig(
-            options=SemgrepScannerConfigOptions(offline=True)
-        )
+        config = SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=True))
         scanner = SemgrepScanner(context=test_plugin_context, config=config)
 
         pairs = _extra_arg_pairs(scanner)

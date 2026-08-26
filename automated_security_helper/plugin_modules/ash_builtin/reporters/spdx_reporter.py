@@ -42,4 +42,9 @@ class SpdxReporter(ReporterPluginBase[SPDXReporterConfig]):
             "not yet implemented. The returned YAML is a raw model dump, not a valid "
             "SPDX document."
         )
-        return yaml.dump(model.model_dump(by_alias=True), indent=2)
+        # mode="json" for the same reason as yaml_reporter: without it the enums
+        # in the model become !!python/object/apply: tags that yaml.safe_load
+        # refuses. Fixed here as well rather than only there, because it is the
+        # identical line and leaving one of the two emitting unloadable YAML is
+        # harder to explain than fixing both.
+        return yaml.dump(model.model_dump(by_alias=True, mode="json"), indent=2)

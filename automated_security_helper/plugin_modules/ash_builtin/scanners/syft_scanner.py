@@ -99,9 +99,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     "SYFT_LOG_QUIET": "true",
                 }
             )
-            ASH_LOGGER.info(
-                "Running Syft in offline mode - update checks disabled"
-            )
+            ASH_LOGGER.info("Running Syft in offline mode - update checks disabled")
 
         super().model_post_init(context)
 
@@ -215,7 +213,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 target_type=target_type,
             )
             return False
-
 
         if not self.dependencies_satisfied:
             self._post_scan(

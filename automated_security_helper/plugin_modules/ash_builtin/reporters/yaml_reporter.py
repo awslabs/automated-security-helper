@@ -35,6 +35,24 @@ class YamlReporter(ReporterPluginBase[YAMLReporterConfig]):
         return super().model_post_init(context)
 
     def report(self, model: "AshAggregatedResults") -> str:
-        """Format ASH model as YAML string."""
+        """Format ASH model as YAML string.
 
-        return yaml.dump(model.model_dump(by_alias=True), indent=2)
+        ``mode="json"`` is what makes the output loadable at all, and its absence
+        was a live defect rather than a workspace-mode concern.
+
+        Without it ``model_dump`` leaves enum *objects* in the tree, and
+        ``yaml.dump`` serialises those as ``!!python/object/apply:`` tags. Any
+        real scan has at least one -- every ``scanner_results`` entry carries a
+        ``ScannerStatus`` -- so ``ash.yaml`` could not be read by
+        ``yaml.safe_load`` and could only be parsed by a loader that will
+        construct arbitrary Python objects from the file. Workspace mode is how
+        this surfaced (it adds ``ProjectRunStatus`` and ``SkippedProjectReason``),
+        but the fix applies to every scan, and it is what makes the workspace
+        attribution this reporter carries actually reachable by a consumer.
+
+        Existing consumers are unaffected in the direction that matters: a status
+        that was an unloadable tag becomes the plain string ``"FAILED"``, which a
+        loader using ``yaml.load`` parses just as happily.
+        """
+
+        return yaml.dump(model.model_dump(by_alias=True, mode="json"), indent=2)

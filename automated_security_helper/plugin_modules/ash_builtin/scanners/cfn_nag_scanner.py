@@ -98,7 +98,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — CfnNag overrides scan() directly; this is unreachable."""
-        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
 
     def scan(
         self,
@@ -172,7 +174,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 target_type=target_type,
             )
             return False
-
 
         if not self.dependencies_satisfied:
             self._post_scan(
@@ -284,9 +285,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         )
                         failed_files.append((cfn_file, "empty stdout"))
                         continue
-                    file_sarif = SarifReport.model_validate_json(
-                        json_data=stdout
-                    )
+                    file_sarif = SarifReport.model_validate_json(json_data=stdout)
                     if sarif_report is None and file_sarif is not None:
                         sarif_report = file_sarif
                     elif file_sarif is not None:
