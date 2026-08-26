@@ -36,6 +36,9 @@ from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
 )
+from automated_security_helper.core.resource_management.scan_tracking import (
+    summarize_scanner_statuses,
+)
 from automated_security_helper.core.resource_management.result_filters import (
     filter_summary,
     filter_minimal,
@@ -221,6 +224,12 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         - status: Current status (running, completed, failed, cancelled)
         - progress_percentage: Estimated completion percentage
         - message: Human-readable status message
+        - scanner_statuses: Per-scanner status for every scanner ASH considered,
+          including ones that never ran. Empty until the scan finishes.
+        - skipped_scanners: The subset that did not run, each with a `reason` of
+          `missing_dependencies`, `excluded_by_configuration` or `skipped`. Use
+          this to tell "scanned, found nothing" from "never ran"; a zero finding
+          count alone cannot distinguish the two.
     """
     try:
         await ctx.info(f"Getting progress for scan: {scan_id}")
@@ -289,6 +298,16 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
         progress_info["scanners"] = scanner_results
         progress_info["severity_counts"] = severity_counts
+
+        # `scanners` above is built by globbing result files, so a scanner that
+        # never ran leaves nothing behind and silently disappears from it. That
+        # made a scanner skipped for missing dependencies indistinguishable from
+        # one that ran clean. These two keys come from scanner_results in the
+        # aggregated output, which records the real status for every scanner ASH
+        # considered. Empty while the scan is still running.
+        status_summary = summarize_scanner_statuses(output_dir)
+        progress_info["scanner_statuses"] = status_summary["scanner_statuses"]
+        progress_info["skipped_scanners"] = status_summary["skipped_scanners"]
 
         return progress_info
     except Exception as e:
@@ -404,9 +423,7 @@ async def get_scan_summary(
     Args:
         output_dir: Path to the scan output directory (absolute path recommended)
     """
-    summary = await get_scan_results(
-        ctx, output_dir=output_dir, filter_level="summary"
-    )
+    summary = await get_scan_results(ctx, output_dir=output_dir, filter_level="summary")
     # Tag the response with the entry point that produced it. get_scan_results
     # serves several filter levels, so callers use this to tell a summary obtained
     # via get_scan_summary from one obtained by calling get_scan_results directly.
@@ -667,7 +684,13 @@ def list_scanners() -> list:
         return mcp_list_scanners()
     except Exception as e:
         logger.exception(f"Error in list_scanners: {str(e)}")
-        return [{"success": False, "error": f"Error listing scanners: {str(e)}", "error_type": type(e).__name__}]
+        return [
+            {
+                "success": False,
+                "error": f"Error listing scanners: {str(e)}",
+                "error_type": type(e).__name__,
+            }
+        ]
 
 
 @mcp.tool()
@@ -710,7 +733,9 @@ def validate_config(
         Dict with valid (bool) and errors (list of {field, message, type}).
     """
     try:
-        return mcp_validate_config(config_content=config_content, config_path=config_path)
+        return mcp_validate_config(
+            config_content=config_content, config_path=config_path
+        )
     except Exception as e:
         logger.exception(f"Error in validate_config: {str(e)}")
         return {
@@ -741,6 +766,7 @@ def _read_ash_suppression_schema() -> str:
     """Return the AshSuppression JSON schema as a string."""
     from automated_security_helper.models.core import AshSuppression
     import json as _json
+
     return _json.dumps(AshSuppression.model_json_schema(), indent=2)
 
 
