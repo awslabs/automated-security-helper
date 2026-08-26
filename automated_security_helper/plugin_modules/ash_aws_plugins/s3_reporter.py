@@ -104,14 +104,54 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     add an N+1st object holding the lossy ``scanner_results`` rollup and an
     ``ash_config`` belonging to no project.
 
-    The object key needs care for this ruling to actually hold. It is derived from
-    ``model.metadata.summary_stats.start``, and all N projects share one
-    configured ``key_prefix``, so per-project uploads collide with each other
-    whenever two projects start within the same resolution of that timestamp --
-    silently, because ``PutObject`` overwrites. Under a workspace this is not a
-    remote possibility: projects run concurrently by default. So the key carries
-    the project when the scan is part of a workspace. Without that, "per project,
-    one artefact each" would be false in exactly the case this feature exists for.
+    The object key needs care for this ruling to hold, and the reason is worse
+    than a race.
+
+    The key is ``f"{key_prefix}ash-report-{timestamp}.{ext}"`` with ``timestamp``
+    taken from ``model.metadata.summary_stats.start``. That field is **not set
+    yet** when a reporter runs: ``ScanExecutionEngine.execute_phases`` assigns it
+    in a ``finally`` block (``execution_engine.py`` around line 547) that runs
+    *after* ``ReportPhase`` (around line 492). So every reporter observes ``None``,
+    and the key every scan computes is literally ``ash-report-None.json``.
+
+    Verified rather than reasoned about, by probing ``ReportPhase._execute_phase``
+    during a real scan: ``start`` is ``None`` there and
+    ``'2026-08-26T00:38:09+00:00'`` once the scan returns -- a second-granular
+    string, so even if it were available in time it would not separate concurrent
+    projects reliably.
+
+    Consequences, in order of how much they matter here:
+
+    * All N projects in a workspace compute the same key and overwrite each other.
+      ``PutObject`` overwrites silently, so N-1 projects' reports vanish with no
+      message -- a false negative with extra steps, in the feature this PR
+      completes. The project segment below closes this, which is the part this
+      ruling owns.
+    * Every *run* of a single-directory scan also overwrites the previous one,
+      because the key is a constant. That is a pre-existing defect orthogonal to
+      workspace mode, and it is deliberately **not** fixed here.
+
+      Not deferred for convenience: both behaviours are defensible and either
+      choice breaks someone. A constant key loses every run but the last. A
+      varying key breaks anyone treating that object as a stable "latest report"
+      pointer, and accumulates objects indefinitely for anyone without a
+      lifecycle policy. That is a product decision about a customer-facing AWS
+      integration, and it belongs to whoever owns that integration rather than to
+      a workspace-mode change.
+
+      Also deliberately not fixed by making the timestamp available earlier:
+      ``summary_stats.start`` is read by more than this reporter, so moving when
+      it is assigned has a much wider blast radius than the key does.
+
+      ``tests/unit/workspace/test_project_attribution.py::TestS3KeysCannotCollideAcrossProjects::test_the_start_timestamp_is_unset_when_a_reporter_runs``
+      pins the premise, so if the timestamp ever does become available the
+      assumption fails loudly rather than silently producing a different key.
+
+    The project is read from ``metadata.workspace_project`` rather than from
+    ``model.workspace``, because a project inside a workspace is scanned as a
+    complete single-project run and its own model's ``workspace`` is ``None`` --
+    a project does not know it is in a workspace.
+    ``ASHScanOrchestrator._apply_metadata`` is what puts the project there.
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
@@ -156,19 +196,14 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         if isinstance(self.config, dict):
             self.config = S3ReporterConfig.model_validate(self.config)
 
-        # Create a unique key for the S3 object.
+        # Create a key for the S3 object.
         #
-        # In a workspace, every project's scan runs this reporter with the same
-        # configured key_prefix, and the only other component is a start
-        # timestamp. Projects run concurrently by default, so two of them
-        # starting within the same resolution of that value produced the same
-        # key -- and PutObject overwrites, so one project's report was silently
-        # lost. The project segment closes that.
-        #
-        # Read from metadata rather than from model.workspace: a project inside a
-        # workspace is scanned as a complete single-project run, so its own
-        # model's workspace is None. ASHScanOrchestrator._apply_metadata is what
-        # puts the project there.
+        # `timestamp` is None here in every real scan -- summary_stats.start is
+        # assigned after the report phase, not before it -- so without the
+        # project segment every project in a workspace computes the identical key
+        # and PutObject silently overwrites all but the last. See the class
+        # docstring for the verification and for why the single-project key is
+        # left exactly as it is.
         timestamp = model.metadata.summary_stats.start
         file_extension = "json" if self.config.options.file_format == "json" else "yaml"
         project = getattr(model.metadata, "workspace_project", None)

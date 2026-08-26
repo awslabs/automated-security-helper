@@ -13,9 +13,10 @@ path -- ``projects/api/reports/ash.ghas.sarif`` versus
 they were not:
 
 * ``s3`` derives its object key from ``metadata.summary_stats.start`` with one
-  shared ``key_prefix``, so two projects starting in the same instant overwrote
-  each other. Under a workspace that is the default case, not a remote one --
-  projects run concurrently.
+  shared ``key_prefix`` -- and that field is ``None`` at report time, because the
+  engine assigns it in a ``finally`` block that runs after ``ReportPhase``. So the
+  key was the constant ``ash-report-None.json`` and *every* project overwrote
+  every other. Not a race that concurrency makes likely: a certainty.
 * ``cloudwatch_logs`` published N events to one log stream with nothing in the
   payload naming the project.
 * ``security_hub`` and ``bedrock_summary`` had the same gap in their payloads.
@@ -247,14 +248,38 @@ class TestS3KeysCannotCollideAcrossProjects:
                 reporter.report(model)
         return captured["Key"]
 
-    def test_two_projects_with_the_same_start_time_get_different_keys(self, tmp_path):
+    def test_the_start_timestamp_is_unset_when_a_reporter_runs(self, tmp_path):
+        """The premise the collision rests on, pinned rather than assumed.
+
+        ``ScanExecutionEngine.execute_phases`` assigns
+        ``metadata.summary_stats.start`` in a ``finally`` block that runs *after*
+        ``ReportPhase``, so every reporter observes ``None`` and the key is the
+        constant ``ash-report-None.json``. Verified against a real scan by probing
+        ``ReportPhase._execute_phase``; asserted here on the default so that a
+        future change which sets it earlier shows up as a failure of this
+        assumption rather than as a silently different key.
+        """
+        from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+            S3ReporterConfigOptions,
+        )
+
+        prefix = S3ReporterConfigOptions.model_fields["key_prefix"].default
+        model = AshAggregatedResults()
+        assert model.metadata.summary_stats.start is None
+        assert (
+            self._key(tmp_path, None, model.metadata.summary_stats.start)
+            == f"{prefix}ash-report-None.json"
+        )
+
+    def test_every_project_gets_a_different_key(self, tmp_path):
         """The collision, reproduced and then closed.
 
-        Identical timestamps on purpose: concurrent projects in one workspace can
-        and do start within the same resolution of this value, and before the
-        project was in the key that made one report silently replace the other.
+        The timestamp is ``None`` for both, which is what a real scan produces --
+        so this is not a same-instant race but the certainty that every project
+        computed one identical key. ``PutObject`` overwrites, so before the project
+        segment N-1 projects' reports vanished with no message.
         """
-        shared = "2026-08-25T00:00:00+00:00"
+        shared = None
         api = self._key(tmp_path, "api", shared)
         web = self._key(tmp_path, "web", shared)
 
@@ -269,6 +294,11 @@ class TestS3KeysCannotCollideAcrossProjects:
         written out, so this asserts "nothing was inserted" rather than pinning
         the prefix's current value -- which is ``ash-reports/`` and is not this
         test's business.
+
+        A non-``None`` timestamp is used here and in the test below because these
+        two are about *where the project segment goes*, and a placeholder value
+        makes that readable. A real scan yields ``None``; that is pinned by
+        ``test_the_start_timestamp_is_unset_when_a_reporter_runs``.
         """
         from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
             S3ReporterConfigOptions,

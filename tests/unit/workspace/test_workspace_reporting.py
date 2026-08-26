@@ -547,6 +547,80 @@ class TestUnsupportedReportersAreRefusedBeforeAnythingIsScanned:
             == ()
         )
 
+    def test_the_pre_flight_runs_after_the_plugin_registry_is_prewarmed(self, tmp_path):
+        """Ordering is load-bearing, and violating it is silent.
+
+        ``unsupported_reporter_names`` reads the reporter set from the plugin
+        registry. Called before ``prewarm_plugin_registry``, it resolves a cold
+        registry -- and ``AshPluginManager.plugin_modules`` memoises into
+        ``_resolved_plugins``, so whatever happened to be resolvable at that
+        instant becomes the set prewarm then hands to every project. That is
+        exactly the defect prewarm exists to fix (PR #462), re-entered from the
+        other end, and its symptom is a project losing a scanner rather than an
+        error.
+
+        Asserted by observing call order rather than by reading the source, in the
+        same shape as
+        ``test_plugin_registry_scoping.py::test_execute_workspace_prewarms_before_starting_the_pool``,
+        so a refactor that reopens the hole fails here instead of quietly.
+
+        The registry-scoping tests cannot cover this: they all use
+        ``phases=("scan",)``, so the report phase -- and therefore the pre-flight
+        -- is outside their reach entirely. ``phases`` here includes ``report``
+        for that reason.
+        """
+        import automated_security_helper.workspace.execution as execution
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+        order: list[str] = []
+        real_prewarm = execution.prewarm_plugin_registry
+        real_unsupported = execution.unsupported_reporter_names
+
+        def recording_prewarm(plan, settings):
+            order.append("prewarm")
+            return real_prewarm(plan, settings)
+
+        def recording_unsupported(*args, **kwargs):
+            order.append("preflight")
+            return real_unsupported(*args, **kwargs)
+
+        class _Orchestrator:
+            def __init__(self, **kwargs):
+                order.append(f"engine:{Path(kwargs['source_dir']).name}")
+
+            @classmethod
+            def create(cls, **kwargs):
+                return cls(**kwargs)
+
+            def execute_scan(self, phases=None):
+                return AshAggregatedResults()
+
+        root = tmp_path / "ws"
+        for key in ("api", "web"):
+            (root / key).mkdir(parents=True, exist_ok=True)
+        plan = _plan(root, "api", "web")
+        settings = execution.ProjectScanSettings(
+            output_dir=tmp_path / "out",
+            phases=("scan", "report"),
+            max_parallel_projects=2,
+        )
+
+        execution.prewarm_plugin_registry = recording_prewarm
+        execution.unsupported_reporter_names = recording_unsupported
+        try:
+            execution.execute_workspace(
+                plan, settings, orchestrator_factory=_Orchestrator.create
+            )
+        finally:
+            execution.prewarm_plugin_registry = real_prewarm
+            execution.unsupported_reporter_names = real_unsupported
+
+        assert order[0] == "prewarm", order
+        assert order[1] == "preflight", order
+        # And both before any project's engine is built, so neither can be
+        # influenced by a project having already touched the registry.
+        assert sorted(order[2:]) == ["engine:api", "engine:web"], order
+
     def test_the_pre_flight_does_not_validate_reporter_dependencies(
         self, workspace, tmp_path
     ):
