@@ -476,6 +476,25 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             "or override scan() directly."
         )
 
+    def _effective_scan_timeout(self) -> float | None:
+        """Seconds to allow this scanner's tool, or None to leave it unbounded.
+
+        Read defensively rather than as self.config.options.scan_timeout. A
+        third-party scanner may define options that predate this field, or set
+        config to None entirely, and a scan must not fail with AttributeError
+        because of a timeout lookup. An absent option means unbounded, which is
+        the behaviour those scanners already had.
+        """
+        options = getattr(self.config, "options", None)
+        timeout = getattr(options, "scan_timeout", None)
+        if timeout is None:
+            return None
+        try:
+            timeout = float(timeout)
+        except (TypeError, ValueError):
+            return None
+        return timeout if timeout > 0 else None
+
     def scan(
         self,
         target: "Path",
@@ -527,13 +546,37 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 global_ignore_paths=global_ignore_paths,
             )
 
-            self._run_subprocess(
+            # Bound the tool invocation. Without this every template-based
+            # scanner could run indefinitely: bandit was reported running past 50
+            # minutes on a project the CLI scanned in 20 seconds. detect-secrets
+            # was the only scanner that timed out cleanly, because it carried its
+            # own copy of this option and enforced it in its own scan override.
+            effective_timeout = self._effective_scan_timeout()
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=results_file.parent,
                 env=subprocess_env,
+                timeout=effective_timeout,
             )
 
             self._post_scan(target=target, target_type=target_type)
+
+            # Say "timed out" rather than "No such file or directory".
+            #
+            # A killed tool never writes its results file, so _read_results_file
+            # below raises FileNotFoundError, which the except clause turns into
+            # "<Scanner> scan failed: [Errno 2] No such file or directory". That
+            # reads as a path bug and sends the reader looking in the wrong place.
+            # The cause is a timeout and the message should say so, along with the
+            # knob to change it.
+            if isinstance(response, dict) and response.get("timed_out"):
+                raise ScannerError(
+                    f"{self.__class__.__name__} timed out after "
+                    f"{effective_timeout}s and was killed, so it produced no "
+                    f"results file. Raise scanners.{getattr(self.config, 'name', '<scanner>')}"
+                    ".options.scan_timeout if this target legitimately needs "
+                    "longer, or set it to null to leave this scanner unbounded."
+                )
 
             raw = self._read_results_file(results_file)
             if raw is None:

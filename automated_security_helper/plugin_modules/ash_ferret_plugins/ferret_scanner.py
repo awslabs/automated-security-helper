@@ -871,6 +871,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 results_dir=target_results_dir,
                 stdout_preference="write",
                 stderr_preference="write",
+                timeout=self._effective_scan_timeout(),
             )
 
             self._post_scan(target=target, target_type=target_type)

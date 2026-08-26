@@ -193,6 +193,7 @@ def run_command_with_output_handling(
     class_name: str = None,
     encoding: Optional[str] = None,
     errors: str = "replace",
+    timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Run a subprocess with the given command and handle output according to preferences.
 
@@ -205,9 +206,14 @@ def run_command_with_output_handling(
         env: Environment variables for the command
         shell: Whether to run the command in a shell
         class_name: Optional class name for log file naming
+        timeout: Seconds to allow the command before it is killed. None leaves it
+            unbounded, which is the previous behaviour and the default so that
+            existing callers are unchanged.
 
     Returns:
-        Dictionary with stdout, stderr, and returncode if requested
+        Dictionary with stdout, stderr, and returncode if requested. A timed-out
+        command returns returncode 124 (matching coreutils ``timeout(1)``) and
+        ``timed_out: True``, so callers can tell it from the generic failure path.
     """
     # Resolve the full path to the executable if possible
     if command and not shell:
@@ -234,6 +240,7 @@ def run_command_with_output_handling(
             env=env,
             encoding=encoding,
             errors=errors,
+            timeout=timeout,
         )
 
         # Use the actual returncode from the result
@@ -280,6 +287,32 @@ def run_command_with_output_handling(
                 response["stderr"] = result.stderr
 
         return response
+
+    except subprocess.TimeoutExpired as e:
+        # subprocess.run has already killed the child by the time this is raised,
+        # which is the point: without the kill the tool would keep running after
+        # ASH stopped waiting for it.
+        #
+        # Handled ahead of the generic branch below so a timeout is reported as
+        # such. That branch returns returncode 1 for everything, which cannot be
+        # told apart from a tool that simply exited 1.
+        error_msg = f"Command timed out after {timeout}s: {cmd_str}"
+        ASH_LOGGER.error(error_msg)
+        partial = {}
+        for stream_name in ("stdout", "stderr"):
+            captured = getattr(e, stream_name, None)
+            if not captured:
+                continue
+            if isinstance(captured, bytes):
+                captured = captured.decode("utf-8", errors="replace")
+            partial[stream_name] = captured
+        return {
+            "error": error_msg,
+            "returncode": 124,
+            "timed_out": True,
+            "stderr": f"{partial.get('stderr', '')}\n{error_msg}".strip(),
+            **{k: v for k, v in partial.items() if k == "stdout"},
+        }
 
     except Exception as e:
         error_msg = f"Error running {cmd_str}: {e}"

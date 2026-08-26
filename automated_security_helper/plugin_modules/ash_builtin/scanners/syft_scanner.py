@@ -263,6 +263,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 command=final_args,
                 results_dir=target_results_dir,
                 env=subprocess_env,
+                timeout=self._effective_scan_timeout(),
             )
 
             self._post_scan(

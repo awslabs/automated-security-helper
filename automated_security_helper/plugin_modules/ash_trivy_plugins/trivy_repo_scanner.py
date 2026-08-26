@@ -278,6 +278,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 command=final_args,
                 results_dir=target_results_dir,
                 env=subprocess_env,
+                timeout=self._effective_scan_timeout(),
             )
 
             # SARIF mode - parse SARIF results

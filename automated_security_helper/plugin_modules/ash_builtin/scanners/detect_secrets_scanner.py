@@ -90,12 +90,13 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
             description="Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
         ),
     ] = DetectSecretsScanSettings()
-    scan_timeout: Annotated[
-        int,
-        Field(
-            description="Maximum time in seconds to allow the detect-secrets scan to run before aborting. Prevents hangs on pathological files.",
-        ),
-    ] = 300
+    # scan_timeout is inherited from ScannerOptionsBase now. The local copy that
+    # used to live here declared `int` with no `ge`, so it shadowed the base field
+    # and gave detect-secrets a different contract from every other scanner:
+    # `scan_timeout: null` -- which the base field's own description documents as
+    # the way to run unbounded -- raised a validation error here only, and
+    # `scan_timeout: 0` was accepted here and rejected elsewhere, then passed
+    # straight to future.result(timeout=0) so every scan timed out instantly.
 
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):

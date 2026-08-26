@@ -383,6 +383,11 @@ class UVToolRunner:
                     class_name=class_name or f"UVTool_{tool_name}",
                     encoding="utf-8" if text else None,
                     errors="replace" if text else None,
+                    # Every scanner passes results_dir, so this is the branch they
+                    # take. Omitting timeout here meant the parameter was honoured
+                    # only on the fallback below, i.e. only for callers that do not
+                    # want output files -- which is none of the scanners.
+                    timeout=timeout,
                 )
 
                 # Create a CompletedProcess-like object from the response

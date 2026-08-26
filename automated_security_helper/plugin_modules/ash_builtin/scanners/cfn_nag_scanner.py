@@ -275,6 +275,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     results_dir=results_file_dir,
                     stdout_preference="both",
                     stderr_preference="both",
+                    timeout=self._effective_scan_timeout(),
                 )
                 try:
                     stdout = proc_resp.get("stdout", "")

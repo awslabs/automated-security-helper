@@ -204,7 +204,12 @@ class TestSyftExcludePathPreservation:
         # command, results_dir and env. env carries the offline-mode overrides
         # (self.extra_env) and is None when there are none, so it must be accepted
         # here or scan() fails with a TypeError before the args can be inspected.
-        def capture_run(command, results_dir, env=None):
+        #
+        # **kwargs rather than an exhaustive parameter list, which is the same
+        # hazard the note above describes: pinning the signature made this test
+        # fail again when the real method gained a `timeout` argument. The double
+        # only inspects command and env, so it should ignore whatever else arrives.
+        def capture_run(command, results_dir, env=None, **kwargs):
             captured_commands.append(command)
             captured_envs.append(env)
 
