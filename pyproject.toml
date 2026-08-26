@@ -29,7 +29,7 @@ dependencies = [
  "cfn-flip>=1.3.0,<2",
  "mcp>=2.0.0,<3",
  "toml>=0.10.2,<1.0.0",
- "python-multipart>=0.0.28,<0.1",
+ "python-multipart>=0.0.32,<0.1",
  # Transitive via pyjwt[crypto] <- mcp[crypto]; pinned to patch GHSA-g6cj-pr64-35w5
  "cryptography>=50.0.0,<51",
  "uvicorn>=0.27,<1",
