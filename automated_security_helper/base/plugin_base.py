@@ -205,7 +205,9 @@ class PluginBase(UVToolMixin, BaseModel):
         # Use abs() so negative codes (e.g. -1 for timeout) aren't
         # silently swallowed by max(0, -1).
         new_code = response.get("returncode", 1)
-        self.exit_code = max(self.exit_code, abs(new_code) if new_code < 0 else new_code)
+        self.exit_code = max(
+            self.exit_code, abs(new_code) if new_code < 0 else new_code
+        )
 
     def _run_subprocess(
         self,
@@ -215,6 +217,7 @@ class PluginBase(UVToolMixin, BaseModel):
         stderr_preference: Literal["return", "write", "both", "none"] = "write",
         cwd: Path | str | None = None,
         env: Dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> Dict[str, str]:
         """Run a subprocess with the given command.
 
@@ -251,6 +254,14 @@ class PluginBase(UVToolMixin, BaseModel):
             if self.use_uv_tool and self.command and len(command) > 0:
                 # Check if the first element of the command is our tool command
                 if command[0] == self.command:
+                    # timeout has to be handed to this path too, not just to the
+                    # direct-execution call below. This branch returns, so a
+                    # timeout passed only below would apply exclusively to
+                    # scanners for which uv is unavailable. bandit, checkov and
+                    # semgrep all set use_uv_tool=True unconditionally and only
+                    # clear it when uv is missing, and ASH ships via uv -- so on a
+                    # normal install the reported bandit hang went through here,
+                    # unbounded, no matter what scan_timeout said.
                     uv_result = self._try_uv_tool_execution(
                         command,
                         working_dir,
@@ -258,6 +269,7 @@ class PluginBase(UVToolMixin, BaseModel):
                         stdout_preference=stdout_preference,
                         stderr_preference=stderr_preference,
                         env=env,
+                        timeout=timeout,
                     )
                     if uv_result is not None:
                         return uv_result
@@ -275,6 +287,7 @@ class PluginBase(UVToolMixin, BaseModel):
                 class_name=self.__class__.__name__,
                 encoding="utf-8",
                 errors="replace",
+                timeout=timeout,
             )
 
             self._process_command_response(response)

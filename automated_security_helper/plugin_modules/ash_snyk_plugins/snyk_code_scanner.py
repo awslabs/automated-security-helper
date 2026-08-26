@@ -211,7 +211,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             )
             return False
 
-
         if not self.dependencies_satisfied:
             self._post_scan(
                 target=target,
@@ -238,6 +237,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
+                timeout=self._effective_scan_timeout(),
             )
 
             # Handle errors executing the scanner. For Snyk, non-zero response indicate the scanner was not

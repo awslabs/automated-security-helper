@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -52,6 +52,21 @@ class ASHScanOrchestrator(BaseModel):
     ] = None
     config: Annotated[
         AshConfig | None, Field(description="The resolved ASH configuration")
+    ] = None
+    resolved_config: Annotated[
+        AshConfig | None,
+        Field(
+            description=(
+                "A configuration the caller has already resolved and merged. When "
+                "set, initialize() adopts it verbatim instead of resolving one of "
+                "its own, and leaves it as the value of `config`. Because "
+                "resolution is skipped entirely, the caller must have applied any "
+                "config_overrides itself before building this config: they cannot "
+                "be supplied alongside it (see _reject_conflicting_config_inputs) "
+                "and nothing here will apply them. A caller that resolves without "
+                "overrides and then passes the result will silently drop them."
+            )
+        ),
     ] = None
 
     strategy: Annotated[
@@ -155,6 +170,42 @@ class ASHScanOrchestrator(BaseModel):
     # Sentinel: True after initialize() has run successfully
     _initialized: bool = False
 
+    @model_validator(mode="after")
+    def _reject_conflicting_config_inputs(self) -> "ASHScanOrchestrator":
+        """Refuse a pre-resolved config alongside the inputs to resolution.
+
+        `resolved_config` says resolution already happened; `config_path` and
+        `config_overrides` say how to perform it. Accepting both would mean
+        honouring one and dropping the other, which is the failure
+        `resolved_config` exists to fix — so refuse instead of picking a winner.
+        Empty values do not conflict: callers routinely pass `... or []`.
+
+        The consequence for the caller is that they own the overrides. Nothing
+        downstream of this point applies them, so a caller that resolves without
+        them and hands the result over drops them silently. The error below says
+        so, because whoever hits it is exactly who needs to know.
+        """
+        if self.resolved_config is None:
+            return self
+        conflicting = [
+            name
+            for name, value in (
+                ("config_path", self.config_path),
+                ("config_overrides", self.config_overrides),
+            )
+            if value
+        ]
+        if conflicting:
+            supplied = " and ".join(conflicting)
+            raise ValueError(
+                f"resolved_config cannot be combined with {supplied}. A resolved "
+                f"config means resolution has already happened, so {supplied} "
+                "would have no effect. Apply them yourself before building the "
+                "config you pass as resolved_config, because nothing else will, "
+                "or drop resolved_config and let the orchestrator resolve."
+            )
+        return self
+
     def model_post_init(self, context):
         """Post initialization — data-only; no filesystem I/O."""
         super().model_post_init(context)
@@ -180,11 +231,17 @@ class ASHScanOrchestrator(BaseModel):
 
         ASH_LOGGER.info(f"Initializing ASH v{get_ash_version()}")
 
-        self.config = resolve_config(
-            config_path=self.config_path,
-            source_dir=self.source_dir,
-            config_overrides=self.config_overrides or [],
-        )
+        if self.resolved_config is not None:
+            ASH_LOGGER.verbose(
+                "Using the configuration supplied by the caller; skipping resolution"
+            )
+            self.config = self.resolved_config
+        else:
+            self.config = resolve_config(
+                config_path=self.config_path,
+                source_dir=self.source_dir,
+                config_overrides=self.config_overrides or [],
+            )
 
         # Surface config resolution warnings prominently
         if self.config._resolution_warnings:

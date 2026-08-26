@@ -134,6 +134,12 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
     Returns:
         The modified AshConfig object
+
+    Raises:
+        ASHConfigValidationError: If an override cannot be parsed or applied, or
+            if the merged configuration does not validate. Failing here is
+            deliberate: silently dropping an override would run the scan with
+            settings the operator did not choose and still report success.
     """
     if not config_overrides:
         return config
@@ -143,25 +149,27 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
     # Apply each override
     for override in config_overrides:
-        try:
-            # Split at the first equals sign
-            key_path, value = override.split("=", 1)
-            _apply_config_override(config_dict, key_path, value)
-        except ValueError:
-            ASH_LOGGER.warning(
-                f"Invalid config override format: {override}. Expected format: key.path=value"
+        key_path, separator, value = override.partition("=")
+        if not separator or not key_path.strip():
+            raise ASHConfigValidationError(
+                f"Invalid config override: '{override}'. "
+                "Expected format: key.path=value"
             )
+        try:
+            _apply_config_override(config_dict, key_path, value)
         except Exception as e:
-            ASH_LOGGER.warning(f"Failed to apply config override {override}: {str(e)}")
+            raise ASHConfigValidationError(
+                f"Failed to apply config override '{override}': {e}"
+            ) from e
 
     # Convert back to AshConfig
     try:
         return AshConfig.model_validate(config_dict)
     except ValidationError as e:
-        ASH_LOGGER.error(
-            f"Failed to validate config after applying overrides: {str(e)}"
-        )
-        return config  # Return original config if validation fails
+        raise ASHConfigValidationError(
+            "Configuration is invalid after applying the requested overrides "
+            f"{config_overrides}: {e}"
+        ) from e
 
 
 def resolve_config(
