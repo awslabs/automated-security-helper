@@ -54,6 +54,7 @@ def _handle_workspace_mode(
     source_dir: str | None,
     allow_missing_projects: bool,
     dry_run: bool,
+    workspace_config: str | None = None,
 ) -> "WorkspacePlan":
     """Resolve a workspace and return the plan, or exit.
 
@@ -88,7 +89,11 @@ def _handle_workspace_mode(
             else Path(workspace)
         )
         plan = resolve_workspace(
-            workspace_file, allow_missing_projects=allow_missing_projects
+            workspace_file,
+            allow_missing_projects=allow_missing_projects,
+            workspace_config=(
+                Path(workspace_config) if workspace_config is not None else None
+            ),
         )
     except WorkspaceDefinitionError as exc:
         _fail_workspace(str(exc))
@@ -315,6 +320,14 @@ def run_ash_scan_cli_command(
             envvar="ASH_WORKSPACE",
         ),
     ] = None,
+    workspace_config: Annotated[
+        str | None,
+        typer.Option(
+            "--workspace-config",
+            help="Path to the workspace policy file (severity ceiling, workspace-wide suppressions and ignore paths, additional scanners). Without this, ASH looks for 'ash-workspace.{yaml,yml,json}' in the workspace root or its '.ash' directory; finding none is not an error. Must not be any project's own ASH config: workspace policy governs every project, so reading one project's config as policy would apply its settings to its siblings.",
+            envvar="ASH_WORKSPACE_CONFIG",
+        ),
+    ] = None,
     allow_missing_projects: Annotated[
         bool,
         typer.Option(
@@ -421,14 +434,19 @@ def run_ash_scan_cli_command(
     # Workspace mode is handled before any cwd-based default is applied, because
     # --workspace and --source-dir are mutually exclusive and defaulting
     # source_dir first would make every invocation look like it had both.
-    if workspace is None and (dry_run or allow_missing_projects):
-        # Neither flag means anything outside workspace mode. Silently ignoring
-        # --dry-run would run a full scan for someone who asked for none.
+    if workspace is None and (
+        dry_run or allow_missing_projects or workspace_config is not None
+    ):
+        # None of these flags mean anything outside workspace mode. Silently
+        # ignoring --dry-run would run a full scan for someone who asked for
+        # none; silently ignoring --workspace-config would scan with no policy
+        # for someone who believes a severity ceiling is in force.
         offending = [
             flag
             for flag, given in (
                 ("--dry-run", dry_run),
                 ("--allow-missing-projects", allow_missing_projects),
+                ("--workspace-config", workspace_config is not None),
             )
             if given
         ]
@@ -444,6 +462,7 @@ def run_ash_scan_cli_command(
             source_dir=source_dir,
             allow_missing_projects=allow_missing_projects,
             dry_run=dry_run,
+            workspace_config=workspace_config,
         )
         # The workspace root is the scan root: it is what container mode mounts at
         # /src, and what every workspace-relative finding path is relative to.

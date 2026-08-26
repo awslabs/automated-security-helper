@@ -14,6 +14,36 @@ Key differences from the generic SARIF reporter:
 3. Strips verbose fields (full markdown help, relationships, deprecated fields)
    to reduce file size significantly.
 4. Excludes suppressed findings (GitHub has its own dismissal workflow).
+
+Workspace mode: per project, never merged -- and this reporter is the reason the
+whole reporter-behaviour contract exists
+--------------------------------------------------------------------------------
+``report()`` reads ``sarif.runs[0]`` and stops. Against the N-run SARIF a
+workspace scan produces, that emits the first project's findings and drops every
+other project: no exception, no warning, just a smaller file that a reviewer has
+no way to tell is incomplete. A security reporter that under-reports in silence
+is the worst thing this feature could ship, and it is why no workspace-level
+report was emitted at all before Phase 2b.
+
+The fix is not to make it iterate the runs. GitHub code scanning ingests a SARIF
+document against *one* repository root: it resolves every result URI relative to
+the repository the upload is attributed to. A merged document declaring N roots
+either mis-locates results into paths that do not exist in the repo it was
+uploaded for, or is rejected outright. Iterating would have replaced a silent
+false negative with a silently mis-located finding, which is not better.
+
+So the correct workspace answer is N documents, one per project, which is what
+``projects/<key>/reports/ash.ghas.sarif`` already is -- each written from that
+project's own single-run scan, each anchored to that project's own root, each
+uploadable on its own. The workspace driver declines to invoke this reporter at
+workspace level and records where the N artefacts are, so the absence of a
+merged file is stated rather than silent.
+
+``runs[0]`` is left in place deliberately. Under this contract the reporter is
+never handed a multi-run model, so the index is correct for every input it can
+receive, and rewriting it would imply a multi-project capability the format does
+not have. ``tests/unit/workspace/test_workspace_reporting.py`` pins the
+declaration, so a future change to MERGED reintroduces the bug loudly.
 """
 
 import json
@@ -26,6 +56,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.get_ash_version import get_ash_version
@@ -67,7 +98,13 @@ class GHASReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
-    """Produces a SARIF report optimized for GitHub Advanced Security Code Scanning."""
+    """Produces a SARIF report optimized for GitHub Advanced Security Code Scanning.
+
+    Per project in workspace mode; see the module docstring for why merging is
+    wrong rather than merely unimplemented.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
 
     def model_post_init(self, context):
         if self.config is None:

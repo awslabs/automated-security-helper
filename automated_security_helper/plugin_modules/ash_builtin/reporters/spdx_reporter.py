@@ -9,6 +9,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -27,7 +28,23 @@ class SPDXReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class SpdxReporter(ReporterPluginBase[SPDXReporterConfig]):
-    """Formats results as SPDX."""
+    """Formats results as SPDX.
+
+    Workspace mode: per project, on the same ground as ``cyclonedx_reporter`` --
+    an SPDX document describes one package with one set of licence and
+    provenance conclusions, and N independently versioned deliverables are N
+    documents.
+
+    Worth stating explicitly here because this reporter would not have *failed*
+    at workspace level. It dumps the whole model, so it would have emitted a
+    file: a workspace-shaped YAML blob presented as an SPDX document. An artefact
+    that is confidently wrong is harder to notice than one that is missing, and
+    the ruling is what keeps it from being produced. (The document is not valid
+    SPDX in single-directory mode either -- see the stub warning in ``report()``
+    -- but that is a separate gap and not one this phase closes.)
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
 
     def model_post_init(self, context):
         if self.config is None:
@@ -42,4 +59,9 @@ class SpdxReporter(ReporterPluginBase[SPDXReporterConfig]):
             "not yet implemented. The returned YAML is a raw model dump, not a valid "
             "SPDX document."
         )
-        return yaml.dump(model.model_dump(by_alias=True), indent=2)
+        # mode="json" for the same reason as yaml_reporter: without it the enums
+        # in the model become !!python/object/apply: tags that yaml.safe_load
+        # refuses. Fixed here as well rather than only there, because it is the
+        # identical line and leaving one of the two emitting unloadable YAML is
+        # harder to explain than fixing both.
+        return yaml.dump(model.model_dump(by_alias=True, mode="json"), indent=2)

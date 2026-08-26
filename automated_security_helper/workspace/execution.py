@@ -9,12 +9,40 @@ Phase 1 produced a plan and refused to act on it. This is the part that acts, an
 its whole job is to hold one invariant while doing so:
 
     For any project P, the findings reported for P and the pass/fail verdict for P
-    are identical to what ``ash --source-dir P`` would produce.
+    are identical to what ``ash --source-dir P`` would produce, ABSENT workspace
+    policy.
 
-Everything below follows from that. Nothing here applies a workspace-level policy,
-because a workspace-level policy can change a project's verdict and that arrives
-in a later phase, explicitly and visibly, rather than sneaking in with an
-execution change.
+Everything below follows from that. The qualification was added in Phase 3 and is
+not a weakening of the invariant; it is the one thing allowed to change a verdict,
+and it does so only where an operator wrote a policy file saying so.
+
+Where policy enters, and where it deliberately does not
+------------------------------------------------------
+Exactly one line applies it: the verdict reads ``project.gate_threshold`` rather
+than ``project.severity_threshold``, so a workspace severity ceiling decides which
+findings are actionable. Everything else about a project's scan -- which scanners
+run, what config they read, what they report -- is still the project's own.
+
+That single point is deliberate. The ceiling changes only the JUDGEMENT of
+findings, never their discovery, so a project scanned under a ceiling reports the
+same findings as ``ash --source-dir P`` and differs only in how many of them are
+counted actionable. An operator can therefore always reproduce a workspace
+verdict locally by passing the effective threshold, which ``--dry-run`` prints.
+
+Two policy fields do NOT yet reach the scan, and the reason is a real constraint
+rather than an omission. ``workspace.suppressions``, ``workspace.ignore_paths``
+and ``workspace.additional_scanners`` have to be visible to the scanners
+themselves, which read them from the resolved ``AshConfig``.
+``ASHScanOrchestrator.__init__`` unconditionally overwrites its ``config`` field
+by calling ``resolve_config`` itself, so a caller cannot hand it a config with
+policy merged in. The other available channel, ``config_overrides``, is
+string-keyed and FAILS OPEN: ``apply_config_overrides`` logs a warning and
+returns the ORIGINAL config when an override does not parse or the result does
+not validate. Routing a security policy through it would mean a typo silently
+scans with no policy at all, which is the failure direction this whole feature
+exists to prevent. Those fields are resolved, validated, pushed down per project
+and recorded on the plan; wiring them into the scan needs the orchestrator to
+accept a pre-resolved config, which touches the single-project path.
 
 How the scoping is achieved, and why it needs almost no new code
 ---------------------------------------------------------------
@@ -220,10 +248,19 @@ from automated_security_helper.workspace.aggregation import (
     has_finding_at_min_severity,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from automated_security_helper.workspace.policy import ceiling_unreachable_counts
+from automated_security_helper.workspace.reporting import (
+    WorkspaceReportOutcome,
+    emit_workspace_reports,
+    unsupported_reporter_names,
+)
 
 #: How often the outer loop wakes to check per-project deadlines. Small enough
 #: that a timeout is reported promptly, large enough not to spin.
 _DEADLINE_POLL_SECONDS = 0.05
+
+#: The phase name that selects report generation, as ``run_ash_scan`` spells it.
+_REPORT_PHASE = "report"
 
 #: The subtree each project's own output lands in.
 PROJECTS_DIR_NAME = "projects"
@@ -275,6 +312,11 @@ class WorkspaceRunResult:
     exit_code: int
     payload: WorkspaceResults
     project_durations: Dict[str, float] = field(default_factory=dict)
+    #: What the workspace-level report step produced, or ``None`` when the
+    #: operator did not ask for the report phase. ``None`` rather than an empty
+    #: outcome, so a caller can tell "no reports were requested" from "reports
+    #: were requested and every one was withheld".
+    report_outcome: Optional["WorkspaceReportOutcome"] = None
 
 
 @dataclass
@@ -380,7 +422,7 @@ def _skipped_outcome(
             relative_path=project.relative_path,
             display_label=project.display_label,
             status=ProjectRunStatus.SKIPPED,
-            severity_threshold=project.severity_threshold,
+            severity_threshold=project.gate_threshold,
             output_path=_project_output_dir(settings, project)
             .relative_to(Path(settings.output_dir))
             .as_posix(),
@@ -404,7 +446,7 @@ def _failed_outcome(
             relative_path=project.relative_path,
             display_label=project.display_label,
             status=ProjectRunStatus.FAILED,
-            severity_threshold=project.severity_threshold,
+            severity_threshold=project.gate_threshold,
             output_path=_project_output_dir(settings, project)
             .relative_to(Path(settings.output_dir))
             .as_posix(),
@@ -533,7 +575,15 @@ def _scan_one_project(
             python_based_plugins_only=settings.python_based_plugins_only,
             ignore_suppressions=settings.ignore_suppressions,
             ash_plugin_modules=list(settings.ash_plugin_modules),
-            metadata=None,
+            # The project's own identity, so that its per-project reports can say
+            # which project they describe. Ten of the nineteen reporters are ruled
+            # PER_PROJECT, and that ruling is only honest if the N artefacts are
+            # distinguishable -- which for the four that publish to a shared
+            # destination they were not. See ASHScanOrchestrator._apply_metadata.
+            metadata={
+                "project_name": project.display_label,
+                "workspace_project": project.key,
+            },
         )
         results = orchestrator.execute_scan(phases=list(settings.phases))
     except ASHConfigValidationError as exc:
@@ -565,7 +615,11 @@ def _scan_one_project(
     results_list = list(run.get("results") or []) if run else []
 
     unsuppressed = [entry for entry in results_list if not entry.get("suppressions")]
-    threshold = project.severity_threshold
+    # gate_threshold, not severity_threshold: this is where a workspace severity
+    # ceiling takes effect on the verdict. Reading the declared value here would
+    # leave the ceiling visible in the plan and in --dry-run while changing
+    # nothing about which projects fail.
+    threshold = project.gate_threshold
     actionable = count_actionable_results(results_list, threshold)
     if actionable and not has_finding_at_min_severity(
         results_list, settings.min_severity
@@ -597,6 +651,19 @@ def _scan_one_project(
 
     _write_project_results(project_output, results)
 
+    # Where the ceiling could not reach, computed from the findings actually
+    # present rather than asserted about a scanner. Only when the ceiling really
+    # did tighten this project: a disclosure printed on every scan is noise, and
+    # noise gets skipped. ceiling_unreachable_counts returns {} when the two
+    # thresholds are equal, so this is belt and braces rather than the only guard.
+    unreachable: Dict[str, int] = {}
+    if project.threshold_tightened_by_policy:
+        unreachable = ceiling_unreachable_counts(
+            results_list,
+            declared_threshold=project.severity_threshold,
+            effective_threshold=threshold,
+        )
+
     outcome = WorkspaceProjectResult(
         project=project.key,
         relative_path=project.relative_path,
@@ -609,6 +676,7 @@ def _scan_one_project(
         duration_seconds=time.monotonic() - started,
         output_path=output_path,
         scanners=_scanner_statuses(results),
+        ceiling_unreachable_findings=unreachable,
     )
     return _ProjectRun(outcome=outcome, run=run)
 
@@ -677,6 +745,7 @@ def execute_workspace(
     settings: ProjectScanSettings,
     *,
     orchestrator_factory: Optional[OrchestratorFactory] = None,
+    reporter_classes: Optional[List[type]] = None,
 ) -> WorkspaceRunResult:
     """Scan every active project in *plan* and write the unified results.
 
@@ -687,15 +756,18 @@ def execute_workspace(
         orchestrator_factory: Builds one project's orchestrator. Defaults to
             ``ASHScanOrchestrator.create``; injected only by tests, so production
             callers never pass it.
+        reporter_classes: The reporters the workspace-level report step considers.
+            Defaults to the plugin registry; injected only by tests.
 
     Returns:
         The unified results path, the process exit code, and the payload.
 
     Raises:
         WorkspaceDefinitionError: When a project is not a git repository under
-            ``precommit`` without ``--allow-missing-projects``. Raised rather than
-            recorded because nothing has been scanned yet and the operator's flags
-            are contradictory -- that is an exit-2 refusal, not a project failure.
+            ``precommit`` without ``--allow-missing-projects``, or when an enabled
+            reporter declares itself unsupported in workspace mode. Raised rather
+            than recorded because nothing has been scanned yet -- that is an
+            exit-4 refusal, not a project failure.
     """
     if orchestrator_factory is None:
         from automated_security_helper.core.orchestrator import ASHScanOrchestrator
@@ -736,6 +808,39 @@ def execute_workspace(
     # first project to touch it would otherwise freeze the scanner set for all.
     prewarm_plugin_registry(plan, settings)
 
+    reports_requested = _REPORT_PHASE in settings.phases
+    if reports_requested:
+        # Before the scan, for two reasons. The operator learns immediately
+        # rather than after paying for the whole workspace; and once
+        # ``aggregator.write`` has recorded the exit code *into* the results
+        # file, a refusal could only be surfaced by exiting with a status that
+        # file does not contain -- two answers to one question, which is what
+        # models.workspace's exit-code contract exists to avoid.
+        #
+        # After prewarm_plugin_registry, and that order is load-bearing rather
+        # than incidental: reading the reporter set from a cold registry would
+        # memoise whatever was resolvable at that moment into
+        # ``_resolved_plugins["reporter"]``, and prewarm would then hand every
+        # project the memoised subset. That is exactly the defect prewarm exists
+        # to fix, reintroduced from the other end.
+        #
+        # Gated on the report phase because a reporter that cannot produce a
+        # workspace artefact is not an operator's problem until they ask for one.
+        refusing = unsupported_reporter_names(
+            plan,
+            output_dir,
+            output_formats=settings.output_formats,
+            python_based_plugins_only=settings.python_based_plugins_only,
+            reporter_classes=reporter_classes,
+        )
+        if refusing:
+            raise WorkspaceDefinitionError(
+                f"reporter(s) {', '.join(refusing)} declare that they cannot "
+                f"produce a correct report in workspace mode, and are enabled. "
+                f"Nothing was scanned. Disable them, narrow --output-format to "
+                f"exclude them, or scan the projects separately."
+            )
+
     bound = min(configured_bound, len(active) or 1)
     ASH_LOGGER.info(
         f"Scanning {len(active)} workspace project(s), "
@@ -772,6 +877,23 @@ def execute_workspace(
         max_parallel_projects=configured_bound,
         project_timeout=settings.project_timeout,
     )
+
+    # After the results file, because the merged reporters read it back -- see
+    # "Why the whole model is loaded back" in workspace.reporting. Reading the
+    # written file rather than a parallel in-memory model is what makes it
+    # impossible for the workspace reports to disagree with it.
+    report_outcome: Optional[WorkspaceReportOutcome] = None
+    if reports_requested:
+        report_outcome = emit_workspace_reports(
+            plan=plan,
+            output_dir=output_dir,
+            results_path=results_path,
+            output_formats=settings.output_formats,
+            python_based_plugins_only=settings.python_based_plugins_only,
+            ignore_suppressions=settings.ignore_suppressions,
+            reporter_classes=reporter_classes,
+        )
+
     return WorkspaceRunResult(
         results_path=results_path,
         exit_code=exit_code,
@@ -779,6 +901,7 @@ def execute_workspace(
         project_durations={
             key: entry.outcome.duration_seconds for key, entry in collected.items()
         },
+        report_outcome=report_outcome,
     )
 
 

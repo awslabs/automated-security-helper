@@ -280,6 +280,202 @@ class TestPerProjectThresholds:
         verdicts = {p.project: p.exceeds_threshold for p in outcome.payload.projects}
         assert verdicts == {"strict": True, "lax": False}
 
+    def test_a_workspace_ceiling_makes_a_lax_project_fail(self, tmp_path):
+        """The ceiling has to change the VERDICT, not just the plan.
+
+        api declares CRITICAL, so on its own a warning-level finding is not
+        actionable -- test_a_project_below_its_own_threshold_passes above is that
+        exact case. Under a MEDIUM ceiling the same finding must fail. If
+        execution read severity_threshold instead of the effective value, this
+        test would see exit 0 and the ceiling would be decorative.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="warning")}
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.actionable_finding_count == 1
+        assert entry.exceeds_threshold is True
+        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        # The reported threshold is the one actually enforced, or a reader
+        # comparing the finding against it would conclude ASH had miscounted.
+        assert entry.severity_threshold == "MEDIUM"
+
+    def test_a_ceiling_does_not_loosen_a_stricter_project(self, tmp_path):
+        """The other direction, since a ceiling that replaced would pass here.
+
+        strict declares LOW and the ceiling is CRITICAL. stricter_of keeps LOW,
+        so the warning stays actionable. An implementation that let the ceiling
+        win would report exit 0 for a project the operator set to LOW.
+        """
+        _, plan = _make_workspace(tmp_path, ("strict", "LOW"))
+        project = plan.projects[0]
+        # What resolution produces for a project already stricter than the
+        # ceiling: unchanged, and not flagged as tightened.
+        project.effective_severity_threshold = "LOW"
+        project.threshold_tightened_by_policy = False
+        FakeOrchestrator.behaviour["strict"] = {"sarif": _sarif(level="warning")}
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.actionable_finding_count == 1
+        assert entry.exceeds_threshold is True
+        assert entry.severity_threshold == "LOW"
+
+    def test_a_plan_with_no_effective_threshold_falls_back_to_the_projects_own(
+        self, tmp_path
+    ):
+        """Plans built outside resolve_workspace never set the effective value.
+
+        plan.py's docstring says a hand-built plan can hold states resolution
+        would not produce, and the executor is given plans by tests and by
+        callers that predate this field. Falling back keeps those judged by their
+        own threshold rather than by None, which would turn the gate off.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "LOW"))
+        assert plan.projects[0].effective_severity_threshold is None
+
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="warning")}
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.actionable_finding_count == 1
+        assert entry.severity_threshold == "LOW"
+
+    def test_the_per_scanner_rollup_agrees_with_the_project_total_under_a_ceiling(
+        self, tmp_path
+    ):
+        """Two derivations of one number must not disagree once policy applies.
+
+        The project's actionable count is computed from the effective threshold,
+        while the workspace rollup splits it per scanner. If the split is derived
+        from the DECLARED threshold instead, the two disagree the moment a ceiling
+        tightens anything -- the per-scanner numbers sum to 0 while the project
+        says 1, and a reader has no rule for which to trust.
+
+        This is the failure the ceiling wiring introduces if the split is missed,
+        so it is asserted as an equality between the two payloads rather than
+        against a literal.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="warning")}
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        # Control: the ceiling really did make this actionable, or the equality
+        # below would hold trivially at 0 == 0 and prove nothing.
+        assert entry.actionable_finding_count == 1
+
+        # Read the written file: scanner_results is a top-level key of the
+        # aggregated report, not a field of WorkspaceResults, and the file is what
+        # a consumer actually reads.
+        written = json.loads(
+            (tmp_path / "out" / "ash_aggregated_results.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        rollup = {
+            name: (value or {}).get("actionable_finding_count", 0)
+            for name, value in (written.get("scanner_results") or {}).items()
+        }
+        assert sum(rollup.values()) == entry.actionable_finding_count, rollup
+
+    def test_a_tightened_project_discloses_findings_the_ceiling_could_not_reach(
+        self, tmp_path
+    ):
+        """The mechanised form of the documented limitation, on the outcome.
+
+        A level-only `error` is read as critical by both threshold gates, so
+        tightening CRITICAL to MEDIUM changes nothing for it. The project still
+        fails -- correctly -- but the operator needs to know the ceiling is not
+        what made it fail, or they will conclude the ceiling works on findings it
+        never touched.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="error")}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+        assert entry.ceiling_unreachable_findings == {"bandit": 1}
+
+    def test_an_untightened_project_discloses_nothing(self, tmp_path):
+        """Load-bearing only. The same finding, no ceiling, no disclosure.
+
+        Without this the disclosure would appear on every scan carrying a
+        level-only finding, and a message that always appears is one nobody
+        reads.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="error")}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+        # Control: the finding IS present and actionable, so the empty disclosure
+        # is a decision rather than an absence of input.
+        assert entry.actionable_finding_count == 1
+        assert entry.ceiling_unreachable_findings == {}
+
+    def test_the_disclosure_follows_the_tightened_flag_not_just_the_thresholds(
+        self, tmp_path
+    ):
+        """Pins the execution-level guard, which is otherwise indistinguishable.
+
+        ceiling_unreachable_counts short-circuits on equal thresholds, so for any
+        plan resolve_workspace builds -- where the flag and the two thresholds are
+        set together and cannot disagree -- either guard alone suffices, and
+        removing the one in execution.py leaves every other test green. That was
+        measured, not assumed.
+
+        This constructs the one state where they disagree: differing thresholds
+        with the flag false, which plan.py's docstring says a hand-built plan may
+        hold. The flag is the record of whether policy moved this project, so it
+        is what the disclosure follows.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = False
+        FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="error")}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        # Control: the finding is present and the thresholds DO differ, so the
+        # empty disclosure is the flag's doing and not a missing input.
+        assert entry.actionable_finding_count == 1
+        assert project.severity_threshold != project.effective_severity_threshold
+        assert entry.ceiling_unreachable_findings == {}
+
+    def test_a_tightened_project_whose_findings_the_ceiling_reached_discloses_nothing(
+        self, tmp_path
+    ):
+        """The other load-bearing arm: tightening happened AND it worked.
+
+        A severity-carrying MEDIUM finding is exactly what the ceiling is for, so
+        there is nothing to qualify. Distinguishes "we disclose whenever tightened"
+        from "we disclose when tightening fell short".
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "CRITICAL"))
+        project = plan.projects[0]
+        project.effective_severity_threshold = "MEDIUM"
+        project.threshold_tightened_by_policy = True
+        sarif = _sarif(level="warning")
+        sarif["runs"][0]["results"][0]["properties"]["issue_severity"] = "MEDIUM"
+        FakeOrchestrator.behaviour["api"] = {"sarif": sarif}
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+        assert entry.actionable_finding_count == 1
+        assert entry.ceiling_unreachable_findings == {}
+
     def test_the_aggregate_exit_code_reflects_the_strictest_failing_project(
         self, tmp_path
     ):
@@ -803,9 +999,50 @@ class TestWorkspaceOutput:
         assert outcome.payload.project_timeout == pytest.approx(42.0)
 
     def test_the_payload_records_wall_clock(self, tmp_path):
+        """The field is populated with a real, non-negative measurement.
+
+        Deliberately ``>= 0`` and not ``> 0``. ``wall_clock`` is
+        ``time.monotonic() - started``, so a strict comparison asserts that the
+        run outlasted the host's clock granularity rather than asserting
+        anything about this code. On Windows that granularity is coarse enough
+        that a fully-faked run can finish inside one tick, making the delta
+        exactly ``0.0``; the strict form failed one CI row out of four while
+        passing on every other platform and version. The exact value is pinned
+        by the test below, against a clock this test controls.
+        """
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
-        assert outcome.payload.wall_clock_seconds > 0
+        assert outcome.payload.wall_clock_seconds is not None
+        assert outcome.payload.wall_clock_seconds >= 0
+
+    def test_the_wall_clock_is_the_elapsed_time_not_a_constant(
+        self, tmp_path, monkeypatch
+    ):
+        """Pin the arithmetic by driving the clock instead of racing it.
+
+        The first ``monotonic()`` call in ``execute_workspace`` is the start
+        stamp; every later call here returns a fixed later instant, so the
+        recorded wall clock must be exactly the difference. ``calls`` is the
+        control: if the start stamp were ever *not* the first call, or the clock
+        were consulted only once, the subtraction below would be meaningless, so
+        the count is asserted rather than assumed.
+        """
+        calls: List[float] = []
+
+        def fake_monotonic() -> float:
+            value = 100.0 if not calls else 142.5
+            calls.append(value)
+            return value
+
+        monkeypatch.setattr(
+            "automated_security_helper.workspace.execution.time.monotonic",
+            fake_monotonic,
+        )
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        outcome = _run(tmp_path, plan)
+        assert len(calls) >= 2, "the clock was consulted too few times to subtract"
+        assert calls[0] == 100.0
+        assert outcome.payload.wall_clock_seconds == pytest.approx(42.5)
 
     def test_the_payload_status_is_completed(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
