@@ -6,16 +6,24 @@ from typing import Literal
 
 def generate_schemas(output: Literal["file", "json", "dict"] = "file"):
     """Generate JSON schemas for the models."""
-    from pathlib import Path
-    from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.models.asharp_model import AshAggregatedResults
     import json
+    from pathlib import Path
+
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.ash_workspace_config import (
+        AshWorkspaceConfig,
+    )
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
 
     cur_file_path = Path(__file__)
     # create schemas dir if not existing
     schemas_dir = cur_file_path.parent
     resp = {}
-    for model in [AshConfig, AshAggregatedResults]:
+    # AshWorkspaceConfig is the workspace policy file's schema. It is a separate
+    # model, not a block of AshConfig, because it lives in a separate file -- see
+    # config/ash_workspace_config.py for why policy must not be readable from a
+    # project's config.
+    for model in [AshConfig, AshAggregatedResults, AshWorkspaceConfig]:
         json_schema_path = schemas_dir.joinpath(f"{model.__name__}.json").resolve()
         schema = model.model_json_schema()
         if output == "dict":
