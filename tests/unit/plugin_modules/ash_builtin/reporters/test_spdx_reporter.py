@@ -58,11 +58,23 @@ class TestSpdxReporter:
             mock_logger.warning.assert_called_once()
             assert "stub" in mock_logger.warning.call_args[0][0]
 
-    def test_report_uses_by_alias(self, spdx_reporter):
-        """report() calls model_dump with by_alias=True."""
+    def test_report_uses_by_alias_and_json_mode(self, spdx_reporter):
+        """report() calls model_dump with by_alias=True and mode="json".
+
+        ``mode="json"`` was added because without it ``model_dump`` leaves enum
+        objects in the tree and ``yaml.dump`` serialises those as
+        ``!!python/object/apply:`` tags -- output ``yaml.safe_load`` refuses
+        outright, and which any other loader parses by constructing arbitrary
+        Python objects. Every real scan has at least one such enum, in
+        ``scanner_results``.
+
+        Pinned as an exact call rather than by inspecting the output because that
+        is what this test has always done, and because the two kwargs are the only
+        thing that makes the document loadable at all.
+        """
         model = MagicMock()
         model.model_dump.return_value = {"key": "value"}
 
         spdx_reporter.report(model)
 
-        model.model_dump.assert_called_once_with(by_alias=True)
+        model.model_dump.assert_called_once_with(by_alias=True, mode="json")

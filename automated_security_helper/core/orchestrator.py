@@ -249,8 +249,58 @@ class ASHScanOrchestrator(BaseModel):
             asharp_model=exec_engine_params.get("asharp_model"),
         )
 
+        self._apply_metadata()
+
         self._initialized = True
         ASH_LOGGER.info("ASH Orchestrator and ScanExecutionEngine initialized")
+
+    def _apply_metadata(self) -> None:
+        """Copy ``self.metadata`` onto the results model's own metadata.
+
+        ``metadata`` has been a declared parameter of this class for its whole
+        life, documented as "Additional metadata for the scan", and read nowhere.
+        Workspace mode is the first caller that needs it, and what it needs it for
+        is the thing that makes the PER_PROJECT reporter ruling honest.
+
+        Every project in a workspace is scanned as a complete single-project run,
+        so its model's ``workspace`` is ``None`` -- a project does not know it is
+        in a workspace. Without something on the metadata, its reports cannot say
+        which project they describe. That mattered concretely rather than
+        aesthetically: ``metadata.project_name`` is hardcoded to ``"ASH"`` in
+        ``AshAggregatedResults``'s default and never derived from
+        ``AshConfig.project_name``, so every project's ``html``, ``markdown`` and
+        ``text`` report printed the same project name; and the ``s3`` reporter
+        derives its object key from a timestamp with one shared prefix, so two
+        projects starting in the same instant overwrote each other's report.
+
+        Applied here, at the end of ``initialize``, because the report phase runs
+        inside ``execute_scan`` -- setting it any later would be after the reports
+        that need it have been written.
+
+        ``project_name`` is set through validation rather than by raw assignment,
+        so an empty or whitespace value is refused and the default kept. Assigning
+        past a pydantic validator produces a model that fails to serialise much
+        later, a long way from the assignment.
+        """
+        if not self.metadata or self.execution_engine is None:
+            return
+        model = getattr(self.execution_engine, "_asharp_model", None)
+        if model is None or model.metadata is None:  # pragma: no cover - defensive
+            return
+
+        for key, value in self.metadata.items():
+            if key == "project_name":
+                if isinstance(value, str) and value.strip():
+                    model.metadata.project_name = value.strip()
+                else:
+                    ASH_LOGGER.warning(
+                        f"Ignoring unusable project_name {value!r} in scan metadata; "
+                        f"keeping {model.metadata.project_name!r}"
+                    )
+                continue
+            # ReportMetadata allows extras, so anything else is carried through
+            # verbatim for a reporter to read.
+            setattr(model.metadata, key, value)
 
     @classmethod
     def create(cls, **kwargs: Any) -> "ASHScanOrchestrator":
@@ -333,7 +383,9 @@ class ASHScanOrchestrator(BaseModel):
                     asharp_model = AshAggregatedResults.from_json(model_data)
 
                     # Update the execution engine's model
-                    if self.execution_engine is not None and hasattr(self.execution_engine, "_asharp_model"):
+                    if self.execution_engine is not None and hasattr(
+                        self.execution_engine, "_asharp_model"
+                    ):
                         self.execution_engine._asharp_model = asharp_model
 
                     # When using existing results, only run the report phase

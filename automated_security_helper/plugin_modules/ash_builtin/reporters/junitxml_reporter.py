@@ -8,6 +8,10 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
+)
+from automated_security_helper.models.flat_vulnerability import (
+    extract_workspace_project,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.severity_ladder import (
@@ -33,7 +37,25 @@ class JUnitXMLReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
-    """Formats results as JUnitXML."""
+    """Formats results as JUnitXML.
+
+    Workspace mode: one merged artefact, with the project in the testsuite name
+    as ``<project>/<scanner>``.
+
+    A deliberate deviation from the RFC, which said the project *becomes* the
+    testsuite name. Taken literally that discards the per-scanner grouping
+    single-directory mode has, and every CI front end that renders JUnit XML
+    groups by suite name -- so a reader would lose the ability to see that
+    bandit failed and checkov did not. The compound name costs nothing, keeps
+    the project as the primary sort key (it is the leading segment, so suites
+    for one project sort together), and makes the workspace artefact a strict
+    refinement of the per-project ones rather than a lossy reshape of them.
+
+    A single-directory scan is unaffected: with no project attribution the suite
+    name stays the bare scanner name it has always been.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         with warnings.catch_warnings():
@@ -189,11 +211,26 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 ):
                     if hasattr(result.properties.scanner_details, "tool_name"):
                         actual_scanner = result.properties.scanner_details.tool_name
-                if actual_scanner not in test_suite_dict:
-                    test_suite_dict[actual_scanner] = TestSuite(name=actual_scanner)
-                test_suite_dict[actual_scanner].add_testcase(test_case)
+                # In workspace mode the suite is named "<project>/<scanner>".
+                # Project leads so that one project's suites sort together in
+                # every CI front end that groups by suite name; the scanner is
+                # kept because discarding it -- the RFC's literal reading -- would
+                # lose a grouping single-directory mode has, for no gain.
+                #
+                # Read through the shared helper rather than inline, so this and
+                # the flattening path cannot disagree about where the attribution
+                # lives -- which is how a finding ends up under the wrong project
+                # in one report and the right one in another.
+                project = extract_workspace_project(result)
+                suite_name = (
+                    f"{project}/{actual_scanner}" if project else actual_scanner
+                )
+                if suite_name not in test_suite_dict:
+                    test_suite_dict[suite_name] = TestSuite(name=suite_name)
+                test_suite_dict[suite_name].add_testcase(test_case)
 
-        for scanner, test_suite in test_suite_dict.items():
+        for suite_name, test_suite in test_suite_dict.items():
+            del suite_name  # keyed for grouping; the name is already on the suite
             report.add_testsuite(test_suite)
         # Return the XML string representation of all test suites
         report_bytes: bytes = report.tostring()

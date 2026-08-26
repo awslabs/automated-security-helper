@@ -28,6 +28,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -323,7 +324,22 @@ class GitLabCycloneDXReporter(ReporterPluginBase[GitLabCycloneDXReporterConfig])
 
     Produces ``gl-dependency-scanning-report.cdx.json`` suitable for upload as
     ``artifacts:reports:cyclonedx`` in GitLab CI pipelines.
+
+    Workspace mode: per project, for both of the reasons its two parents have. It
+    is an SBOM, so N deliverables are N documents (see ``cyclonedx_reporter``);
+    and it is a GitLab CI report artefact resolved against one project's
+    repository root (see ``gitlab_sast_reporter``).
+
+    The GitLab taxonomy this reporter injects makes merging worse rather than
+    just wrong. ``_resolve_dominant_type`` and ``_dominant_input_file`` pick a
+    single ecosystem and a single manifest path by majority vote across
+    components. Across N projects the majority is whichever project has the most
+    dependencies, so a merged document would label a Python project's components
+    with a JavaScript project's ``package_manager`` and point at its lockfile --
+    plausible-looking metadata that is simply false.
     """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
 
     def model_post_init(self, context):
         if self.config is None:
