@@ -1638,6 +1638,14 @@
             }
           },
           "description": "Scanner configurations by name."
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceExecutionConfig",
+          "default": {
+            "max_parallel_projects": null,
+            "project_timeout": null
+          },
+          "description": "Workspace-mode execution settings. Read from the config resolved for the workspace root; a project's own copy of this block is ignored, because how many projects run at once is not a project's decision."
         }
       },
       "title": "AshConfig",
@@ -12343,6 +12351,16 @@
       "title": "Primitive",
       "type": "string"
     },
+    "ProjectRunStatus": {
+      "description": "What became of one project once execution started.\n\n``SKIPPED`` covers both skip reasons and carries ``skip_reason`` to say\nwhich; ``FAILED`` is reserved for a project that was attempted and produced\nno verdict, which is the only one of the three that fails the workspace.",
+      "enum": [
+        "completed",
+        "skipped",
+        "failed"
+      ],
+      "title": "ProjectRunStatus",
+      "type": "string"
+    },
     "ProofOfConcept": {
       "properties": {
         "environment": {
@@ -17189,6 +17207,15 @@
       "title": "Signer",
       "type": "object"
     },
+    "SkippedProjectReason": {
+      "description": "Why a project in the workspace was not scanned.\n\nThe distinction is load-bearing: ``NO_CHANGES`` is a successful\noptimisation, ``ERROR`` is a project the operator asked for that did not\nrun. Only the latter should affect the exit status.",
+      "enum": [
+        "no-changes",
+        "error"
+      ],
+      "title": "SkippedProjectReason",
+      "type": "string"
+    },
     "Source": {
       "additionalProperties": false,
       "properties": {
@@ -20973,6 +21000,303 @@
       "title": "Workspace",
       "type": "object"
     },
+    "WorkspaceExecutionConfig": {
+      "additionalProperties": false,
+      "description": "How many projects a workspace scan runs at once, and how long each may take.\n\nWhy this is not read from the .code-workspace file\n--------------------------------------------------\n``automated_security_helper.workspace.workspace_file`` deliberately ignores\nthat file's ``settings`` block, because it belongs to another tool whose\nschema ASH does not control. So every ASH knob, including these two, lives in\nASH's own config -- here, in the config resolved for the workspace root.\n\nWhy these two land before the workspace policy block\n----------------------------------------------------\nNeither can change any project's verdict. ``max_parallel_projects`` decides\nscheduling and ``project_timeout`` decides how long to wait; the findings a\nproject reports and the threshold they are judged against are untouched. The\nworkspace-level *policy* fields -- a severity ceiling, workspace-wide\nsuppressions -- can change a verdict, and they arrive separately and visibly\nrather than riding in on an execution change.\n\nWall clock is ``ceil(projects / bound)`` waves, and that is arithmetic\n-----------------------------------------------------------------------\nA workspace of N projects at a bound of B runs in ``ceil(N / B)`` waves, so\nits wall clock is roughly that multiple of one project's. Reproduce with\n``scripts/measure_workspace_parallelism.py``; measured on a 192-CPU Linux\nhost on 2026-08-25, five projects, bound 4, three timed runs per arm, the\nwhole child process timed:\n\n* five equal projects -- one alone 21.3s median (19.4-22.7), the workspace\n  43.4s median (41.5-45.8). Ratio of medians **2.036x**, range 1.823-2.365x.\n* one larger project plus four small -- one alone 20.7s median (20.7-26.3),\n  the workspace 40.5s median (39.3-46.0). Ratio **1.958x**, range\n  1.495-2.227x.\n\nBoth sit on the ``ceil(5/4) = 2`` floor, so neither says much about the\nimplementation: an operator who wants a workspace to finish in about the time\nof its slowest project has to set ``max_parallel_projects`` to at least the\nproject count and accept the thread product below. The default stays at 4\nbecause that product is the thing worth defaulting conservatively.\n\nTwo earlier figures for this were wrong and are withdrawn. A reported 0.88x at\nbound 5 -- a five-project workspace beating one project alone -- was an\nartefact of timing a cold single-project arm against a warm workspace arm,\nbecause ``uv_tool_runner`` caches tool probing across invocations. The\nmeasurement script now runs a discard pass first and alternates the arms, and\nnothing close to a sub-1.0 ratio reappears. A reported 2.35x at bound 4 was a\nsingle unrepeated run; it lands at the top of the range measured here rather\nthan at its centre, which is why the figures above are medians with a spread.\n\nThe second shape did not do what it was designed to do, and that is worth\nknowing before anyone repeats it. It gave one project five times the files, on\nthe theory that \"the slowest project alone\" would then be a real baseline and\nthe small projects could hide inside its wave. But 60 files scanned in 20.7s\nand 12 files in 21.3s -- indistinguishable. Scan wall clock here is dominated\nby per-scanner startup, not by file count, so the fixture produced no dominant\nproject and its number is really the equal case again. Testing the RFC's 1.5x\ncriterion properly needs a project large enough to be file-bound rather than\nstartup-bound, which is thousands of files, not sixty.\n\nOn this evidence the 1.5x criterion is not met at the default bound in either\nshape, and for five projects at bound 4 it cannot be: two waves is 2.0x before\nany implementation cost.\n\nFailure modes and known limitations\n-----------------------------------\n* ``project_timeout`` bounds the *verdict*, not the worker. Python cannot\n  preempt a thread, so a timed-out project is recorded FAILED and the\n  workspace continues, but the abandoned worker keeps running -- and keeps\n  its pool slot. Once every slot is held by an abandoned project, nothing\n  still queued can start, so those projects are cancelled and recorded\n  FAILED rather than waited on. A workspace with more projects than\n  ``max_parallel_projects`` can therefore report several failures from one\n  slow project; raising either knob avoids it.\n* The process still does not exit until every abandoned worker finishes,\n  because the interpreter joins them. Scanners run as subprocesses with\n  their own timeouts, so the residual exposure is a genuinely wedged\n  in-process scanner.\n* The outer bound multiplies with the inner scanner pool. That pool is\n  ``min(32, cpu_count + 4)`` in ``ScanExecutionEngine.__init__``, not 4, and\n  not the unrelated ``thread_pool_max_workers`` MCP setting, so the\n  worst-case thread count is ``max_parallel_projects * min(32, cpu + 4)``.\n  On the 192-CPU host above, the default bound of 4 already permits up to\n  128 concurrent scanner threads.",
+      "properties": {
+        "max_parallel_projects": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum number of projects scanned concurrently. Unset means min(4, cpu_count). This is an outer bound over each project's own scanner thread pool, not a replacement for it.",
+          "title": "Max Parallel Projects"
+        },
+        "project_timeout": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds to allow a single project. Unset means no limit. On timeout that project is recorded as failed and the remaining projects still complete.",
+          "title": "Project Timeout"
+        }
+      },
+      "title": "WorkspaceExecutionConfig",
+      "type": "object"
+    },
+    "WorkspaceProjectResult": {
+      "additionalProperties": true,
+      "description": "One project's outcome, as it appears in the aggregated results.",
+      "properties": {
+        "actionable_finding_count": {
+          "default": 0,
+          "description": "Findings at or above this project's own effective threshold.",
+          "minimum": 0,
+          "title": "Actionable Finding Count",
+          "type": "integer"
+        },
+        "ceiling_unreachable_findings": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Per scanner, how many of this project's findings the workspace severity ceiling could not affect, because they carry no properties.issue_severity and are therefore judged from the SARIF level -- where `error` is read as critical and so is actionable at every threshold. Populated only when the ceiling actually tightened this project AND some of its findings were beyond that tightening's reach, so an empty mapping means the ceiling did what it says. An observation about these findings, not a claim about the scanner: it is recomputed every scan, so it stops appearing if a scanner starts emitting severity.",
+          "title": "Ceiling Unreachable Findings",
+          "type": "object"
+        },
+        "display_label": {
+          "description": "What a human reads. Not unique.",
+          "minLength": 1,
+          "title": "Display Label",
+          "type": "string"
+        },
+        "duration_seconds": {
+          "default": 0.0,
+          "description": "Wall clock spent on this project.",
+          "minimum": 0.0,
+          "title": "Duration Seconds",
+          "type": "number"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What went wrong, for a FAILED project.",
+          "title": "Error"
+        },
+        "exceeds_threshold": {
+          "default": false,
+          "description": "Whether this project's own verdict is a failure. Stored rather than derived from actionable_finding_count because fail_on_findings can be off, in which case a project has actionable findings and still passes.",
+          "title": "Exceeds Threshold",
+          "type": "boolean"
+        },
+        "finding_count": {
+          "default": 0,
+          "description": "Unsuppressed findings reported for the project.",
+          "minimum": 0,
+          "title": "Finding Count",
+          "type": "integer"
+        },
+        "invalid_config": {
+          "default": false,
+          "description": "Whether the failure was this project's own configuration. Separated from a general failure because it selects exit code 3 rather than 1, and those route to different people.",
+          "title": "Invalid Config",
+          "type": "boolean"
+        },
+        "output_path": {
+          "description": "Where this project's own subtree lives, relative to the workspace output directory.",
+          "minLength": 1,
+          "title": "Output Path",
+          "type": "string"
+        },
+        "project": {
+          "description": "The project key -- its workspace-relative path with separators replaced by dashes. Every other attribution in the results joins on this.",
+          "minLength": 1,
+          "title": "Project",
+          "type": "string"
+        },
+        "relative_path": {
+          "description": "The project's workspace-relative path, forward-slash separated. The coordinate system workspace-relative finding paths live in.",
+          "minLength": 1,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "sarif_run_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Index of this project's run in the aggregated SARIF, so a consumer can extract one project by selecting a run. Null when the project contributed no run.",
+          "title": "Sarif Run Index"
+        },
+        "scanners": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Final status per scanner name, for this project alone.",
+          "title": "Scanners",
+          "type": "object"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The threshold this project's verdict was judged against. Null for a project that never ran.",
+          "title": "Severity Threshold"
+        },
+        "skip_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human-readable explanation of the skip.",
+          "title": "Skip Detail"
+        },
+        "skip_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SkippedProjectReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why the project was skipped, when it was."
+        },
+        "status": {
+          "$ref": "#/$defs/ProjectRunStatus",
+          "description": "Whether the project completed, was skipped, or failed."
+        }
+      },
+      "required": [
+        "project",
+        "relative_path",
+        "display_label",
+        "status",
+        "output_path"
+      ],
+      "title": "WorkspaceProjectResult",
+      "type": "object"
+    },
+    "WorkspaceResults": {
+      "additionalProperties": true,
+      "description": "Everything a workspace scan concluded, keyed under ``workspace``.",
+      "properties": {
+        "exit_code": {
+          "description": "The process status this run exited with.",
+          "title": "Exit Code",
+          "type": "integer"
+        },
+        "max_parallel_projects": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The outer concurrency bound this run used.",
+          "title": "Max Parallel Projects"
+        },
+        "project_timeout": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The per-project time budget, when one was set.",
+          "title": "Project Timeout"
+        },
+        "projects": {
+          "description": "Every project in workspace-file order, skipped ones included.",
+          "items": {
+            "$ref": "#/$defs/WorkspaceProjectResult"
+          },
+          "title": "Projects",
+          "type": "array"
+        },
+        "refusal_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why the workspace was refused, for status='refused'. Null for a run that scanned anything.",
+          "title": "Refusal Detail"
+        },
+        "status": {
+          "default": "completed",
+          "description": "Whether projects were scanned at all. The discriminator for the code-2 collision -- see the module docstring.",
+          "enum": [
+            "completed",
+            "refused"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "unconvertible_finding_paths": {
+          "default": 0,
+          "description": "Number of findings that could not be given a workspace-relative path, because every location they offered was absolute and outside the project or traversed upward. One per finding, not per location. Counted rather than dropped: dropping a finding because its path is awkward is a silent false negative.",
+          "minimum": 0,
+          "title": "Unconvertible Finding Paths",
+          "type": "integer"
+        },
+        "wall_clock_seconds": {
+          "default": 0.0,
+          "description": "Wall clock for the whole workspace.",
+          "minimum": 0.0,
+          "title": "Wall Clock Seconds",
+          "type": "number"
+        },
+        "workspace_file": {
+          "description": "Absolute path of the workspace definition.",
+          "minLength": 1,
+          "title": "Workspace File",
+          "type": "string"
+        },
+        "workspace_root": {
+          "description": "Absolute path of the directory holding it. Every workspace-relative finding path is relative to this, and in container mode this is what was mounted at /src.",
+          "minLength": 1,
+          "title": "Workspace Root",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_file",
+        "workspace_root",
+        "exit_code"
+      ],
+      "title": "WorkspaceResults",
+      "type": "object"
+    },
     "YAMLReporterConfig": {
       "additionalProperties": true,
       "properties": {
@@ -21524,7 +21848,7 @@
                 "supportedTaxonomies": [],
                 "taxa": [],
                 "translationMetadata": null,
-                "version": "3.6.0"
+                "version": "3.5.9"
               },
               "extensions": [],
               "properties": null
@@ -21563,6 +21887,18 @@
       },
       "title": "Validation Checkpoints",
       "type": "array"
+    },
+    "workspace": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspaceResults"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Per-project attribution for a workspace-mode scan: one entry per project, the skipped-project payload, and the exit code the run produced. Null for a single-directory scan, which is how a consumer tells the two shapes apart."
     }
   },
   "title": "AshAggregatedResults",

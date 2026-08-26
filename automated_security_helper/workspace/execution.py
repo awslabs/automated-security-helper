@@ -9,12 +9,40 @@ Phase 1 produced a plan and refused to act on it. This is the part that acts, an
 its whole job is to hold one invariant while doing so:
 
     For any project P, the findings reported for P and the pass/fail verdict for P
-    are identical to what ``ash --source-dir P`` would produce.
+    are identical to what ``ash --source-dir P`` would produce, ABSENT workspace
+    policy.
 
-Everything below follows from that. Nothing here applies a workspace-level policy,
-because a workspace-level policy can change a project's verdict and that arrives
-in a later phase, explicitly and visibly, rather than sneaking in with an
-execution change.
+Everything below follows from that. The qualification was added in Phase 3 and is
+not a weakening of the invariant; it is the one thing allowed to change a verdict,
+and it does so only where an operator wrote a policy file saying so.
+
+Where policy enters, and where it deliberately does not
+------------------------------------------------------
+Exactly one line applies it: the verdict reads ``project.gate_threshold`` rather
+than ``project.severity_threshold``, so a workspace severity ceiling decides which
+findings are actionable. Everything else about a project's scan -- which scanners
+run, what config they read, what they report -- is still the project's own.
+
+That single point is deliberate. The ceiling changes only the JUDGEMENT of
+findings, never their discovery, so a project scanned under a ceiling reports the
+same findings as ``ash --source-dir P`` and differs only in how many of them are
+counted actionable. An operator can therefore always reproduce a workspace
+verdict locally by passing the effective threshold, which ``--dry-run`` prints.
+
+Two policy fields do NOT yet reach the scan, and the reason is a real constraint
+rather than an omission. ``workspace.suppressions``, ``workspace.ignore_paths``
+and ``workspace.additional_scanners`` have to be visible to the scanners
+themselves, which read them from the resolved ``AshConfig``.
+``ASHScanOrchestrator.__init__`` unconditionally overwrites its ``config`` field
+by calling ``resolve_config`` itself, so a caller cannot hand it a config with
+policy merged in. The other available channel, ``config_overrides``, is
+string-keyed and FAILS OPEN: ``apply_config_overrides`` logs a warning and
+returns the ORIGINAL config when an override does not parse or the result does
+not validate. Routing a security policy through it would mean a typo silently
+scans with no policy at all, which is the failure direction this whole feature
+exists to prevent. Those fields are resolved, validated, pushed down per project
+and recorded on the plan; wiring them into the scan needs the orchestrator to
+accept a pre-resolved config, which touches the single-project path.
 
 How the scoping is achieved, and why it needs almost no new code
 ---------------------------------------------------------------
@@ -220,6 +248,7 @@ from automated_security_helper.workspace.aggregation import (
     has_finding_at_min_severity,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from automated_security_helper.workspace.policy import ceiling_unreachable_counts
 from automated_security_helper.workspace.reporting import (
     WorkspaceReportOutcome,
     emit_workspace_reports,
@@ -393,7 +422,7 @@ def _skipped_outcome(
             relative_path=project.relative_path,
             display_label=project.display_label,
             status=ProjectRunStatus.SKIPPED,
-            severity_threshold=project.severity_threshold,
+            severity_threshold=project.gate_threshold,
             output_path=_project_output_dir(settings, project)
             .relative_to(Path(settings.output_dir))
             .as_posix(),
@@ -417,7 +446,7 @@ def _failed_outcome(
             relative_path=project.relative_path,
             display_label=project.display_label,
             status=ProjectRunStatus.FAILED,
-            severity_threshold=project.severity_threshold,
+            severity_threshold=project.gate_threshold,
             output_path=_project_output_dir(settings, project)
             .relative_to(Path(settings.output_dir))
             .as_posix(),
@@ -586,7 +615,11 @@ def _scan_one_project(
     results_list = list(run.get("results") or []) if run else []
 
     unsuppressed = [entry for entry in results_list if not entry.get("suppressions")]
-    threshold = project.severity_threshold
+    # gate_threshold, not severity_threshold: this is where a workspace severity
+    # ceiling takes effect on the verdict. Reading the declared value here would
+    # leave the ceiling visible in the plan and in --dry-run while changing
+    # nothing about which projects fail.
+    threshold = project.gate_threshold
     actionable = count_actionable_results(results_list, threshold)
     if actionable and not has_finding_at_min_severity(
         results_list, settings.min_severity
@@ -618,6 +651,19 @@ def _scan_one_project(
 
     _write_project_results(project_output, results)
 
+    # Where the ceiling could not reach, computed from the findings actually
+    # present rather than asserted about a scanner. Only when the ceiling really
+    # did tighten this project: a disclosure printed on every scan is noise, and
+    # noise gets skipped. ceiling_unreachable_counts returns {} when the two
+    # thresholds are equal, so this is belt and braces rather than the only guard.
+    unreachable: Dict[str, int] = {}
+    if project.threshold_tightened_by_policy:
+        unreachable = ceiling_unreachable_counts(
+            results_list,
+            declared_threshold=project.severity_threshold,
+            effective_threshold=threshold,
+        )
+
     outcome = WorkspaceProjectResult(
         project=project.key,
         relative_path=project.relative_path,
@@ -630,6 +676,7 @@ def _scan_one_project(
         duration_seconds=time.monotonic() - started,
         output_path=output_path,
         scanners=_scanner_statuses(results),
+        ceiling_unreachable_findings=unreachable,
     )
     return _ProjectRun(outcome=outcome, run=run)
 

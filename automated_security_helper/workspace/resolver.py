@@ -140,6 +140,10 @@ from automated_security_helper.core.exceptions import (
 from automated_security_helper.models.workspace import SkippedProjectReason
 from automated_security_helper.utils.path_containment import validate_contained_path
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from automated_security_helper.workspace.policy import (
+    policy_for_project,
+    resolve_workspace_policy,
+)
 from automated_security_helper.workspace.scanner_pins import PinVerdict, compare_pins
 from automated_security_helper.workspace.workspace_file import (
     WorkspaceDefinition,
@@ -599,10 +603,67 @@ def _assign_display_labels(projects: List[ProjectPlan]) -> None:
         )
 
 
+def _apply_workspace_policy(
+    definition: WorkspaceDefinition,
+    projects: List[ProjectPlan],
+    workspace_config: Optional[PathLike],
+) -> Optional[Path]:
+    """Resolve the workspace policy and fold it into every active project.
+
+    Runs AFTER the per-project configs are resolved, because the ceiling needs
+    each project's own threshold to combine with and the scanner classification
+    needs each project's scanner set. It runs after ``_validate_scanner_pins``
+    and ``_validate_plugin_modules`` too: a workspace that cannot be scanned at
+    all should say so rather than first complaining about a policy pattern.
+
+    Skipped projects are left alone. Applying a ceiling to a project that will
+    not be scanned would put a threshold in the plan for work that never
+    happens, and pushing a pattern into it could refuse the whole workspace over
+    a project nobody is looking at.
+
+    Returns:
+        The policy file that was applied, or ``None`` when there is no policy.
+
+    Raises:
+        WorkspaceDefinitionError: Exit code 4, for an unusable policy file or a
+            pattern with no sound rewrite for some project. The message names the
+            project as well as the pattern, because a workspace-level pattern is
+            legal in itself and only fails in combination with one project.
+    """
+    policy, source = resolve_workspace_policy(
+        definition.root,
+        explicit=workspace_config,
+        project_config_paths=[
+            Path(project.config_source)
+            for project in projects
+            if project.config_source
+        ],
+    )
+
+    for project in projects:
+        if project.skipped:
+            continue
+        resolved = policy_for_project(
+            policy.workspace if policy else None,
+            project_prefix=project.relative_path,
+            project_threshold=project.severity_threshold,
+            project_scanners=project.scanners,
+        )
+        project.effective_severity_threshold = resolved.effective_threshold
+        project.threshold_tightened_by_policy = resolved.threshold_tightened
+        project.policy_suppressions = list(resolved.suppressions)
+        project.policy_ignore_paths = list(resolved.ignore_paths)
+        project.policy_scanners = list(resolved.policy_scanners)
+        project.policy_scanners_gate = resolved.policy_scanners_gate
+
+    return source
+
+
 def resolve_workspace(
     workspace_file: PathLike,
     *,
     allow_missing_projects: bool = False,
+    workspace_config: Optional[PathLike] = None,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -615,6 +676,11 @@ def resolve_workspace(
             absent or unreadable. Those projects are marked skipped and recorded
             in the plan's ``skipped_projects`` payload. Does not opt out of any
             other check -- see "Fail-closed" in the module docstring.
+        workspace_config: ``--workspace-config``: the workspace policy file to
+            apply. When omitted the workspace root is searched for one, and
+            having none is not an error. When given it must exist; ASH does not
+            fall back to searching, because that would apply different policy
+            than the one named. It may not be any project's own config.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -684,10 +750,14 @@ def resolve_workspace(
     _validate_scanner_pins(definition, active)
     _validate_plugin_modules(definition, active)
     _assign_display_labels(projects)
+    policy_source = _apply_workspace_policy(definition, projects, workspace_config)
 
     return WorkspacePlan(
         workspace_file=definition.path.as_posix(),
         workspace_root=definition.root.as_posix(),
+        workspace_config_source=(
+            policy_source.as_posix() if policy_source is not None else None
+        ),
         projects=projects,
         allow_missing_projects=allow_missing_projects,
     )
