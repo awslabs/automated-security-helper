@@ -139,9 +139,7 @@ class BedrockPromptBuilder:
         for f in findings:
             severity_counts[f.get("level", "none")] += 1
 
-        counts_str = ", ".join(
-            f"{sev}: {cnt}" for sev, cnt in severity_counts.items()
-        )
+        counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         return (
             f"Generate an executive summary for a security scan with the following results:\n\n"
             f"SCAN OVERVIEW:\n"
@@ -152,9 +150,7 @@ class BedrockPromptBuilder:
             f"Provide a concise executive summary that highlights the most important aspects of the scan results.\n"
         )
 
-    def severity_analysis(
-        self, findings: List[Dict[str, Any]], severity: str
-    ) -> str:
+    def severity_analysis(self, findings: List[Dict[str, Any]], severity: str) -> str:
         if not findings:
             return f"No findings with {severity} level severity."
 
@@ -234,9 +230,7 @@ class BedrockPromptBuilder:
         remaining = [f for f in findings if f not in severe]
         severe.extend(remaining[: max(0, max_findings - len(severe))])
 
-        counts_str = ", ".join(
-            f"{sev}: {cnt}" for sev, cnt in severity_counts.items()
-        )
+        counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         lines = [
             f"Based on the security scan with the following results:\n\n"
             f"FINDINGS BY SEVERITY:\n{counts_str}\n\n"
@@ -271,13 +265,17 @@ class BedrockPromptBuilder:
         if not findings:
             return "No findings to analyze."
 
-        lines = ["Generate a detailed technical analysis of the following security findings:\n"]
+        lines = [
+            "Generate a detailed technical analysis of the following security findings:\n"
+        ]
         for i, finding in enumerate(findings[:max_findings]):
             msg = self._extract_message(finding)
             rule_id = self._extract_rule_id(finding)
             level = finding.get("level", "none")
             locations = self._extract_locations(finding)
-            code_snippets = self._extract_code_snippets(finding) if include_code_snippets else []
+            code_snippets = (
+                self._extract_code_snippets(finding) if include_code_snippets else []
+            )
 
             lines.append(
                 f"\nFINDING {i + 1}:\n"
@@ -287,7 +285,9 @@ class BedrockPromptBuilder:
                 f"- Locations: {', '.join(locations) if locations else 'Unknown'}\n"
             )
             if code_snippets and include_code_snippets:
-                lines.append("- Code Snippet:\n```\n" + "\n".join(code_snippets[:3]) + "\n```\n")
+                lines.append(
+                    "- Code Snippet:\n```\n" + "\n".join(code_snippets[:3]) + "\n```\n"
+                )
 
         lines.append(
             "\nProvide a detailed technical analysis including:\n"
@@ -310,9 +310,7 @@ class BedrockPromptBuilder:
         for f in findings:
             severity_counts[f.get("level", "none")] += 1
 
-        counts_str = ", ".join(
-            f"{sev}: {cnt}" for sev, cnt in severity_counts.items()
-        )
+        counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         lines = [
             f"Generate a risk assessment based on the following security scan results:\n\n"
             f"FINDINGS BY SEVERITY:\n{counts_str}\n\n"
@@ -354,9 +352,7 @@ class BedrockPromptBuilder:
         for f in findings:
             severity_counts[f.get("level", "none")] += 1
 
-        counts_str = ", ".join(
-            f"{sev}: {cnt}" for sev, cnt in severity_counts.items()
-        )
+        counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         fw_str = ", ".join(compliance_frameworks)
         lines = [
             f"Generate a compliance impact analysis for the following security scan results:\n\n"
@@ -442,7 +438,9 @@ class BedrockPromptBuilder:
             if industry_context:
                 context_info += f"- Industry: {industry_context}\n"
             if compliance_frameworks:
-                context_info += f"- Compliance frameworks: {', '.join(compliance_frameworks)}\n"
+                context_info += (
+                    f"- Compliance frameworks: {', '.join(compliance_frameworks)}\n"
+                )
             if custom_context:
                 context_info += f"\n{custom_context}"
             user_message += context_info

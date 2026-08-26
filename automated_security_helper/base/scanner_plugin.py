@@ -10,13 +10,28 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
-from automated_security_helper.schemas.sarif_schema_model import ArtifactLocation, Invocation, SarifReport
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactLocation,
+    Invocation,
+    SarifReport,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 from pydantic import Field
-from typing import Annotated, Any, ClassVar, Generic, List, Literal, Optional, Set, Tuple, TypeVar
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Generic,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+)
 from abc import abstractmethod
 
 # Pattern for valid CLI flag keys: one or two leading dashes followed by
@@ -323,9 +338,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return
         working_dir = ArtifactLocation(uri=get_shortest_name(input=target))  # type: ignore[call-arg]
         extras = self._invocation_extras(sarif_report, final_args, target)
-        command_line = (
-            shlex.join(str(a) for a in final_args) if final_args else ""
-        )
+        command_line = shlex.join(str(a) for a in final_args) if final_args else ""
         sarif_report.runs[0].invocations = [
             Invocation(  # type: ignore[call-arg]
                 commandLine=command_line,
