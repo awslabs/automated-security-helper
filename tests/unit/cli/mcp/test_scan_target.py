@@ -212,27 +212,47 @@ class TestDeniedRootSet:
         """On Windows the refused set follows the shell's own directory vars.
 
         Hardcoding ``C:\\Windows`` is wrong on a machine whose system drive is
-        not C:. The comparison semantics on Windows are supplied by
-        ``WindowsPath`` itself, which compares case-insensitively; what this
-        test pins is the *contents* of the set.
+        not C:, so the values come from the environment. What this test pins is
+        the *contents* of the set; the comparison semantics are supplied by
+        ``WindowsPath`` itself, which compares case-insensitively.
+
+        Every variable the implementation reads has to be controlled here, and
+        the assertion has to be exact set equality. An earlier version set three
+        of the five and then asserted no entry contained ``"C:"``, which passed
+        on Linux -- where the uncontrolled variables are simply absent -- and
+        failed on a real Windows runner, where ``ProgramW6432`` is set and
+        contributed a genuine ``C:\\Program Files``. A broad negative over the
+        whole set cannot tell "the real environment leaked in" apart from "an
+        entry was legitimately derived", so it reported the wrong thing in both
+        directions.
         """
         monkeypatch.setattr(platform, "system", lambda: "Windows")
+        # 32-bit Python on 64-bit Windows: WOW64 rewrites ProgramFiles to the
+        # x86 directory and the 64-bit one is only reachable via ProgramW6432.
+        # Giving the two distinct values proves both are read.
         monkeypatch.setenv("SystemRoot", r"D:\Windows")
-        monkeypatch.setenv("ProgramFiles", r"D:\Program Files")
+        monkeypatch.setenv("ProgramFiles", r"D:\Program Files (x86)")
+        monkeypatch.setenv("ProgramW6432", r"D:\Program Files")
         monkeypatch.setenv("ProgramData", r"D:\ProgramData")
         monkeypatch.delenv("ProgramFiles(x86)", raising=False)
 
-        names = set(_denied_root_values())
-
-        assert r"D:\Windows" in names
-        assert r"D:\Program Files" in names
-        assert r"D:\ProgramData" in names
-        assert not any("C:" in n for n in names)
+        assert set(_denied_root_values()) == {
+            r"D:\Windows",
+            r"D:\Program Files (x86)",
+            r"D:\Program Files",
+            r"D:\ProgramData",
+        }
 
     def test_windows_set_falls_back_when_the_environment_is_bare(self, monkeypatch):
         """Without the shell variables, the conventional locations are used."""
         monkeypatch.setattr(platform, "system", lambda: "Windows")
-        for var in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"):
+        for var in (
+            "SystemRoot",
+            "ProgramFiles",
+            "ProgramFiles(x86)",
+            "ProgramW6432",
+            "ProgramData",
+        ):
             monkeypatch.delenv(var, raising=False)
 
         names = set(_denied_root_values())
@@ -466,12 +486,26 @@ class TestAllowlistParsing:
             assert validate_scan_target("/etc") is not None
 
     def test_user_home_shorthand_is_expanded(self, tmp_path, monkeypatch):
-        """``~`` is expanded, matching how ASH_MCP_WORKSPACE_ROOT is read."""
+        """``~`` is expanded, matching how ASH_MCP_WORKSPACE_ROOT is read.
+
+        Both ``HOME`` and ``USERPROFILE`` are set because the two stdlib
+        implementations of ``expanduser`` read different variables:
+        ``posixpath`` reads ``HOME``, while ``ntpath`` reads ``USERPROFILE``
+        then falls back to ``HOMEDRIVE`` + ``HOMEPATH`` and never consults
+        ``HOME`` at all. Which one runs is decided by the real platform, not by
+        anything a test can patch, so setting only ``HOME`` left ``~``
+        unexpanded on Windows and the target was refused.
+        """
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, "~/repos")
         target = tmp_path / "repos" / "project"
         target.mkdir(parents=True)
 
+        # Guard the premise: if expansion silently did nothing, the assertion
+        # below could pass for the wrong reason on a host whose cwd happens to
+        # sit under tmp_path.
+        assert Path("~/repos").expanduser() == tmp_path / "repos"
         assert validate_scan_target(target) is None
 
     def test_whitespace_around_entries_is_stripped(self, tmp_path, monkeypatch):
