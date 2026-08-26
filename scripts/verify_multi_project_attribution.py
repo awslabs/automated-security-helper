@@ -92,6 +92,14 @@ Deliberate choices
   and it is what sets the margin the threshold assertion relies on.
 * ``--phases scan`` only. The report phase is the next PR's subject and would add
   minutes without adding signal here.
+* ``--scanners bandit --scanners checkov``, so the gate runs only the two
+  producers it reads. This is about determinism rather than runtime: opengrep and
+  semgrep default to the ``p/ci`` ruleset, which is fetched over the network, and
+  four concurrent projects make four concurrent fetches. A lost fetch is scanner
+  status ERROR, which ``check_no_scanner_errors`` refuses to tolerate -- correctly,
+  since tolerating ERROR is how a total functional failure reached main earlier in
+  this project. The gate was therefore red on a flake in a producer no assertion
+  reads. See ``GATE_SCANNERS``.
 * The scan is invoked as ``<python> -m automated_security_helper.cli.main`` with
   ``cwd`` set to the repository root, so ``-m`` puts the working tree on
   ``sys.path`` rather than whatever copy is pip-installed on the runner.
@@ -101,8 +109,12 @@ Known limitations
 * Local mode only. There is no OCI runtime on these runners, so the containerised
   workspace path is covered by unit tests over the assembled command and the
   per-project basename guard, not by a real container run.
-* A green gate is evidence about bandit. Other scanners return PASSED with zero
-  findings on this fixture, so for them it asserts only "not ERROR".
+* A green gate is evidence about bandit and checkov, and about nothing else. The
+  other scanners are not run at all (``GATE_SCANNERS``), so this gate says nothing
+  about whether they work in workspace mode. It did not say much before either:
+  measured on this fixture they all returned PASSED with zero findings, so the only
+  claim lost is "they did not ERROR". Covering them needs a fixture with input they
+  actually match, which is a different gate.
 * If bandit cannot be installed the gate fails rather than passing quietly. A
   gate that silently tests nothing is worse than a red one.
 * The suppression assertion needs the suppressed rule to actually fire. If a
@@ -150,6 +162,25 @@ WORKSPACE_ERROR_EXIT_CODE = 4
 JOB_TIMEOUT_BUDGET_SECONDS = 1500.0
 DEFAULT_SCAN_TIMEOUT_SECONDS = 1200.0
 LOG_TAIL_LINES = 60
+
+#: The only scanners this gate reads, so the only ones it runs.
+#:
+#: Restricting the run is a correctness property, not a speed optimisation. Every
+#: assertion below reads bandit (the marker rules, the suppression, the
+#: thresholdable severities) or checkov (the second scanner family the rollup
+#: check needs); nothing reads any other producer. Leaving the rest enabled
+#: therefore added no signal and one dependency: opengrep and semgrep default to
+#: the ``p/ci`` ruleset, which is fetched from a rule registry over the network.
+#: With four projects running concurrently that is four simultaneous fetches, and
+#: a fetch that loses gives the scanner status ERROR -- which check_no_scanner_errors
+#: correctly refuses to tolerate. So the gate went red on a network flake in a
+#: producer it asserts nothing about.
+#:
+#: An allowlist rather than excluding the two grep scanners by name: a future
+#: scanner that reaches the network on startup would silently reintroduce the
+#: flake through a denylist, and would have to be named here to reintroduce it
+#: through this one.
+GATE_SCANNERS: Tuple[str, ...] = ("bandit", "checkov")
 
 
 # ---------------------------------------------------------------------------
@@ -1571,8 +1602,13 @@ def write_fixture(workspace_root: Path) -> Path:
 
 
 def build_scan_command(definition: Path, output_dir: Path) -> List[str]:
-    """The scan invocation, as a list -- never a shell string."""
-    return [
+    """The scan invocation, as a list -- never a shell string.
+
+    ``--scanners`` restricts the run to the two producers every assertion here
+    actually reads. See GATE_SCANNERS for why that is a correctness property of
+    the gate and not a speed optimisation.
+    """
+    command = [
         sys.executable,
         "-m",
         "automated_security_helper.cli.main",
@@ -1586,6 +1622,9 @@ def build_scan_command(definition: Path, output_dir: Path) -> List[str]:
         "--no-progress",
         "--simple",
     ]
+    for scanner in GATE_SCANNERS:
+        command += ["--scanners", scanner]
+    return command
 
 
 def run_scan(
