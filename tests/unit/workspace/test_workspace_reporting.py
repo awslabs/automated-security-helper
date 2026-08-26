@@ -337,6 +337,49 @@ class TestMergedReporters:
         outcome = _emit(workspace, FakeDisabledReporter)
         assert outcome.workspace_artifacts == {}
 
+    def test_a_disabled_reporter_is_still_recorded_with_its_reason(self, workspace):
+        """Found by running a real workspace scan and reading the manifest.
+
+        ``yaml`` and ``spdx`` ship disabled, and the four AWS reporters report
+        unsatisfied dependencies without credentials -- so six of the nineteen were
+        absent from the manifest with nothing to say why. An operator asking "where
+        is my yaml report" got silence, which is the failure mode this manifest
+        exists to prevent; only the reason differs from a withheld one.
+
+        Recorded with ``considered: false``, so a consumer can still tell "the
+        operator turned this off" from "this format cannot be merged".
+        """
+        _, output_dir, _ = workspace
+        _emit(workspace, FakeDisabledReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-disabled"]
+        assert entry["considered"] is False
+        assert entry["skipped"] == "disabled"
+        assert entry["workspace_artifact"] is None
+
+    def test_a_reporter_outside_the_requested_formats_says_so(self, workspace):
+        """A distinct reason from "disabled", because the fix is different.
+
+        Disabled means edit the config; not-requested means widen
+        ``--output-format``. Collapsing the two would send an operator to the
+        wrong knob.
+        """
+        _, output_dir, _ = workspace
+        _emit(workspace, FakeMergedReporter, output_formats=("something.else",))
+
+        entry = _manifest(output_dir)["reporters"]["fake-merged"]
+        assert entry["considered"] is False
+        assert entry["skipped"] == "not-in-requested-output-formats"
+
+    def test_a_reporter_that_ran_is_marked_considered(self, workspace):
+        """The companion assertion, so ``considered`` is not always False."""
+        _, output_dir, _ = workspace
+        _emit(workspace, FakeMergedReporter)
+
+        entry = _manifest(output_dir)["reporters"]["fake-merged"]
+        assert entry["considered"] is True
+        assert "skipped" not in entry
+
 
 class TestPerProjectReporters:
     def test_a_per_project_reporter_gets_no_workspace_artefact(self, workspace):
@@ -610,6 +653,41 @@ class TestTheManifestIsExhaustive:
             "fake-workspace-scoped",
             "fake-unsupported",
             "fake-raising",
+        }
+
+    def test_all_nineteen_shipped_reporters_are_accounted_for(self, workspace):
+        """Acceptance criterion 23, over the whole shipped set rather than a sample.
+
+        The default plugin registry resolves 15 reporters: the four under
+        ``ash_aws_plugins`` are registered only when an operator names that module
+        in ``ash_plugin_modules``. So a default workspace run's manifest has 15
+        entries, and that is correct -- the manifest is exhaustive over what was
+        registered, not over what exists on disk.
+
+        This asserts the other half: when all nineteen *are* registered, every one
+        gets an entry carrying the behaviour it declared. Without it, "every
+        reporter has an asserted workspace behaviour" would hold for the
+        declaration and be untested for the four an operator has to opt into --
+        which are precisely the four that publish side effects.
+
+        Artefacts are deliberately not asserted. The AWS reporters' dependency
+        checks fail without credentials, so they are recorded as not considered,
+        which is the right outcome and not the subject here.
+        """
+        from tests.unit.workspace.test_reporter_workspace_behaviour import (
+            EXPECTED_BEHAVIOURS,
+            _iter_reporter_classes,
+        )
+
+        _, output_dir, _ = workspace
+        _emit(workspace, *_iter_reporter_classes().values())
+
+        recorded = {
+            name: entry["behaviour"]
+            for name, entry in _manifest(output_dir)["reporters"].items()
+        }
+        assert recorded == {
+            name: behaviour.value for name, behaviour in EXPECTED_BEHAVIOURS.items()
         }
 
     def test_the_manifest_records_the_workspace_root(self, workspace):

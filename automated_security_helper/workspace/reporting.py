@@ -118,6 +118,14 @@ MANIFEST_FILENAME = "workspace-reports.json"
 #: circular once ``execution`` calls this module.
 PROJECTS_DIR_NAME = "projects"
 
+#: Why a reporter was not considered at workspace level. Recorded distinctly
+#: rather than collapsed into one "skipped" flag, because each sends the operator
+#: somewhere different: to the config, to ``--output-format``, or to the
+#: reporter's own missing dependencies.
+SKIP_DISABLED = "disabled"
+SKIP_NOT_REQUESTED = "not-in-requested-output-formats"
+SKIP_NOT_PYTHON_ONLY = "non-python-dependencies-excluded"
+
 #: Behaviours that produce a workspace-level artefact. ``WORKSPACE_SCOPED`` is in
 #: the set but is not a merge, which is why ``covers_projects`` is recorded
 #: separately in the manifest.
@@ -301,30 +309,29 @@ def _selected_reporters(
         if instance is None:
             continue
         name = _reporter_name(instance)
-        if not _is_enabled(instance):
-            ASH_LOGGER.debug(
-                f"Reporter {name} is disabled; skipping at workspace level"
-            )
-            continue
-        if python_based_plugins_only and not instance.is_python_only():
-            ASH_LOGGER.debug(
-                f"Reporter {name} has non-Python dependencies and "
-                f"--python-based-plugins-only was requested; skipping"
-            )
-            continue
-        if not _matches_requested_formats(instance, output_formats):
-            ASH_LOGGER.debug(
-                f"Reporter {name} was not in the requested output formats; skipping"
-            )
-            continue
-        yield (
-            instance,
-            getattr(
-                reporter_class,
-                "workspace_behaviour",
-                ReporterWorkspaceBehaviour.PER_PROJECT,
-            ),
+        behaviour = getattr(
+            reporter_class,
+            "workspace_behaviour",
+            ReporterWorkspaceBehaviour.PER_PROJECT,
         )
+
+        # Each reason is reported distinctly rather than collapsed into "skipped",
+        # because they route the operator to different knobs: disabled means edit
+        # the config, not-requested means widen --output-format, and unavailable
+        # means the reporter's own dependencies are unsatisfied.
+        skipped: Optional[str] = None
+        if not _is_enabled(instance):
+            skipped = SKIP_DISABLED
+        elif python_based_plugins_only and not instance.is_python_only():
+            skipped = SKIP_NOT_PYTHON_ONLY
+        elif not _matches_requested_formats(instance, output_formats):
+            skipped = SKIP_NOT_REQUESTED
+
+        if skipped is not None:
+            ASH_LOGGER.debug(
+                f"Reporter {name} not considered at workspace level: {skipped}"
+            )
+        yield instance, behaviour, skipped
 
 
 def _workspace_context(
@@ -389,14 +396,17 @@ def unsupported_reporter_names(
     context, config_lookup = _workspace_context(plan.workspace_root, Path(output_dir))
     return tuple(
         _reporter_name(instance)
-        for instance, behaviour in _selected_reporters(
+        for instance, behaviour, skipped in _selected_reporters(
             context=context,
             config_lookup=config_lookup,
             output_formats=output_formats,
             python_based_plugins_only=python_based_plugins_only,
             reporter_classes=reporter_classes,
         )
-        if behaviour is ReporterWorkspaceBehaviour.UNSUPPORTED
+        # ``skipped is None`` is what makes disabling the documented way out
+        # actually work: a reporter the operator turned off must not refuse a run
+        # it is not part of.
+        if skipped is None and behaviour is ReporterWorkspaceBehaviour.UNSUPPORTED
     )
 
 
@@ -450,7 +460,7 @@ def emit_workspace_reports(
     # pays the cost of materialising the whole model.
     model = None
 
-    for instance, behaviour in _selected_reporters(
+    for instance, behaviour, skipped in _selected_reporters(
         context=context,
         config_lookup=config_lookup,
         output_formats=output_formats,
@@ -461,12 +471,24 @@ def emit_workspace_reports(
         filename = _report_filename(instance)
         entry: Dict[str, Any] = {
             "behaviour": behaviour.value,
+            "considered": skipped is None,
             "covers_projects": behaviour is ReporterWorkspaceBehaviour.MERGED,
             "workspace_artifact": None,
             "per_project_artifacts": [],
             "missing_per_project_artifacts": [],
         }
         manifest_reporters[name] = entry
+
+        if skipped is not None:
+            # Recorded rather than omitted. Six of the nineteen shipped reporters
+            # land here on a default run -- yaml and spdx ship disabled, and the
+            # four AWS ones report unsatisfied dependencies without credentials --
+            # and an operator asking where their yaml report went deserves an
+            # answer rather than silence. Silence is the defect this manifest
+            # exists to prevent; only the reason differs from a withheld artefact.
+            entry["skipped"] = skipped
+            entry["covers_projects"] = False
+            continue
 
         if behaviour is ReporterWorkspaceBehaviour.UNSUPPORTED:
             unsupported.append(name)
