@@ -175,9 +175,8 @@ converters:
   jupyter:
     enabled: true
     options:
-      file_extensions: [".ipynb"]
-      preserve_line_numbers: true
-      include_markdown: false
+      tool_version: null      # Version constraint for the conversion tool
+      install_timeout: 300    # Seconds allowed for tool installation
 ```
 
 ## Testing Converter Plugins

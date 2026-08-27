@@ -101,11 +101,10 @@ converters:
   jupyter:
     enabled: true
     options:
-      # Converter-specific options
+      tool_version: null      # Version constraint for the conversion tool
+      install_timeout: 300    # Seconds allowed for tool installation
   archive:
-    enabled: true
-    options:
-      # Converter-specific options
+    enabled: true             # The archive converter exposes no options
 ```
 
 ### Scanners Configuration
@@ -216,24 +215,19 @@ reporters:
       include_detailed_findings: true
 
   html:
-    enabled: true
-    options:
-      include_detailed_findings: true
+    enabled: true             # The HTML reporter exposes no options
 
-  json:
+  flat-json:                  # Note the hyphen; there is no 'json' reporter
     enabled: true
     options:
-      pretty_print: true
+      include_metadata: true
+      include_scanner_metrics: true
 
   csv:
-    enabled: true
-    options:
-      include_all_fields: false
+    enabled: true             # The CSV reporter exposes no options
 
   sarif:
-    enabled: true
-    options:
-      include_help_uri: true
+    enabled: true             # The SARIF reporter exposes no options
 
   github-ghas:
     enabled: true

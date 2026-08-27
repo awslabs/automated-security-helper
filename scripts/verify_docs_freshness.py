@@ -314,33 +314,36 @@ def check_suppression_field_name() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 8: documented scanner options exist and validate
+# Check 8: documented plugin options exist and validate
 # ---------------------------------------------------------------------------
 
 
-def _scanner_option_models() -> dict[str, type]:
-    """Map each built-in scanner's config name to its options model.
+def _plugin_option_models(config_suffix: str, options_base: type) -> dict[str, type]:
+    """Map each built-in plugin's config name to its options model.
 
-    Keyed on the ``name`` Literal of the scanner's config class, because that is
-    the string a user actually writes under ``scanners:`` -- ``npm-audit``, not
+    Keyed on the ``name`` Literal of the plugin's config class, because that is the
+    string a user actually writes in the config -- ``npm-audit``, not
     ``NpmAuditScanner``.
+
+    Every module under ``plugin_modules`` is walked rather than filtering on a
+    module-name suffix. Reporter and converter modules do not follow one naming
+    convention (``s3_reporter.py`` but also ``github_ghas_reporter.py``,
+    ``archive_converter.py``), and a suffix filter silently shrinks the model set,
+    which would make this check pass by simply not knowing about a plugin.
     """
     import importlib
     import pkgutil
 
     from automated_security_helper import plugin_modules
-    from automated_security_helper.base.options import ScannerOptionsBase
 
     models: dict[str, type] = {}
     for mod in pkgutil.walk_packages(
         plugin_modules.__path__, plugin_modules.__name__ + "."
     ):
-        if not mod.name.endswith("_scanner"):
-            continue
         try:
             module = importlib.import_module(mod.name)
         except Exception:  # noqa: BLE001, S112  # nosec B112 -- see below
-            # Deliberately broad and deliberately silent. A scanner module whose
+            # Deliberately broad and deliberately silent. A plugin module whose
             # optional dependency is missing in this environment is not a
             # documentation problem, and failing the docs gate on it would make
             # the gate depend on which extras happen to be installed.
@@ -352,11 +355,11 @@ def _scanner_option_models() -> dict[str, type]:
             obj = getattr(module, attr)
             if not isinstance(obj, type):
                 continue
-            if attr.endswith("ScannerConfig") and hasattr(obj, "model_fields"):
+            if attr.endswith(config_suffix) and hasattr(obj, "model_fields"):
                 field = obj.model_fields.get("name")
                 if field is not None and field.default:
                     config_name = field.default
-            elif attr.endswith("ConfigOptions") and issubclass(obj, ScannerOptionsBase):
+            elif attr.endswith("ConfigOptions") and issubclass(obj, options_base):
                 options_cls = obj
 
         if config_name and options_cls is not None:
@@ -365,12 +368,13 @@ def _scanner_option_models() -> dict[str, type]:
     return models
 
 
-def check_scanner_option_keys() -> list[str]:
-    """Every documented scanners.<name>.options block must validate.
+def check_plugin_option_keys() -> list[str]:
+    """Every documented <section>.<name>.options block must validate.
 
     Why this check exists
     ---------------------
-    ``ScannerOptionsBase`` sets ``extra="allow"``, so an option name that does not
+    The three options bases -- scanner, reporter, converter -- all set
+    ``extra="allow"``, so an option name that does not
     exist is accepted and then never read. A reader who copies it gets no error and
     no effect. That let 46 invented option keys accumulate across the configuration
     guide and the built-in plugin pages -- ``severity_level`` for bandit (the field
@@ -382,17 +386,44 @@ def check_scanner_option_keys() -> list[str]:
     lowercase-only while ``severity_threshold`` is uppercase-only, and cdk-nag's
     ``nag_packs`` is an object of per-pack booleans rather than a list.
 
-    Only blocks that parse as a mapping with a ``scanners`` key are considered, and
-    only for scanners this build knows about, so a snippet documenting a third-party
-    scanner is skipped rather than reported.
+    All three plugin kinds are covered, not just scanners. Scanners were fixed first
+    and reporters and converters were left, which hid 53 more invented reporter keys
+    and 30 converter keys behind a passing check -- seven reporters (``csv``,
+    ``cyclonedx``, ``html``, ``ocsf``, ``sarif``, ``spdx``, ``yaml``) and the
+    ``archive`` converter expose *no* options at all, so every option documented for
+    them was fictional.
+
+    ``global_settings`` is deliberately not in this table: it sets
+    ``extra="forbid"``, so a wrong key there is already a startup error rather than a
+    silent no-op, and it has accumulated none.
+
+    Only blocks that parse as a mapping with one of these section keys are
+    considered, and only for plugins this build knows about, so a snippet documenting
+    a third-party plugin is skipped rather than reported.
     """
     import yaml
     from pydantic import ValidationError
 
+    from automated_security_helper.base.options import (
+        ConverterOptionsBase,
+        ReporterOptionsBase,
+        ScannerOptionsBase,
+    )
+
+    # (config section key, config class suffix, options base class)
+    kinds = (
+        ("scanners", "ScannerConfig", ScannerOptionsBase),
+        ("reporters", "ReporterConfig", ReporterOptionsBase),
+        ("converters", "ConverterConfig", ConverterOptionsBase),
+    )
+
     failures: list[str] = []
-    models = _scanner_option_models()
-    if not models:
-        return ["Could not import any built-in scanner options model"]
+    models: dict[str, dict[str, type]] = {}
+    for section, config_suffix, base in kinds:
+        found = _plugin_option_models(config_suffix, base)
+        if not found:
+            return [f"Could not import any built-in {section} options model"]
+        models[section] = found
 
     fence = re.compile(r"```ya?ml\n(.*?)```", re.DOTALL)
 
@@ -410,44 +441,46 @@ def check_scanner_option_keys() -> list[str]:
                 continue
             if not isinstance(parsed, dict):
                 continue
-            scanners = parsed.get("scanners")
-            if not isinstance(scanners, dict):
-                continue
 
-            for scanner_name, scanner_cfg in scanners.items():
-                if not isinstance(scanner_cfg, dict):
-                    continue
-                options = scanner_cfg.get("options")
-                if not isinstance(options, dict):
-                    continue
-                model = models.get(scanner_name)
-                if model is None:
+            for section, _config_suffix, _base in kinds:
+                entries = parsed.get(section)
+                if not isinstance(entries, dict):
                     continue
 
-                for key in options:
-                    if key not in model.model_fields:
-                        failures.append(
-                            f"{rel_path}:~{line_no} scanners.{scanner_name}"
-                            f".options.{key} is not a field on "
-                            f"{model.__name__}; extra='allow' means it is "
-                            f"accepted and ignored"
+                for plugin_name, plugin_cfg in entries.items():
+                    if not isinstance(plugin_cfg, dict):
+                        continue
+                    options = plugin_cfg.get("options")
+                    if not isinstance(options, dict):
+                        continue
+                    model = models[section].get(plugin_name)
+                    if model is None:
+                        continue
+
+                    for key in options:
+                        if key not in model.model_fields:
+                            failures.append(
+                                f"{rel_path}:~{line_no} {section}.{plugin_name}"
+                                f".options.{key} is not a field on "
+                                f"{model.__name__}; extra='allow' means it is "
+                                f"accepted and ignored"
+                            )
+
+                    try:
+                        model.model_validate(options)
+                    except ValidationError as exc:
+                        detail = next(
+                            (
+                                ln.strip()
+                                for ln in str(exc).splitlines()[1:]
+                                if ln.strip() and "further information" not in ln
+                            ),
+                            str(exc).splitlines()[0],
                         )
-
-                try:
-                    model.model_validate(options)
-                except ValidationError as exc:
-                    detail = next(
-                        (
-                            ln.strip()
-                            for ln in str(exc).splitlines()[1:]
-                            if ln.strip() and "further information" not in ln
-                        ),
-                        str(exc).splitlines()[0],
-                    )
-                    failures.append(
-                        f"{rel_path}:~{line_no} scanners.{scanner_name}.options "
-                        f"does not validate against {model.__name__}: {detail}"
-                    )
+                        failures.append(
+                            f"{rel_path}:~{line_no} {section}.{plugin_name}.options "
+                            f"does not validate against {model.__name__}: {detail}"
+                        )
 
     return failures
 
@@ -466,7 +499,7 @@ def main() -> int:
         ("Version consistency", check_version_consistency),
         ("Config file path consistency", check_config_path),
         ("Suppression field name", check_suppression_field_name),
-        ("Scanner options in docs exist and validate", check_scanner_option_keys),
+        ("Plugin options in docs exist and validate", check_plugin_option_keys),
     ]
 
     all_failures: list[tuple[str, list[str]]] = []

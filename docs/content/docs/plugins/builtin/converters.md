@@ -26,11 +26,8 @@ ASH includes 2 built-in converters that preprocess files to make them suitable f
 converters:
   archive:
     enabled: true
-    options:
-      max_extraction_depth: 3
-      max_file_size: "100MB"
-      preserve_permissions: true
-      extract_nested: true
+    # The archive converter exposes no options. It extracts supported archives
+    # so their contents can be scanned; there is nothing to tune per run.
 ```
 
 **Key Features**:
@@ -57,10 +54,8 @@ converters:
   jupyter:
     enabled: true
     options:
-      extract_code_cells: true
-      extract_markdown_cells: false
-      preserve_cell_numbers: true
-      output_format: "python"
+      tool_version: null      # Version constraint for the conversion tool
+      install_timeout: 300    # Seconds allowed for tool installation
 ```
 
 **Key Features**:
@@ -93,19 +88,14 @@ converters:
 converters:
   archive:
     enabled: true
-    options:
-      max_extraction_depth: 2
-      max_file_size: "50MB"
-      allowed_extensions: [".zip", ".tar.gz", ".7z"]
-      exclude_patterns: ["*.exe", "*.dll"]
+    # The archive converter exposes no options. It extracts supported archives
+    # so their contents can be scanned; there is nothing to tune per run.
 
   jupyter:
     enabled: true
     options:
-      extract_code_cells: true
-      extract_markdown_cells: true
-      cell_separator: "# %%"
-      validate_syntax: true
+      tool_version: null
+      install_timeout: 300
 ```
 
 ## Best Practices
@@ -115,10 +105,7 @@ converters:
 ```yaml
 converters:
   archive:
-    options:
-      max_extraction_depth: 3    # Prevent zip bombs
-      max_file_size: "100MB"     # Limit resource usage
-      scan_extracted_only: true  # Don't scan original archives
+    enabled: false             # The only lever is whether extraction runs at all
 ```
 
 ### Jupyter Processing
@@ -126,9 +113,7 @@ converters:
 ```yaml
 converters:
   jupyter:
-    options:
-      preserve_cell_numbers: true  # Accurate line mapping
-      validate_syntax: true        # Skip malformed cells
+    enabled: true                # Cell-to-line mapping is always preserved
 ```
 
 ## Integration with Scanners
@@ -151,18 +136,14 @@ ash analysis.ipynb --scanners bandit,detect-secrets
 ```yaml
 converters:
   archive:
-    options:
-      ignore_extraction_errors: true
-      log_extraction_details: true
+    enabled: true                # Extraction errors are logged and the scan continues
 ```
 
 **Large archives**:
 ```yaml
 converters:
   archive:
-    options:
-      max_file_size: "500MB"
-      max_extraction_depth: 1
+    enabled: true
 ```
 
 ### Jupyter Issues
@@ -171,9 +152,7 @@ converters:
 ```yaml
 converters:
   jupyter:
-    options:
-      skip_invalid_cells: true
-      validate_json: true
+    enabled: true                # A notebook that will not parse is reported, not skipped silently
 ```
 
 ## Next Steps

@@ -49,14 +49,10 @@ scanners:
 
 reporters:
   html:
-    enabled: true
-    options:
-      include_suppressed: false
+    enabled: true             # The HTML reporter exposes no options
 
   sarif:
-    enabled: true
-    options:
-      include_rule_metadata: true
+    enabled: true             # The SARIF reporter exposes no options
 ```
 
 ## Plugin Categories
