@@ -32,7 +32,7 @@ dependencies = [
  "python-multipart>=0.0.32,<0.1",
  # Transitive via pyjwt[crypto] <- mcp[crypto]; pinned to patch GHSA-g6cj-pr64-35w5
  "cryptography>=50.0.0,<51",
- "uvicorn>=0.27,<1",
+ "uvicorn>=0.52.4,<1",
  "jsonpatch>=1.33,<2",
 ]
 [project.optional-dependencies]
