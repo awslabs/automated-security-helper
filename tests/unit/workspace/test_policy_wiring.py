@@ -48,6 +48,7 @@ assert only that the override REACHES the project's config.
 from __future__ import annotations
 
 import json
+from pathlib import PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, ClassVar
 
 import pytest
@@ -78,7 +79,13 @@ class RecordingOrchestrator:
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs: dict[str, Any] = kwargs
-        self.key = str(kwargs["source_dir"]).rstrip("/").rsplit("/", 1)[-1]
+        # PurePath.name rather than a string split: str() of a WindowsPath has
+        # no forward slash in it, so rsplit("/", 1)[-1] returned the entire
+        # path and every _kwargs_for lookup missed. The caller's own flavour is
+        # preserved when it is already a PurePath, so a PureWindowsPath stays
+        # Windows-parsed even when this runs on Linux.
+        src = kwargs["source_dir"]
+        self.key = (src if isinstance(src, PurePath) else PurePath(src)).name
         RecordingOrchestrator.built.append(self)
 
     @classmethod
@@ -138,6 +145,34 @@ def _kwargs_for(key):
         f"{[o.key for o in RecordingOrchestrator.built]}"
     )
     return matches[0]
+
+
+# ---------------------------------------------------------------------------
+# 0. The double's own key derivation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "source_dir",
+    [
+        pytest.param(PurePosixPath("/tmp/pytest-0/t0/api"), id="posix"),
+        pytest.param(PureWindowsPath(r"C:\Temp\pytest-0\t0\api"), id="windows"),
+    ],
+)
+def test_the_double_derives_the_project_key_on_either_path_flavour(source_dir):
+    """A test double's helper, tested, because this one broke every Windows row.
+
+    The key was originally derived with ``str(...).rsplit("/", 1)[-1]``. A
+    ``WindowsPath`` stringifies with backslashes and no forward slash, so that
+    expression returned the *entire path* and `_kwargs_for` matched nothing --
+    reported as "no orchestrator was built", which reads as the executor having
+    raised before building one. It had built one; the lookup could not find it.
+
+    Parametrised over both flavours rather than guarded by a skip, so the
+    Windows case is exercised on Linux. That is the whole point: the bug was
+    invisible on every platform CI ran green on.
+    """
+    assert RecordingOrchestrator(source_dir=source_dir).key == "api"
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +333,18 @@ def test_an_override_cannot_loosen_a_project_past_the_workspace_ceiling(tmp_path
 
     # And the gate actually uses it.
     outcome = _run(tmp_path, plan, config_overrides=overrides)
-    assert outcome.payload.projects[0].severity_threshold == "MEDIUM"
+    scanned = outcome.payload.projects[0]
+    # Status before threshold, because `_failed_outcome` reports
+    # `severity_threshold=project.gate_threshold` -- the same value the success
+    # path reports. So the threshold assertion below passes even when the
+    # project never ran, and this test could not tell "the ceiling was enforced"
+    # from "the project died and the plan's value was echoed back". This is the
+    # only test here that executes a project without going through
+    # `_kwargs_for`, so it was the one place a broken execution path could hide.
+    assert scanned.status == "completed", (
+        f"the project did not run: status={scanned.status!r} error={scanned.error!r}"
+    )
+    assert scanned.severity_threshold == "MEDIUM"
 
 
 def test_an_override_may_tighten_past_the_ceiling_without_limit(tmp_path):
