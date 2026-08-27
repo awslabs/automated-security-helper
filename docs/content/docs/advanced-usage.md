@@ -149,6 +149,12 @@ ash --mode container --oci-runner finch
 
 ### Custom Container Images
 
+ASH does not publish a container image to a public registry. Building it yourself and
+hosting it in your own registry is the recommended posture, so that the provenance and
+patching cadence of the image that reads your source code belong to you. See
+[Building your own container image](building-your-own-image.md) for the reasoning, the
+rebuild cadence it commits you to, and offline builds.
+
 ```bash
 # Specify a custom container image
 export ASH_IMAGE_NAME="my-registry/ash:custom"
