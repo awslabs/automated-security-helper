@@ -79,6 +79,23 @@ def _mcp_wrapper(
         "--auth-header-value",
         help="Expected value of --auth-header-name.",
     ),
+    stateless_http: bool = typer.Option(
+        False,
+        "--stateless-http/--no-stateless-http",
+        help="Handle each streamable-HTTP request independently instead of binding "
+        "it to a server-held session. Required behind a load balancer that may "
+        "route consecutive requests to different replicas, and by managed runtimes "
+        "that inject their own Mcp-Session-Id. Only valid with "
+        "--transport streamable-http.",
+    ),
+    allowed_host: list[str] | None = typer.Option(
+        None,
+        "--allowed-host",
+        help="Host header value to accept, repeatable. Keeps DNS-rebinding "
+        "protection enabled while allowing a known proxy or load balancer "
+        "hostname. Without this, protection is enabled only when --host is "
+        "loopback, matching the MCP SDK's own default.",
+    ),
 ):
     """Lazy wrapper that imports and delegates to the real MCP command."""
     from automated_security_helper.cli.mcp import mcp_command
@@ -96,6 +113,8 @@ def _mcp_wrapper(
         mount_path=mount_path,
         auth_header_name=auth_header_name,
         auth_header_value=auth_header_value,
+        stateless_http=stateless_http,
+        allowed_host=allowed_host,
     )
 
 

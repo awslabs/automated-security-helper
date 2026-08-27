@@ -18,7 +18,7 @@ supports multiple transports:
 from __future__ import annotations
 
 import os
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional
 import typer
 from rich.console import Console
 
@@ -95,6 +95,30 @@ def _validate_auth_options(
         )
 
 
+def _validate_stateless_http(transport: str, stateless_http: bool) -> None:
+    """Reject ``--stateless-http`` on a transport that has no sessions to skip.
+
+    Refused rather than ignored. An operator who passes it expects a server that
+    tolerates being load-balanced; silently dropping it on the wrong transport
+    would leave them running a stateful server and only find out when a request
+    landed on the wrong replica in production.
+
+    Only the affirmative case is checked. ``--no-stateless-http`` is
+    indistinguishable from the default, so treating it as an error would break
+    every existing stdio invocation for no gain.
+
+    Raises:
+        ASHValidationError: if stateless_http is set on a non-streamable transport.
+    """
+    if stateless_http and transport != "streamable-http":
+        raise ASHValidationError(
+            f"--stateless-http only applies to '--transport streamable-http', but "
+            f"transport is '{transport}'. stdio has a single implicit session and "
+            f"sse holds an open connection per client, so neither has a session to "
+            f"make stateless."
+        )
+
+
 def _build_auth_middleware(header_name: str, header_value: str):
     """Build a Starlette middleware class that enforces a static header.
 
@@ -148,6 +172,9 @@ def build_streamable_http_app(
     mount_path: str = "/mcp",
     auth_header_name: Optional[str] = None,
     auth_header_value: Optional[str] = None,
+    stateless_http: bool = False,
+    host: str = "127.0.0.1",
+    allowed_hosts: Optional[List[str]] = None,
 ):
     """Build the MCPServer streamable-HTTP ASGI app, optionally guarded by auth.
 
@@ -156,6 +183,30 @@ def build_streamable_http_app(
         auth_header_name: When set with ``auth_header_value``, requests
             missing the header (or carrying a different value) get 401.
         auth_header_value: Expected value for ``auth_header_name``.
+        stateless_http: When True, treat every request independently instead of
+            binding it to a server-held session. Needed by any runtime that
+            load-balances requests across replicas -- the next request may reach
+            a replica that never saw the session -- and by runtimes that inject
+            their own ``Mcp-Session-Id``, which a stateful server refuses as a
+            session it does not know. Defaults to False, preserving the stateful
+            behaviour ASH had before this option existed.
+        host: The address the server will bind. This must be the *same* value
+            handed to uvicorn -- see below.
+        allowed_hosts: Explicit Host-header allowlist. When given, DNS-rebinding
+            protection stays on and accepts exactly these hosts, which is the
+            right posture behind a proxy whose hostname is known.
+
+    The host argument is load-bearing, not cosmetic
+    ----------------------------------------------
+    The SDK turns DNS-rebinding protection on automatically when *this* host is
+    loopback, and the allowlist it installs then contains only ``127.0.0.1``,
+    ``localhost`` and ``[::1]``. ASH previously omitted the argument entirely, so
+    the app was always built as though bound to ``127.0.0.1`` no matter what
+    ``--host`` said. A server started with ``--host 0.0.0.0`` bound correctly and
+    then answered ``421 Misdirected Request`` to every request whose Host header
+    was anything but loopback -- so every request through a load balancer, and
+    every request from another machine. Passing the real bind address is what
+    makes the app's security match the socket's reachability.
 
     Returns:
         A Starlette application ready to hand to uvicorn.
@@ -178,7 +229,24 @@ def build_streamable_http_app(
     # `ValueError: "Settings" object has no field "streamable_http_path"`.
     # Passing it per call is also better behaved: the previous form mutated a
     # module-level singleton's settings as a side effect.
-    app = _mcp_instance.streamable_http_app(streamable_http_path=mount_path)
+    app_kwargs = {
+        "streamable_http_path": mount_path,
+        "stateless_http": stateless_http,
+        "host": host,
+    }
+    if allowed_hosts:
+        # Supplying transport_security suppresses the SDK's host-based autodetect
+        # entirely, so this is the only branch that can keep protection on while
+        # accepting a non-loopback name. allowed_origins is left empty rather than
+        # mirroring allowed_hosts: Origin is a browser-supplied header, and an MCP
+        # server reached through a proxy has no reason to trust one.
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        app_kwargs["transport_security"] = TransportSecuritySettings(
+            allowed_hosts=list(allowed_hosts),
+            allowed_origins=[],
+        )
+    app = _mcp_instance.streamable_http_app(**app_kwargs)
 
     if auth_header_name and auth_header_value:
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
@@ -291,6 +359,27 @@ def mcp_command(
             help="Expected value of --auth-header-name.",
         ),
     ] = None,
+    stateless_http: Annotated[
+        bool,
+        typer.Option(
+            "--stateless-http/--no-stateless-http",
+            help="Handle each streamable-HTTP request independently instead of "
+            "binding it to a server-held session. Required behind a load balancer "
+            "that may route consecutive requests to different replicas, and by "
+            "managed runtimes that inject their own Mcp-Session-Id. Only valid "
+            "with --transport streamable-http.",
+        ),
+    ] = False,
+    allowed_host: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--allowed-host",
+            help="Host header value to accept, repeatable. Keeps DNS-rebinding "
+            "protection enabled while allowing a known proxy or load balancer "
+            "hostname. Without this, protection is enabled only when --host is "
+            "loopback, matching the MCP SDK's own default.",
+        ),
+    ] = None,
 ) -> None:
     """Start the ASH MCP server.
 
@@ -348,6 +437,15 @@ def mcp_command(
         )
         raise typer.Exit(3)
 
+    # After the transport check, not with the auth options above: an unknown
+    # transport combined with --stateless-http should be reported as an unknown
+    # transport, which is the operator's actual mistake.
+    try:
+        _validate_stateless_http(transport, stateless_http)
+    except ASHValidationError as e:
+        _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
+        raise typer.Exit(3)
+
     # Validate and configure logging options
     log_level_value = validate_log_options(verbose, debug, log_level)
 
@@ -369,6 +467,12 @@ def mcp_command(
                 mount_path=mount_path,
                 auth_header_name=auth_header_name,
                 auth_header_value=auth_header_value,
+                stateless_http=stateless_http,
+                # The same host uvicorn is about to bind. Passing a different
+                # value here than to _run_uvicorn below is the bug this argument
+                # exists to prevent.
+                host=host,
+                allowed_hosts=allowed_host,
             )
             if not quiet:
                 _stderr.print(
