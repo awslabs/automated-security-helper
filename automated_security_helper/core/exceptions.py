@@ -28,6 +28,42 @@ class WorkspacePatternError(ASHValidationError):
     pass
 
 
+class ShardSelectionError(ASHValidationError):
+    """Exception raised when ``--shard-index``/``--shard-count`` cannot be used as given.
+
+    Every case this covers would otherwise produce a *partial* scan that reports
+    itself as a whole one, which is the worst available outcome for a security
+    scanner: a lone ``--shard-index`` with no ``--shard-count`` would scan shard 0
+    of an unknown total, and an index at or past the count would scan nothing at
+    all and exit 0.
+
+    Refused rather than clamped. Clamping an out-of-range index onto the last
+    shard would make a pipeline with an off-by-one in its matrix expression scan
+    one shard twice and another never, and the reports would look healthy.
+    """
+
+    pass
+
+
+class ShardCoverageError(ASHValidationError):
+    """Exception raised when a set of shard results cannot be merged into a whole.
+
+    A merge is only meaningful if the shards it is handed reconstruct exactly one
+    full scan. This is raised when they do not: a missing index (a CI job that
+    failed or whose artifact never uploaded), a duplicated index, shards that
+    disagree about the total count, or two shards that both claim the same
+    scanner.
+
+    The failure mode this exists to prevent is silent and severe. Merging four of
+    five shards produces a valid, well-formed, confidently-empty-looking report
+    for whichever scanners lived on the missing shard, and nothing in the output
+    says a fifth of the scan is absent. So the merge fails loudly and names the
+    specific gap instead of reporting what it happens to have.
+    """
+
+    pass
+
+
 class WorkspaceDefinitionError(ASHValidationError):
     """Exception raised when a workspace definition cannot be used as given.
 
