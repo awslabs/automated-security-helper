@@ -564,7 +564,19 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         execute_workspace,
     )
 
-    assert opts.workspace_plan is not None
+    if opts.workspace_plan is None:
+        # The sole caller checks this before dispatching here, so reaching this
+        # branch means a new call site skipped the check. Raised rather than
+        # asserted because `python -O` strips assert, and a missing plan would then
+        # surface much deeper as an unrelated AttributeError inside
+        # execute_workspace. RuntimeError rather than a Workspace*Error, which
+        # would report a caller bug as though the operator's workspace file were
+        # at fault.
+        raise RuntimeError(
+            "_run_workspace_mode requires a resolved workspace plan; "
+            "opts.workspace_plan is None"
+        )
+
     workspace_config = _resolve_workspace_execution_config(opts)
 
     _offline_was_set = False

@@ -146,8 +146,8 @@ class TestRunCommandAssembly:
         )
         mounts = [
             command[index + 1]
-            for index, token in enumerate(command)
-            if token == "--mount"
+            for index, arg in enumerate(command)
+            if arg == "--mount"
         ]
         source_mounts = [m for m in mounts if "destination=/src" in m]
         assert len(source_mounts) == 1
@@ -175,8 +175,8 @@ class TestRunCommandAssembly:
         assert "/out" in command
         assert any(
             "destination=/out" in command[index + 1]
-            for index, token in enumerate(command)
-            if token == "--mount"
+            for index, arg in enumerate(command)
+            if arg == "--mount"
         )
 
 

@@ -1010,8 +1010,8 @@ class TestScanCommand:
         command = gate.build_scan_command(tmp_path / "w.code-workspace", tmp_path / "o")
         selected = [
             command[i + 1]
-            for i, token in enumerate(command[:-1])
-            if token == "--scanners"
+            for i, arg in enumerate(command[:-1])
+            if arg == "--scanners"
         ]
         assert set(selected) == {"bandit", "checkov"}
         assert selected == list(gate.GATE_SCANNERS)

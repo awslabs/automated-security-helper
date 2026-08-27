@@ -339,7 +339,7 @@ def _scanner_option_models() -> dict[str, type]:
             continue
         try:
             module = importlib.import_module(mod.name)
-        except Exception:  # noqa: BLE001, S112 - see below
+        except Exception:  # noqa: BLE001, S112  # nosec B112 -- see below
             # Deliberately broad and deliberately silent. A scanner module whose
             # optional dependency is missing in this environment is not a
             # documentation problem, and failing the docs gate on it would make

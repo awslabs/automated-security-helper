@@ -88,7 +88,7 @@ import csv
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 -- the gate runs ASH as a child process to produce the reports it checks
 import sys
 import tempfile
 from dataclasses import dataclass
