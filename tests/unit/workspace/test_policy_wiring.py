@@ -155,8 +155,13 @@ def _kwargs_for(key):
 @pytest.mark.parametrize(
     "source_dir",
     [
-        pytest.param(PurePosixPath("/tmp/pytest-0/t0/api"), id="posix"),
-        pytest.param(PureWindowsPath(r"C:\Temp\pytest-0\t0\api"), id="windows"),
+        # Deliberately not /tmp, /var/tmp or /dev/shm. Those are bandit B108's
+        # three patterns, ASH self-scans this repository at MEDIUM, and one
+        # actionable finding fails the required check. Nothing here touches the
+        # filesystem -- the literals are only ever parsed -- so any absolute
+        # path serves, and a non-temp one keeps the self-scan green.
+        pytest.param(PurePosixPath("/w/ws/api"), id="posix"),
+        pytest.param(PureWindowsPath(r"C:\w\ws\api"), id="windows"),
     ],
 )
 def test_the_double_derives_the_project_key_on_either_path_flavour(source_dir):
