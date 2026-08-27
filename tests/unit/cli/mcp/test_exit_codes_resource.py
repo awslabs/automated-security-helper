@@ -13,15 +13,28 @@ import automated_security_helper.interactions.run_ash_scan as run_ash_scan_modul
 
 
 class TestExitCodesResource:
-    def test_resource_returns_dict_with_keys_0_1_2_3(self):
+    def test_resource_returns_dict_with_keys_0_through_4(self):
+        """4 was added for workspace mode; see models/workspace.py for why not 2."""
         result = _build_ash_exit_codes()
         data = json.loads(result)
-        assert set(data.keys()) == {"0", "1", "2", "3"}
+        assert set(data.keys()) == {"0", "1", "2", "3", "4"}
 
     def test_exit_code_3_describes_invalid_config(self):
         result = _build_ash_exit_codes()
         data = json.loads(result)
         assert "invalid config" in data["3"].lower()
+
+    def test_exit_code_4_describes_a_workspace_error(self):
+        result = _build_ash_exit_codes()
+        data = json.loads(result)
+        assert "workspace" in data["4"].lower()
+
+    def test_exit_code_2_still_describes_findings(self):
+        """Guards the decision: 4 was added rather than overloading 2."""
+        result = _build_ash_exit_codes()
+        data = json.loads(result)
+        assert "findings" in data["2"].lower()
+        assert "workspace" not in data["2"].lower()
 
     def test_resource_matches_runtime_behavior(self):
         source = inspect.getsource(run_ash_scan_module)

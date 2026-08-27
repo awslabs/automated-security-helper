@@ -12,6 +12,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -69,7 +70,24 @@ class SecurityHubReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
-    """Sends security findings to AWS Security Hub in ASFF format."""
+    """Sends security findings to AWS Security Hub in ASFF format.
+
+    Workspace mode: per project.
+
+    This reporter has a side effect -- it calls ``BatchImportFindings`` -- so the
+    behaviour is not only about document shape. Each project's own scan already
+    publishes that project's findings. Invoking it again at workspace level would
+    import every finding a second time, and ASFF findings are keyed on ``Id``, so
+    the duplicates would either overwrite the per-project imports or land beside
+    them depending on how the ids collide. Neither outcome is one an operator
+    asked for, and both are silent.
+
+    Per project is also the correct scope for the data: an ASFF finding is
+    attributed to one resource in one account, and a workspace's projects are
+    independently owned.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
 
     def model_post_init(self, context):
         if self.config is None:

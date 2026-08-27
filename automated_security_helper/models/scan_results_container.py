@@ -137,25 +137,31 @@ class ScanResultsContainer(BaseModel):
     def determine_status(self, threshold: str | None) -> ScannerStatus:
         """Determine PASSED/FAILED status by comparing severity_counts to threshold.
 
-        Mirrors the cascade that previously lived in scan_phase.py: any finding at
-        or above the configured severity threshold fails the scanner. Does not
-        mutate the container's current status — the caller assigns the result.
+        Any finding at or above the configured severity threshold fails the
+        scanner. Does not mutate the container's current status — the caller
+        assigns the result.
+
+        The gate itself lives in ``utils.severity_ladder``, shared with the
+        junitxml reporter so the two cannot disagree about the same finding.
+        Two properties worth knowing before changing anything here: raising the
+        threshold LOOSENS the gate, and a None/empty threshold is more
+        permissive than ``CRITICAL`` rather than equivalent to it — it is how an
+        operator turns the gate off, so even a critical finding passes.
         """
-        # Treat a None/empty threshold the same as the most permissive level
-        # so severity counts are only ignored when configured to ignore.
-        if not threshold:
-            return ScannerStatus.PASSED
+        from automated_security_helper.utils.severity_ladder import (
+            severity_fails_threshold,
+        )
 
         counts = self.severity_counts
+        counts_by_severity = (
+            ("CRITICAL", counts.critical),
+            ("HIGH", counts.high),
+            ("MEDIUM", counts.medium),
+            ("LOW", counts.low),
+            ("INFO", counts.info),
+        )
 
-        if counts.critical > 0:
-            return ScannerStatus.FAILED
-        if counts.high > 0 and threshold in ("ALL", "LOW", "MEDIUM", "HIGH"):
-            return ScannerStatus.FAILED
-        if counts.medium > 0 and threshold in ("ALL", "LOW", "MEDIUM"):
-            return ScannerStatus.FAILED
-        if counts.low > 0 and threshold in ("ALL", "LOW"):
-            return ScannerStatus.FAILED
-        if counts.info > 0 and threshold == "ALL":
-            return ScannerStatus.FAILED
+        for severity, count in counts_by_severity:
+            if count > 0 and severity_fails_threshold(severity, threshold):
+                return ScannerStatus.FAILED
         return ScannerStatus.PASSED

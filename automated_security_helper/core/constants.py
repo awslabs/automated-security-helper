@@ -175,6 +175,11 @@ ASH_EXIT_CODES: Dict[int, str] = {
     1: "scan errors / scanner failures",
     2: "actionable findings above threshold",
     3: "invalid config",
+    # 4 is workspace-mode only. It is deliberately NOT an overload of 2: a
+    # workspace definition error means nothing was scanned, whereas 2 means a
+    # scan completed and found something. See models/workspace.py for why the
+    # RFC's original assignment of 2 was not used.
+    4: "workspace definition or policy error",
 }
 
 

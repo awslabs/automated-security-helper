@@ -219,7 +219,7 @@ scanners:
   bandit:
     enabled: true
     options:
-      confidence_level: HIGH
+      confidence_level: high  # lowercase only; HIGH is rejected
 reporters:
   markdown:
     enabled: true

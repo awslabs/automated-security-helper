@@ -10,6 +10,10 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    text_workspace_section,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
@@ -43,7 +47,15 @@ class TextReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class TextReporter(ReporterPluginBase[TextReporterConfig]):
-    """Formats results as a human-readable plain text document."""
+    """Formats results as a human-readable plain text document.
+
+    Workspace mode: one merged artefact with a per-project section. This is what
+    ends up in a CI job log, so the section is fixed-width and aligned like the
+    scanner table beside it -- a workspace summary that a reader has to count
+    columns in is worse than no summary.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         if self.config is None:
@@ -87,6 +99,11 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
         text_parts.append(f"Scan executed: {metadata['scan_time']}")
         text_parts.append(f"ASH version: {metadata['tool_version']}")
         text_parts.append("")
+
+        # The per-project table, ahead of the summary because in a workspace the
+        # first question is which project failed and a merged count cannot answer
+        # it. Empty for a single-directory scan.
+        text_parts.extend(text_workspace_section(model))
 
         # Add summary section if enabled
         if isinstance(self.config, dict):

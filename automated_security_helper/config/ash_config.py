@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import re
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
-from typing import Annotated, Any, List, Dict, Literal
+from typing import Annotated, Any, List, Dict, Literal, Optional
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
@@ -533,6 +533,146 @@ class AshConfigGlobalSettingsSection(BaseModel):
     ] = AshMcpConfig()
 
 
+# Distinguishes "caller did not pass cpu_count" from "caller passed None", which
+# is a real value here: os.cpu_count() returns None on hosts that cannot report it,
+# and a test needs to be able to say so explicitly.
+_UNSET_CPU_COUNT: Any = object()
+
+
+class WorkspaceExecutionConfig(BaseModel):
+    """How many projects a workspace scan runs at once, and how long each may take.
+
+    Why this is not read from the .code-workspace file
+    --------------------------------------------------
+    ``automated_security_helper.workspace.workspace_file`` deliberately ignores
+    that file's ``settings`` block, because it belongs to another tool whose
+    schema ASH does not control. So every ASH knob, including these two, lives in
+    ASH's own config -- here, in the config resolved for the workspace root.
+
+    Why these two land before the workspace policy block
+    ----------------------------------------------------
+    Neither can change any project's verdict. ``max_parallel_projects`` decides
+    scheduling and ``project_timeout`` decides how long to wait; the findings a
+    project reports and the threshold they are judged against are untouched. The
+    workspace-level *policy* fields -- a severity ceiling, workspace-wide
+    suppressions -- can change a verdict, and they arrive separately and visibly
+    rather than riding in on an execution change.
+
+    Wall clock is ``ceil(projects / bound)`` waves, and that is arithmetic
+    -----------------------------------------------------------------------
+    A workspace of N projects at a bound of B runs in ``ceil(N / B)`` waves, so
+    its wall clock is roughly that multiple of one project's. Reproduce with
+    ``scripts/measure_workspace_parallelism.py``; measured on a 192-CPU Linux
+    host on 2026-08-25, five projects, bound 4, three timed runs per arm, the
+    whole child process timed:
+
+    * five equal projects -- one alone 21.3s median (19.4-22.7), the workspace
+      43.4s median (41.5-45.8). Ratio of medians **2.036x**, range 1.823-2.365x.
+    * one larger project plus four small -- one alone 20.7s median (20.7-26.3),
+      the workspace 40.5s median (39.3-46.0). Ratio **1.958x**, range
+      1.495-2.227x.
+
+    Both sit on the ``ceil(5/4) = 2`` floor, so neither says much about the
+    implementation: an operator who wants a workspace to finish in about the time
+    of its slowest project has to set ``max_parallel_projects`` to at least the
+    project count and accept the thread product below. The default stays at 4
+    because that product is the thing worth defaulting conservatively.
+
+    Two earlier figures for this were wrong and are withdrawn. A reported 0.88x at
+    bound 5 -- a five-project workspace beating one project alone -- was an
+    artefact of timing a cold single-project arm against a warm workspace arm,
+    because ``uv_tool_runner`` caches tool probing across invocations. The
+    measurement script now runs a discard pass first and alternates the arms, and
+    nothing close to a sub-1.0 ratio reappears. A reported 2.35x at bound 4 was a
+    single unrepeated run; it lands at the top of the range measured here rather
+    than at its centre, which is why the figures above are medians with a spread.
+
+    The second shape did not do what it was designed to do, and that is worth
+    knowing before anyone repeats it. It gave one project five times the files, on
+    the theory that "the slowest project alone" would then be a real baseline and
+    the small projects could hide inside its wave. But 60 files scanned in 20.7s
+    and 12 files in 21.3s -- indistinguishable. Scan wall clock here is dominated
+    by per-scanner startup, not by file count, so the fixture produced no dominant
+    project and its number is really the equal case again. Testing the RFC's 1.5x
+    criterion properly needs a project large enough to be file-bound rather than
+    startup-bound, which is thousands of files, not sixty.
+
+    On this evidence the 1.5x criterion is not met at the default bound in either
+    shape, and for five projects at bound 4 it cannot be: two waves is 2.0x before
+    any implementation cost.
+
+    Failure modes and known limitations
+    -----------------------------------
+    * ``project_timeout`` bounds the *verdict*, not the worker. Python cannot
+      preempt a thread, so a timed-out project is recorded FAILED and the
+      workspace continues, but the abandoned worker keeps running -- and keeps
+      its pool slot. Once every slot is held by an abandoned project, nothing
+      still queued can start, so those projects are cancelled and recorded
+      FAILED rather than waited on. A workspace with more projects than
+      ``max_parallel_projects`` can therefore report several failures from one
+      slow project; raising either knob avoids it.
+    * The process still does not exit until every abandoned worker finishes,
+      because the interpreter joins them. Scanners run as subprocesses with
+      their own timeouts, so the residual exposure is a genuinely wedged
+      in-process scanner.
+    * The outer bound multiplies with the inner scanner pool. That pool is
+      ``min(32, cpu_count + 4)`` in ``ScanExecutionEngine.__init__``, not 4, and
+      not the unrelated ``thread_pool_max_workers`` MCP setting, so the
+      worst-case thread count is ``max_parallel_projects * min(32, cpu + 4)``.
+      On the 192-CPU host above, the default bound of 4 already permits up to
+      128 concurrent scanner threads.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_parallel_projects: Annotated[
+        Optional[int],
+        Field(
+            None,
+            ge=1,
+            le=64,
+            description=(
+                "Maximum number of projects scanned concurrently. Unset means "
+                "min(4, cpu_count). This is an outer bound over each project's "
+                "own scanner thread pool, not a replacement for it."
+            ),
+        ),
+    ] = None
+
+    project_timeout: Annotated[
+        Optional[float],
+        Field(
+            None,
+            gt=0,
+            description=(
+                "Seconds to allow a single project. Unset means no limit. On "
+                "timeout that project is recorded as failed and the remaining "
+                "projects still complete."
+            ),
+        ),
+    ] = None
+
+    def resolved_max_parallel_projects(
+        self, cpu_count: Optional[int] = _UNSET_CPU_COUNT
+    ) -> int:
+        """The bound to use, deriving the default when none is configured.
+
+        Stored as ``None`` and derived here rather than defaulted to 4 in the
+        field, so that a one-CPU host gets one worker instead of four and a
+        serialised config still shows the operator did not choose a number.
+
+        Args:
+            cpu_count: Override for the host CPU count, for tests. ``None`` and
+                ``0`` are both treated as one CPU, because ``os.cpu_count()``
+                can return ``None`` and a pool of zero workers never runs.
+        """
+        if self.max_parallel_projects is not None:
+            return self.max_parallel_projects
+        if cpu_count is _UNSET_CPU_COUNT:
+            cpu_count = os.cpu_count()
+        return max(1, min(4, cpu_count or 1))
+
+
 class AshConfig(BaseModel):
     """Main configuration model for Automated Security Helper."""
 
@@ -617,6 +757,18 @@ class AshConfig(BaseModel):
             alias="mcp-resource-management",
         ),
     ] = MCPResourceManagementConfig()
+
+    workspace: Annotated[
+        WorkspaceExecutionConfig,
+        Field(
+            description=(
+                "Workspace-mode execution settings. Read from the config "
+                "resolved for the workspace root; a project's own copy of this "
+                "block is ignored, because how many projects run at once is not "
+                "a project's decision."
+            ),
+        ),
+    ] = WorkspaceExecutionConfig()
 
     @classmethod
     def from_file(cls, config_path: Path) -> "AshConfig":

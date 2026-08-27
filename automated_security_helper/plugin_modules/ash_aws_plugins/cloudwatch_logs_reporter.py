@@ -22,6 +22,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
@@ -109,7 +110,36 @@ class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
-    """Formats results and publishes to CloudWatch Logs."""
+    """Formats results and publishes to CloudWatch Logs.
+
+    Workspace mode: per project. The RFC's reporter table did not rule on this
+    one, so the reasoning is recorded here.
+
+    This is a delivery mechanism rather than a format, and it has a side effect --
+    ``PutLogEvents``. Each project's own scan already publishes its own event, so
+    a workspace-level invocation would add an N+1st event to the same log stream
+    describing the same findings, and a CloudWatch Logs Insights query would then
+    double-count every one of them.
+
+    What the extra event would contain is the stronger argument. It publishes
+    ``model.to_simple_dict()``, whose two substantive keys at workspace level are
+    the *lossy* ``scanner_results`` rollup -- per-scanner counts summed across
+    projects, status taken as the worst across projects -- and an ``ash_config``
+    that is no project's config, because workspace-level config does not exist
+    until Phase 3. The event would describe a scan that never ran, in a stream
+    where it sits indistinguishably beside N events that did.
+
+    A size limit also applies, though it is not the binding argument here because
+    ``to_simple_dict()`` omits findings and SARIF: PutLogEvents caps a single
+    event at 1 MB and a batch at 1,048,576 bytes
+    (https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutLogEvents.html).
+    It is worth naming because it forecloses the obvious alternative -- publishing
+    the merged findings instead of the summary -- which would exceed it for any
+    workspace of consequence, and this reporter's error path returns the exception
+    text as its report rather than failing the run.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
 
     def model_post_init(self, context):
         if self.config is None:

@@ -409,6 +409,14 @@
             }
           },
           "description": "Scanner configurations by name."
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceExecutionConfig",
+          "default": {
+            "max_parallel_projects": null,
+            "project_timeout": null
+          },
+          "description": "Workspace-mode execution settings. Read from the config resolved for the workspace root; a project's own copy of this block is ignored, because how many projects run at once is not a project's decision."
         }
       },
       "title": "AshConfig",
@@ -3927,6 +3935,43 @@
         "key"
       ],
       "title": "ToolExtraArg",
+      "type": "object"
+    },
+    "WorkspaceExecutionConfig": {
+      "additionalProperties": false,
+      "description": "How many projects a workspace scan runs at once, and how long each may take.\n\nWhy this is not read from the .code-workspace file\n--------------------------------------------------\n``automated_security_helper.workspace.workspace_file`` deliberately ignores\nthat file's ``settings`` block, because it belongs to another tool whose\nschema ASH does not control. So every ASH knob, including these two, lives in\nASH's own config -- here, in the config resolved for the workspace root.\n\nWhy these two land before the workspace policy block\n----------------------------------------------------\nNeither can change any project's verdict. ``max_parallel_projects`` decides\nscheduling and ``project_timeout`` decides how long to wait; the findings a\nproject reports and the threshold they are judged against are untouched. The\nworkspace-level *policy* fields -- a severity ceiling, workspace-wide\nsuppressions -- can change a verdict, and they arrive separately and visibly\nrather than riding in on an execution change.\n\nWall clock is ``ceil(projects / bound)`` waves, and that is arithmetic\n-----------------------------------------------------------------------\nA workspace of N projects at a bound of B runs in ``ceil(N / B)`` waves, so\nits wall clock is roughly that multiple of one project's. Reproduce with\n``scripts/measure_workspace_parallelism.py``; measured on a 192-CPU Linux\nhost on 2026-08-25, five projects, bound 4, three timed runs per arm, the\nwhole child process timed:\n\n* five equal projects -- one alone 21.3s median (19.4-22.7), the workspace\n  43.4s median (41.5-45.8). Ratio of medians **2.036x**, range 1.823-2.365x.\n* one larger project plus four small -- one alone 20.7s median (20.7-26.3),\n  the workspace 40.5s median (39.3-46.0). Ratio **1.958x**, range\n  1.495-2.227x.\n\nBoth sit on the ``ceil(5/4) = 2`` floor, so neither says much about the\nimplementation: an operator who wants a workspace to finish in about the time\nof its slowest project has to set ``max_parallel_projects`` to at least the\nproject count and accept the thread product below. The default stays at 4\nbecause that product is the thing worth defaulting conservatively.\n\nTwo earlier figures for this were wrong and are withdrawn. A reported 0.88x at\nbound 5 -- a five-project workspace beating one project alone -- was an\nartefact of timing a cold single-project arm against a warm workspace arm,\nbecause ``uv_tool_runner`` caches tool probing across invocations. The\nmeasurement script now runs a discard pass first and alternates the arms, and\nnothing close to a sub-1.0 ratio reappears. A reported 2.35x at bound 4 was a\nsingle unrepeated run; it lands at the top of the range measured here rather\nthan at its centre, which is why the figures above are medians with a spread.\n\nThe second shape did not do what it was designed to do, and that is worth\nknowing before anyone repeats it. It gave one project five times the files, on\nthe theory that \"the slowest project alone\" would then be a real baseline and\nthe small projects could hide inside its wave. But 60 files scanned in 20.7s\nand 12 files in 21.3s -- indistinguishable. Scan wall clock here is dominated\nby per-scanner startup, not by file count, so the fixture produced no dominant\nproject and its number is really the equal case again. Testing the RFC's 1.5x\ncriterion properly needs a project large enough to be file-bound rather than\nstartup-bound, which is thousands of files, not sixty.\n\nOn this evidence the 1.5x criterion is not met at the default bound in either\nshape, and for five projects at bound 4 it cannot be: two waves is 2.0x before\nany implementation cost.\n\nFailure modes and known limitations\n-----------------------------------\n* ``project_timeout`` bounds the *verdict*, not the worker. Python cannot\n  preempt a thread, so a timed-out project is recorded FAILED and the\n  workspace continues, but the abandoned worker keeps running -- and keeps\n  its pool slot. Once every slot is held by an abandoned project, nothing\n  still queued can start, so those projects are cancelled and recorded\n  FAILED rather than waited on. A workspace with more projects than\n  ``max_parallel_projects`` can therefore report several failures from one\n  slow project; raising either knob avoids it.\n* The process still does not exit until every abandoned worker finishes,\n  because the interpreter joins them. Scanners run as subprocesses with\n  their own timeouts, so the residual exposure is a genuinely wedged\n  in-process scanner.\n* The outer bound multiplies with the inner scanner pool. That pool is\n  ``min(32, cpu_count + 4)`` in ``ScanExecutionEngine.__init__``, not 4, and\n  not the unrelated ``thread_pool_max_workers`` MCP setting, so the\n  worst-case thread count is ``max_parallel_projects * min(32, cpu + 4)``.\n  On the 192-CPU host above, the default bound of 4 already permits up to\n  128 concurrent scanner threads.",
+      "properties": {
+        "max_parallel_projects": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum number of projects scanned concurrently. Unset means min(4, cpu_count). This is an outer bound over each project's own scanner thread pool, not a replacement for it.",
+          "title": "Max Parallel Projects"
+        },
+        "project_timeout": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds to allow a single project. Unset means no limit. On timeout that project is recorded as failed and the remaining projects still complete.",
+          "title": "Project Timeout"
+        }
+      },
+      "title": "WorkspaceExecutionConfig",
       "type": "object"
     },
     "YAMLReporterConfig": {

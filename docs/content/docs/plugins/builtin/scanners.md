@@ -30,12 +30,15 @@ ASH includes 10 built-in security scanners that analyze different aspects of you
 scanners:
   bandit:
     enabled: true
-    severity_threshold: "MEDIUM"
     options:
-      confidence_level: "HIGH"  # LOW, MEDIUM, HIGH
-      skips: ["B101", "B601"]   # Skip specific test IDs
-      tests: ["B201", "B301"]   # Run only specific tests
+      severity_threshold: "MEDIUM"   # ALL, LOW, MEDIUM, HIGH, CRITICAL -- uppercase
+      confidence_level: "high"       # all, low, medium, high -- lowercase
+      ignore_nosec: false
+      config_file: ".bandit"         # Selects individual tests; see below
 ```
+
+Individual bandit test IDs are selected in a bandit configuration file, not through
+ASH options. `severity_threshold` belongs under `options`, alongside the rest.
 
 **Key Checks**:
 - SQL injection vulnerabilities
@@ -108,12 +111,17 @@ scanners:
   checkov:
     enabled: true
     options:
-      framework: ["terraform", "cloudformation", "kubernetes"]
-      check: ["CKV_AWS_*", "CKV_K8S_*"]
-      skip_check: ["CKV_AWS_123"]
-      external_checks_dir: "/path/to/custom/checks"
-      compact: true
+      frameworks: ["terraform", "cloudformation", "kubernetes"]
+      skip_frameworks: ["secrets"]
+      skip_path:                         # Regular expressions, each with a reason
+        - path: "tests/fixtures/.*"
+          reason: "Vulnerable-by-design fixtures"
+      config_file: ".checkov.yaml"       # Selects individual checks; see below
+      additional_formats: ["cyclonedx_json"]
 ```
+
+Individual check IDs and custom check directories are configured in a checkov
+configuration file, which `config_file` points at.
 
 **Key Checks**:
 - Cloud resource misconfigurations
@@ -162,8 +170,9 @@ scanners:
   grype:
     enabled: true
     options:
-      scope: "all-layers"  # all-layers, squashed
-      fail_on: "medium"    # negligible, low, medium, high, critical
+      severity_threshold: "MEDIUM"   # ALL, LOW, MEDIUM, HIGH, CRITICAL
+      offline: false                 # Skip database updates
+      config_file: null              # Explicit grype config, relative to the source directory
 ```
 
 **Key Checks**:
@@ -210,9 +219,11 @@ scanners:
   opengrep:
     enabled: true
     options:
-      rules: "auto"  # auto, or path to rules
-      timeout: 300
-      max_memory: 5000
+      config: "p/ci"        # Ruleset, directory of YAML rules, or URL
+      exclude_rule: []      # Rule IDs to skip
+      severity: []          # Report only rules of these severities
+      scan_timeout: 1800    # Seconds before the invocation is killed
+      version: "v1.15.1"    # OpenGrep version to use
 ```
 
 **Key Checks**:
@@ -235,10 +246,10 @@ scanners:
   semgrep:
     enabled: true
     options:
-      rules: "auto"  # auto, p/security, p/owasp-top-10, or custom
-      timeout: 300
-      max_memory: 5000
+      config: "p/ci"        # p/ci, p/security, p/owasp-top-10, a directory, or a URL
+      scan_timeout: 1800    # Seconds before the invocation is killed
       exclude: ["test/", "*.min.js"]
+      exclude_rule: []      # Rule IDs to skip
 ```
 
 **Key Checks**:
@@ -261,8 +272,9 @@ scanners:
   syft:
     enabled: true
     options:
-      scope: "all-layers"  # all-layers, squashed
-      format: "spdx-json"  # spdx-json, cyclonedx-json, syft-json
+      additional_outputs: ["syft-table"]   # Extra output formats beyond CycloneDX
+      exclude: []                          # Paths to skip, matched as regular expressions
+      offline: false                       # Skip update checks
 ```
 
 **Key Features**:
@@ -300,12 +312,12 @@ ash --scanners npm-audit,detect-secrets,semgrep
 scanners:
   semgrep:
     options:
-      timeout: 60
-      max_memory: 2000
+      scan_timeout: 60      # Give up quickly rather than waiting the 1800s default
+      config: "p/ci"        # A narrower ruleset than a full audit pack
 
   grype:
     options:
-      scope: "squashed"  # Faster than all-layers
+      offline: true         # Skip the database update round trip
 ```
 
 ### CI/CD Integration
@@ -345,11 +357,16 @@ ash --exclude-scanners grype,syft
 **False positives**:
 ```yaml
 # Suppress specific findings
-scanners:
-  bandit:
-    options:
-      skips: ["B101"]  # Skip assert_used test
+global_settings:
+  suppressions:
+    - rule_id: "B101"
+      path: "tests/**"
+      reason: "assert_used is expected in tests"
 ```
+
+ASH suppresses findings through `global_settings.suppressions`, which applies to every
+scanner uniformly. Skipping a bandit test ID instead requires a bandit configuration
+file referenced by `options.config_file`; there is no `skips` option.
 
 ## Next Steps
 

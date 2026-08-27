@@ -8,10 +8,10 @@ import platform
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Union, cast
+from typing import TYPE_CHECKING, List, Optional, Union, cast
 
 import typer
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from rich import print
 
 from automated_security_helper.core.constants import (
@@ -27,7 +27,10 @@ from automated_security_helper.core.enums import (
     ExportFormat,
     RunMode,
 )
-from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.core.exceptions import (
+    ASHConfigValidationError,
+    WorkspaceDefinitionError,
+)
 from automated_security_helper.core.progress import ExecutionPhaseType
 from automated_security_helper.core.unified_metrics import (
     format_duration,
@@ -35,6 +38,14 @@ from automated_security_helper.core.unified_metrics import (
 )
 from automated_security_helper.interactions.run_ash_container import run_ash_container
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.workspace.plan import WorkspacePlan
+
+if TYPE_CHECKING:
+    # Imported for annotations only. A runtime import here would pull the
+    # workspace executor -- and through it core.orchestrator -- into every
+    # single-directory scan's import graph.
+    from automated_security_helper.workspace.execution import WorkspaceRunResult
 
 
 # ---------------------------------------------------------------------------
@@ -44,9 +55,17 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 class ScanOptions(BaseModel):
     """All parameters for a single run_ash_scan invocation."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     # Core paths
     source_dir: Path
     output_dir: Path
+
+    # Workspace mode. When set, source_dir is the workspace ROOT and each project
+    # is scanned with its own source_dir inside it. None means single-directory
+    # mode, which is the only shape the rest of this module handles.
+    workspace_plan: Optional[WorkspacePlan] = None
+    allow_missing_projects: bool = False
 
     # General scan options
     config: Optional[str] = None
@@ -214,6 +233,26 @@ def _setup_logger(opts: ScanOptions):
 # _run_container_mode
 # ---------------------------------------------------------------------------
 
+
+def _workspace_relative_file(opts: ScanOptions) -> Optional[str]:
+    """The workspace definition's path relative to the root, for container mode.
+
+    Container mode has exactly one bind mount, so the workspace root goes to
+    ``/src`` and the definition has to be named relative to it. Resolution has
+    already established that every project sits below the root, which is what
+    makes one mount sufficient.
+    """
+    plan = opts.workspace_plan
+    if plan is None:
+        return None
+    return (
+        Path(plan.workspace_file)
+        .resolve()
+        .relative_to(Path(plan.workspace_root).resolve())
+        .as_posix()
+    )
+
+
 def _run_container_mode(
     opts: ScanOptions,
     logger,
@@ -267,6 +306,8 @@ def _run_container_mode(
         custom_build_arg=opts.custom_build_arg,
         ash_plugin_modules=opts.ash_plugin_modules,
         container_network=opts.container_network,
+        workspace_relative_file=_workspace_relative_file(opts),
+        allow_missing_projects=opts.allow_missing_projects,
     )
 
     if opts.debug:
@@ -463,6 +504,204 @@ def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Op
     finally:
         if _offline_was_set:
             os.environ.pop("ASH_OFFLINE", None)
+
+
+# ---------------------------------------------------------------------------
+# Workspace mode
+# ---------------------------------------------------------------------------
+
+
+def _resolve_workspace_execution_config(opts: ScanOptions):
+    """Read the workspace execution knobs from the workspace root's ASH config.
+
+    The workspace root's config, not a project's: how many projects run at once
+    is not a project's decision, and a project that set it would be overriding a
+    sibling. Falls back to the defaults when there is no config file or it cannot
+    be read -- these are scheduling knobs, so refusing to scan over an unreadable
+    one would be a poor trade.
+    """
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        WorkspaceExecutionConfig,
+    )
+
+    config_path_str = opts.config
+    if config_path_str is None:
+        for config_file in ASH_CONFIG_FILE_NAMES:
+            for candidate in (
+                opts.source_dir / config_file,
+                opts.source_dir / ".ash" / config_file,
+            ):
+                if candidate.exists():
+                    config_path_str = candidate.as_posix()
+                    break
+            if config_path_str is not None:
+                break
+
+    if config_path_str is None:
+        return WorkspaceExecutionConfig()
+
+    try:
+        return AshConfig.from_file(Path(config_path_str)).workspace
+    except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
+        logging.getLogger(__name__).warning(
+            f"Could not read workspace execution settings from "
+            f"'{config_path_str}' ({exc}); using defaults."
+        )
+        return WorkspaceExecutionConfig()
+
+
+def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
+    """Scan every project in the plan and write the unified workspace results.
+
+    Returns the run result rather than an ``AshAggregatedResults``, because a
+    workspace run's verdict is per project and is already computed -- handing back
+    a merged model for ``_compute_exit_code`` to re-derive would give two answers
+    to the same question and no rule for which wins.
+    """
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        execute_workspace,
+    )
+
+    if opts.workspace_plan is None:
+        # The sole caller checks this before dispatching here, so reaching this
+        # branch means a new call site skipped the check. Raised rather than
+        # asserted because `python -O` strips assert, and a missing plan would then
+        # surface much deeper as an unrelated AttributeError inside
+        # execute_workspace. RuntimeError rather than a Workspace*Error, which
+        # would report a caller bug as though the operator's workspace file were
+        # at fault.
+        raise RuntimeError(
+            "_run_workspace_mode requires a resolved workspace plan; "
+            "opts.workspace_plan is None"
+        )
+
+    workspace_config = _resolve_workspace_execution_config(opts)
+
+    _offline_was_set = False
+    if opts.offline:
+        os.environ["ASH_OFFLINE"] = "YES"
+        _offline_was_set = True
+
+    phases: List[str] = []
+    for phase, name in (
+        (ExecutionPhase.CONVERT, "convert"),
+        (ExecutionPhase.SCAN, "scan"),
+        (ExecutionPhase.REPORT, "report"),
+    ):
+        if phase in (opts.phases or []):
+            phases.append(name)
+    if ExecutionPhase.INSPECT in (opts.phases or []) or opts.inspect:
+        phases.append("inspect")
+    if not phases:
+        phases = ["convert", "scan", "report"]
+
+    settings = ProjectScanSettings(
+        output_dir=opts.output_dir,
+        phases=tuple(phases),
+        enabled_scanners=tuple(opts.scanners or []),
+        excluded_scanners=tuple(opts.excluded_scanners or []),
+        output_formats=tuple(
+            getattr(fmt, "value", str(fmt)) for fmt in (opts.output_formats or [])
+        ),
+        config_overrides=tuple(opts.config_overrides or []),
+        ash_plugin_modules=tuple(opts.ash_plugin_modules or []),
+        strategy=getattr(opts.strategy, "value", str(opts.strategy)),
+        offline=opts.offline,
+        python_based_plugins_only=opts.python_based_plugins_only,
+        ignore_suppressions=opts.ignore_suppressions,
+        min_severity=opts.min_severity,
+        fail_on_findings=opts.fail_on_findings,
+        changed_files_only=opts.changed_files_only,
+        base_ref=opts.base_ref,
+        precommit=opts.mode == RunMode.precommit,
+        cleanup=opts.cleanup,
+        verbose=opts.verbose,
+        debug=opts.debug,
+        simple=opts.simple,
+        color_system=(
+            "windows"
+            if platform.system() == "Windows"
+            else "auto"
+            if opts.color
+            else None
+        ),
+        max_parallel_projects=workspace_config.resolved_max_parallel_projects(),
+        project_timeout=workspace_config.project_timeout,
+        allow_missing_projects=opts.allow_missing_projects,
+    )
+
+    try:
+        return execute_workspace(opts.workspace_plan, settings)
+    except WorkspaceDefinitionError as exc:
+        # A refusal, not a project failure: nothing was scanned, so there is no
+        # results file and the exit-2 collision is unambiguous. See
+        # models.workspace for the discriminator.
+        typer.echo(str(exc), err=True)
+        sys.exit(int(WorkspaceExitCode.WORKSPACE_ERROR))
+    except ASHConfigValidationError as exc:
+        print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
+        sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
+    except Exception as exc:
+        logger.exception(exc)
+        print(
+            f"[bold red]ERROR (1) Exiting due to exception during ASH workspace "
+            f"scan: {exc}[/bold red]"
+        )
+        sys.exit(int(WorkspaceExitCode.INTERNAL_ERROR))
+    finally:
+        if _offline_was_set:
+            os.environ.pop("ASH_OFFLINE", None)
+
+
+def _print_workspace_summary(
+    result: "WorkspaceRunResult", opts: ScanOptions, scan_start_time: float
+) -> None:
+    """Per-project outcomes, in workspace-file order.
+
+    A per-project table rather than the single-scan "next steps" block, because
+    the first question about a workspace scan is which project failed, and a
+    merged count cannot answer it.
+    """
+    if opts.quiet:
+        return
+
+    duration_str = format_duration(time.time() - scan_start_time)
+    print(f"\n[cyan]=== ASH Workspace Scan Completed in {duration_str} ===[/cyan]")
+    print(f"  workspace: {result.payload.workspace_file}")
+    print(f"  output:    {opts.output_dir.as_posix()}")
+    print("")
+
+    for entry in result.payload.projects:
+        if entry.status.value == "skipped":
+            reason = entry.skip_reason.value if entry.skip_reason else "unspecified"
+            print(f"  [yellow]skipped[/yellow]  {entry.display_label} ({reason})")
+            continue
+        if entry.status.value == "failed":
+            print(
+                f"  [bold red]failed[/bold red]   {entry.display_label}: {entry.error}"
+            )
+            continue
+        colour = "bold red" if entry.exceeds_threshold else "green"
+        verdict = "FAIL" if entry.exceeds_threshold else "pass"
+        print(
+            f"  [{colour}]{verdict}[/{colour}]     {entry.display_label} -- "
+            f"{entry.actionable_finding_count} actionable of "
+            f"{entry.finding_count} at threshold "
+            f"{entry.severity_threshold or 'none'} "
+            f"({entry.duration_seconds:.1f}s)"
+        )
+
+    print("")
+    print(f"  Aggregated results: {result.results_path.as_posix()}")
+    print(f"  Per-project output: {opts.output_dir.joinpath('projects').as_posix()}")
+    if result.payload.unconvertible_finding_paths:
+        print(
+            f"  [yellow]{result.payload.unconvertible_finding_paths} finding "
+            f"path(s) could not be expressed relative to the workspace root and "
+            f"carry no workspace_uri; they are still reported.[/yellow]"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -730,10 +969,17 @@ def run_ash_scan(
     custom_build_arg: List[str] | None = None,
     ash_plugin_modules: List[str] | None = None,
     container_network: str = "bridge",
+    workspace_plan: "WorkspacePlan | None" = None,
+    allow_missing_projects: bool = False,
     *args,
     **kwargs,
 ):
-    """Run an ASH scan against source_dir, outputting results to output_dir."""
+    """Run an ASH scan against source_dir, outputting results to output_dir.
+
+    When *workspace_plan* is given, *source_dir* is the workspace root and each
+    project in the plan is scanned in its own scope. See
+    :mod:`automated_security_helper.workspace.execution`.
+    """
     scan_start_time = time.time()
 
     # Resolve cwd-based defaults at call time (not import time).
@@ -782,9 +1028,23 @@ def run_ash_scan(
         custom_build_arg=custom_build_arg,
         ash_plugin_modules=ash_plugin_modules,
         container_network=container_network,
+        workspace_plan=workspace_plan,
+        allow_missing_projects=allow_missing_projects,
     )
 
     logger = _setup_logger(opts)
+
+    if opts.workspace_plan is not None and opts.mode != RunMode.container:
+        # Workspace mode owns its own verdict and its own summary. It does not go
+        # through _compute_exit_code, which answers for one directory against one
+        # threshold and has no way to express "project A failed, project B did
+        # not".
+        workspace_result = _run_workspace_mode(opts, logger)
+        if opts.show_summary:
+            _print_workspace_summary(workspace_result, opts, scan_start_time)
+        if workspace_result.exit_code != 0:
+            sys.exit(workspace_result.exit_code)
+        return workspace_result
 
     config_fail_on_findings: Optional[bool] = _resolve_config_fail_on_findings(opts)
     results: Optional[AshAggregatedResults]
@@ -797,6 +1057,25 @@ def run_ash_scan(
         # applied by the orchestrator may alter fail_on_findings).
         if _local_config_fof is not None:
             config_fail_on_findings = _local_config_fof
+
+    if opts.workspace_plan is not None:
+        # Container mode ran `ash --workspace` inside the container, so the
+        # verdict was already computed there by the same code. Re-deriving it on
+        # the host from a merged model would answer a different question.
+        workspace_payload = getattr(results, "workspace", None)
+        exit_code = (
+            int(workspace_payload.exit_code)
+            if workspace_payload is not None
+            else int(WorkspaceExitCode.INTERNAL_ERROR)
+        )
+        if workspace_payload is None:
+            logger.error(
+                "The container produced no workspace payload, so no per-project "
+                "verdict is available."
+            )
+        if exit_code != 0:
+            sys.exit(exit_code)
+        return results
 
     exit_code = _compute_exit_code(results, opts, config_fail_on_findings)
 
