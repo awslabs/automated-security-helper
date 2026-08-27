@@ -306,7 +306,7 @@ Full list of supported languages is available at the [Snyk Website](https://docs
 ## Documentation
 
 For comprehensive documentation and advanced configuration options, see:
-- [ASH Community Plugins Documentation](../../../docs/content/docs/plugins/community/snyk-plugin.md)
+- [ASH Community Plugins Documentation](index.md)
 - [Snyk CLI Documentation](https://docs.snyk.io/cli-ide-and-ci-cd-integrations/snyk-cli)
 - [Snyk Code Documentation](https://docs.snyk.io/products/snyk-code)
 

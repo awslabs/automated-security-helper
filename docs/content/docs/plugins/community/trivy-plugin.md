@@ -1987,7 +1987,7 @@ trivy image --download-db-only
 ### Documentation
 - [Trivy Official Documentation](https://aquasecurity.github.io/trivy/)
 - [ASH Plugin Development Guide](../../plugins/development-guide.md)
-- [ASH Configuration Reference](../../configuration/reference.md)
+- [ASH Configuration Guide](../../configuration-guide.md)
 
 ### Community
 - [ASH GitHub Issues](https://github.com/aws-samples/automated-security-helper/issues)

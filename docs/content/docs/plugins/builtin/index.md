@@ -39,13 +39,13 @@ scanners:
     enabled: true
     severity_threshold: "MEDIUM"
     options:
-      confidence_level: "HIGH"
+      confidence_level: "high"    # lowercase only
 
   semgrep:
     enabled: true
     options:
-      rules: "auto"
-      timeout: 300
+      config: "p/ci"
+      scan_timeout: 1800
 
 reporters:
   html:
@@ -109,11 +109,16 @@ Each plugin supports specific configuration options:
 scanners:
   checkov:
     options:
-      framework: ["terraform", "cloudformation"]
-      check: ["CKV_AWS_*"]
-      skip_check: ["CKV_AWS_123"]
-      external_checks_dir: "/path/to/custom/checks"
+      frameworks: ["terraform", "cloudformation"]
+      skip_frameworks: ["secrets"]
+      skip_path:                       # Each entry needs a path and a reason
+        - path: "tests/fixtures/.*"
+          reason: "Vulnerable-by-design fixtures"
+      config_file: ".checkov.yaml"
 ```
+
+Selecting or skipping individual checks is done in a checkov configuration file
+rather than through ASH options; point `config_file` at one.
 
 ### Selective Plugin Execution
 
