@@ -198,21 +198,51 @@ class TestPerProjectScoping:
         built = FakeOrchestrator.built[0]
         assert built.output_dir == tmp_path / "out" / "projects" / "api"
 
-    def test_each_project_gets_its_own_config_path(self, tmp_path):
-        root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
-        for project in plan.projects:
-            project.config_source = (
-                Path(project.path) / ".ash" / "ash.yaml"
-            ).as_posix()
-        _run(tmp_path, plan)
-        for orchestrator in FakeOrchestrator.built:
-            assert orchestrator.key in orchestrator.kwargs["config_path"]
+    def test_each_project_gets_a_config_resolved_from_its_own_file(self, tmp_path):
+        """Was asserted via config_path, which the executor no longer passes.
 
-    def test_a_project_with_no_config_passes_none(self, tmp_path):
-        """resolve_config then finds nothing in the project and takes the default."""
-        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        The executor now resolves each project's config itself and hands over a
+        resolved_config, because the orchestrator refuses config_path alongside
+        one. The property under test is unchanged -- each project's config comes
+        from its own directory -- so the assertion moves to the resolved object,
+        where it is stronger: it checks the file's CONTENT arrived, not just that
+        a path was forwarded.
+        """
+        root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
+        for project, threshold in (
+            (plan.projects[0], "LOW"),
+            (plan.projects[1], "HIGH"),
+        ):
+            ash_dir = Path(project.path) / ".ash"
+            ash_dir.mkdir(parents=True, exist_ok=True)
+            (ash_dir / "ash.yaml").write_text(
+                f"global_settings:\n  severity_threshold: {threshold}\n",
+                encoding="utf-8",
+            )
+            project.config_source = (ash_dir / "ash.yaml").as_posix()
+
         _run(tmp_path, plan)
-        assert FakeOrchestrator.built[0].kwargs["config_path"] is None
+
+        by_key = {o.key: o.kwargs["resolved_config"] for o in FakeOrchestrator.built}
+        assert by_key["api"].global_settings.severity_threshold == "LOW"
+        assert by_key["web"].global_settings.severity_threshold == "HIGH"
+        assert by_key["api"] is not by_key["web"]
+
+    def test_a_project_with_no_config_takes_the_default(self, tmp_path):
+        """Same substitution: config_path=None became "resolution found no file".
+
+        The observable consequence is what this asserts -- the project gets a
+        usable default config rather than nothing -- which is what the old
+        config_path assertion stood in for.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        assert plan.projects[0].config_source is None
+
+        _run(tmp_path, plan)
+
+        resolved = FakeOrchestrator.built[0].kwargs["resolved_config"]
+        assert resolved is not None
+        assert resolved.global_settings is not None
 
     def test_the_per_project_orchestrator_never_shows_progress(self, tmp_path):
         """N concurrent Rich Live displays would corrupt the terminal."""

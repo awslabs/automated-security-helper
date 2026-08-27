@@ -13,9 +13,10 @@ Exit codes come from ``models.workspace.WorkspaceExitCode``: 4 for a workspace
 definition or policy error, 3 for a project whose own config is invalid. Every
 assertion below names the enum member rather than the integer, so a test cannot
 keep passing while meaning the wrong thing if the contract moves again -- which
-it already has once, from 2 to 4. The one place the literal value is pinned is
-``test_a_workspace_error_is_not_the_findings_exit_code``, which exists to catch
-the specific regression of collapsing 4 back onto 2.
+it already has once, from 2 to 4. Two tests also pin the literal value, because
+an enum-only assertion cannot catch a collapse of two codes onto each other:
+``test_a_workspace_error_is_not_the_findings_exit_code`` for 4 against 2, and
+``test_an_invalid_project_config_is_an_invalid_config_error`` for 3 against both.
 """
 
 import json
@@ -76,20 +77,6 @@ def _project(root, relative, config=None):
 
 def _invoke(*args):
     return runner.invoke(app, ["scan", *args])
-
-
-def _all_output(result, capsys):
-    """Everything the operator would see, from whichever stream captured it.
-
-    ``pytest.ini`` sets ``log_cli = True``, and pytest's live-logging handler
-    suspends and resumes global capture around every record it emits. Resuming
-    re-points ``sys.stdout``/``sys.stderr`` at pytest's capture objects, which
-    overwrites the streams ``CliRunner`` installed, so anything written after a
-    log record lands in pytest's capture rather than in ``result.output``. Any
-    test whose path emits a log record at INFO or above has to read both.
-    """
-    captured = capsys.readouterr()
-    return result.output + captured.out + captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -296,21 +283,29 @@ def test_incompatible_scanner_pins_are_a_workspace_error(tmp_path, no_scan):
     assert not no_scan
 
 
-def test_an_invalid_project_config_is_an_invalid_config_error(
-    tmp_path, no_scan, capsys
-):
+def test_an_invalid_project_config_is_an_invalid_config_error(tmp_path, no_scan):
     """A distinct code, because it routes to a different person than a
-    workspace definition error: the workspace is fine, one project is not."""
+    workspace definition error: the workspace is fine, one project is not.
+
+    The code is pinned against both neighbours it could collapse onto, not just
+    named: 4 would send this to whoever owns the workspace file, and 2 would
+    report it as a scan that ran and found something. Both are wrong, and an
+    equality check against the enum alone cannot tell them apart if the contract
+    moves. The message is asserted on ``result.stderr`` specifically, because a
+    resolution that succeeded would print the plan to stdout and exit 0 -- so
+    reading a merged stream could let a silently-passing scan satisfy this test.
+    """
     _project(tmp_path, "api", "project_name: api\nglobal_settings: 7\n")
     workspace = _workspace(tmp_path, ["api"])
 
     result = _invoke("--workspace", str(workspace), "--dry-run")
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG
-    # Config resolution logs at ERROR on this path, so see _all_output.
-    output = _all_output(result, capsys)
-    assert "api" in output
-    assert "invalid configuration" in output
+    assert result.exit_code == 3
+    assert result.exit_code != WorkspaceExitCode.WORKSPACE_ERROR
+    assert result.exit_code != WorkspaceExitCode.ACTIONABLE_FINDINGS
+    assert "api" in result.stderr
+    assert "invalid configuration" in result.stderr
     assert not no_scan
 
 

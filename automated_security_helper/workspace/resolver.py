@@ -423,6 +423,7 @@ def _apply_existence_checks(
 
 def _resolve_project_config(
     candidate: _Candidate,
+    config_overrides: Tuple[str, ...] = (),
 ) -> Tuple[AshConfig, Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
@@ -430,12 +431,25 @@ def _resolve_project_config(
     resolution search again, so the file the plan reports is definitionally the
     file that was loaded and the two cannot disagree.
 
+    Why the CLI overrides are applied HERE
+    -------------------------------------
+    They decide what the project *declares*. Under the settled precedence rule
+    ``declared(P)`` is the override value when one is present and the project's
+    own config value otherwise, and ``effective(P)`` is
+    ``stricter_of(declared(P), ceiling)``. Both ``severity_threshold`` and the
+    policy composition that reads it are computed at resolution time, so an
+    override arriving only at execution time would leave the plan -- and
+    therefore ``--dry-run`` -- reporting a threshold that is not the one enforced.
+
     Returns:
         The resolved config, and the config file it came from -- ``None`` when the
         project has none and took ASH's default config.
 
     Raises:
-        ASHConfigValidationError: When the project's own config is invalid. Left
+        ASHConfigValidationError: When the project's own config is invalid, or an
+            override cannot be applied to it. An unusable override is fatal here
+            rather than dropped, which is what ``apply_config_overrides`` raising
+            now makes possible. Left
             as this type, not wrapped as a workspace error, because it maps to a
             different exit code (3, not 2) and routes to a different person. The
             message is re-issued with the project key so the operator knows which
@@ -447,6 +461,7 @@ def _resolve_project_config(
             config_path=config_path,
             source_dir=candidate.resolved,
             fallback_to_default=True,
+            config_overrides=list(config_overrides),
         )
         return config, config_path
     except ASHConfigValidationError as exc:
@@ -634,9 +649,7 @@ def _apply_workspace_policy(
         definition.root,
         explicit=workspace_config,
         project_config_paths=[
-            Path(project.config_source)
-            for project in projects
-            if project.config_source
+            Path(project.config_source) for project in projects if project.config_source
         ],
     )
 
@@ -664,6 +677,7 @@ def resolve_workspace(
     *,
     allow_missing_projects: bool = False,
     workspace_config: Optional[PathLike] = None,
+    config_overrides: Tuple[str, ...] = (),
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -676,6 +690,14 @@ def resolve_workspace(
             absent or unreadable. Those projects are marked skipped and recorded
             in the plan's ``skipped_projects`` payload. Does not opt out of any
             other check -- see "Fail-closed" in the module docstring.
+        config_overrides: ``--config-overrides`` values, including any the CLI
+            synthesised. Applied to each project's config here, so a threshold
+            override changes what the project DECLARES and the workspace ceiling
+            is then applied to that. Passing these only to execution would leave
+            the plan, and therefore ``--dry-run``, reporting a threshold
+            different from the one enforced -- and the RFC's carve-out for a
+            workspace overriding a project is conditioned on that override being
+            visible.
         workspace_config: ``--workspace-config``: the workspace policy file to
             apply. When omitted the workspace root is searched for one, and
             having none is not an error. When given it must exist; ASH does not
@@ -726,7 +748,7 @@ def resolve_workspace(
             )
             continue
 
-        config, config_path = _resolve_project_config(candidate)
+        config, config_path = _resolve_project_config(candidate, config_overrides)
         scanners, pins = _scanner_state(config)
         label = _project_label(config, candidate.key)
         projects.append(
