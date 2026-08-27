@@ -600,14 +600,38 @@ class ConfigLinter:
             line_end = suppression.get("line_end")
 
             if line_start is not None and line_end is None:
+                # The old wording said the range "will default to line_start
+                # value", i.e. one line. _line_range_matches does the opposite:
+                # with no line_end it returns finding_end >= line_start, matching
+                # everything from that line to the end of the file, including
+                # findings that do not exist yet. Whichever the reader believed,
+                # the other was wrong.
+                #
+                # The message was corrected rather than the matcher because
+                # narrowing the matcher would stop every existing single-line
+                # suppression from covering the range it covers today, so
+                # findings currently suppressed would reappear on upgrade.
+                #
+                # The fix is still offered, since one line is usually what
+                # someone wants, but it is described as a narrowing: applying it
+                # changes which findings are suppressed, and `--fix` should not
+                # do that while claiming to correct an omission.
                 result.issues.append(
                     LintIssue(
                         severity=LintSeverity.WARNING,
                         category=LintCategory.SUPPRESSION_LINE_RANGE,
-                        message=f"Suppression has 'line_start' ({line_start}) but missing 'line_end' - will default to line_start value",
+                        message=(
+                            f"Suppression has 'line_start' ({line_start}) but "
+                            f"missing 'line_end' - it matches any finding that "
+                            f"ends at or after line {line_start}, including a "
+                            f"multi-line finding that starts before it"
+                        ),
                         path=path_prefix,
                         fixable=True,
-                        fix_description=f"Set line_end = {line_start} (same as line_start)",
+                        fix_description=(
+                            f"Narrow the suppression to line {line_start} alone "
+                            f"by setting line_end = {line_start}"
+                        ),
                     )
                 )
 
