@@ -29,9 +29,13 @@ describe('MCP entrypoint script', () => {
   });
 
   test('states the stateless intent explicitly in both directions', () => {
-    // ASH spells this as a paired flag. Passing neither would inherit ASH's
-    // default, so a change to that default would silently change behaviour on
-    // AgentCore, where stateful mode answers 404 to every request.
+    // ASH spells this as a paired flag, so the script names the direction it
+    // wants rather than inheriting whatever ASH's default happens to be.
+    //
+    // Both spellings are now emitted only when `ash mcp --help` advertises them;
+    // which branch runs, and what happens when neither is available, is covered
+    // by the "MCP entrypoint capability probe" suite below. This test only pins
+    // that the script still knows both spellings.
     expect(MCP_ENTRYPOINT_SCRIPT).toContain('--stateless-http');
     expect(MCP_ENTRYPOINT_SCRIPT).toContain('--no-stateless-http');
     expect(MCP_ENTRYPOINT_SCRIPT).toContain('${ASH_MCP_STATELESS:-true}');
@@ -150,5 +154,154 @@ describe('MCP entrypoint script is valid shell', () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ash-entry-')), 'entrypoint.sh');
     fs.writeFileSync(file, MCP_ENTRYPOINT_SCRIPT);
     execFileSync('sh', ['-n', file], { stdio: 'pipe' });
+  });
+});
+
+/**
+ * The capability probe is RUN here, not pattern-matched.
+ *
+ * Asserting that the script merely contains `--stateless-http` cannot tell a
+ * working branch from a broken one — the string is present either way. These
+ * tests execute the real entrypoint against a fake `ash` whose `mcp --help`
+ * advertises either the modern option set or v3.7.0's, and then read back the
+ * argv the entrypoint actually exec'd.
+ */
+describe('MCP entrypoint capability probe', () => {
+  const os = require('os') as typeof import('os');
+  const fs = require('fs') as typeof import('fs');
+  const path = require('path') as typeof import('path');
+  const { spawnSync } = require('child_process') as typeof import('child_process');
+
+  /**
+   * A stand-in for ASH. `mcp --help` lists the options of the era being
+   * simulated; any other invocation is the real exec, and records its argv.
+   */
+  const FAKE_ASH = `#!/bin/sh
+if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+  echo "Usage: ash mcp [OPTIONS]"
+  echo "  --transport TEXT"
+  echo "  --host TEXT"
+  echo "  --port INTEGER"
+  echo "  --mount-path TEXT"
+  echo "  --auth-header-name TEXT"
+  echo "  --auth-header-value TEXT"
+  if [ -n "\${FAKE_ASH_MODERN:-}" ]; then
+    echo "  --stateless-http/--no-stateless-http"
+    echo "  --allowed-host TEXT"
+  fi
+  exit 0
+fi
+if [ -n "\${FAKE_ASH_HELP_BROKEN:-}" ]; then
+  exit 1
+fi
+: > "\${FAKE_ASH_ARGV}"
+for fake_arg in "$@"; do
+  echo "\${fake_arg}" >> "\${FAKE_ASH_ARGV}"
+done
+exit 0
+`;
+
+  /** Broken-install variant: `mcp --help` itself fails. */
+  const FAKE_ASH_BROKEN_HELP = `#!/bin/sh
+echo "ImportError: cannot import name 'mcp'" >&2
+exit 1
+`;
+
+  function runEntrypoint(
+    env: Record<string, string>,
+    fakeAsh: string = FAKE_ASH,
+  ): { status: number | null; stderr: string; argv: string[] } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ash-probe-'));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    const ash = path.join(bin, 'ash');
+    fs.writeFileSync(ash, fakeAsh, { mode: 0o755 });
+    const entrypoint = path.join(dir, 'entrypoint.sh');
+    fs.writeFileSync(entrypoint, MCP_ENTRYPOINT_SCRIPT);
+    const argvFile = path.join(dir, 'argv');
+
+    const result = spawnSync('sh', [entrypoint], {
+      encoding: 'utf-8',
+      env: {
+        PATH: `${bin}:${process.env.PATH}`,
+        FAKE_ASH_ARGV: argvFile,
+        ...env,
+      },
+    });
+
+    const argv = fs.existsSync(argvFile)
+      ? fs.readFileSync(argvFile, 'utf-8').split('\n').filter((line: string) => line !== '')
+      : [];
+    return { status: result.status, stderr: result.stderr ?? '', argv };
+  }
+
+  test('passes --stateless-http when the ASH in the image supports it', () => {
+    const { status, argv } = runEntrypoint({ FAKE_ASH_MODERN: '1' });
+    expect(status).toBe(0);
+    expect(argv).toContain('--stateless-http');
+    expect(argv).not.toContain('--no-stateless-http');
+  });
+
+  test('REFUSES to start stateless-by-default on an ASH without the option', () => {
+    // The defect this whole probe exists for: AshVersion=v3.7.0 with the shipped
+    // McpStatelessHttp default. Starting anyway would serve a stateful server
+    // that 404s every platform-injected session id while looking healthy.
+    const { status, stderr, argv } = runEntrypoint({});
+    expect(status).toBe(65);
+    expect(stderr).toContain('--stateless-http');
+    expect(argv).toEqual([]);
+  });
+
+  test('runs without either stateless flag when stateful was asked for explicitly', () => {
+    // An ASH with no stateless mode is already stateful, so this is the one
+    // combination that is genuinely satisfiable on an older release.
+    const { status, argv } = runEntrypoint({ ASH_MCP_STATELESS: 'false' });
+    expect(status).toBe(0);
+    expect(argv).not.toContain('--stateless-http');
+    expect(argv).not.toContain('--no-stateless-http');
+    expect(argv).toContain('mcp');
+  });
+
+  test('passes --no-stateless-http when stateful was asked for and the option exists', () => {
+    const { status, argv } = runEntrypoint({
+      FAKE_ASH_MODERN: '1',
+      ASH_MCP_STATELESS: 'false',
+    });
+    expect(status).toBe(0);
+    expect(argv).toContain('--no-stateless-http');
+    expect(argv).not.toContain('--stateless-http');
+  });
+
+  test('repeats --allowed-host once per comma-separated host', () => {
+    const { status, argv } = runEntrypoint({
+      FAKE_ASH_MODERN: '1',
+      ASH_MCP_ALLOWED_HOST: 'alb.example.com,other.example.com',
+    });
+    expect(status).toBe(0);
+    expect(argv.filter((a: string) => a === '--allowed-host')).toHaveLength(2);
+    expect(argv).toContain('alb.example.com');
+    expect(argv).toContain('other.example.com');
+  });
+
+  test('warns but still starts when a Host allowlist cannot be enforced', () => {
+    // Deliberately NOT a refusal: the Fargate stack substitutes the load
+    // balancer DNS name whenever McpAllowedHost is empty, so refusing here would
+    // leave no parameter value that lets that target deploy.
+    const { status, stderr, argv } = runEntrypoint({
+      ASH_MCP_STATELESS: 'false',
+      ASH_MCP_ALLOWED_HOST: 'alb.example.com',
+    });
+    expect(status).toBe(0);
+    expect(stderr).toContain('WARNING');
+    expect(stderr).toContain('EVERY Host header will be accepted');
+    expect(argv).not.toContain('--allowed-host');
+  });
+
+  test('distinguishes a broken ASH install from a missing option', () => {
+    // Reading a failed `ash mcp --help` as "the flag is absent" would report the
+    // wrong cause and, worse, would let the stateful path look satisfiable.
+    const { status, stderr } = runEntrypoint({}, FAKE_ASH_BROKEN_HELP);
+    expect(status).toBe(69);
+    expect(stderr).toContain('cannot serve MCP at all');
   });
 });
