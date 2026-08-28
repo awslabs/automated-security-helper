@@ -1,0 +1,842 @@
+# Keeps every committed generated artifact under deploy/ honest.
+#
+# Three trees under deploy/ commit files that a generator produced: the CDK app
+# commits its synthesized CloudFormation templates so adopters get one-click
+# launches without a build step, and the jsii construct package commits the
+# buildspec.yml it generates. A committed generated file is a cache, and a cache
+# with no invalidation check goes stale silently -- an adopter then launches a
+# template that no longer matches the app that was reviewed.
+#
+# Every check here is offline. cdk synth, terraform validate and cdk-nag all
+# read local files and never call an AWS API, so this workflow needs no AWS
+# credentials and must never be given any. terraform init -backend=false does
+# reach the Terraform provider registry, which is a public artifact fetch and
+# not an AWS API call.
+#
+# The measurement trap this workflow is built around
+# --------------------------------------------------
+# git diff compares the index to the working tree, so it cannot see a file git
+# has never heard of. Regenerating an artifact that grew a NEW file leaves the
+# new file untracked, and a diff-based check reports the tree as clean -- the
+# gate passes green while the repo is stale. git status --porcelain reports
+# untracked files too, which is why every check below uses it. The same trap and
+# the same fix already live in ash-unified-ci.yml's schema gate.
+#
+# Three failure modes, one measurement. Each job deletes the generated files it
+# owns before regenerating them, so git status --porcelain reports all three:
+#
+#   modified generated file  -> ' M'   (a stack's output changed)
+#   new generated file       -> '??'   (a stack was added and never committed)
+#   orphan generated file    -> ' D'   (a stack was removed, its file was not)
+#
+# The orphan case is the one a naive gate misses even with porcelain: an
+# abandoned template is tracked and unmodified, so nothing reports it until the
+# regeneration step deletes it first.
+#
+# git status --porcelain does not report ignored files, so an ignore rule
+# covering a generated path would blind every check here at once. The discover
+# job asserts with git check-ignore that no generated path is ignored.
+#
+# No path filter on the triggers, deliberately. This is a required check, and a
+# path-filtered required check never reports on a PR that misses the filter,
+# which blocks the merge queue instead of passing it. It also matches
+# ash-unified-ci.yml, which filters no paths either.
+name: ASH - IaC Drift
+
+on:
+  push:
+    branches:
+      - "!main"
+  pull_request:
+    # "**" not "*": GitHub branch filters treat "*" as matching any character
+    # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting
+    # e.g. pr/scan-decomposition) never matched and silently got no CI at all.
+    # "**" matches nested refs too.
+    branches:
+      - "**"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+env:
+  COLUMNS: 160
+  # Drops the "Terraform has been successfully initialized" banner and the
+  # interactive suggestions from every init in the loop below. A static value,
+  # so it is safe at this level -- see the note on runner context in the
+  # terraform-hygiene job.
+  TF_IN_AUTOMATION: "1"
+
+# Every job only reads the checkout. Nothing here publishes, comments, or
+# writes a check, so nothing needs more than contents: read.
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  #
+  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
+  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
+  # in its own group and entries never serialize behind one another.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict, and push/tag runs feed docs and releases.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Which generated trees exist on this ref, and can git see them at all.
+  #
+  # deploy/cdk, deploy/cdk-constructs and deploy/terraform land independently,
+  # so each check below is conditional. Absence is reported in the job summary
+  # rather than inferred from a job that quietly did nothing: a reader of any run
+  # can see which gates ran and which had nothing to gate.
+  #
+  # Presence is keyed on the marker file that makes a check meaningful, not on
+  # the directory. A half-landed tree -- a deploy/cdk with no cdk.json -- would
+  # otherwise produce a confusing red instead of a skip.
+  # ---------------------------------------------------------------------------
+  discover:
+    name: discover generated artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      cdk: ${{ steps.paths.outputs.cdk }}
+      constructs: ${{ steps.paths.outputs.constructs }}
+      terraform: ${{ steps.paths.outputs.terraform }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Detect which generated trees are present
+        id: paths
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cdk=false
+          constructs=false
+          terraform=false
+
+          # Written as explicit if blocks rather than `[ -f x ] && y=true`. Under
+          # `set -e` the latter leans on errexit's exemption for non-final
+          # commands in an AND-OR list, and the cost of getting that wrong is
+          # the whole gate turning red on a ref where deploy/ simply has not
+          # landed -- the exact opposite of skipping cleanly.
+
+          # The CDK app's entry point. Without cdk.json there is nothing to synth.
+          if [ -f deploy/cdk/cdk.json ]; then
+            cdk=true
+          fi
+          # The jsii package's manifest, which also carries the generator script.
+          if [ -f deploy/cdk-constructs/package.json ]; then
+            constructs=true
+          fi
+          # Any .tf anywhere under deploy/terraform, modules and examples alike.
+          if [ -d deploy/terraform ] && [ -n "$(find deploy/terraform -type f -name '*.tf' -print -quit)" ]; then
+            terraform=true
+          fi
+
+          {
+            echo "cdk=$cdk"
+            echo "constructs=$constructs"
+            echo "terraform=$terraform"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### IaC drift gate coverage"
+            echo
+            echo "| check | marker | present |"
+            echo "| --- | --- | --- |"
+            echo "| CDK template drift | \`deploy/cdk/cdk.json\` | \`$cdk\` |"
+            echo "| cdk-nag | \`deploy/cdk/cdk.json\` | \`$cdk\` |"
+            echo "| Generated buildspec drift | \`deploy/cdk-constructs/package.json\` | \`$constructs\` |"
+            echo "| Terraform hygiene | \`deploy/terraform/**/*.tf\` | \`$terraform\` |"
+            echo
+            echo "A \`false\` row means that tree has not landed on this ref yet and its"
+            echo "check was skipped. It does not mean the check passed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Without this, one line in .gitignore would turn every check below into a
+      # no-op that reports success: git status --porcelain says nothing about an
+      # ignored file, so a stale generated artifact under an ignored path reads
+      # as a clean tree. check-ignore is the only tool that sees the rule.
+      #
+      # Paths are checked whether or not they exist -- check-ignore matches
+      # patterns, not the filesystem -- so this guard also protects trees that
+      # have not landed yet.
+      - name: Assert no generated path is hidden from git by an ignore rule
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ignored=0
+          for path in \
+            deploy/cdk/templates \
+            deploy/cdk/templates/Probe.template.json \
+            deploy/cdk-constructs/buildspec.yml \
+            deploy/terraform
+          do
+            if git check-ignore -q "$path"; then
+              echo "::error file=.gitignore::'$path' is ignored by git, so the drift gate cannot see changes to it. Remove the ignore rule or narrow it."
+              git check-ignore -v "$path" || true
+              ignored=$((ignored + 1))
+            fi
+          done
+
+          if [ "$ignored" -ne 0 ]; then
+            echo "$ignored generated path(s) are ignored by git. The drift checks below would report success without checking anything."
+            exit 1
+          fi
+          echo "No generated path is ignored. git status --porcelain can see all of them."
+
+  # ---------------------------------------------------------------------------
+  # CDK template drift: the committed templates must be exactly what the app
+  # synthesizes.
+  #
+  # Why regenerate in place and ask git, rather than diffing two files: cdk
+  # chooses its own JSON serialization, and a hand-rolled comparison would have
+  # to reproduce that choice to avoid reporting formatting as drift. Writing the
+  # synth output over the committed files makes the serializations identical by
+  # construction -- whatever cdk emits is what the committed file holds -- so the
+  # comparison is byte-exact without anyone having to know cdk's indentation.
+  #
+  # Normalization applied to the comparison: NONE. Not one byte is rewritten
+  # before comparing, because every candidate normalization is a hole. Stripping
+  # the Analytics string out of AWS::CDK::Metadata would hide a change to the
+  # set of constructs the app uses; stripping asset hashes would hide a change
+  # to bundled Lambda or Docker content. Both are real drift wearing a volatile
+  # key's clothing.
+  #
+  # Nondeterminism is handled by scoping and pinning instead:
+  #
+  #   * Only *.template.json is compared. cdk.out also holds manifest.json,
+  #     tree.json and *.assets.json, which carry environment-specific bucket
+  #     names and local paths and are correctly not committed.
+  #   * npm ci installs from package-lock.json, so aws-cdk-lib is byte-pinned.
+  #     The Analytics string encodes construct library versions, so an unpinned
+  #     install is the main way this comparison goes flaky.
+  #   * --no-lookups makes any context lookup fail loudly instead of reaching
+  #     for AWS credentials. A lookup-dependent template cannot be reproducibly
+  #     synthesized offline, and a lookup that silently resolved differently per
+  #     run is drift nobody could explain. If the app needs a lookup, its
+  #     cdk.context.json must be committed.
+  #
+  # When the comparison does fail, the failure output classifies the diff as
+  # touching only known-volatile keys or touching template content. That
+  # classification is advisory -- printed to help a human triage -- and never
+  # changes the verdict.
+  # ---------------------------------------------------------------------------
+  cdk-template-drift:
+    name: cdk template drift
+    needs: discover
+    if: needs.discover.outputs.cdk == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-node's npm cache fails with "Some specified paths were not
+      # resolved" when the lockfile is missing, which reads like a CI problem
+      # rather than a missing file. This names the file and the reason before
+      # that happens. The lockfile is not optional here: these comparisons are
+      # byte-exact, and an unpinned install moves the Analytics string in
+      # AWS::CDK::Metadata on its own.
+      - name: Require a committed lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f deploy/cdk/package-lock.json ]; then
+            echo "::error file=deploy/cdk/package-lock.json::deploy/cdk/package-lock.json is missing. Run 'npm install' in deploy/cdk and commit the lockfile; this gate installs with 'npm ci' so the toolchain is pinned and the generated output is reproducible."
+            exit 1
+          fi
+          echo "deploy/cdk/package-lock.json present"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: deploy/cdk/package-lock.json
+
+      # ci, not install: install would resolve fresh versions and silently move
+      # the Analytics string in AWS::CDK::Metadata, turning a dependency drift
+      # into a template drift that looks like the developer's fault.
+      - name: Install the CDK app's pinned dependencies
+        shell: bash
+        run: npm ci --prefix deploy/cdk
+
+      - name: Synthesize every stack
+        shell: bash
+        working-directory: deploy/cdk
+        run: |
+          set -euo pipefail
+          # cdk synth writes into the output directory without clearing it, so a
+          # cdk.out left over from a synth of a different stack set keeps the
+          # templates of stacks that no longer exist. Copying that directory
+          # forward would reintroduce the orphan this gate exists to catch. A CI
+          # runner starts without a cdk.out, but the regeneration command printed
+          # on failure runs on a developer's machine where one usually exists --
+          # so the clear belongs here rather than in a comment telling people to
+          # remember it.
+          rm -rf cdk.out
+          # --quiet keeps the templates out of the log; they are written to
+          # cdk.out and compared below. Assets are staged normally: --no-staging
+          # would put absolute local paths into aws:asset:path metadata and make
+          # the output less reproducible, not more.
+          #
+          # If this fails, read the cdk-nag job before suspecting drift: an
+          # unacknowledged cdk-nag finding makes synth exit non-zero, so it turns
+          # this step red too. There is nothing to compare when synth did not run
+          # to completion, and the cdk-nag job names the offending rule.
+          npx cdk synth --all --output cdk.out --no-lookups --quiet
+
+      - name: Regenerate the committed templates and let git report the drift
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SYNTH_DIR=deploy/cdk/cdk.out
+          GEN_DIR=deploy/cdk/templates
+          # rm -rf cdk.out is part of the command, not an aside: without it a
+          # developer with a stale cdk.out copies templates for stacks that no
+          # longer exist and the gate reds out again on the fix.
+          REGEN_CMD="cd deploy/cdk && npm ci && rm -rf cdk.out && npx cdk synth --all --output cdk.out --no-lookups --quiet && find templates -type f -name '*.template.json' -delete && cp cdk.out/*.template.json templates/"
+
+          # A zero here means synth ran and produced nothing, which would make
+          # every check below vacuously pass. Fail on it rather than measure it.
+          synthesized="$(find "$SYNTH_DIR" -maxdepth 1 -type f -name '*.template.json' | wc -l)"
+          if [ "$synthesized" -eq 0 ]; then
+            echo "::error::cdk synth produced no *.template.json under $SYNTH_DIR. Nothing was compared, so this gate proved nothing."
+            find "$SYNTH_DIR" -maxdepth 1 -type f -print || true
+            exit 1
+          fi
+          echo "synthesized $synthesized template(s)"
+
+          # Delete the generated files before copying the new ones in. This is
+          # what turns an orphan committed template -- one whose stack was
+          # removed from the app -- into a deletion git will report. Only the
+          # generated pattern is deleted, so a README or a LICENSE the CDK lane
+          # keeps alongside the templates survives.
+          mkdir -p "$GEN_DIR"
+          find "$GEN_DIR" -type f -name '*.template.json' -delete
+          cp "$SYNTH_DIR"/*.template.json "$GEN_DIR"/
+
+          # git diff compares the index to the worktree, so it cannot see a file
+          # git has never heard of. Synthesizing a stack that nobody committed
+          # produces an untracked .template.json, which a diff-based check
+          # reports as clean -- so the template would silently never be
+          # committed. git status --porcelain reports untracked files too.
+          # --untracked-files=all lists each new file rather than collapsing a
+          # wholly-new directory to one entry, which makes the failure readable.
+          # The pathspec is quoted so git does the matching rather than the
+          # shell, which is what lets it match files that are not in the index.
+          changed="$(git status --porcelain --untracked-files=all -- "$GEN_DIR")"
+          if [ -z "$changed" ]; then
+            echo "Committed templates match the synthesized assembly byte for byte."
+            exit 0
+          fi
+
+          echo "::error::Committed CloudFormation templates are out of date. Regenerate them and commit the result: $REGEN_CMD"
+          echo "git status --porcelain -- $GEN_DIR"
+          echo "$changed"
+
+          git diff -- "$GEN_DIR" > "${RUNNER_TEMP}/cdk-template-drift.diff" || true
+          echo "::group::diff of the modified templates"
+          cat "${RUNNER_TEMP}/cdk-template-drift.diff"
+          echo "::endgroup::"
+
+          # Advisory triage only. The verdict above is already final; this just
+          # tells the reader whether the diff looks like toolchain noise or like
+          # a real change, so nobody has to read a 4000-line template diff to
+          # find out. Deliberately NOT used to pass the gate: a normalization
+          # that can excuse a diff can also excuse real drift.
+          content_lines="$(awk '
+            /^(\+\+\+|---)/ { next }
+            /^[+-]/ {
+              if ($0 ~ /Analytics|aws:asset:path|aws:asset:property|"S3Key"|"ImageTag"|BootstrapVersion/) next
+              n++
+            }
+            END { print n+0 }
+          ' "${RUNNER_TEMP}/cdk-template-drift.diff")"
+
+          if [ ! -s "${RUNNER_TEMP}/cdk-template-drift.diff" ]; then
+            # An added or removed template has no line diff to classify: git only
+            # diffs tracked, present files. The porcelain lines above say which.
+            echo "Triage hint: a template was added or removed rather than changed, so there is no line diff to classify. The '??' and ' D' lines above name it."
+          elif [ "$content_lines" -eq 0 ]; then
+            echo "Triage hint: every changed line touches a volatile key (Analytics, asset hash, S3Key, ImageTag, BootstrapVersion)."
+            echo "That usually means the CDK toolchain moved rather than the infrastructure. Check that deploy/cdk/package-lock.json is committed and up to date."
+          else
+            echo "Triage hint: $content_lines changed line(s) touch template content, not just volatile keys. This is a real difference between the app and the committed templates."
+          fi
+          exit 1
+
+      # A red run should leave the actual bytes behind, not a pointer into a
+      # deleted runner. Matches the evidence-collection pattern the scan gates
+      # in ash-unified-ci.yml use.
+      - name: Collect the synthesized assembly
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cdk-synth-assembly
+          path: |
+            deploy/cdk/cdk.out
+            ${{ runner.temp }}/cdk-template-drift.diff
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Generated buildspec drift: the construct is the source of truth, the
+  # committed buildspec.yml is its output.
+  #
+  # The generator is found by name in the package's own scripts rather than
+  # hardcoded here, so the jsii lane owns how it runs. If the package exists but
+  # exposes none of the accepted names, this fails and says so -- the one
+  # outcome worse than a red gate is a gate that finds no generator, regenerates
+  # nothing, compares a file to itself and reports success.
+  # ---------------------------------------------------------------------------
+  generated-buildspec-drift:
+    name: generated buildspec drift
+    needs: discover
+    if: needs.discover.outputs.constructs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-node's npm cache fails with "Some specified paths were not
+      # resolved" when the lockfile is missing, which reads like a CI problem
+      # rather than a missing file. This names the file and the reason before
+      # that happens. The lockfile is not optional here: these comparisons are
+      # byte-exact, and an unpinned install moves the Analytics string in
+      # AWS::CDK::Metadata on its own.
+      - name: Require a committed lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f deploy/cdk-constructs/package-lock.json ]; then
+            echo "::error file=deploy/cdk-constructs/package-lock.json::deploy/cdk-constructs/package-lock.json is missing. Run 'npm install' in deploy/cdk-constructs and commit the lockfile; this gate installs with 'npm ci' so the toolchain is pinned and the generated output is reproducible."
+            exit 1
+          fi
+          echo "deploy/cdk-constructs/package-lock.json present"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: deploy/cdk-constructs/package-lock.json
+
+      - name: Install the construct package's pinned dependencies
+        shell: bash
+        run: npm ci --prefix deploy/cdk-constructs
+
+      - name: Regenerate the buildspec and let git report the drift
+        shell: bash
+        working-directory: deploy/cdk-constructs
+        run: |
+          set -euo pipefail
+
+          # The accepted generator script names, in priority order. Reading them
+          # out of package.json keeps this workflow from pinning the lane's
+          # internal naming, while still refusing to run if none is present.
+          script="$(node -e '
+            const scripts = (require("./package.json").scripts) || {};
+            const candidates = [
+              "generate:buildspec",
+              "generate-buildspec",
+              "generate",
+              "codegen",
+              "synth:buildspec",
+            ];
+            const found = candidates.find((c) => Object.prototype.hasOwnProperty.call(scripts, c));
+            process.stdout.write(found || "");
+          ')"
+
+          if [ -z "$script" ]; then
+            echo "::error file=deploy/cdk-constructs/package.json::No buildspec generator script found. Add one named generate:buildspec, generate-buildspec, generate, codegen or synth:buildspec so this gate can regenerate the committed buildspec.yml."
+            exit 1
+          fi
+          echo "regenerating with: npm run $script"
+
+          # Delete the generated file first, for the same reason the CDK job
+          # clears its templates: a generator that stops emitting a file leaves
+          # a stale committed copy that is tracked and unmodified, and nothing
+          # reports it until it is missing.
+          rm -f buildspec.yml
+          npm run "$script"
+
+          if [ ! -f buildspec.yml ]; then
+            echo "::error::npm run $script did not produce deploy/cdk-constructs/buildspec.yml. Nothing was compared, so this gate proved nothing."
+            exit 1
+          fi
+
+      - name: Check the committed buildspec matches the construct
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GEN_DIR=deploy/cdk-constructs
+
+          # Scoped to the generated file rather than the whole package, so an
+          # unrelated dirty file in the package -- a build artifact npm ci or the
+          # generator dropped -- cannot masquerade as buildspec drift.
+          changed="$(git status --porcelain --untracked-files=all -- "$GEN_DIR/buildspec.yml")"
+          if [ -z "$changed" ]; then
+            echo "Committed buildspec.yml matches what the construct generates."
+            exit 0
+          fi
+
+          echo "::error::deploy/cdk-constructs/buildspec.yml is out of date. Regenerate it and commit the result: cd deploy/cdk-constructs && npm ci && npm run <generator>"
+          echo "git status --porcelain -- $GEN_DIR/buildspec.yml"
+          echo "$changed"
+          echo "::group::diff"
+          git diff -- "$GEN_DIR/buildspec.yml"
+          echo "::endgroup::"
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Terraform hygiene: formatting, and every module and example initializes and
+  # validates.
+  #
+  # Directories are discovered by finding .tf files rather than by assuming a
+  # layout, so a module and an example are treated identically and a new one is
+  # covered the day it lands without editing this workflow.
+  #
+  # -backend=false keeps init from configuring or contacting remote state.
+  # Providers are still fetched from the Terraform registry, which is a public
+  # artifact download and not an AWS API call, so no AWS credentials are needed.
+  #
+  # terraform_wrapper is disabled because this job checks exit codes itself in a
+  # loop and has no use for the wrapper's step outputs. One fewer layer between
+  # a failing terraform and a red job.
+  # ---------------------------------------------------------------------------
+  terraform-hygiene:
+    name: terraform hygiene
+    needs: discover
+    if: needs.discover.outputs.terraform == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.14.4"
+          terraform_wrapper: false
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! terraform fmt -check -recursive -diff -no-color deploy/terraform; then
+            echo "::error::Terraform files are not formatted. Run 'terraform fmt -recursive deploy/terraform' and commit the result."
+            exit 1
+          fi
+          echo "All Terraform files are formatted."
+
+      - name: Initialize and validate every module and example
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # -printf is GNU find, which is what ubuntu-latest ships. %h is the
+          # containing directory, so this yields every directory holding at
+          # least one .tf file, modules and examples alike.
+          mapfile -t dirs < <(find deploy/terraform -type f -name '*.tf' -printf '%h\n' | sort -u)
+
+          # An empty list here would let the loop below validate nothing and
+          # exit 0. The discover job already proved at least one .tf exists, so
+          # a zero at this point is a bug in this step, not a clean repo.
+          if [ "${#dirs[@]}" -eq 0 ]; then
+            echo "::error::Found no directory containing a .tf file under deploy/terraform, but the discover job saw one. Nothing was validated."
+            exit 1
+          fi
+          echo "validating ${#dirs[@]} Terraform directory(ies)"
+
+          # Every directory is attempted even after one fails, so a single run
+          # reports every broken module instead of only the first. Exit codes
+          # are captured explicitly rather than left to errexit, which would
+          # abandon the remaining directories.
+          failed=0
+          for dir in "${dirs[@]}"; do
+            echo "::group::$dir"
+            if ! terraform -chdir="$dir" init -backend=false -input=false -no-color; then
+              echo "::error file=$dir::terraform init failed in $dir"
+              failed=$((failed + 1))
+              echo "::endgroup::"
+              continue
+            fi
+            if ! terraform -chdir="$dir" validate -no-color; then
+              echo "::error file=$dir::terraform validate failed in $dir"
+              failed=$((failed + 1))
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "$failed of ${#dirs[@]} Terraform directory(ies) failed to initialize or validate."
+            exit 1
+          fi
+          echo "All ${#dirs[@]} Terraform directory(ies) initialized and validated."
+
+  # ---------------------------------------------------------------------------
+  # cdk-nag, failing on any unsuppressed finding.
+  #
+  # cdk-nag runs inside the CDK app's own synth, as an aws-cdk-lib validation
+  # plugin, and this job asserts on the report that synth leaves behind. It does
+  # NOT re-scan the committed templates from the outside, and that is a measured
+  # decision rather than a preference:
+  #
+  #   * cdk-nag 3.x suppressions are "acknowledgements", declared in the app with
+  #     Validations.of(scope).acknowledge(). They do NOT serialize into the
+  #     emitted CloudFormation -- a synthesized template of an app with every
+  #     finding acknowledged contains no trace of the acknowledgement. So an
+  #     external re-scan of a committed template re-reports every finding the app
+  #     legitimately acknowledged, with no way to silence it. A gate nobody can
+  #     suppress is a gate somebody deletes.
+  #   * Running cdk-nag inside synth also means the suppression lives in exactly
+  #     one place -- the construct -- instead of being mirrored into a second
+  #     allowlist that drifts from it.
+  #
+  # What the three states look like, measured on cdk-nag 3.0.2 with the CDK CLI:
+  #
+  #   plugin registered, finding unacknowledged -> synth exits 1, report lists
+  #                                               the plugin and 1 violation
+  #   plugin registered, all acknowledged       -> synth exits 0, report lists
+  #                                               the plugin and 0 violations
+  #   plugin NOT registered                     -> synth exits 0, report lists
+  #                                               NO plugin and 0 violations
+  #
+  # The last row is why this job parses the report instead of trusting synth's
+  # exit code. An app that never registers cdk-nag synthesizes cleanly, and a
+  # gate that only checked the exit code would pass unscanned infrastructure
+  # forever. pluginReports naming the pack is the positive control: it appears
+  # even on a clean run, so "scanned and clean" and "never scanned" are
+  # distinguishable. Nothing else in the report distinguishes them.
+  #
+  # Requires of deploy/cdk: depend on cdk-nag and register at least one pack,
+  #   Validations.of(app).addPlugins(new AwsSolutionsChecks())
+  # Keep the aws-cdk CLI and aws-cdk-lib compatible while doing it -- a CLI too
+  # old to read the library's cloud-assembly schema fails synth with a schema
+  # version mismatch, which this job reports as a synth failure.
+  #
+  # ASH's own Python cdk-nag wrapper is deliberately not used here. On the
+  # versions this repo pins it raises before producing a finding, and its caller
+  # swallows that at trace level, so it yields zero findings for every template.
+  # See the note in the report accompanying this workflow.
+  # ---------------------------------------------------------------------------
+  cdk-nag:
+    name: cdk-nag
+    needs: discover
+    if: needs.discover.outputs.cdk == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-node's npm cache fails with "Some specified paths were not
+      # resolved" when the lockfile is missing, which reads like a CI problem
+      # rather than a missing file. This names the file and the reason before
+      # that happens. The lockfile is not optional here: these comparisons are
+      # byte-exact, and an unpinned install moves the Analytics string in
+      # AWS::CDK::Metadata on its own.
+      - name: Require a committed lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f deploy/cdk/package-lock.json ]; then
+            echo "::error file=deploy/cdk/package-lock.json::deploy/cdk/package-lock.json is missing. Run 'npm install' in deploy/cdk and commit the lockfile; this gate installs with 'npm ci' so the toolchain is pinned and the generated output is reproducible."
+            exit 1
+          fi
+          echo "deploy/cdk/package-lock.json present"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: deploy/cdk/package-lock.json
+
+      - name: Install the CDK app's pinned dependencies
+        shell: bash
+        run: npm ci --prefix deploy/cdk
+
+      - name: Synthesize with the app's validation plugins
+        shell: bash
+        working-directory: deploy/cdk
+        run: |
+          # Note the absence of -e: synth exits non-zero when cdk-nag reports an
+          # unacknowledged finding, and that status has to reach the next step
+          # rather than end this one. It is captured to a file instead of being
+          # discarded, which is the difference between a gate and a coin flip.
+          set -uo pipefail
+          rm -rf cdk.out
+          set +e
+          npx cdk synth --all --output cdk.out --no-lookups --quiet
+          synth_rc=$?
+          set -e
+          echo "$synth_rc" > "${RUNNER_TEMP}/cdk-nag-synth-rc"
+          echo "cdk synth exit code: $synth_rc"
+
+      - name: Assert cdk-nag ran and reported no unsuppressed finding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          REPORT = Path("deploy/cdk/cdk.out/validation-report.json")
+          synth_rc = int(Path(os.environ["RUNNER_TEMP"], "cdk-nag-synth-rc").read_text().strip())
+
+          # No report means no validation plugin ever ran -- not that the
+          # templates are clean. Inferring "clean" from a missing measurement is
+          # the whole failure mode this job is built to avoid.
+          if not REPORT.exists():
+              print(
+                  f"::error::{REPORT} was not written, so no validation plugin ran and "
+                  "nothing was scanned. Register cdk-nag in the CDK app with "
+                  "Validations.of(app).addPlugins(new AwsSolutionsChecks())."
+              )
+              sys.exit(1)
+
+          report = json.loads(REPORT.read_text())
+          plugin_reports = report.get("pluginReports") or []
+          plugin_names = [p.get("pluginName") for p in plugin_reports]
+
+          # The positive control. A clean scan still names its plugin here, so an
+          # empty list can only mean the app registered none -- which synth
+          # reports as success, with every template unscanned.
+          if not plugin_names:
+              print(
+                  "::error::The validation report names no plugin, so cdk-nag never ran and "
+                  "every template went unscanned. synth exits 0 in this state, which is why "
+                  "its exit code alone cannot be trusted. Register cdk-nag in the CDK app with "
+                  "Validations.of(app).addPlugins(new AwsSolutionsChecks())."
+              )
+              sys.exit(1)
+
+          # cdk-nag 3.0.2 leaves violatingResources empty in the JSON report even
+          # though it names the construct path on the console, so the per-finding
+          # line below often has no resource to attribute. The rule id and the
+          # description are always present, which is what points a developer at
+          # the right construct.
+          violations = []
+          for plugin in plugin_reports:
+              for violation in plugin.get("violations") or []:
+                  resources = [
+                      r.get("resourceLogicalId") or r.get("constructPath") or "?"
+                      for r in violation.get("violatingResources") or []
+                  ]
+                  violations.append(
+                      (
+                          plugin.get("pluginName"),
+                          violation.get("ruleName"),
+                          violation.get("severity"),
+                          violation.get("description"),
+                          resources,
+                      )
+                  )
+
+          print(f"validation plugins that ran: {', '.join(str(n) for n in plugin_names)}")
+          print(f"unsuppressed violations: {len(violations)}")
+
+          if violations:
+              print(f"::error::cdk-nag reported {len(violations)} unsuppressed finding(s).")
+              for plugin_name, rule, severity, description, resources in violations:
+                  where = ", ".join(resources) if resources else "stack"
+                  print(
+                      f"::error title={rule}::[{severity}] {plugin_name} {rule} on {where}: {description}"
+                  )
+              print(
+                  "Fix the resource, or acknowledge the rule in the construct with a reason: "
+                  "Validations.of(scope).acknowledge({ id: 'AwsSolutions::<RuleId>', reason: '...' }). "
+                  "An acknowledged rule is not reported and does not fail this gate."
+              )
+              sys.exit(1)
+
+          # Zero violations and a named plugin means the scan really ran and found
+          # nothing. Any remaining non-zero synth status is a different failure --
+          # a schema mismatch between the CLI and aws-cdk-lib, a broken app -- and
+          # must not be reported as a clean cdk-nag run.
+          if synth_rc != 0:
+              print(
+                  f"::error::cdk synth exited {synth_rc} while the validation report shows no "
+                  "violation, so synth failed for some reason other than a cdk-nag finding. "
+                  "Read the synth step's log above."
+              )
+              sys.exit(1)
+
+          print("cdk-nag ran and reported no unsuppressed findings.")
+          PY
+
+      - name: Collect the validation report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cdk-nag-validation-report
+          path: deploy/cdk/cdk.out/validation-report.json
+          retention-days: 7
+          if-no-files-found: warn
+  # ---------------------------------------------------------------------------
+  # One stable name for branch protection to require.
+  #
+  # The four checks above are conditional, and a required check that is skipped
+  # never reports, which parks a pull request instead of passing it. This job
+  # always runs, so it always reports, and it turns "skipped because the tree has
+  # not landed" into a pass while turning any real failure into a failure.
+  # ---------------------------------------------------------------------------
+  iac-drift:
+    name: iac-drift
+    if: always()
+    needs:
+      - discover
+      - cdk-template-drift
+      - generated-buildspec-drift
+      - terraform-hygiene
+      - cdk-nag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # The whole needs context at once, rather than one expression per job.
+      # Job ids here contain hyphens, and reading them as toJSON avoids any
+      # question about hyphens in dotted property access -- and picks up a job
+      # added to the needs list later without this step being edited.
+      - name: Report each check's result
+        shell: bash
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+
+          needs = json.loads(os.environ["NEEDS"])
+          for name, data in sorted(needs.items()):
+              print(f"{name:<28} {data.get('result', 'unknown')}")
+          PY
+
+      # A skipped check is acceptable: its tree has not landed, and the discover
+      # job's summary already says so in the run. A failed or cancelled one is
+      # not. discover itself is in the needs list, so a skip there -- which can
+      # only happen if it failed to start -- also lands here as a failure.
+      - name: Fail if any check failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error::At least one IaC drift check failed or was cancelled. See the individual jobs above."
+          exit 1
+
+      - name: Pass
+        run: echo "All present IaC drift checks passed."
