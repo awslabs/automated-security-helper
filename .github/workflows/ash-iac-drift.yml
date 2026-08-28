@@ -434,6 +434,46 @@ jobs:
         shell: bash
         run: npm ci --prefix deploy/cdk-constructs
 
+      # The construct ships its own drift check, and it owns its own definition
+      # of what "matches" means -- so it gets asked first, and a failure here is
+      # binding. It runs BEFORE the regeneration step deliberately: afterwards the
+      # committed files have been overwritten with fresh output, so any comparison
+      # would be fresh against fresh and would pass no matter what was committed.
+      #
+      # It is not a substitute for the git check below, which stays the authority
+      # for two reasons. It does not consult git, so it cannot see a generated
+      # file git has never heard of -- the untracked case this whole workflow is
+      # built around. And its verdict comes from a script inside the tree under
+      # review, which a pull request can edit; the git check's verdict cannot be
+      # redefined by the change being reviewed.
+      - name: Ask the construct whether its committed output is current
+        shell: bash
+        working-directory: deploy/cdk-constructs
+        run: |
+          set -uo pipefail
+
+          has_check="$(node -e '
+            const scripts = (require("./package.json").scripts) || {};
+            process.stdout.write(Object.prototype.hasOwnProperty.call(scripts, "check:buildspec") ? "yes" : "no");
+          ')"
+
+          if [ "$has_check" != "yes" ]; then
+            echo "package.json exposes no check:buildspec script; skipping the construct's own check."
+            echo "The git-based check in the following steps is unaffected -- it does not depend on this script."
+            exit 0
+          fi
+
+          set +e
+          npm run check:buildspec
+          check_rc=$?
+          set -e
+
+          if [ "$check_rc" -ne 0 ]; then
+            echo "::error::'npm run check:buildspec' exited $check_rc: the construct reports its committed buildspecs do not match what it generates. Its output above names the difference."
+            exit 1
+          fi
+          echo "The construct's own check passes against the committed files."
+
       - name: Regenerate the buildspec and let git report the drift
         shell: bash
         working-directory: deploy/cdk-constructs
@@ -443,11 +483,19 @@ jobs:
           # The accepted generator script names, in priority order. Reading them
           # out of package.json keeps this workflow from pinning the lane's
           # internal naming, while still refusing to run if none is present.
+          #
+          # Both "generate:buildspec" and "buildspec" are accepted because the two
+          # reports of what the construct package exposes disagreed, one naming
+          # each. Accepting both costs a line and makes the gate correct either
+          # way, which is worth more than being right about which report was
+          # current. The list is an allowlist, so $script below is always one of
+          # these literals and never arbitrary text out of package.json.
           script="$(node -e '
             const scripts = (require("./package.json").scripts) || {};
             const candidates = [
               "generate:buildspec",
               "generate-buildspec",
+              "buildspec",
               "generate",
               "codegen",
               "synth:buildspec",
@@ -457,10 +505,17 @@ jobs:
           ')"
 
           if [ -z "$script" ]; then
-            echo "::error file=deploy/cdk-constructs/package.json::No buildspec generator script found. Add one named generate:buildspec, generate-buildspec, generate, codegen or synth:buildspec so this gate can regenerate the committed buildspec.yml."
+            echo "::error file=deploy/cdk-constructs/package.json::No buildspec generator script found. Add one named generate:buildspec, generate-buildspec, buildspec, generate, codegen or synth:buildspec so this gate can regenerate the committed buildspecs."
             exit 1
           fi
           echo "regenerating with: npm run $script"
+          # Handed to the next step through a file rather than a step output, so
+          # the value never reaches a shell by way of a GitHub expression
+          # interpolation. (Writing the literal two-brace form even inside a shell
+          # comment is itself a trap: interpolation happens before the shell sees
+          # the line, so an empty one is a syntax error that rejects the whole
+          # workflow file.)
+          echo "$script" > "${RUNNER_TEMP}/buildspec-generator-script"
 
           # Delete the generated files first, for the same reason the CDK job
           # clears its templates: a generator that stops emitting a file leaves
@@ -510,7 +565,26 @@ jobs:
             exit 0
           fi
 
-          echo "::error::The committed buildspecs are out of date. Regenerate them and commit the result: cd deploy/cdk-constructs && npm ci && npm run generate:buildspec"
+          # The regeneration command is taken from the generated file's own
+          # "GENERATED FILE - DO NOT EDIT" header when it names one, so this
+          # message and that header cannot drift apart. Only when the header
+          # names no command does it fall back to the script this gate
+          # discovered. Both are read into a variable and echoed, never
+          # evaluated -- the header is repo content and a PR author controls it.
+          regen_cmd=""
+          header_file="$(git ls-files -- "$PATHSPEC" | head -1)"
+          if [ -n "$header_file" ] && [ -f "$header_file" ]; then
+            regen_cmd="$(git show "HEAD:$header_file" 2>/dev/null \
+              | head -5 \
+              | grep -oE 'npm run [A-Za-z0-9:_-]+' \
+              | head -1 || true)"
+          fi
+          if [ -z "$regen_cmd" ]; then
+            script="$(cat "${RUNNER_TEMP}/buildspec-generator-script" 2>/dev/null || echo '<generator>')"
+            regen_cmd="npm run $script"
+          fi
+
+          echo "::error::The committed buildspecs are out of date. Regenerate them and commit the result: cd deploy/cdk-constructs && npm ci && $regen_cmd"
           echo "git status --porcelain -- $PATHSPEC"
           echo "$changed"
           echo "::group::diff"
