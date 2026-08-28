@@ -57,7 +57,8 @@ import { Construct } from 'constructs';
 
 import {
   ashSynthesizer,
-  ashOfflineMode, ashVersion, MCP_PORT, rebuildSchedule,
+  ashImageTag,
+  ashOfflineMode, ashVersion, diagnosticLogGroupProps, mcpIngressCidr, MCP_PORT, rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
 import {
@@ -82,6 +83,7 @@ export class AshFargateStack extends Stack {
     const version = ashVersion(this);
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
+    const ingressCidr = mcpIngressCidr(this);
     const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: true });
 
     // One customer-managed key per stack, shared by every CodeBuild project here.
@@ -99,6 +101,7 @@ export class AshFargateStack extends Stack {
       ashVersion: version,
       offlineMode: offline,
       rebuildSchedule: schedule,
+      imageTag: ashImageTag(this),
       encryptionKey,
     });
 
@@ -115,10 +118,11 @@ export class AshFargateStack extends Stack {
       flowLogs: {
         Vpc: {
           destination: ec2.FlowLogDestination.toCloudWatchLogs(
-            new logs.LogGroup(this, 'VpcFlowLogs', {
-              retention: logs.RetentionDays.ONE_MONTH,
-              removalPolicy: RemovalPolicy.DESTROY,
-            }),
+            // Retained for the same reason, one step removed: forensics you
+            // delete on teardown are not forensics. This is the highest-volume
+            // group of the set, but retention is finite so its events still age
+            // out on the same schedule.
+            new logs.LogGroup(this, 'VpcFlowLogs', diagnosticLogGroupProps()),
           ),
           trafficType: ec2.FlowLogTrafficType.ALL,
         },
@@ -130,10 +134,16 @@ export class AshFargateStack extends Stack {
       containerInsightsV2: ecs.ContainerInsights.ENABLED,
     });
 
-    const logGroup = new logs.LogGroup(this, 'TaskLogs', {
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
+    /**
+     * Retained, and this is the group the whole policy exists for.
+     *
+     * A deployment that trips the ECS circuit breaker rolls back, and the
+     * container stderr saying why lived here — so rollback destroyed the evidence
+     * for the rollback. The ECS-owned container-insights group survives but
+     * carries only performance metrics, no stderr. See
+     * `diagnosticLogGroupProps`.
+     */
+    const logGroup = new logs.LogGroup(this, 'TaskLogs', diagnosticLogGroupProps());
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'TaskDefinition', {
       // ASH runs several scanners concurrently. 2 vCPU / 4 GiB is the smallest
@@ -160,7 +170,7 @@ export class AshFargateStack extends Stack {
     const container = taskDefinition.addContainer('Ash', {
       image: ecs.ContainerImage.fromEcrRepository(
         image.repository,
-        image.tagForFlavor('mcp'),
+        image.workloadTagForFlavor('mcp'),
       ),
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'ash-mcp', logGroup }),
       // A scanner that dies takes the server's usefulness with it, so let ECS
@@ -276,11 +286,67 @@ export class AshFargateStack extends Stack {
     // The image must exist before the service tries to place a task.
     service.node.addDependency(image.bootstrap!);
 
+    /**
+     * `open: false`, so this stack adds NO ingress rule and the endpoint starts
+     * unreachable — from outside the VPC and from inside it.
+     *
+     * That is deliberate, and the outputs below say so rather than implying the
+     * endpoint is usable on deployment. An observed stack had exactly one rule on
+     * this security group, allow-all egress, while the `McpEndpoint` output
+     * described the endpoint as "reachable from inside the VPC or over a
+     * peered/VPN path". It was reachable from nowhere.
+     *
+     * SO THE POSTURE STAYS CLOSED, AND `McpIngressCidr` IS THE WAY TO OPEN IT
+     * ---------------------------------------------------------------------
+     * `open: false` is kept, and the parameter defaults to empty, so an adopter
+     * who sets nothing gets exactly the behaviour above — no ingress rule, nothing
+     * reachable, and no new rule appearing on an update of an existing stack.
+     * Setting it adds one rule for that CIDR on the listener port.
+     *
+     * Both halves are needed and neither is sufficient. Correcting the output text
+     * without a parameter leaves the adopter with an accurate message and no way to
+     * act on it, which is the same documented-but-unreachable defect wearing
+     * different clothes. Adding the parameter without correcting the output leaves
+     * the stack claiming a reachability it does not have until someone sets it.
+     *
+     * REJECTED: defaulting to this VPC's CIDR. The stack creates its own VPC and
+     * puts nothing in it but the ASH tasks, so that rule would admit a range
+     * containing no clients while still widening access. Real consumers arrive from
+     * a peered VPC, a VPN or a transit gateway, none of which fall inside it.
+     *
+     * REJECTED: an `IPeer` list or a comma-separated CIDR list. One CIDR covers the
+     * common case, and `McpSecurityGroupId` is still an output, so an adopter
+     * needing several sources authorizes the rest against that group directly —
+     * which is also how to use `--source-group` instead of a CIDR.
+     */
     const listener = loadBalancer.addListener('Listener', {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
       open: false,
     });
+
+    /**
+     * `Fn::If` on the rule's existence, not on its CIDR.
+     *
+     * `McpIngressCidr` is a deploy-time parameter, so the choice cannot be made at
+     * synth time. Emitting the rule unconditionally with a conditional CIDR was
+     * rejected: there is no CIDR value that means "no access", and `0.0.0.0/32`
+     * would be a real rule that merely looks inert. Gating the RESOURCE on the
+     * condition means the empty default emits no ingress rule at all, which is
+     * what preserves the closed posture byte for byte.
+     */
+    const ingressSupplied = new CfnCondition(this, 'McpIngressCidrSupplied', {
+      expression: Fn.conditionNot(Fn.conditionEquals(ingressCidr.valueAsString, '')),
+    });
+    const ingressRule = new ec2.CfnSecurityGroupIngress(this, 'McpIngress', {
+      groupId: loadBalancer.connections.securityGroups[0].securityGroupId,
+      ipProtocol: 'tcp',
+      fromPort: 80,
+      toPort: 80,
+      cidrIp: ingressCidr.valueAsString,
+      description: 'MCP clients allowed by McpIngressCidr.',
+    });
+    ingressRule.cfnOptions.condition = ingressSupplied;
 
     listener.addTargets('Mcp', {
       port: MCP_PORT,
@@ -333,9 +399,23 @@ export class AshFargateStack extends Stack {
 
     new CfnOutput(this, 'McpEndpoint', {
       description:
-        'MCP endpoint. Internal by default, so reachable from inside the VPC or over a ' +
-        'peered/VPN path. Append the McpMountPath value.',
+        'MCP endpoint. The load balancer is internal, and reachable only from the range ' +
+        'given in McpIngressCidr. If you left that empty there is NO ingress rule, so ' +
+        'this address is not reachable from anywhere — set McpIngressCidr, or authorize ' +
+        'McpSecurityGroupId directly. Append the McpMountPath value. Plain HTTP.',
       value: Fn.join('', ['http://', loadBalancer.loadBalancerDnsName]),
+    });
+    new CfnOutput(this, 'McpSecurityGroupId', {
+      description:
+        "The load balancer's security group, which starts with no ingress rule. Authorize " +
+        'the range your MCP clients come from, for example: aws ec2 ' +
+        'authorize-security-group-ingress --group-id <this> --protocol tcp --port 80 ' +
+        '--cidr <your-client-cidr>. Prefer --source-group over --cidr where the client ' +
+        'has its own security group.',
+      // The ALB L2 creates exactly one security group, and this stack adds none,
+      // so indexing it is a synth-time fact rather than an assumption about
+      // deploy-time ordering. It is asserted in ash-fargate-stack.test.ts.
+      value: loadBalancer.connections.securityGroups[0].securityGroupId,
     });
     new CfnOutput(this, 'LoadBalancerDnsName', {
       description:

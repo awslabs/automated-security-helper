@@ -216,12 +216,90 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
 /**
  * Shell entrypoint for the MCP-serving image flavor.
  *
+ * WHY IT PROBES ASH INSTEAD OF ASSUMING ITS OPTIONS
+ * ------------------------------------------------
+ * This script is fixed when the image is built, but the ASH inside the image is
+ * whatever `AshVersion` names at deploy time. Measured across the repository:
+ * `--stateless-http` and `--allowed-host` exist on neither v3.5.x, v3.6.0,
+ * v3.7.0, `main` nor `beta` — the word `stateless` appears nowhere under
+ * `automated_security_helper/cli` at v3.7.0. Emitting them unconditionally made
+ * the shipped default (`AshVersion=v3.7.0`) undeployable: Typer rejects the
+ * unknown option, the server never binds, and CloudFormation reports a
+ * health-check timeout rather than the flag that caused it.
+ *
+ * So the script asks `ash mcp --help` once and branches on what it finds.
+ *
+ * WHAT WAS TRIED AND REJECTED
+ * ---------------------------
+ * - Pointing `DEFAULT_ASH_VERSION` at a ref that has the flags: rejected. The
+ *   only such ref is a feature branch. A moving branch is not a reproducible
+ *   default, and pinning adopters to someone's in-flight work is worse than
+ *   pinning them to a release.
+ * - Emitting the flags conditionally with NO refusal path: rejected outright.
+ *   Dropping `--stateless-http` yields a stateful server, which is the exact
+ *   failure the flag prevents. A quiet downgrade there produces a container that
+ *   passes its health check and answers 404 to every real request.
+ * - Asserting the flags at BUILD time and failing the image build: rejected as a
+ *   guard that would make the runtime branch unreachable. The build cannot see
+ *   `ASH_MCP_STATELESS`, which is a deploy-time value, so it could only refuse on
+ *   the flags' absence — banning the one combination that genuinely works on an
+ *   older ASH (stateful, single replica). It would also be a second guard for the
+ *   same fault, and the untaken one would never be exercised.
+ * - Probing by running `ash mcp --stateless-http --help` and reading the exit
+ *   code: rejected. Whether Click services the eager `--help` before or after it
+ *   rejects an unknown option is version-dependent, so the probe could report
+ *   success for a flag that does not exist — the one error direction that must
+ *   not happen.
+ *
  * KNOWN LIMITATION: ASH takes the shared-secret value as `--auth-header-value`,
  * a command-line argument, and exposes no environment-variable equivalent for
  * it. The resolved secret is therefore visible in the container's own process
  * list. Nothing outside the container can read it, and it never reaches the
  * template or the task definition, but a process running inside the same
  * container could. Closing that would need an env-var option in ASH itself.
+ *
+ * WHY THE ALLOWED HOSTS ARE FOLDED TO LOWER CASE
+ * ---------------------------------------------
+ * Every request through the Fargate load balancer returned HTTP 421 "Invalid Host
+ * header". The load balancer lowercases the `Host` header it forwards, and the MCP
+ * SDK compares case-sensitively — `mcp/server/transport_security.py`
+ * `_validate_host` tries `if host in self.settings.allowed_hosts` and then a
+ * `":*"` port-suffix loop built on `host.startswith(...)`. NEITHER path folds
+ * case, so a mixed-case allowed value matches on neither. The stack feeds it
+ * `loadBalancerDnsName`, which CloudFormation returns mixed-case, so the
+ * comparison could never succeed.
+ *
+ * Diagnosed by a same-instant differential rather than by reading alone: through
+ * the load balancer the container logged an all-lowercase host and answered 421,
+ * while the identical mixed-case value sent straight to the task's private IP
+ * answered 200. A port-suffix explanation was raised and refuted with controls.
+ * After the fold, via-load-balancer returned 200 with a full `tools/list`, and a
+ * bogus Host on the same path still returned 421 — so the guard still guards.
+ *
+ * REJECTED: lowercasing in TypeScript instead. `loadBalancerDnsName` is a
+ * deploy-time attribute, so at synth time there is no string to fold and
+ * CloudFormation has no lower-case intrinsic. Same constraint that put the Docker
+ * tag folding in the buildspec rather than in the CDK.
+ *
+ * REJECTED: relying on a future `mcp` release comparing case-insensitively. ASH
+ * declares `mcp>=2.0.0,<3`, so the resolved version moves under us; a fix that
+ * depends on library behaviour we do not pin would regress silently.
+ *
+ * KNOWN LIMITATION: the probe costs one `ash mcp --help` — a Python import of
+ * ASH's CLI — at every container start. That is well inside the five-minute
+ * health-check grace period the Fargate target allows.
+ *
+ * WHERE TO PUT AN EXPLANATION, AND WHY IT MATTERS HERE
+ * ---------------------------------------------------
+ * Comments inside the script below are not free. The script is inlined into the
+ * buildspec, which is inlined into every synthesized template, and CloudFormation
+ * refuses an inline `--template-body` over 51,200 bytes — a ceiling two of these
+ * templates sit just under. This JSDoc, by contrast, is stripped at synth and
+ * costs nothing.
+ *
+ * So the reasoning lives here and the script carries only what an operator
+ * reading the container's entrypoint needs. Please keep that split; re-expanding
+ * the shell comments spends template budget that the launch path depends on.
  */
 export const MCP_ENTRYPOINT_SCRIPT = `#!/bin/sh
 # Entrypoint for the ASH MCP server. Generated by the ASH CDK deployment
@@ -249,31 +327,65 @@ if [ -n "\${ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN:-}" ]; then
   ASH_AUTH_VALUE=$(python3 -c "import os, sys, boto3; sys.stdout.write(boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN'])['SecretString'])")
 fi
 
+# Ask this image's ASH which MCP options it accepts, once. AshVersion decides
+# which ASH is in here at deploy time, and older releases have neither
+# --stateless-http nor --allowed-host; passing an unknown option would leave the
+# server unable to bind. COLUMNS is wide so rich cannot wrap a flag name across
+# lines and make a supported option measure as missing.
+if ! ASH_MCP_HELP="$(COLUMNS=200 ash mcp --help 2>&1)"; then
+  echo "ash-mcp-entrypoint: 'ash mcp --help' exited non-zero, so this image cannot serve MCP at all. This is not a missing option; it is a broken ASH install. Its output was:" >&2
+  printf '%s\\n' "\${ASH_MCP_HELP}" >&2
+  exit 69
+fi
+
+# Fixed-string match, so a flag name is never interpreted as a regex.
+ash_mcp_supports() {
+  printf '%s' "\${ASH_MCP_HELP}" | grep -qF -- "$1"
+}
+
 set -- ash mcp --transport streamable-http \\
   --host "\${ASH_MCP_HOST:-0.0.0.0}" \\
   --port "\${ASH_MCP_PORT:-8000}" \\
   --mount-path "\${ASH_MCP_MOUNT_PATH:-/mcp}"
 
-# --stateless-http is spelled as a paired flag, so state the intent explicitly
-# rather than relying on ASH's default staying put.
+# --stateless-http is a paired flag, so state the intent rather than inheriting
+# ASH's default. Refuses to start if stateless was asked for and this ASH has no
+# such option: running stateful instead would answer 404 to every session id the
+# platform injects while still passing the health check.
 if [ "\${ASH_MCP_STATELESS:-true}" = "true" ]; then
-  set -- "$@" --stateless-http
-else
+  if ash_mcp_supports '--stateless-http'; then
+    set -- "$@" --stateless-http
+  else
+    echo "ash-mcp-entrypoint: this deployment asks for a stateless MCP server, but the ASH in this image has no --stateless-http option, so the server would run stateful and reject every session id the platform injects. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http, or set McpStatelessHttp=false to run stateful deliberately." >&2
+    exit 65
+  fi
+elif ash_mcp_supports '--no-stateless-http'; then
   set -- "$@" --no-stateless-http
 fi
+# The remaining case needs no flag and is not a degradation: stateful was asked
+# for, and an ASH without the option is already stateful.
 
-# --allowed-host is repeatable. Split the comma-separated value so DNS-rebinding
-# protection stays ON with one flag per known proxy hostname, instead of being
-# relaxed wholesale by binding a non-loopback host.
+# --allowed-host is repeatable, so split the comma-separated value and pass one
+# flag per hostname; a comma-joined single value would match nothing. Warns
+# rather than refusing when the option is absent: the Fargate stack always
+# substitutes its load balancer DNS name here, so there is no parameter value an
+# operator could set to satisfy a refusal.
 if [ -n "\${ASH_MCP_ALLOWED_HOST:-}" ]; then
-  ASH_SAVED_IFS=$IFS
-  IFS=,
-  for ash_host in \${ASH_MCP_ALLOWED_HOST}; do
-    if [ -n "$ash_host" ]; then
-      set -- "$@" --allowed-host "$ash_host"
-    fi
-  done
-  IFS=$ASH_SAVED_IFS
+  if ash_mcp_supports '--allowed-host'; then
+    ASH_SAVED_IFS=$IFS
+    IFS=,
+    for ash_host in \${ASH_MCP_ALLOWED_HOST}; do
+      if [ -n "$ash_host" ]; then
+        # Lower-cased because a load balancer lowercases Host while the MCP SDK
+        # matches case-sensitively; mixed case yields 421 on every request.
+        ash_host=$(printf '%s' "$ash_host" | tr 'A-Z' 'a-z')
+        set -- "$@" --allowed-host "$ash_host"
+      fi
+    done
+    IFS=$ASH_SAVED_IFS
+  else
+    echo "ash-mcp-entrypoint: WARNING: a Host allowlist of '\${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option, so EVERY Host header will be accepted. Deploy an AshVersion whose 'ash mcp' accepts --allowed-host to enforce the allowlist." >&2
+  fi
 fi
 
 # Both halves are required: a header name with no value would make ASH compare

@@ -71,7 +71,9 @@ import {
   ashOfflineMode,
   ashSynthesizer,
   ashVersion,
+  ashImageTag,
   codeCommitRepositoryArn,
+  diagnosticLogGroupProps,
   rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
@@ -141,6 +143,7 @@ export class AshCodeCommitGateStack extends Stack {
       ashVersion: version,
       offlineMode: offline,
       rebuildSchedule: schedule,
+      imageTag: ashImageTag(this),
       encryptionKey,
     });
 
@@ -149,9 +152,12 @@ export class AshCodeCommitGateStack extends Stack {
     // disagree with the ARN.
     const repositoryName = Fn.select(5, Fn.split(':', repositoryArn.valueAsString));
 
-    const logGroup = new logs.LogGroup(this, 'ScanLogs', {
-      retention: logs.RetentionDays.ONE_MONTH,
-    });
+    // This group was already retained, but only by accident: it was the one that
+    // omitted `removalPolicy` and so inherited CDK's RETAIN default, while the
+    // groups that named a policy chose DESTROY. Stating it explicitly means the
+    // behaviour no longer depends on a library default, and the split is no longer
+    // invisible in the source. See `diagnosticLogGroupProps`.
+    const logGroup = new logs.LogGroup(this, 'ScanLogs', diagnosticLogGroupProps());
 
     // Own role rather than the AWS managed AWSLambdaBasicExecutionRole: the only
     // logging grant this function needs is on the one log group above.
@@ -173,7 +179,7 @@ export class AshCodeCommitGateStack extends Stack {
       // synth time and push it through a bootstrap staging bucket. The image has
       // to be built in the adopter's account by the CodeBuild project.
       code: lambda.DockerImageCode.fromEcr(image.repository, {
-        tagOrDigest: image.tagForFlavor('lambda'),
+        tagOrDigest: image.workloadTagForFlavor('lambda'),
       }),
       // 900 seconds is Lambda's maximum, not a tuned value. A gate that needs
       // more cannot run on Lambda at all.

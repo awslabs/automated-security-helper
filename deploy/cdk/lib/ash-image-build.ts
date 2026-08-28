@@ -38,6 +38,18 @@
  * *fails* is fine — `post_build` still runs and reports FAILED, and the stack
  * rolls back with the CodeBuild log id in the reason.
  *
+ * THE BOOTSTRAP AND THE SCHEDULE MUST NOT RUN TOGETHER
+ * ---------------------------------------------------
+ * Both start the same project, and every build pushes the same moving tag into
+ * the same MUTABLE repository, so two of them at once resolve by whichever
+ * finishes last — and only the bootstrap answers CloudFormation. Three things
+ * keep them apart, and each covers a case the others do not: the default schedule
+ * is a cron expression so a new rule does not fire on creation, the rule depends
+ * on the bootstrap so even a `rate()` value cannot fire during it, and the project
+ * allows one concurrent build so a stack UPDATE cannot overlap a rebuild already
+ * in flight. See `DEFAULT_REBUILD_SCHEDULE`, `rebuildRule` and
+ * `concurrentBuildLimit` respectively.
+ *
  * WHY THE SOURCE IS `NO_SOURCE` AND THE BUILDSPEC CLONES
  * -----------------------------------------------------
  * A CodeBuild GitHub source needs a stored source credential in the account,
@@ -48,7 +60,7 @@
  * source configuration.
  */
 
-import { Aws, CfnParameter, CustomResource, Duration, RemovalPolicy } from 'aws-cdk-lib';
+import { Aws, CfnCondition, CfnParameter, CustomResource, Duration, Fn, RemovalPolicy } from 'aws-cdk-lib';
 import * as codebuild from 'aws-cdk-lib/aws-codebuild';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -59,6 +71,7 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
+import { diagnosticLogGroupProps } from './ash-config';
 import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressUnevaluableRules } from './ash-nag-suppressions';
 import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
 
@@ -122,6 +135,13 @@ export interface AshImageBuildProps {
   /** Rebuild cadence. */
   readonly rebuildSchedule: CfnParameter;
   /**
+   * Optional tag override for the WORKLOAD's image reference.
+   *
+   * Only pass this from a stack that actually runs a workload. It deliberately
+   * does NOT affect what the build pushes — see `workloadTagForFlavor`.
+   */
+  readonly imageTag?: CfnParameter;
+  /**
    * Run a build during stack creation and make it gate the workload.
    *
    * Leave this on for any stack whose workload cannot be created against an
@@ -153,6 +173,9 @@ export class AshImageBuild extends Construct {
   public readonly bootstrap?: CustomResource;
 
   private readonly platform: AshBuildPlatform;
+  /** Set only when the stack supplied an `imageTag` parameter. */
+  private readonly imageTagParameter?: CfnParameter;
+  private readonly imageTagCondition?: CfnCondition;
 
   constructor(scope: Construct, id: string, props: AshImageBuildProps) {
     super(scope, id);
@@ -160,6 +183,15 @@ export class AshImageBuild extends Construct {
 
     if (props.flavors.length === 0) {
       throw new Error('AshImageBuild needs at least one flavor to build.');
+    }
+
+    // The condition is created once here rather than per flavor, so a stack with
+    // several flavors pins them together rather than emitting one condition each.
+    if (props.imageTag) {
+      this.imageTagParameter = props.imageTag;
+      this.imageTagCondition = new CfnCondition(this, 'ImageTagPinned', {
+        expression: Fn.conditionNot(Fn.conditionEquals(props.imageTag.valueAsString, '')),
+      });
     }
 
     // RETAIN, deliberately. `emptyOnDelete` would make CDK synthesize an
@@ -180,10 +212,10 @@ export class AshImageBuild extends Construct {
       ],
     });
 
-    const logGroup = new logs.LogGroup(this, 'BuildLogs', {
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
+    // Retained on purpose: these logs are the only account of why an image build
+    // failed, and a failed build rolls the stack back. See
+    // `diagnosticLogGroupProps`.
+    const logGroup = new logs.LogGroup(this, 'BuildLogs', diagnosticLogGroupProps());
 
     this.project = new codebuild.Project(this, 'Build', {
       description:
@@ -206,6 +238,31 @@ export class AshImageBuild extends Construct {
       // is markedly slower than an online one. This is the ceiling, not the
       // expectation.
       timeout: Duration.hours(2),
+      /**
+       * One build at a time, because two builds of this project race each other.
+       *
+       * Every build pushes the same moving tag into the same MUTABLE repository,
+       * so two builds running together resolve by whichever finishes last. On a
+       * stack UPDATE that is not merely wasteful: if `AshVersion` changed, a
+       * scheduled rebuild that overlaps the update's bootstrap can republish the
+       * tag from the other revision, and CloudFormation reports success while the
+       * workload runs the wrong ASH.
+       *
+       * The dependency on the bootstrap already prevents this at stack CREATE.
+       * This closes the update case, which no ordering can, because by then the
+       * rule exists and fires on its own schedule.
+       *
+       * THE COST, STATED PLAINLY: CodeBuild does not queue past this limit — AWS
+       * documents that "if the current build count meets this limit, new builds
+       * are throttled and are not run". So a bootstrap that collides with an
+       * in-flight scheduled rebuild fails to start, and the starter reports FAILED
+       * to CloudFormation, so the stack operation fails and has to be retried.
+       * That is the better failure: it is loud, it names the cause, and retrying
+       * is safe. The alternative is a silent last-writer-wins publish, which looks
+       * like a successful deployment.
+       * https://docs.aws.amazon.com/codebuild/latest/userguide/create-project.html
+       */
+      concurrentBuildLimit: 1,
       logging: { cloudWatch: { logGroup } },
       encryptionKey: props.encryptionKey,
       environmentVariables: {
@@ -231,16 +288,41 @@ export class AshImageBuild extends Construct {
       }),
     );
 
-    new events.Rule(this, 'RebuildSchedule', {
+    if (props.bootstrapOnDeploy ?? true) {
+      this.bootstrap = this.addBootstrap(props);
+    }
+
+    /**
+     * The rebuild schedule is created AFTER the bootstrap, and depends on it.
+     *
+     * WHY THE ORDER MATTERS — A REAL DEPLOYMENT, NOT A HYPOTHETICAL
+     * ------------------------------------------------------------
+     * With the old `rate(1 day)` default this rule fired the moment
+     * CloudFormation created it, because an EventBridge rate expression is
+     * anchored at rule creation. On a real stack that put a scheduled build 43
+     * seconds behind a bootstrap build that was still running: two concurrent
+     * ARM64 LARGE builds, both pushing the same moving tag into the same MUTABLE
+     * repository, with only the bootstrap visible to CloudFormation. The workload
+     * got whichever image landed last.
+     *
+     * `DEFAULT_REBUILD_SCHEDULE` is now a cron expression, which does not fire on
+     * creation. That fixes the default but not an adopter who sets `rate(...)`,
+     * which is a legitimate value and still fires immediately. The dependency is
+     * what makes that safe: the bootstrap custom resource does not complete until
+     * its build has finished and answered CloudFormation, so a rule created after
+     * it cannot fire alongside it. Worst case for a `rate()` adopter is one extra
+     * build after the deployment, sequentially, which wastes money but cannot
+     * publish a tag out from under the workload.
+     */
+    const rebuildRule = new events.Rule(this, 'RebuildSchedule', {
       description:
         'Rebuilds the ASH image so a long-lived deployment keeps receiving base-image, ' +
         'OS and scanner patches for the pinned ASH revision.',
       schedule: events.Schedule.expression(props.rebuildSchedule.valueAsString),
       targets: [new targets.CodeBuildProject(this.project)],
     });
-
-    if (props.bootstrapOnDeploy ?? true) {
-      this.bootstrap = this.addBootstrap(props);
+    if (this.bootstrap) {
+      rebuildRule.node.addDependency(this.bootstrap);
     }
 
     suppressCodeBuildRoleWildcards(this.project);
@@ -253,12 +335,43 @@ export class AshImageBuild extends Construct {
   /**
    * The image URI a workload should reference, for one flavor.
    *
-   * This is the MOVING tag, so a scheduled rebuild replaces what the tag points
-   * at. See the note in the README about what that does and does not roll out
-   * on its own.
+   * Follows `workloadTagForFlavor`, so it is the moving tag unless the stack
+   * supplied an `imageTag` parameter and the adopter set it.
    */
   public imageUriForFlavor(flavor: AshImageFlavor): string {
-    return this.repository.repositoryUriForTag(this.tagForFlavor(flavor));
+    return this.repository.repositoryUriForTag(this.workloadTagForFlavor(flavor));
+  }
+
+  /**
+   * The tag a WORKLOAD should pull. Distinct from `tagForFlavor` on purpose.
+   *
+   * WHY THE BUILD AND THE WORKLOAD MUST NOT SHARE ONE ACCESSOR
+   * ---------------------------------------------------------
+   * `tagForFlavor` is what the buildspec tags and pushes, and what
+   * `sanitizeRefCommand` measures to budget the folded ref against the 128-character
+   * Docker tag limit. Both need a real string. If the override leaked into either,
+   * the build would push to a tag derived from an `Fn::If` — so the moving tag would
+   * stop being published at all, and the length budget would be computed from a
+   * token's placeholder rather than the tag.
+   *
+   * So the override applies here and nowhere else: the build always publishes both
+   * the moving tag and the version-qualified one, and this decides which of them the
+   * workload pulls.
+   *
+   * `Fn::If` rather than a synth-time choice, because `AshImageTag` is a deploy-time
+   * parameter. When no parameter was supplied — `AshImagePipeline`, which has no
+   * workload — this returns the plain moving tag and emits no condition.
+   */
+  public workloadTagForFlavor(flavor: AshImageFlavor): string {
+    const moving = this.tagForFlavor(flavor);
+    if (!this.imageTagCondition || !this.imageTagParameter) {
+      return moving;
+    }
+    return Fn.conditionIf(
+      this.imageTagCondition.logicalId,
+      this.imageTagParameter.valueAsString,
+      moving,
+    ).toString();
   }
 
   /** The moving tag for a flavor, for example `mcp-arm64`. */
@@ -276,10 +389,10 @@ export class AshImageBuild extends Construct {
   private addBootstrap(props: AshImageBuildProps): CustomResource {
     // Its own log group, so the role can be scoped to exactly one group instead
     // of carrying the AWS managed AWSLambdaBasicExecutionRole.
-    const starterLogs = new logs.LogGroup(this, 'BootstrapStarterLogs', {
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
+    // Retained: this is where a build that never STARTED is explained, which
+    // `concurrentBuildLimit` gives a real trigger — CodeBuild refuses a colliding
+    // StartBuild rather than queueing it. See `diagnosticLogGroupProps`.
+    const starterLogs = new logs.LogGroup(this, 'BootstrapStarterLogs', diagnosticLogGroupProps());
     const starterRole = new iam.Role(this, 'BootstrapStarterRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
       description:
@@ -356,10 +469,11 @@ export class AshImageBuild extends Construct {
             // rather than after twenty minutes of `docker build`.
             this.sanitizeRefCommand(flavors),
 
-            // Write the container scripts next to the cloned Dockerfile so the
-            // derived builds can COPY them.
-            this.writeFileCommand('ash-src/ash-mcp-entrypoint.sh', MCP_ENTRYPOINT_SCRIPT),
-            this.writeFileCommand('ash-src/ash_gate_handler.py', CODECOMMIT_GATE_HANDLER),
+            // The container scripts are written by the flavor that COPYs them,
+            // in `flavorBuildCommands`. They used to be written here, both of
+            // them, on every build — which put the CodeCommit gate handler into
+            // all five committed templates, including the two that build no
+            // Lambda at all. See the note on `flavorBuildCommands`.
 
             // Build each ASH Dockerfile stage this image set needs. --platform is
             // explicit even though the compute already matches, so a build on the
@@ -468,6 +582,26 @@ export class AshImageBuild extends Construct {
     ].join('\n');
   }
 
+  /**
+   * The `docker` work for one flavor, including the scripts only that flavor needs.
+   *
+   * WHY THE SCRIPT WRITES LIVE HERE RATHER THAN ONCE PER BUILD
+   * ---------------------------------------------------------
+   * They were emitted unconditionally, so every build wrote both the MCP
+   * entrypoint and the CodeCommit gate handler whether or not it built an image
+   * that COPYs them. Because the buildspec is inlined into the synthesized
+   * template, that put the whole gate handler into all five committed templates —
+   * including `AshImagePipeline`, whose ARM64 build has no Lambda flavor, and
+   * `AshDistributedPipeline`, which builds only the `cli` flavor and needs
+   * neither script.
+   *
+   * That matters beyond tidiness: CloudFormation caps an inline
+   * `--template-body` at 51,200 bytes, and these templates are committed
+   * precisely so they can be launched directly. Pairing each script with the
+   * flavor whose Dockerfile COPYs it also means the two cannot drift apart — a
+   * new flavor that forgets its script fails at `docker build` rather than
+   * shipping an image with a stale one.
+   */
   private flavorBuildCommands(flavor: AshImageFlavor): string[] {
     const base = `ash-base-${DOCKER_TARGET_FOR_FLAVOR[flavor]}:local`;
     const tag = this.tagForFlavor(flavor);
@@ -489,6 +623,7 @@ export class AshImageBuild extends Construct {
 
     if (flavor === 'mcp') {
       return [
+        this.writeFileCommand('ash-src/ash-mcp-entrypoint.sh', MCP_ENTRYPOINT_SCRIPT),
         this.writeFileCommand(
           'ash-src/Dockerfile.mcp',
           [
@@ -512,6 +647,7 @@ export class AshImageBuild extends Construct {
     }
 
     return [
+      this.writeFileCommand('ash-src/ash_gate_handler.py', CODECOMMIT_GATE_HANDLER),
       this.writeFileCommand(
         'ash-src/Dockerfile.lambda',
         [
@@ -628,8 +764,13 @@ def handler(event, context):
             ],
         )
     except Exception as exc:
-        # The build never started, so nothing else will ever answer.
-        send(event, "FAILED", "Could not start the ASH image build: %s" % exc)
+        # The build never started, so nothing else will ever answer. The most
+        # likely cause is a scheduled rebuild holding the project's only
+        # concurrent build slot, which is why the reason says so: retrying the
+        # stack operation once the rebuild finishes is safe.
+        send(event, "FAILED", "Could not start the ASH image build. A scheduled "
+             "rebuild may hold the project's only build slot; retrying is safe. "
+             "Cause: %s" % exc)
     # Success path is silent by design: the build itself responds when the image
     # exists. Responding here would let the workload be created too early.
 `;

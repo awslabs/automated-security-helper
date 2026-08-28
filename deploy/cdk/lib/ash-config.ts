@@ -38,7 +38,8 @@
  *   `resolveShardCount` for the full reasoning.
  */
 
-import { CfnParameter, DefaultStackSynthesizer, IStackSynthesizer, Stack } from 'aws-cdk-lib';
+import { CfnParameter, DefaultStackSynthesizer, IStackSynthesizer, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import * as logs from 'aws-cdk-lib/aws-logs';
 
 /**
  * Canonical parameter names, shared with the Terraform mirror.
@@ -49,11 +50,13 @@ export const ASH_PARAMETER_NAMES = {
   ashOfflineMode: 'AshOfflineMode',
   ashBaseConfigYaml: 'AshBaseConfigYaml',
   ashVersion: 'AshVersion',
+  ashImageTag: 'AshImageTag',
   mcpStatelessHttp: 'McpStatelessHttp',
   mcpAuthHeaderName: 'McpAuthHeaderName',
   mcpAuthHeaderValue: 'McpAuthHeaderValue',
   mcpMountPath: 'McpMountPath',
   mcpAllowedHost: 'McpAllowedHost',
+  mcpIngressCidr: 'McpIngressCidr',
   rebuildSchedule: 'RebuildSchedule',
   shardCount: 'ShardCount',
   codeCommitRepositoryArn: 'CodeCommitRepositoryArn',
@@ -69,8 +72,34 @@ export const ASH_PARAMETER_NAMES = {
  */
 export const DEFAULT_ASH_VERSION = 'v3.7.0';
 
-/** Default cadence for the scheduled rebuild that keeps the image patched. */
-export const DEFAULT_REBUILD_SCHEDULE = 'rate(1 day)';
+/**
+ * Default cadence for the scheduled rebuild that keeps the image patched.
+ *
+ * WHY THIS IS A CRON EXPRESSION AND NOT `rate(1 day)`
+ * --------------------------------------------------
+ * It was `rate(1 day)`, and that made every deployment run two image builds at
+ * once. EventBridge is explicit that "a rate expression starts when you create
+ * the scheduled event rule, and then it runs on a defined schedule", so the rule
+ * fires as soon as CloudFormation creates it — observed on a real stack as a
+ * scheduled build starting 43 seconds after the rule was created, while the
+ * bootstrap build begun 14 seconds earlier was still running.
+ * https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-scheduled-rule-pattern.html
+ *
+ * Two concurrent ARM64 LARGE builds is the smaller half of the problem. Both push
+ * the same moving tag to the same MUTABLE repository, so which image the workload
+ * ends up running is decided by whichever build finishes last — and only the
+ * bootstrap build reports to CloudFormation, so the stack cannot see the other
+ * one at all.
+ *
+ * A cron expression has no such anchor: it fires at the times it names and
+ * nothing else, so a freshly created rule does not fire. 06:00 UTC daily keeps
+ * the original intent — patches picked up about once a day.
+ *
+ * `rate()` is still accepted, and still fires on creation. What stops that being
+ * a race is the dependency in `ash-image-build.ts`, which withholds the rule
+ * until the bootstrap build has finished.
+ */
+export const DEFAULT_REBUILD_SCHEDULE = 'cron(0 6 * * ? *)';
 
 /**
  * The port AgentCore Runtime requires, and the default everywhere else so the
@@ -167,18 +196,106 @@ export function ashVersion(scope: Stack): CfnParameter {
 }
 
 /**
+ * The ECR tag the WORKLOAD pulls, as opposed to the tag the build pushes.
+ *
+ * THE PROBLEM THIS EXISTS FOR
+ * ---------------------------
+ * A mutable tag consumed by a running workload has no defined moment at which
+ * the workload adopts a new image. Every build republishes the moving tag
+ * (`mcp-arm64` and friends), so a task replaced for any unrelated reason — a
+ * scaling event, a host failure, an ECS redeploy — silently picks up whatever the
+ * tag points at then. Nothing promotes the image and nothing announces the swap.
+ *
+ * Leaving this empty keeps that behaviour, which is what every existing
+ * deployment already has. Setting it pins the workload to one immutable-in-practice
+ * reference instead.
+ *
+ * THE WRINKLE, STATED PLAINLY: YOU CANNOT PIN ON THE FIRST DEPLOY
+ * -------------------------------------------------------------
+ * The value worth pinning is the version-qualified audit tag the build also
+ * pushes, `<flavor>-<platform>-<folded-ref>-<sha256-prefix>`. Its digest is
+ * computed inside CodeBuild from the raw `AshVersion`, so it does not exist and
+ * cannot be predicted at create time. The workflow is therefore: deploy with this
+ * empty, read the tag out of ECR or the build log, then set it on a stack update.
+ * Pinning a tag that does not exist yet fails workload creation rather than
+ * waiting for it.
+ *
+ * WHAT WAS REJECTED
+ * -----------------
+ * - Defaulting this to the audit tag: impossible for the reason above, and it
+ *   would make the first deploy of every stack fail.
+ * - Having the stack compute the digest at synth time so the tag were knowable:
+ *   `AshVersion` is a deploy-time parameter, so at synth time it is an `Fn::Ref`
+ *   with no string to hash. This is the same constraint that put the folding in
+ *   the buildspec rather than in TypeScript.
+ * - Resolving a digest by calling ECR from a custom resource: that reintroduces
+ *   the lookup-at-deploy machinery these templates avoid, to save one manual read.
+ *
+ * CONTRACT NOTE: this is a new name in the shared parameter surface, so the
+ * Terraform mirror under `deploy/terraform/` needs the same one to stay in step.
+ */
+export function ashImageTag(scope: Stack): CfnParameter {
+  return new CfnParameter(scope, ASH_PARAMETER_NAMES.ashImageTag, {
+    type: 'String',
+    default: '',
+    // Kept short on purpose: this text is inlined into four templates, two of
+    // which sit close to CloudFormation's 51,200-byte inline limit. The full
+    // workflow is in deploy/cdk/README.md under "Pinning the image a workload runs".
+    description:
+      'ECR tag the workload pulls. Empty tracks the moving tag, which every rebuild ' +
+      'republishes, so a replaced task adopts the newest image at no defined moment. ' +
+      "Pin the build's version-qualified tag instead; its digest is only known after " +
+      'a build, so deploy empty, read the tag, then set this on a stack update.',
+  });
+}
+
+/**
  * Whether the MCP server treats each streamable-HTTP request independently.
  *
- * WHY THE DEFAULT IS `true`: AgentCore injects its own `Mcp-Session-Id` header.
- * Measured against ASH directly, a session id the server never issued yields
- * HTTP 404 "Session not found" in stateful mode and HTTP 200 in stateless mode.
- * AWS documents the same requirement: "In stateless mode, servers must support
- * stateless operation so as to not reject platform generated Mcp-Session-Id
- * header."
+ * WHY THE DEFAULT IS `true`, SEPARATED INTO WHAT IS MEASURED AND WHAT IS NOT
+ * -------------------------------------------------------------------------
+ * An earlier version of this comment justified the default by asserting that
+ * AgentCore "injects its own `Mcp-Session-Id` that a stateful server rejects with
+ * 404". That is stronger than the evidence, and it is worth being precise,
+ * because an adopter reads this to decide whether they may set `false`.
+ *
+ * MEASURED, against ASH directly rather than through AgentCore: given a session
+ * id the server never issued, ASH's MCP server returns HTTP 404 "Session not
+ * found" in stateful mode and HTTP 200 in stateless mode. Controls confirmed both
+ * servers start and that the stateful one issues an id of its own.
+ *
+ * DOCUMENTED by AWS, quoting the MCP protocol contract:
+ * - "By default, use stateless mode (`stateless_http=True`) for compatibility
+ *   with AWS's session management and load balancing."
+ * - "In stateless mode, servers must support stateless operation so as to not
+ *   reject platform generated `Mcp-Session-Id` header."
+ * - In stateless mode specifically, "Platform generates the `Mcp-Session-Id` and
+ *   includes it in the request to your MCP server" and "Your MCP server must
+ *   accept the platform-provided session ID (do not reject it)."
  * https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html
  *
- * The same reasoning applies behind any load balancer that may route
- * consecutive requests to different replicas.
+ * ALSO DOCUMENTED, and the reason the old claim was too strong: AgentCore
+ * supports stateful MCP servers too. In that mode "the client sends the
+ * initialize request without an `Mcp-Session-Id` header" and the platform returns
+ * one — which is not the platform injecting an id into a server that never issued
+ * it. Stateful mode is what enables elicitation, sampling and progress
+ * notifications.
+ * https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/mcp-stateful-features.html
+ *
+ * NOT ESTABLISHED, and not establishable from here: that this deployment could
+ * safely run stateful on AgentCore. `AWS::BedrockAgentCore::Runtime` exposes no
+ * property for the choice — `ProtocolConfiguration` is a plain string whose
+ * allowed values are `MCP | HTTP | A2A | AGUI` — so the mode is a property of the
+ * container's own invocation, and making it work depends on every client omitting
+ * the session id on initialize. This stack does not control the clients.
+ * https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-bedrockagentcore-runtime.html
+ *
+ * So `true` is the right default because AWS names it the default, because ASH
+ * measurably 404s an id it did not issue, and because nothing here can guarantee
+ * the client behaviour stateful mode needs. Not because stateful is impossible.
+ *
+ * Independently of AgentCore, `true` is also what makes the server correct behind
+ * any load balancer that may route consecutive requests to different replicas.
  */
 export function mcpStatelessHttp(scope: Stack): CfnParameter {
   return new CfnParameter(scope, ASH_PARAMETER_NAMES.mcpStatelessHttp, {
@@ -187,9 +304,12 @@ export function mcpStatelessHttp(scope: Stack): CfnParameter {
     allowedValues: ['true', 'false'],
     description:
       'Handle each streamable-HTTP request independently instead of binding it to a ' +
-      'server-held session. Must stay true on AgentCore, which injects its own ' +
-      'Mcp-Session-Id that a stateful server rejects with 404. Also required behind ' +
-      'a load balancer that may route consecutive requests to different replicas.',
+      'server-held session. Keep true on AgentCore: AWS documents stateless as the ' +
+      'default there and requires the server not to reject the platform-generated ' +
+      'Mcp-Session-Id, and ASH in stateful mode answers 404 to a session id it did ' +
+      'not issue. AgentCore does support stateful servers, but only when clients ' +
+      'omit the session id on initialize, which this stack cannot enforce. Also keep ' +
+      'true behind a load balancer that may route requests to different replicas.',
   });
 }
 
@@ -270,6 +390,52 @@ export function mcpAllowedHost(scope: Stack): CfnParameter {
   });
 }
 
+/**
+ * CIDR allowed to reach the Fargate load balancer, or empty for no ingress.
+ *
+ * WHY AN EMPTY DEFAULT RATHER THAN THE VPC CIDR
+ * -------------------------------------------
+ * The listener is created with `open: false`, so the load balancer's security
+ * group has allow-all egress and NO ingress rule. Empty here preserves that
+ * exactly: today's secure-by-default posture is unchanged for anyone who does not
+ * set it, and an existing stack sees no new rule on update.
+ *
+ * Defaulting to the stack's own VPC CIDR was rejected as the appearance of a fix.
+ * The Fargate stack creates its own VPC and puts nothing in it but the ASH tasks,
+ * so that rule would admit a range containing no clients while still widening
+ * access. Real consumers arrive from a peered VPC, a VPN or a transit gateway,
+ * none of which fall inside it.
+ *
+ * WHY A PARAMETER AT ALL, HAVING PREVIOUSLY DECLINED ONE
+ * ----------------------------------------------------
+ * Correcting the `McpEndpoint` output to admit the endpoint is closed left the
+ * adopter with an accurate message and no way to act on it. An output that
+ * describes a reachable endpoint, or documentation that describes an action, with
+ * no parameter that performs it is the same documented-but-unreachable defect in
+ * a different costume. So the honest posture needs both halves: say it is closed,
+ * and provide the switch.
+ *
+ * CONTRACT NOTE: this is a new name in the shared parameter surface, so the
+ * Terraform mirror under `deploy/terraform/` needs the same one to stay in step.
+ *
+ * The pattern permits only a CIDR, not a bare address, so `10.0.0.5` is rejected
+ * at parameter validation rather than silently becoming a /32 nobody intended.
+ * Use `x.x.x.x/32` to admit a single host.
+ */
+export function mcpIngressCidr(scope: Stack): CfnParameter {
+  return new CfnParameter(scope, ASH_PARAMETER_NAMES.mcpIngressCidr, {
+    type: 'String',
+    default: '',
+    allowedPattern: '^$|^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$',
+    description:
+      'CIDR allowed to reach the MCP load balancer on port 80. Leave empty and NO ' +
+      'ingress rule is created, so the endpoint is reachable from nowhere — the ' +
+      'default, and unchanged from before this parameter existed. Set it to the range ' +
+      'your MCP clients come from, for example 10.1.0.0/16, or x.x.x.x/32 for one ' +
+      'host. A CIDR is required; a bare address is rejected.',
+  });
+}
+
 /** Cadence of the scheduled image rebuild. */
 export function rebuildSchedule(scope: Stack): CfnParameter {
   return new CfnParameter(scope, ASH_PARAMETER_NAMES.rebuildSchedule, {
@@ -278,9 +444,11 @@ export function rebuildSchedule(scope: Stack): CfnParameter {
     minLength: 1,
     description:
       'EventBridge schedule expression for the image rebuild, for example ' +
-      '"rate(1 day)" or "cron(0 6 * * ? *)". The rebuild repulls the base image and ' +
+      '"cron(0 6 * * ? *)" or "rate(1 day)". The rebuild repulls the base image and ' +
       'scanner tools so a long-lived deployment keeps getting OS and scanner ' +
-      'patches without a stack update.',
+      'patches without a stack update. Note that a rate() expression starts when ' +
+      'the rule is created, so it also rebuilds once at deployment; a cron() ' +
+      'expression only fires at the times it names.',
   });
 }
 
@@ -351,6 +519,55 @@ export function toAgentCoreName(raw: string): string {
   const folded = raw.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z]+/, '');
   const seeded = folded.length > 0 ? folded : 'ash';
   return seeded.slice(0, 48);
+}
+
+/**
+ * Retention and removal policy for a log group that holds diagnostic evidence.
+ *
+ * WHY THIS EXISTS — A REAL DEPLOYMENT, NOT A HYPOTHETICAL
+ * ------------------------------------------------------
+ * A Fargate stack failed with "ECS Deployment Circuit Breaker was triggered" and
+ * rolled back. The container stderr explaining WHY was in the stack's own
+ * `TaskLogs` group, and rollback had already deleted it — CloudFormation removes
+ * everything a failed create made. The only surviving group was the ECS-owned
+ * `containerinsights/.../performance` one, which carries no stderr. So the single
+ * artifact that explains a failed deployment was guaranteed to be gone by the
+ * time anyone went looking for it.
+ *
+ * That is a property of every log group in these stacks, not just that one. The
+ * image build's logs explain a failed image build; the bootstrap starter's logs
+ * explain a build that never started — a path that now has a real trigger, since
+ * `concurrentBuildLimit` makes CodeBuild refuse a colliding StartBuild.
+ *
+ * WHY A SHARED FUNCTION RATHER THAN THE LITERAL AT EACH CALL SITE
+ * -------------------------------------------------------------
+ * Because the same class of defect was already half-present and invisible. The
+ * CodeCommit gate's `ScanLogs` was the only group that did NOT pass a
+ * `removalPolicy`, so it inherited CDK's `RETAIN` default and survived rollback,
+ * while the four groups that explicitly asked for `DESTROY` did not. Nothing in
+ * the source showed that split — it was only visible by reading `DeletionPolicy`
+ * out of the synthesized template. Routing every group through one function means
+ * the policy is stated once, and a new log group either uses it or visibly does
+ * not.
+ *
+ * TWO CONSEQUENCES, BOTH DELIBERATE
+ * --------------------------------
+ * - Retained groups survive `cdk destroy`, so they are teardown residuals. None
+ *   of these groups sets `logGroupName`, so CloudFormation assigns each a fresh
+ *   physical name; a re-created stack therefore gets a NEW group rather than
+ *   colliding with the old one, and repeated deploy/rollback cycles accumulate
+ *   one group per attempt. They are listed in the README alongside the ECR
+ *   repositories and buckets that are retained for the same reason.
+ * - Retention stays finite. `ONE_MONTH` is what every group here already used, so
+ *   this is not a new value; keeping it bounded means a retained group stops
+ *   costing anything for storage once its events age out, rather than
+ *   accumulating indefinitely the way `RetentionDays.INFINITE` would.
+ */
+export function diagnosticLogGroupProps(): Pick<logs.LogGroupProps, 'retention' | 'removalPolicy'> {
+  return {
+    retention: logs.RetentionDays.ONE_MONTH,
+    removalPolicy: RemovalPolicy.RETAIN,
+  };
 }
 
 /**

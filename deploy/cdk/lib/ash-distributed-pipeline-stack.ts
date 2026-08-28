@@ -94,6 +94,7 @@ import { Construct } from 'constructs';
 
 import {
   ashSynthesizer,
+  ashImageTag,
   ashOfflineMode, ashVersion, rebuildSchedule, resolveShardCount,
 } from './ash-config';
 import {
@@ -145,6 +146,7 @@ export class AshDistributedPipelineStack extends Stack {
       ashVersion: version,
       offlineMode: offline,
       rebuildSchedule: schedule,
+      imageTag: ashImageTag(this),
       // The pipeline's own first stage builds the image, so a deploy-time
       // bootstrap would duplicate it.
       bootstrapOnDeploy: false,
@@ -200,10 +202,15 @@ export class AshDistributedPipelineStack extends Stack {
      *
      * Resolved at build start, not at deploy, which is what lets stage one create
      * the image the later stages run inside.
+     *
+     * `AshImageTag` pins it the same way it pins the other targets, with one
+     * difference worth knowing: because the reference resolves per build rather
+     * than at create time, a pin that names a tag stage one has not produced fails
+     * the shard projects when they start, not when the stack deploys.
      */
     const ashBuildImage = codebuild.LinuxBuildImage.fromEcrRepository(
       image.repository,
-      image.tagForFlavor('cli'),
+      image.workloadTagForFlavor('cli'),
     );
 
     const sourceOutput = new codepipeline.Artifact('Source');
