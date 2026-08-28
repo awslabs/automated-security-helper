@@ -65,6 +65,18 @@ time can detect that, so it is caught at merge time instead:
 :func:`verify_shard_coverage` refuses a set of shards that does not reconstruct
 exactly one whole scan.
 
+Catching it needs each shard to record the set it partitioned, and for a while
+this claim was false because nothing did. ``ShardAssignment`` held only the index,
+the count and the assignment, so at ``shard_count=2`` executor 0 resolving
+``{a,b,c,d}`` and taking ``[a,c]`` merged cleanly with executor 1 resolving
+``{a,b,c}`` and taking ``[b]``: counts agree, indices complete, no duplicates, no
+overlap, and ``d`` never scanned. ``candidate_scanners`` is what the union is
+compared against. It happened to be caught in practice by
+``merge._verify_scanner_union``, but only incidentally -- that check works from
+the SKIPPED markers a shard writes for scanners it did not own, and
+``verify_shard_coverage`` is exported in ``__all__``, so any caller using it alone
+got no hole detection at all.
+
 Known limitations
 -----------------
 Balance is by scanner *count*, not by scanner *cost*. A shard holding semgrep
@@ -114,6 +126,14 @@ class ShardAssignment(BaseModel):
     here that failed or was disabled by config still appears; the scanner's own
     status in the results says what became of it. Conflating the two would make a
     legitimately-disabled scanner look like a coverage gap.
+
+    ``candidate_scanners`` is what makes coverage verifiable at all. Recording
+    only the assignment lets every shard be internally consistent while the union
+    has a hole: at ``shard_count=2``, executor 0 resolving ``{a,b,c,d}`` and
+    taking ``[a,c]`` alongside executor 1 resolving ``{a,b,c}`` and taking ``[b]``
+    agrees on the count, has complete indices, no duplicates and no overlap. Every
+    check in :func:`verify_shard_coverage` passed and ``d`` was never scanned,
+    because nothing recorded what the partition was taken *from*.
     """
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -127,6 +147,14 @@ class ShardAssignment(BaseModel):
     assigned_scanners: list[str] = Field(
         default_factory=list,
         description="Scanner names this shard was responsible for running.",
+    )
+    candidate_scanners: list[str] | None = Field(
+        default=None,
+        description=(
+            "Every scanner this executor resolved before partitioning -- the set "
+            "assigned_scanners was taken from. None on results written before "
+            "this field existed, in which case the union check is skipped."
+        ),
     )
 
 
@@ -254,8 +282,9 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
 
     Raises:
         ShardCoverageError: If no shards were supplied, if the shards disagree
-            about the total count, if any index is missing or repeated, or if two
-            shards claim the same scanner.
+            about the total count, if any index is missing or repeated, if two
+            shards claim the same scanner, if the shards disagree about the
+            candidate set, or if the assignments do not union to it.
     """
     if not assignments:
         raise ShardCoverageError(
@@ -316,4 +345,84 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
             "The same scanner was assigned to more than one shard: "
             f"{'; '.join(sorted(overlaps))}. Its findings would be counted once "
             "per shard."
+        )
+
+    _verify_candidate_agreement(assignments, claimed)
+
+
+def _verify_candidate_agreement(
+    assignments: Sequence[ShardAssignment], claimed: dict[str, int]
+) -> None:
+    """Check the shards agree on what they partitioned, and that they cover it.
+
+    This is the check that closes the residual risk named in the module docstring:
+    two executors resolving *different* scanner sets, so that both partitions are
+    internally valid and the union has a hole. Every other check here reads only
+    indices and assignments, and a hole of that kind disturbs neither.
+
+    Skipped when no shard records a candidate set, which is how results written
+    before ``candidate_scanners`` existed keep merging. A mixed set -- some shards
+    carrying it, some not -- is refused rather than checked on the subset: the
+    shards that predate the field are exactly the ones that could be hiding the
+    hole, so verifying only the ones that do carry it would report a pass that
+    means less than it appears to.
+
+    Args:
+        assignments: One entry per shard result being merged.
+        claimed: Normalized scanner name to the index of the shard that owns it,
+            built by the caller while checking for overlaps. Reused rather than
+            recomputed so the two checks cannot disagree about normalization.
+
+    Raises:
+        ShardCoverageError: If only some shards record a candidate set, if the
+            shards disagree about it, or if the assignments do not union to it.
+    """
+    with_candidates = [a for a in assignments if a.candidate_scanners is not None]
+    if not with_candidates:
+        return
+
+    if len(with_candidates) != len(assignments):
+        missing = sorted(
+            a.shard_index for a in assignments if a.candidate_scanners is None
+        )
+        raise ShardCoverageError(
+            f"Shards {missing} record no candidate scanner set while the others "
+            f"do. These results were produced by different versions of ASH, so "
+            f"they are not known to have partitioned the same scanner set -- and "
+            f"the shards without the record are the ones that could be hiding a "
+            f"gap. Re-run the whole matrix on one version."
+        )
+
+    candidate_sets = {tuple(_normalized(a.candidate_scanners)) for a in with_candidates}
+    if len(candidate_sets) > 1:
+        detail = "; ".join(
+            f"shard {a.shard_index}: {', '.join(_normalized(a.candidate_scanners))}"
+            for a in sorted(with_candidates, key=lambda a: a.shard_index)
+        )
+        raise ShardCoverageError(
+            f"The shards partitioned different scanner sets: {detail}. Each "
+            f"partition is internally valid, so nothing else here can see this: "
+            f"one executor was missing a plugin module, or --python-only or a "
+            f"config override was applied to some jobs and not others. Merging "
+            f"would report a scan that never covered the scanners the smaller set "
+            f"omitted."
+        )
+
+    candidates = set(candidate_sets.pop())
+    uncovered = sorted(candidates - set(claimed))
+    if uncovered:
+        raise ShardCoverageError(
+            f"These scanners were candidates on every shard but assigned to none: "
+            f"{', '.join(uncovered)}. The partition did not cover the set it was "
+            f"taken from, so no shard ran them and the merged report would not "
+            f"say so."
+        )
+
+    unexpected = sorted(set(claimed) - candidates)
+    if unexpected:
+        raise ShardCoverageError(
+            f"These scanners were assigned to a shard but are not in the candidate "
+            f"set: {', '.join(unexpected)}. An assignment that names a scanner the "
+            f"executor did not resolve cannot have been produced by partitioning "
+            f"that set, so the provenance does not describe this run."
         )

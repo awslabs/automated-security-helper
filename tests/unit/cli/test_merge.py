@@ -277,6 +277,12 @@ def build_shard(
                 shard_index=shard_index,
                 shard_count=shard_count,
                 assigned_scanners=list(owned),
+                # Recorded because a real ScanPhase records it. Fixtures that left
+                # it None would exercise only the backward-compatibility path, in
+                # which verify_shard_coverage skips the union check entirely -- so
+                # the mainline merge tests would run against a weaker contract than
+                # any real scan produces.
+                candidate_scanners=list(all_scanners),
             ),
         )
     return model
@@ -594,20 +600,56 @@ class TestCoverageIsRefused:
         with pytest.raises(ShardCoverageError, match=r"more than one shard"):
             merge_shard_results(as_loaded(shards))
 
-    def test_scanner_claimed_by_no_shard_is_refused(self):
-        # The residual risk the sharding module names: two executors resolving
-        # different scanner sets, so both partitions are internally valid and the
-        # union has a hole. Every shard marks the orphan SKIPPED, so a merge that
-        # allowed it would report a scanner nobody ran as deliberately excluded.
-        shards = build_shards(3)
+    def _orphan_grype(self, shards, keep_candidates: bool):
+        """Drop grype from every shard's assignment, leaving its SKIPPED markers.
+
+        The residual risk the sharding module names: two executors resolving
+        different scanner sets, so both partitions are internally valid and the
+        union has a hole.
+        """
         for model in shards:
             assignment = read_shard_assignment(model)
             assignment.assigned_scanners = [
                 name for name in assignment.assigned_scanners if name != "grype"
             ]
+            if not keep_candidates:
+                assignment.candidate_scanners = None
             stamp_shard_assignment(model, assignment)
+        return shards
+
+    def test_scanner_claimed_by_no_shard_is_refused_by_the_candidate_check(self):
+        # With candidate_scanners recorded -- what every current scan writes --
+        # verify_shard_coverage catches this from the provenance alone, before any
+        # results are read.
+        shards = self._orphan_grype(build_shards(3), keep_candidates=True)
+
+        with pytest.raises(ShardCoverageError, match=r"assigned to none"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_scanner_claimed_by_no_shard_is_refused_from_the_results_alone(self):
+        # The same hole on results written before candidate_scanners existed, where
+        # verify_shard_coverage has nothing to compare a union against. Every shard
+        # marks the orphan SKIPPED, and _verify_scanner_union catches it from those
+        # markers -- a second line of defense that has to keep working, because it
+        # is the only one for legacy artifacts.
+        shards = self._orphan_grype(build_shards(3), keep_candidates=False)
 
         with pytest.raises(ShardCoverageError, match=r"no shard was assigned them"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_executors_resolving_different_scanner_sets_are_refused(self):
+        # The disagreement itself, rather than its consequence: one executor was
+        # missing a plugin module, so its candidate set is short. Neither shard's
+        # own partition is wrong, which is why nothing but the candidate comparison
+        # can see it.
+        shards = build_shards(3)
+        assignment = read_shard_assignment(shards[1])
+        assignment.candidate_scanners = [
+            name for name in assignment.candidate_scanners if name != "grype"
+        ]
+        stamp_shard_assignment(shards[1], assignment)
+
+        with pytest.raises(ShardCoverageError, match=r"different scanner sets"):
             merge_shard_results(as_loaded(shards))
 
     def test_owning_shard_with_no_result_for_its_scanner_is_refused(self):
