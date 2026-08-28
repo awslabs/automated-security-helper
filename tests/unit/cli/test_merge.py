@@ -348,6 +348,41 @@ class TestShardedEqualsUnsharded:
 
         assert finding_keys(merged) == finding_keys(unsharded)
 
+    def test_a_shard_count_far_above_the_scanner_count_still_merges(self):
+        # core/sharding's docstring allows a shard count above the scanner count
+        # so a pipeline can parameterize it without knowing how many scanners
+        # exist, calling the surplus shards "wasteful rather than wrong". This
+        # pins the merge half of that promise at a shard count a CI pipeline
+        # plausibly permits: 50 shards over 5 scanners leaves 45 shards whose
+        # assigned_scanners is empty.
+        #
+        # Worth pinning rather than leaving to the n=7 case, because an empty
+        # assignment is exactly the shape a future coverage check might decide is
+        # suspicious. Refusing it would turn a merely wasteful configuration into
+        # a pipeline that cannot merge at all, and the failure would read as
+        # missing coverage rather than as an over-large shard count.
+        shard_count = 50
+        shards = build_shards(shard_count)
+        surplus = [
+            model
+            for model in shards
+            if not read_shard_assignment(model).assigned_scanners
+        ]
+        assert len(surplus) == shard_count - len(SCANNERS)
+        # Every surplus shard still records provenance. ScanPhase gates the stamp
+        # on the scanners it *discovered*, not on the slice it was assigned, so an
+        # empty slice is stamped and only a runner that found no scanners at all
+        # goes unstamped.
+        assert all(read_shard_assignment(model) is not None for model in shards)
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert finding_keys(merged) == finding_keys(build_unsharded())
+        assert len(merged.scanner_results) == len(SCANNERS)
+        assert [
+            name for name, entry in merged.scanner_results.items() if entry.excluded
+        ] == []
+
     def test_one_collapsed_sarif_run(self):
         # Shards share a single root, so one run is the honest shape. N runs would
         # describe a workspace that does not exist.
