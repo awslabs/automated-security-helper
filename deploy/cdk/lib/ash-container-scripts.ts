@@ -46,6 +46,174 @@
 export const ASH_MATERIALIZED_CONFIG_PATH = '/tmp/ash-config/.ash.yaml';
 
 /**
+ * Path the S3 helper below is written to inside the build container.
+ *
+ * Under `/tmp` rather than in the build's working directory, which for a
+ * CodeBuild build is the source tree ASH is about to scan. A helper dropped there
+ * would become part of the scanned repository and show up in the findings as the
+ * deployment's own file.
+ */
+export const ASH_S3_SYNC_PATH = '/tmp/ash-s3-sync.py';
+
+/**
+ * Recursive S3 upload and download, for the buildspecs that run in the ASH image.
+ *
+ * WHY THIS EXISTS AT ALL
+ * ---------------------
+ * The shard and merge actions of the distributed pipeline use the ASH image as
+ * their CodeBuild environment image. That is what puts `ash` directly on PATH with
+ * no Docker-in-Docker and no privileged build, and the trade is the constraint the
+ * header of this file describes: the image ships git, curl and boto3, but no AWS
+ * CLI. `aws s3 cp --recursive` is not available there. It exits 127.
+ *
+ * WHY A SCRIPT RATHER THAN AN INLINE `python3 -c`
+ * ----------------------------------------------
+ * The SSM and Secrets Manager reads elsewhere in this file are single API calls
+ * and fit on one line. A recursive download does not: it has to paginate
+ * ListObjectsV2, recreate the key hierarchy as directories, and refuse a key that
+ * would escape the destination. Squeezed into a `-c` one-liner, the part that gets
+ * dropped first is the containment check, which is the part that matters.
+ *
+ * RELATIONSHIP TO THE TERRAFORM MIRROR
+ * -----------------------------------
+ * `deploy/terraform/modules/codepipeline-executor/files/ash_s3_sync.py` is the
+ * same helper for the same reason, and this is deliberately kept behaviourally
+ * identical to it. The two are separate copies because the two deployment trees
+ * are independently consumable — an adopter vendoring `deploy/terraform` gets no
+ * `deploy/cdk` — and each tree already keeps its own copy of the scripts it
+ * injects. They differ in exactly one respect, and only because of how each tool
+ * renders: Terraform base64-encodes the file into its buildspec, because
+ * `templatefile` would otherwise interpolate `${...}` inside the Python. CDK has
+ * no such rendering step, so this is written out through a quoted heredoc instead
+ * and stays readable in the committed CloudFormation template.
+ *
+ * NOT REPRESENTED: empty directories. S3 has no such object, so a directory that
+ * held no files upstream is not recreated on download. Nothing here depends on
+ * one — every consumer looks for `ash_aggregated_results.json`.
+ */
+export const ASH_S3_SYNC_SCRIPT = `#!/usr/bin/env python3
+"""Minimal recursive S3 upload and download, using boto3.
+
+Written into the build container by the ASH CDK deployment targets; see
+deploy/cdk/lib/ash-container-scripts.ts. Exists because these builds run inside
+the ASH image, which ships boto3 but not the AWS CLI.
+
+Usage:
+    ash-s3-sync.py upload   <local-dir> <bucket> <key-prefix>
+    ash-s3-sync.py download <bucket> <key-prefix> <local-dir>
+
+Both directions are recursive. Empty directories are not represented in S3 and
+are therefore not recreated on download.
+"""
+
+from __future__ import annotations
+
+import pathlib
+import sys
+
+import boto3
+
+
+def _fail(message: str) -> None:
+    print(f"ash-s3-sync: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def upload(local_dir: str, bucket: str, prefix: str) -> int:
+    root = pathlib.Path(local_dir)
+    if not root.is_dir():
+        _fail(f"{local_dir} is not a directory")
+
+    client = boto3.client("s3")
+    prefix = prefix.strip("/")
+    count = 0
+
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        key = f"{prefix}/{relative}" if prefix else relative
+        client.upload_file(str(path), bucket, key)
+        count += 1
+
+    print(f"ash-s3-sync: uploaded {count} file(s) to s3://{bucket}/{prefix}/")
+    return count
+
+
+def download(bucket: str, prefix: str, local_dir: str) -> int:
+    client = boto3.client("s3")
+    prefix = prefix.strip("/")
+    root = pathlib.Path(local_dir)
+    root.mkdir(parents=True, exist_ok=True)
+
+    paginator = client.get_paginator("list_objects_v2")
+    count = 0
+
+    for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/" if prefix else ""):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+            relative = key[len(prefix) + 1 :] if prefix else key
+            if not relative:
+                continue
+            destination = root / relative
+
+            # Refuse a key that would escape the destination directory. S3 keys
+            # are attacker-influenced in the general case, and a key containing
+            # ".." would otherwise write outside local_dir.
+            resolved = destination.resolve()
+            if not resolved.is_relative_to(root.resolve()):
+                _fail(f"key {key!r} would write outside {local_dir}")
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            client.download_file(bucket, key, str(destination))
+            count += 1
+
+    print(f"ash-s3-sync: downloaded {count} file(s) from s3://{bucket}/{prefix}/")
+    return count
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        _fail("expected a subcommand: upload or download")
+
+    action, rest = argv[0], argv[1:]
+
+    if action == "upload":
+        if len(rest) != 3:
+            _fail("upload takes <local-dir> <bucket> <key-prefix>")
+        upload(rest[0], rest[1], rest[2])
+    elif action == "download":
+        if len(rest) != 3:
+            _fail("download takes <bucket> <key-prefix> <local-dir>")
+        download(rest[0], rest[1], rest[2])
+    else:
+        _fail(f"unknown subcommand {action!r}; expected upload or download")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+`;
+
+/**
+ * Write the S3 helper into the container, for a buildspec phase to use later.
+ *
+ * A QUOTED heredoc delimiter. With `<<'PY'` the shell performs no expansion on
+ * the body at all, so the Python's `$`, backticks and `{}` reach the file
+ * verbatim. An unquoted `<<PY` would let the shell eat them, and the failure would
+ * be a syntax error inside a generated file nobody is looking at.
+ *
+ * This has to run in a phase that precedes every use of the helper. CodeBuild
+ * phases of one build share a filesystem, so `pre_build` covers a later
+ * `post_build`, which is the shape both projects below need.
+ */
+export const MATERIALIZE_S3_SYNC_COMMAND = `cat > ${ASH_S3_SYNC_PATH} <<'PY'
+${ASH_S3_SYNC_SCRIPT}PY`;
+
+/**
  * Shell entrypoint for the MCP-serving image flavor.
  *
  * KNOWN LIMITATION: ASH takes the shared-secret value as `--auth-header-value`,
