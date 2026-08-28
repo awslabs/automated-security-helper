@@ -194,14 +194,21 @@ def stamp_shard_assignment(
     """Record *assignment* on *results* so ``ash merge`` can verify coverage.
 
     This is what the scan side should call once a shard's results are final.
-    ``ReportMetadata`` is declared ``extra="allow"``, so the key survives a JSON
-    round trip without any schema change.
+
+    Assigns the ``ShardAssignment`` itself, not ``model_dump()``. Dumping first
+    was tried and rejected: ``ReportMetadata`` declares ``shard`` as a real field
+    and does not enable ``validate_assignment``, so a dict is stored raw and every
+    later ``model_dump_json`` emits ``PydanticSerializationUnexpectedValue:
+    Expected ShardAssignment``. The JSON comes out correct, but the warning is
+    noise on every serialization, and worse, a fixture that stored a dict would
+    exercise a shape the scan side never produces -- ``execution_engine`` assigns
+    the object.
 
     Args:
         results: The shard's aggregated results.
         assignment: What this shard was asked to run.
     """
-    setattr(results.metadata, SHARD_PROVENANCE_KEY, assignment.model_dump(mode="json"))
+    setattr(results.metadata, SHARD_PROVENANCE_KEY, assignment)
 
 
 def read_shard_assignment(results: AshAggregatedResults) -> ShardAssignment | None:
@@ -675,18 +682,24 @@ def _record_merge_provenance(
 ) -> None:
     """Replace the base shard's provenance with the merge's own.
 
-    The ``shard`` key is removed rather than updated. Leaving it would describe
+    The ``shard`` value is cleared rather than updated. Leaving it would describe
     the merged report as one shard of n, so re-merging an output directory would
     be accepted and would report a whole scan as a fraction of itself.
+
+    Cleared to None rather than deleted, which was tried and rejected.
+    ``ReportMetadata`` declares ``shard`` as a real field, and pydantic does allow
+    ``delattr`` on a declared field -- but afterwards a plain
+    ``results.metadata.shard`` raises AttributeError instead of returning the
+    field's default, and the field vanishes from ``model_dump_json`` entirely.
+    That leaves a booby-trapped model for every consumer that reads the attribute
+    without a default: reporters, the committed JSON schema, and any later lane.
+    None is the field's own default, serializes as ``"shard": null``, and
+    :func:`read_shard_assignment` treats it as absent, so clearing achieves
+    everything deleting did without the landmine.
     """
     for carrier in (merged, merged.metadata):
         if getattr(carrier, SHARD_PROVENANCE_KEY, None) is not None:
-            try:
-                delattr(carrier, SHARD_PROVENANCE_KEY)
-            except (AttributeError, ValueError):
-                # A declared field cannot be deleted, only cleared. Setting None
-                # is enough: read_shard_assignment treats None as absent.
-                setattr(carrier, SHARD_PROVENANCE_KEY, None)
+            setattr(carrier, SHARD_PROVENANCE_KEY, None)
 
     setattr(merged.metadata, MERGED_SHARD_COUNT_KEY, shards[0][2].shard_count)
     setattr(

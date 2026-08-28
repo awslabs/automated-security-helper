@@ -849,7 +849,9 @@ class TestMergeCli:
 
         written = json.loads(merged_file.read_text(encoding="utf-8"))
         assert written["metadata"][MERGED_SHARD_COUNT_KEY] == 3
-        assert SHARD_PROVENANCE_KEY not in written["metadata"]
+        # Absent or null; see test_merged_report_carries_no_shard_key for why both
+        # are acceptable.
+        assert written["metadata"].get(SHARD_PROVENANCE_KEY) is None
 
         reloaded = AshAggregatedResults.model_validate_json(
             merged_file.read_text(encoding="utf-8")
