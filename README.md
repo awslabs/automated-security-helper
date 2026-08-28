@@ -295,6 +295,8 @@ The ASH MCP server provides these tools:
 | `get_config` | Get the resolved ASH config (defaults plus user overrides merged) | Confirm what configuration a scan will actually use |
 | `diff_scan_results` | Compare two `ash_aggregated_results.json` files and return a structured diff | Detect newly introduced or resolved findings between scans |
 | `suggest_suppression` | Build a paste-ready `AshSuppression` entry for a finding | Draft a correctly-shaped suppression without hand-writing YAML |
+| `resolve_ash_workspace` | Resolve a VS Code `.code-workspace` file into a scan plan without scanning | Inspect which projects, configs and thresholds a workspace would use before committing to N repository scans |
+| `run_ash_workspace_scan` | Scan every project in a `.code-workspace` file and return the per-project verdict | Scan a multi-repository workspace in one call, each project under its own config and threshold |
 
 ### Usage Examples
 
