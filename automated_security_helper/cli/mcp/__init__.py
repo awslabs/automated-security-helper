@@ -22,6 +22,7 @@ from typing import Annotated, List, Optional
 import typer
 from rich.console import Console
 
+from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -409,8 +410,12 @@ def mcp_command(
         _stderr.print(
             "MCP support is included by default in ASH v3. Try reinstalling ASH:"
         )
+        # Reinstall from git, which is how ASH is distributed. This hint used to
+        # read "pip install --force-reinstall automated-security-helper", which
+        # is an unrelated project's name on PyPI -- so following it replaced the
+        # user's working ASH install with a stranger's package.
         _stderr.print(
-            "  [cyan]pip install --force-reinstall automated-security-helper[/cyan]"
+            f"  [cyan]pip install --force-reinstall 'git+{ASH_REPO_URL}.git'[/cyan]"
         )
         _stderr.print("  [cyan]uv sync --reinstall[/cyan]")
         _stderr.print()

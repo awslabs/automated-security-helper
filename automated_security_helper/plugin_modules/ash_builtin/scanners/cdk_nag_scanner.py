@@ -1,6 +1,8 @@
 """Module containing the CDK Nag security scanner implementation."""
 
 import logging
+import re
+from importlib.metadata import PackageNotFoundError, packages_distributions, requires
 from typing import Annotated, ClassVar, List, Literal
 from pathlib import Path
 
@@ -45,6 +47,66 @@ except (ImportError, Exception):
     _CDK_AVAILABLE = False
     _cdk_nag_version = "unavailable"
     run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
+
+
+# Last-resort copy of the "cdk" extra's contents. The source of truth is
+# [project.optional-dependencies] cdk in pyproject.toml; this list duplicates it
+# and can therefore go stale, which is exactly why it is only reached when the
+# metadata read below fails outright.
+_CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
+    "aws-cdk-lib>=2.257.0,<3.0.0",
+    "cdk-nag>=3.0.2,<4.0.0",
+    "constructs>=10.8.1,<11.0.0",
+]
+
+# Matches the ``extra == "cdk"`` half of a PEP 508 marker. importlib.metadata
+# renders the marker with single quotes while pyproject.toml and pip emit double
+# quotes, so neither style can be assumed.
+_CDK_EXTRA_MARKER = re.compile(r"""\bextra\s*==\s*['"]cdk['"]""")
+
+
+def _cdk_extra_requirements() -> List[str]:
+    """Return the third-party requirements that make up ASH's ``cdk`` extra.
+
+    Reads them out of the installed distribution's own metadata so that changing
+    a bound in pyproject.toml cannot leave this installer resolving versions
+    nobody has looked at since. A hardcoded list was rejected as the primary
+    source for that reason; it survives only as the fallback below.
+
+    The distribution is located by asking which distribution provides *this
+    module's* top-level package, never by naming one. A literal distribution
+    name is a name someone else can own on a package index, and installing by
+    such a name is the defect this function exists to remove.
+
+    Returns an empty list when the distribution is found but declares no ``cdk``
+    extra, since in that case there is genuinely nothing to install. Only an
+    unreadable or absent ``*.dist-info`` -- ASH run straight from a checkout
+    that was never installed -- falls back to the hardcoded pins. Failing closed
+    with an empty list in that case was rejected: callers only inspect the
+    process exit code, so it would look like a successful install that silently
+    installed nothing, which is how cdk-nag came to be reported MISSING before.
+    """
+    root_package = __name__.split(".", 1)[0]
+    try:
+        for dist_name in packages_distributions().get(root_package) or []:
+            declared = requires(dist_name)
+            if declared is None:
+                continue
+            return [
+                # Keep the requirement, drop the marker. pip evaluates markers
+                # with ``extra`` undefined, so ``extra == "cdk"`` is false and
+                # pip skips the requirement while still exiting 0 -- an install
+                # that reports success and installs nothing.
+                requirement.split(";", 1)[0].strip()
+                for requirement in declared
+                if _CDK_EXTRA_MARKER.search(requirement)
+            ]
+    except (PackageNotFoundError, OSError) as exc:
+        ASH_LOGGER.debug(
+            f"Could not read the cdk extra from ASH's own metadata ({exc}); "
+            "falling back to the pinned requirement list."
+        )
+    return list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
 
 
 class CdkNagPacks(BaseModel):
@@ -124,9 +186,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             ScannerError: If validation fails
         """
         if not _CDK_AVAILABLE:
+            # Points at ASH's own command rather than at a pip install of
+            # "automated-security-helper[cdk]". That name belongs to an
+            # unrelated project on PyPI, so the old hint sent users to install a
+            # stranger's package to fix an ASH problem.
             ASH_LOGGER.warning(
                 "CDK dependencies (aws-cdk-lib, cdk-nag, constructs) are not installed. "
-                "Install them with: pip install 'automated-security-helper[cdk]'"
+                "Install them with: ash dependencies install"
             )
             self.dependencies_satisfied = False
             return False
@@ -134,25 +200,28 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         return found is not None
 
     def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
-        """Install CDK dependencies via pip extra.
+        """Install the third-party packages behind ASH's ``cdk`` extra.
 
-        The CDK dependencies (aws-cdk-lib, cdk-nag, constructs) are Python packages
-        defined as optional extras in pyproject.toml under [cdk]. This method ensures
-        they are installed when `ash dependencies install` is run.
+        Names aws-cdk-lib, cdk-nag and constructs directly. This method used to
+        install ``automated-security-helper[cdk]`` instead, which made
+        ``ash dependencies install`` resolve a distribution by that name from
+        whatever index pip is pointed at. ASH is not published to any index --
+        it installs from git, as the README documents -- so that name resolves to
+        an unrelated third party's package, and it was being installed by a
+        security scanner running inside CI with repository access. Naming the
+        extra's real contents means this command cannot resolve ASH by name at
+        all, whoever ends up owning that name.
         """
         import sys
 
         commands = super().get_installation_commands(platform, arch)
         if not _CDK_AVAILABLE:
-            commands.append(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "automated-security-helper[cdk]",
-                ]
-            )
+            requirements = _cdk_extra_requirements()
+            if requirements:
+                # One pip invocation, so the three are resolved together. Three
+                # separate installs let a later one downgrade an earlier one's
+                # shared transitive dependency.
+                commands.append([sys.executable, "-m", "pip", "install", *requirements])
         return commands
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
