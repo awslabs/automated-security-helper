@@ -91,10 +91,33 @@ describe('verdict ownership in the generated buildspecs', () => {
   });
 
   test('each generated file names its regeneration command', () => {
+    // The exact script name matters beyond documentation: the CI drift gate looks
+    // it up in package.json, so a rename that misses one of these three places
+    // leaves the gate regenerating nothing and comparing the file to itself.
+    const scripts = require('../package.json').scripts as Record<string, string>;
+    expect(scripts['generate:buildspec']).toBeDefined();
+
     for (const spec of generatedBuildspecs()) {
-      expect(spec.contents).toContain('npm run buildspec');
+      expect(spec.contents).toContain('npm run generate:buildspec');
       expect(spec.contents).toContain('GENERATED FILE - DO NOT EDIT.');
     }
+  });
+
+  test('the generator scripts compile before they generate', () => {
+    // Both run straight after a bare `npm ci`. Without the build step the
+    // generator is missing from lib/ and exits MODULE_NOT_FOUND having written
+    // nothing, which reads to a drift gate as "the generator produced no file".
+    const scripts = require('../package.json').scripts as Record<string, string>;
+
+    for (const name of ['generate:buildspec', 'check:buildspec']) {
+      expect(scripts[name]).toContain('npm run build');
+      expect(scripts[name]).toContain('lib/buildspec-cli.js');
+    }
+  });
+
+  test('the unsharded buildspec is written to the exact path the gate checks', () => {
+    // deploy/cdk-constructs/buildspec.yml is the only path the drift gate reads.
+    expect(generatedBuildspecs().map((s) => s.filename)).toContain('buildspec.yml');
   });
 });
 

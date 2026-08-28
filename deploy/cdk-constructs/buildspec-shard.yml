@@ -6,7 +6,7 @@
 # disagree, and CI byte-compares the two.
 #
 # Regenerate with:
-#   cd deploy/cdk-constructs && npm ci && npm run buildspec
+#   cd deploy/cdk-constructs && npm ci && npm run generate:buildspec
 #
 # One shard of a fanned-out scan. Set ASH_SHARD_INDEX to 0..N-1 and
 # ASH_SHARD_COUNT to N, then run buildspec-merge.yml over the outputs.

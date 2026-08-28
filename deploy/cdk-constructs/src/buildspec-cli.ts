@@ -65,7 +65,7 @@ function check(): number {
       process.stderr.write(`  ${problem}\n`);
     }
     process.stderr.write(
-      '\nRegenerate with:\n  cd deploy/cdk-constructs && npm ci && npm run buildspec\n',
+      '\nRegenerate with:\n  cd deploy/cdk-constructs && npm ci && npm run generate:buildspec\n',
     );
     return 1;
   }

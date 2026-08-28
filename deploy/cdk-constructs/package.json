@@ -22,9 +22,8 @@
     "build": "jsii",
     "watch": "jsii --watch",
     "test": "jest",
-    "generate:buildspec": "node lib/buildspec-cli.js write",
-    "check:buildspec": "node lib/buildspec-cli.js check",
-    "buildspec": "npm run build && npm run generate:buildspec"
+    "generate:buildspec": "npm run build && node lib/buildspec-cli.js write",
+    "check:buildspec": "npm run build && node lib/buildspec-cli.js check"
   },
   "jsii": {
     "outdir": "dist",

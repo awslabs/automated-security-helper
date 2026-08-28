@@ -60,7 +60,7 @@ function header(purpose: string[]): string[] {
     'disagree, and CI byte-compares the two.',
     '',
     'Regenerate with:',
-    '  cd deploy/cdk-constructs && npm ci && npm run buildspec',
+    '  cd deploy/cdk-constructs && npm ci && npm run generate:buildspec',
     '',
     ...purpose,
   ];

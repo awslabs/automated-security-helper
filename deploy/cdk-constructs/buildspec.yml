@@ -6,7 +6,7 @@
 # disagree, and CI byte-compares the two.
 #
 # Regenerate with:
-#   cd deploy/cdk-constructs && npm ci && npm run buildspec
+#   cd deploy/cdk-constructs && npm ci && npm run generate:buildspec
 #
 # Runs a full, unsharded ASH scan and fails the build on findings.
 # This document owns its own pass/fail verdict.

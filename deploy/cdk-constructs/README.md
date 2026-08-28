@@ -153,14 +153,19 @@ consumer run the same commands:
 Regenerate them with:
 
 ```console
-cd deploy/cdk-constructs && npm ci && npm run buildspec
+cd deploy/cdk-constructs && npm ci && npm run generate:buildspec
 ```
 
 Verify them without rewriting anything — this is what a CI drift gate should run:
 
 ```console
-cd deploy/cdk-constructs && npm ci && npm run build && npm run check:buildspec
+cd deploy/cdk-constructs && npm ci && npm run check:buildspec
 ```
+
+Both scripts compile before they generate, so either one works straight after a
+bare `npm ci` with no separate build step. That matters for a drift gate: the
+generator lives in compiled output, so a script that assumed `lib/` already
+existed would fail with `MODULE_NOT_FOUND` and produce no file at all.
 
 `check:buildspec` byte-compares each committed file against a fresh render and
 exits non-zero on any difference. It compares bytes rather than parsed YAML on
