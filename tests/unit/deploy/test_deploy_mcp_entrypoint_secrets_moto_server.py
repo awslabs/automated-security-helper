@@ -252,9 +252,19 @@ class TestReadShape:
         """The parametrization must not be able to cover nothing.
 
         Every other test here is parametrized over the templates that emit the
-        entrypoint. If that set were ever empty, those tests would not fail -- they
-        would simply not be generated, and the suite would go green having checked
-        nothing. This is the assertion that turns that into a red.
+        entrypoint. An empty set would generate no tests at all rather than failing
+        any, so "green" would mean "checked nothing".
+
+        WHAT ACTUALLY HAPPENS IF THE SET EMPTIES, measured by renaming the marker in
+        all five templates: the module fails to IMPORT, because the parametrization
+        is computed at import time and the lookup raises. That is a collection error
+        naming the marker and listing where it now lives -- redder and harder to miss
+        than a single failing test, so it is left as is rather than softened into a
+        tolerant empty list.
+
+        This test is therefore the belt to that braces. It is what names the
+        condition if the lookup is ever made lenient, and it prints the covered
+        stacks on every run so a reviewer can see which ones were exercised.
 
         It is not a count: how many stacks build the mcp flavor is a deployment
         decision, and pinning the number would make every flavor change a false
