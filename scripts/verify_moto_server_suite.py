@@ -60,14 +60,16 @@ from defusedxml import ElementTree as ET
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SUITE = "tests/unit/deploy"
 
-# A floor, not the exact count. 46 tests exist as this is written; 40 catches a
+# A floor, not the exact count. 52 tests exist as this is written; 45 catches a
 # suite that stopped being collected without going red on every addition.
-MIN_TESTS = 40
+MIN_TESTS = 45
 
-# Losing one of these files should be red even if the other one grew.
+# Losing any one of these files should be red even if the others grew. Each covers
+# a different AWS surface, so one disappearing is not made up for by the rest.
 REQUIRED_MODULES = (
     "test_deploy_s3_sync_moto_server",
     "test_deploy_buildspec_ssm_moto_server",
+    "test_deploy_mcp_entrypoint_secrets_moto_server",
 )
 
 # The two copies of the S3 helper. Each behavior test runs against both, so a

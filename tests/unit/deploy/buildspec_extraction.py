@@ -195,6 +195,51 @@ def joined_buildspec_text(template: dict, marker: str) -> str:
     )
 
 
+def joined_buildspec_document(template: dict, marker: str) -> dict:
+    """Decode an `Fn::Join` buildspec into the real parsed document.
+
+    The image-build projects assemble their buildspec from template parameters, so
+    the BuildSpec is a `Fn::Join` whose parts alternate between literal JSON text
+    and `Ref`/`Fn::GetAtt` objects. Concatenating only the literals leaves invalid
+    JSON, which is why `joined_buildspec_text` above hands back raw text and its
+    callers have to reason about escaping levels.
+
+    Substituting a placeholder string for each non-literal part makes the
+    concatenation valid JSON again, so it decodes to real command strings with no
+    escaping guesswork. That matters here because the MCP entrypoint is a shell
+    script inside a heredoc inside a command inside that JSON -- three nestings,
+    each with its own quoting, and getting the level wrong yields a pattern that
+    silently matches nothing.
+
+    The placeholder is deliberately not a plausible value. Nothing this is used for
+    asserts across a substitution boundary, and a stand-in that looked like a real
+    bucket or ARN would let a test appear to check a resolved value.
+    """
+    for resource in template.get("Resources", {}).values():
+        if resource.get("Type") != CODEBUILD_PROJECT:
+            continue
+        spec = resource.get("Properties", {}).get("Source", {}).get("BuildSpec")
+        if not isinstance(spec, dict) or "Fn::Join" not in spec:
+            continue
+        delimiter, parts = spec["Fn::Join"]
+        rebuilt = delimiter.join(
+            part if isinstance(part, str) else "CFN_SUBSTITUTION_PLACEHOLDER"
+            for part in parts
+        )
+        if marker not in rebuilt:
+            continue
+        try:
+            return json.loads(rebuilt)
+        except json.JSONDecodeError as exc:  # pragma: no cover - guard
+            raise AssertionError(
+                f"an Fn::Join buildspec containing {marker!r} did not decode as JSON "
+                f"once its Ref parts were replaced: {exc}"
+            ) from exc
+    raise AssertionError(
+        f"no Fn::Join CodeBuild buildspec in this template contains {marker!r}"
+    )
+
+
 def rewrite_helper_path(command: str, replacement: str) -> str:
     """Repoint the buildspec's hard-coded helper path at a per-test path.
 
