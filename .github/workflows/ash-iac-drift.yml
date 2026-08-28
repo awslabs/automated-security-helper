@@ -700,6 +700,53 @@ jobs:
           fi
           echo "All ${#dirs[@]} Terraform directory(ies) initialized and validated."
 
+      # terraform validate does not evaluate variable validation rules -- a
+      # validation block whose condition is wrong passes it cleanly -- so the
+      # step above says nothing about whether the modules' input contracts work.
+      #
+      # This closes that gap without credentials, which is possible because
+      # Terraform evaluates input variable validation BEFORE it initializes the
+      # provider. Measured with every AWS_* variable unset and
+      # AWS_EC2_METADATA_DISABLED=true: a plan carrying an invalid value fails on
+      # the rule's own error_message, while the same plan with valid values fails
+      # later on "No valid credential sources found" and emits no validation
+      # message at all. The second direction is the one that matters -- it
+      # separates a rule that ran and passed from one that was never reached.
+      #
+      # Runs after the init loop because plan needs the provider schema that init
+      # writes into each module's .terraform/. The script is bash rather than a
+      # .tf directory, so the discovery above cannot find it and it needs naming
+      # explicitly. Invoked through bash rather than executed directly, so a
+      # missing exec bit on the committed file is not a failure mode.
+      - name: Verify the modules' input validation rules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SCRIPT=deploy/terraform/tests/validate-inputs.sh
+
+          if [ ! -f "$SCRIPT" ]; then
+            echo "$SCRIPT is not present on this ref, so the modules' variable validation rules were NOT exercised."
+            echo "terraform validate does not cover them, so nothing in this run checked them."
+            {
+              echo "### Terraform input validation: not checked"
+              echo
+              echo "\`$SCRIPT\` is absent on this ref. \`terraform validate\` does not evaluate"
+              echo "variable validation rules, so no check in this run covered them. This is a"
+              echo "gap, not a pass."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # No credentials are configured on this runner, and the assertion is
+          # that none are needed. Making that explicit rather than incidental
+          # means the script cannot start passing for the wrong reason if a
+          # credential ever leaks into the environment.
+          export AWS_EC2_METADATA_DISABLED=true
+          unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN || true
+
+          bash "$SCRIPT"
+
   # ---------------------------------------------------------------------------
   # cdk-nag, failing on any unsuppressed finding.
   #

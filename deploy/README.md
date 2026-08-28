@@ -171,7 +171,17 @@ the template is not the place to look for them.
   between agents and it does not expire on its own.
 - The CI gate's `terraform validate` does not evaluate variable validation rules.
   A `validation` block whose condition is wrong — including a cross-variable rule
-  that should reject its input — passes `validate` and only errors at plan time.
-  So a green Terraform gate means the configuration parses and its references
-  resolve; it does not mean the input contracts work. Nothing in CI covers that,
-  because `plan` needs AWS credentials and this gate deliberately has none.
+  that should reject its input — passes `validate` cleanly. So `validate` passing
+  means the configuration parses and its references resolve; it says nothing about
+  whether the input contracts work.
+
+  That gap is covered separately, by `terraform/tests/validate-inputs.sh`, which
+  the gate runs after the per-module init. It works without credentials because
+  Terraform evaluates input variable validation before it initializes the
+  provider: a plan carrying a deliberately invalid value fails on the rule's own
+  `error_message` and never reaches AWS. Measured with every `AWS_*` variable
+  unset and `AWS_EC2_METADATA_DISABLED=true` — the invalid value produces the
+  rule's message, and the same plan with valid values fails later, on
+  `No valid credential sources found`, with no validation message at all. That
+  second direction is what distinguishes a rule that ran and passed from one that
+  was never reached.
