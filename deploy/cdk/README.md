@@ -414,6 +414,40 @@ here rather than to a variant.
 - **The Fargate listener is HTTP, not HTTPS.** A certificate ARN would be needed,
   and the shared parameter surface has no slot for one. The load balancer is
   internal by default to match.
+- **No target sets `ASH_MCP_ALLOWED_ROOTS`, so the MCP scan boundary is the
+  permissive fallback.** Only two targets run `ash mcp` at all — AgentCore and
+  Fargate. The CodeCommit gate and the sharded pipeline invoke `ash scan` directly
+  and are unaffected. On the two that do, the variable is unset, so scan targets
+  fall back to a short denylist of system directories, which ASH's own docs call
+  "a safety net rather than a boundary." On a network-reachable MCP endpoint that is
+  not the same as naming the roots.
+
+  The stacks do not set it, and the reason is a real obstacle rather than an
+  omission. The scannable path on these targets is the per-session workspace that
+  protocol source delivery writes into, and its location is resolved *inside the
+  container* — `$ASH_MCP_WORKSPACE_ROOT`, else `$XDG_CACHE_HOME/ash-mcp`, else
+  `~/.cache/ash-mcp`. So a value is only correct if the stack also pins
+  `ASH_MCP_WORKSPACE_ROOT`. Worse, `validate_scan_target` adds the per-session
+  directory to the allowlist only when a caller passes a session id, and several
+  call sites — including output-directory validation — do not. A value that looks
+  right can therefore admit the scan and still refuse its output directory partway
+  through. Setting that wrong from here would break source delivery on a live
+  feature, which is worse than leaving the documented fallback in place.
+
+  To set it yourself, pin both, and make the allowlist include the workspace root:
+
+  ```sh
+  ASH_MCP_WORKSPACE_ROOT=/var/cache/ash-mcp
+  ASH_MCP_ALLOWED_ROOTS=/var/cache/ash-mcp
+  ```
+
+  Naming the workspace **root** rather than a per-session directory is what makes
+  every call site agree, including those that pass no session id. The cost is that
+  it no longer scopes a session to its own subdirectory, so concurrent sessions can
+  reach each other's uploaded source; add further roots for anything else you want
+  scannable. Judge that against the alternative, which is most of the container
+  filesystem.
+
 - **The Fargate endpoint is closed until you open it.** The listener is created
   closed, so on deployment the load balancer's security group has allow-all egress
   and **no ingress rule at all** — reachable from nowhere, not even from inside the
