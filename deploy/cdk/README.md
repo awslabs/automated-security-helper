@@ -317,10 +317,28 @@ first:
 cdk-nag is pinned at **2.38.2** and registered as a CDK Aspect. On 2.x,
 `AwsSolutionsChecks.prototype.visit` is a function and the Aspect path works —
 measured here, and demonstrated by the run that surfaced 110 findings before they
-were fixed. cdk-nag 3.x drops `visit()` and needs
+were fixed. cdk-nag 3.x makes `NagPack` an `IPolicyValidationPlugin` — verified by
+reading the declarations in the published 3.0.2 tarball — and needs
 `Validations.of(app).addPlugins(...)` instead; if this app is ever moved to 3.x,
 the registration in `bin/ash.ts` and every `NagSuppressions` call have to move with
 it.
+
+**The CI gate is pinned to the same major version.** The `cdk-nag` job in
+`.github/workflows/ash-iac-drift.yml` reads the per-stack compliance reports 2.x
+writes into the cloud assembly — `cdk.out/AwsSolutions--<StackName>-NagReport.csv`,
+one row per rule × resource, failing on `Non-Compliant` or `UNKNOWN`. It does not
+read `cdk.out/validation-report.json`, because on 2.x no cdk-nag finding ever
+appears there. On 3.x that inverts: findings land in `validation-report.json` and
+the CSV reports go away, so the gate has to move with the pin. A gate written
+against the wrong major version reported another validator's findings as cdk-nag's
+while cdk-nag had never run, which is the failure this note exists to prevent
+happening twice.
+
+Two further 2.x-only facts the gate depends on: suppressions serialize into the
+emitted template as `Metadata.cdk_nag.rules_to_suppress` (82 resources across the
+committed templates carry one), and a rule that throws while evaluating is recorded
+as `UNKNOWN` rather than skipped — which is why the gate fails on it instead of
+counting only `Non-Compliant`.
 
 `AwsSolutions-IAM5` suppressions deliberately do not use `appliesTo`. The granular
 form needs strings embedding CDK logical ids, which rot on any rename and fail
