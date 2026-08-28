@@ -14,8 +14,14 @@ variable "agent_runtime_name" {
     Name of the AgentCore runtime. When null, `<name_prefix>_mcp` is used.
 
     AgentCore runtime names accept letters, digits, and underscores only. A
-    hyphen is rejected, which is why this module's name_prefix validation is
-    stricter than the other modules'.
+    hyphen is rejected, which is why this module's name_prefix validation
+    differs from the other modules'.
+
+    Differs, not "stricter": the two constraints are not ordered, so neither
+    accepts a superset of the other. This module accepts uppercase and an
+    underscore and rejects a hyphen; the others accept a hyphen and a leading
+    digit and reject uppercase and an underscore. `ash-mcp` is valid elsewhere and
+    invalid here, and `ash_MCP` is the reverse.
   EOT
   type        = string
   default     = null
