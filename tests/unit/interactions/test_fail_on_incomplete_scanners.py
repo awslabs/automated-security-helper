@@ -277,6 +277,137 @@ class TestResolutionPrecedence:
         assert code == 1
 
 
+class TestReadsTheAuthoritativeSignals:
+    """Two fields look like they carry this signal and do not. Built from real
+    models rather than status mocks, because the point is which field the gate
+    ends up reading -- a mocked status list would answer that by construction.
+
+    Both cases deliberately set their two signals to DISAGREE. A case where they
+    agree cannot tell you which one the gate leans on, and that blind spot is why
+    the wrong field looked interchangeable in the first place.
+    """
+
+    @staticmethod
+    def _model_with(scanner: str, status: ScannerStatus, source_status: str):
+        """A model whose two per-scanner status fields disagree.
+
+        Measured shape: on a run where bandit found two HIGH findings,
+        ``scanner_results.bandit.status`` was FAILED while
+        ``additional_reports.bandit.source.status`` was PASSED.
+        ``ScannerStatisticsCalculator.get_scanner_status_info`` is an if/elif
+        chain that reaches ``additional_reports[name]["source"]`` only when the
+        scanner is absent from ``scanner_results``, so the entry below has to be
+        present for the precedence to be exercised at all.
+        """
+        # AshConfig is imported first on purpose: AshAggregatedResults declares
+        # ash_config as a forward reference, and until AshConfig is defined the
+        # model has no validator and construction raises PydanticUserError. Same
+        # dependency cli/merge.py documents at module scope.
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            ScannerStatusInfo,
+        )
+
+        model = AshAggregatedResults()
+        model.ash_config = AshConfig(project_name="gate-signal-test")
+        model.scanner_results[scanner] = ScannerStatusInfo(
+            status=status,
+            excluded=False,
+            dependencies_satisfied=status is not ScannerStatus.MISSING,
+        )
+        model.additional_reports[scanner] = {
+            "source": {"scanner_name": scanner, "status": source_status}
+        }
+        return model
+
+    def test_reads_scanner_results_not_additional_reports(self, tmp_path):
+        """An ERROR in ``scanner_results`` is a fault even when
+        ``additional_reports.source`` says PASSED.
+
+        A gate reading the wrong one accepts a scan that did not run. Nothing is
+        patched here: the status comes out of the real
+        ``get_unified_scanner_metrics``.
+        """
+        model = self._model_with("bandit", ScannerStatus.ERROR, "PASSED")
+
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+        )
+
+        assert incomplete_scanners(model) == [("bandit", "ERROR")], (
+            "the gate must read scanner_results.<name>.status; the "
+            "additional_reports source marker said PASSED on this same model"
+        )
+
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        assert _compute_exit_code(model, opts) == 1
+
+    def test_missing_in_scanner_results_is_a_fault_too(self, tmp_path):
+        """The same precedence, for the MISSING half of the fault set."""
+        model = self._model_with("cdk-nag", ScannerStatus.MISSING, "PASSED")
+
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        assert _compute_exit_code(model, opts) == 1
+
+    def test_cannot_be_fooled_by_a_clean_completion_validation_block(self, tmp_path):
+        """``validation_summary.*.has_issues`` must not be able to suppress this.
+
+        Measured on a run with four scanner tools absent: ``summary_stats.missing``
+        was 4 while ``execution_completion_validation`` reported
+        ``{expected_count: 1, completed_count: 1, missing_count: 0,
+        completion_rate: 1.0, has_issues: false}``. "expected" counts only the
+        scanners actually dispatched, so a MISSING scanner never enters the
+        expected set and cannot register as absent from it -- the field
+        under-reports exactly the condition it appears to report.
+
+        This model carries that clean block alongside a genuine MISSING scanner.
+        The gate reads neither ``validation_summary`` nor ``summary_stats``, so it
+        is structurally immune; the test pins that rather than trusting it.
+        """
+        model = self._model_with("cdk-nag", ScannerStatus.MISSING, "PASSED")
+        # metadata.validation_summary, not a root-level field: ScanPhase writes it
+        # onto ReportMetadata by setattr, which works because ReportMetadata is
+        # declared extra="allow" (see scan_phase.py's validation_summary blocks).
+        model.metadata.validation_summary = {
+            "execution_completion_validation": {
+                "expected_count": 1,
+                "completed_count": 1,
+                "missing_count": 0,
+                "completion_rate": 1.0,
+                "has_issues": False,
+            }
+        }
+
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        assert _compute_exit_code(model, opts) == 1, (
+            "a clean completion-validation block must not suppress a real "
+            "MISSING scanner"
+        )
+
+    def test_error_is_reachable_at_all_which_summary_stats_cannot_express(self):
+        """ERROR has no counter in ``SummaryStats``, so the gate cannot use one.
+
+        ``SummaryStats`` carries passed/failed/missing/skipped and no error field.
+        A gate keyed literally on ``summary_stats.missing`` would therefore be
+        blind to a scanner that ran and failed; reading the per-scanner status
+        covers both halves of the fault set.
+        """
+        from automated_security_helper.models.asharp_model import SummaryStats
+
+        assert "error" not in SummaryStats.model_fields, (
+            "if SummaryStats grows an error counter, revisit whether the gate "
+            "should read it"
+        )
+        model = self._model_with("grype", ScannerStatus.ERROR, "PASSED")
+
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+        )
+
+        assert incomplete_scanners(model) == [("grype", "ERROR")]
+
+
 class TestIncompleteScannerReport:
     """The failure has to name which scanners and which status.
 
