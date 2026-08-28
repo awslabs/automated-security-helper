@@ -283,6 +283,34 @@ exit 1
     expect(argv).toContain('other.example.com');
   });
 
+  test('folds every allowed host to lower case, not just the first', () => {
+    /*
+     * Every request through the Fargate load balancer returned HTTP 421 "Invalid
+     * Host header": the load balancer lowercases the Host it forwards, and the MCP
+     * SDK's _validate_host compares case-sensitively on both its exact-match and
+     * its ":*" port-suffix path. The stack supplies loadBalancerDnsName, which
+     * CloudFormation returns mixed-case, so nothing could ever match.
+     *
+     * Asserting on EVERY element matters: folding only the first would still leave
+     * later hosts unmatchable, and a single-value test would not notice.
+     */
+    const { status, argv } = runEntrypoint({
+      FAKE_ASH_MODERN: '1',
+      ASH_MCP_ALLOWED_HOST: 'ASH-MCP-123.us-east-1.ELB.amazonaws.com,Second.Example.COM',
+    });
+    expect(status).toBe(0);
+
+    const hosts = argv.filter((_a: string, i: number) => argv[i - 1] === '--allowed-host');
+    expect(hosts).toEqual([
+      'ash-mcp-123.us-east-1.elb.amazonaws.com',
+      'second.example.com',
+    ]);
+    // Nothing upper-case survives anywhere in the argv.
+    for (const host of hosts) {
+      expect(host).toBe(host.toLowerCase());
+    }
+  });
+
   test('warns but still starts when a Host allowlist cannot be enforced', () => {
     // Deliberately NOT a refusal: the Fargate stack substitutes the load
     // balancer DNS name whenever McpAllowedHost is empty, so refusing here would

@@ -90,6 +90,33 @@ export const ASH_MATERIALIZED_CONFIG_PATH = '/tmp/ash-config/.ash.yaml';
  * template or the task definition, but a process running inside the same
  * container could. Closing that would need an env-var option in ASH itself.
  *
+ * WHY THE ALLOWED HOSTS ARE FOLDED TO LOWER CASE
+ * ---------------------------------------------
+ * Every request through the Fargate load balancer returned HTTP 421 "Invalid Host
+ * header". The load balancer lowercases the `Host` header it forwards, and the MCP
+ * SDK compares case-sensitively — `mcp/server/transport_security.py`
+ * `_validate_host` tries `if host in self.settings.allowed_hosts` and then a
+ * `":*"` port-suffix loop built on `host.startswith(...)`. NEITHER path folds
+ * case, so a mixed-case allowed value matches on neither. The stack feeds it
+ * `loadBalancerDnsName`, which CloudFormation returns mixed-case, so the
+ * comparison could never succeed.
+ *
+ * Diagnosed by a same-instant differential rather than by reading alone: through
+ * the load balancer the container logged an all-lowercase host and answered 421,
+ * while the identical mixed-case value sent straight to the task's private IP
+ * answered 200. A port-suffix explanation was raised and refuted with controls.
+ * After the fold, via-load-balancer returned 200 with a full `tools/list`, and a
+ * bogus Host on the same path still returned 421 — so the guard still guards.
+ *
+ * REJECTED: lowercasing in TypeScript instead. `loadBalancerDnsName` is a
+ * deploy-time attribute, so at synth time there is no string to fold and
+ * CloudFormation has no lower-case intrinsic. Same constraint that put the Docker
+ * tag folding in the buildspec rather than in the CDK.
+ *
+ * REJECTED: relying on a future `mcp` release comparing case-insensitively. ASH
+ * declares `mcp>=2.0.0,<3`, so the resolved version moves under us; a fix that
+ * depends on library behaviour we do not pin would regress silently.
+ *
  * KNOWN LIMITATION: the probe costs one `ash mcp --help` — a Python import of
  * ASH's CLI — at every container start. That is well inside the five-minute
  * health-check grace period the Fargate target allows.
@@ -181,6 +208,9 @@ if [ -n "\${ASH_MCP_ALLOWED_HOST:-}" ]; then
     IFS=,
     for ash_host in \${ASH_MCP_ALLOWED_HOST}; do
       if [ -n "$ash_host" ]; then
+        # Lower-cased because a load balancer lowercases Host while the MCP SDK
+        # matches case-sensitively; mixed case yields 421 on every request.
+        ash_host=$(printf '%s' "$ash_host" | tr 'A-Z' 'a-z')
         set -- "$@" --allowed-host "$ash_host"
       fi
     done
