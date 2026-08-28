@@ -260,8 +260,48 @@ def build_sse_app(
     mount_path: str = "/sse",
     auth_header_name: Optional[str] = None,
     auth_header_value: Optional[str] = None,
+    host: str = "127.0.0.1",
+    allowed_hosts: Optional[List[str]] = None,
 ):
-    """Build the MCPServer SSE ASGI app (legacy)."""
+    """Build the MCPServer SSE ASGI app (legacy).
+
+    Args:
+        mount_path: HTTP path the SSE transport listens on.
+        auth_header_name: When set with ``auth_header_value``, requests
+            missing the header (or carrying a different value) get 401.
+        auth_header_value: Expected value for ``auth_header_name``.
+        host: The address the server will bind. Load-bearing for the same
+            reason it is on the streamable-HTTP path -- see below.
+        allowed_hosts: Explicit Host-header allowlist. When given, DNS-rebinding
+            protection stays on and accepts exactly these hosts.
+
+    Why sse_app gets host and allowed_hosts too
+    -------------------------------------------
+    ``sse_app`` carries the same loopback autodetect as ``streamable_http_app``:
+    ``host`` defaults to ``127.0.0.1``, and when ``transport_security`` is None
+    and host is loopback the SDK installs an allowlist containing only
+    ``127.0.0.1``, ``localhost`` and ``[::1]``. Omitting both arguments here
+    therefore reproduced, on sse, exactly the defect that was fixed for
+    streamable-http: ``--host 0.0.0.0 --transport sse`` bound the wildcard
+    address and then answered ``421 Misdirected Request`` to every request whose
+    Host header was not loopback, which is every request through a proxy.
+
+    Refusing ``--allowed-host`` on sse the way ``_validate_stateless_http``
+    refuses ``--stateless-http`` was considered and rejected. It would turn a
+    silently dropped flag into a loud refusal, which is an improvement, but it
+    would leave the 421 defect in place: an operator who passes only
+    ``--host 0.0.0.0`` never mentions ``--allowed-host`` and so trips no
+    validation, and their server still refuses every proxied request. sse being
+    deprecated upstream is an argument against giving it new capabilities, not
+    against making a transport ASH still advertises in ``_VALID_TRANSPORTS``
+    work at the address the operator asked for.
+
+    Returns:
+        A Starlette application ready to hand to uvicorn.
+
+    Raises:
+        RuntimeError: if MCPServer is not installed.
+    """
     if MCPServer is None:
         raise RuntimeError(
             "MCPServer is not installed. The 'mcp' package is required for "
@@ -271,7 +311,19 @@ def build_sse_app(
 
     # Same v2 change as the streamable-HTTP path above: sse_path is a keyword
     # argument on sse_app() rather than a Settings field.
-    app = _mcp_instance.sse_app(sse_path=mount_path)
+    app_kwargs = {"sse_path": mount_path, "host": host}
+    if allowed_hosts:
+        # Supplying transport_security suppresses the SDK's host-based autodetect
+        # entirely, exactly as on the streamable-HTTP path. allowed_origins is
+        # left empty for the same reason: Origin is browser-supplied, and a
+        # server reached through a proxy has no reason to trust one.
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        app_kwargs["transport_security"] = TransportSecuritySettings(
+            allowed_hosts=list(allowed_hosts),
+            allowed_origins=[],
+        )
+    app = _mcp_instance.sse_app(**app_kwargs)
 
     if auth_header_name and auth_header_value:
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
@@ -494,6 +546,12 @@ def mcp_command(
                 mount_path=sse_path,
                 auth_header_name=auth_header_name,
                 auth_header_value=auth_header_value,
+                # Same reason as the streamable-HTTP branch: the SDK decides
+                # whether to install a loopback-only Host allowlist from the host
+                # it is *built* with, so building with a different value than
+                # uvicorn binds makes the app answer 421 to every proxied request.
+                host=host,
+                allowed_hosts=allowed_host,
             )
             if not quiet:
                 _stderr.print(
