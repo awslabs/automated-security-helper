@@ -158,7 +158,9 @@ class TestExecuteScannerRawResultShapes:
     def test_disabled_scanner_is_not_run_and_yields_failure_results(self, tmp_path):
         """A disabled scanner is skipped and its container records the miss."""
         ctx = _make_context(tmp_path)
-        scanner = _make_scanner(ctx, scripted_result=SarifReport(runs=[]), enabled=False)
+        scanner = _make_scanner(
+            ctx, scripted_result=SarifReport(runs=[]), enabled=False
+        )
         executor = _make_executor(ctx)
 
         with patch(f"{_EXEC_MODULE}.ASH_LOGGER") as mock_logger:
@@ -225,13 +227,17 @@ class TestExecuteScannerRawResultShapes:
             critical=1, high=2, medium=3, low=0, info=0, suppressed=4
         )
 
-        with patch(
-            f"{_EXEC_MODULE}.sanitize_sarif_paths", return_value=report
-        ) as mock_sanitize, patch(
-            f"{_EXEC_MODULE}.apply_suppressions_to_sarif", return_value=report
-        ) as mock_suppress, patch(
-            "automated_security_helper.utils.sarif_utils.get_severity_metrics_from_sarif",
-            return_value=counts,
+        with (
+            patch(
+                f"{_EXEC_MODULE}.sanitize_sarif_paths", return_value=report
+            ) as mock_sanitize,
+            patch(
+                f"{_EXEC_MODULE}.apply_suppressions_to_sarif", return_value=report
+            ) as mock_suppress,
+            patch(
+                "automated_security_helper.utils.sarif_utils.get_severity_metrics_from_sarif",
+                return_value=counts,
+            ),
         ):
             results = executor._execute_scanner("scripted", scanner, _targets(ctx))
 
@@ -249,11 +255,13 @@ class TestExecuteScannerRawResultShapes:
         scanner = _make_scanner(ctx, scripted_result=report)
         executor = _make_executor(ctx)
 
-        with patch(f"{_EXEC_MODULE}.sanitize_sarif_paths", return_value=report), patch(
-            f"{_EXEC_MODULE}.apply_suppressions_to_sarif"
-        ) as mock_suppress, patch(
-            "automated_security_helper.utils.sarif_utils.get_severity_metrics_from_sarif",
-            return_value=ScannerSeverityCount(),
+        with (
+            patch(f"{_EXEC_MODULE}.sanitize_sarif_paths", return_value=report),
+            patch(f"{_EXEC_MODULE}.apply_suppressions_to_sarif") as mock_suppress,
+            patch(
+                "automated_security_helper.utils.sarif_utils.get_severity_metrics_from_sarif",
+                return_value=ScannerSeverityCount(),
+            ),
         ):
             executor._execute_scanner("scripted", scanner, _targets(ctx))
 
@@ -366,7 +374,9 @@ class TestExecuteScannerRawResultShapes:
 
         with pytest.raises(KeyError):
             executor._execute_scanner(
-                "scripted", scanner, [{"path": ctx.source_dir}]  # no "type" key
+                "scripted",
+                scanner,
+                [{"path": ctx.source_dir}],  # no "type" key
             )
 
 
@@ -391,9 +401,12 @@ class TestSafeExecuteScanner:
         ctx = _make_context(tmp_path)
         executor = _make_executor(ctx)
 
-        with patch.object(
-            executor, "_execute_scanner", side_effect=RuntimeError("deep failure")
-        ), _broken_events_module():
+        with (
+            patch.object(
+                executor, "_execute_scanner", side_effect=RuntimeError("deep failure")
+            ),
+            _broken_events_module(),
+        ):
             results, succeeded = executor._safe_execute_scanner("s", MagicMock(), [])
 
         assert succeeded is False
@@ -461,9 +474,10 @@ class TestRunSequentialEdgeCases:
             seen.append(name)
             raise RuntimeError(f"{name} exploded")
 
-        with patch.object(
-            executor, "_safe_execute_scanner", side_effect=_boom
-        ), patch(f"{_EXEC_MODULE}.ASH_LOGGER") as mock_logger:
+        with (
+            patch.object(executor, "_safe_execute_scanner", side_effect=_boom),
+            patch(f"{_EXEC_MODULE}.ASH_LOGGER") as mock_logger,
+        ):
             result = executor.run_sequential(aggregated)
 
         assert seen == ["a", "b"], "a failing scanner must not stop the next one"
@@ -548,11 +562,14 @@ class TestRunParallelEdgeCases:
         executor._process_fn = MagicMock(side_effect=RuntimeError("processor down"))
         aggregated = AshAggregatedResults()
 
-        with patch.object(
-            executor,
-            "_safe_execute_scanner",
-            side_effect=RuntimeError("thread exploded"),
-        ), patch(f"{_EXEC_MODULE}.ASH_LOGGER") as mock_logger:
+        with (
+            patch.object(
+                executor,
+                "_safe_execute_scanner",
+                side_effect=RuntimeError("thread exploded"),
+            ),
+            patch(f"{_EXEC_MODULE}.ASH_LOGGER") as mock_logger,
+        ):
             result = executor.run_parallel(aggregated)
 
         assert result is aggregated

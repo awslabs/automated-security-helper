@@ -6,7 +6,6 @@ dispatch, error handling and duration formatting.
 """
 
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -52,9 +51,7 @@ def _make_context(tmp_path, config=None):
 def _build_engine(tmp_path, config=None, context=None, **kwargs):
     """Build an engine with internal plugin loading stubbed for speed."""
     ctx = context if context is not None else _make_context(tmp_path, config)
-    with patch(
-        "automated_security_helper.plugins.loader.load_internal_plugins"
-    ):
+    with patch("automated_security_helper.plugins.loader.load_internal_plugins"):
         return ScanExecutionEngine(context=ctx, show_progress=False, **kwargs)
 
 
@@ -96,13 +93,13 @@ class TestEngineConstruction:
         config.ash_plugin_modules = ["cfg_mod_a, cfg_mod_b"]
         ctx = _make_context(tmp_path, config)
 
-        with patch(
-            "automated_security_helper.plugins.loader.load_internal_plugins"
-        ), patch(
-            "automated_security_helper.plugins.loader.load_additional_plugin_modules"
-        ) as mock_load, patch(
-            f"{_ENGINE_MODULE}.discover_plugins"
-        ) as mock_discover:
+        with (
+            patch("automated_security_helper.plugins.loader.load_internal_plugins"),
+            patch(
+                "automated_security_helper.plugins.loader.load_additional_plugin_modules"
+            ) as mock_load,
+            patch(f"{_ENGINE_MODULE}.discover_plugins") as mock_discover,
+        ):
             ScanExecutionEngine(
                 context=ctx,
                 show_progress=False,
@@ -116,16 +113,14 @@ class TestEngineConstruction:
 
     def test_no_plugin_modules_skips_discovery(self, tmp_path):
         """With no modules configured, the loader is never invoked."""
-        with patch(
-            "automated_security_helper.plugins.loader.load_internal_plugins"
-        ), patch(
-            "automated_security_helper.plugins.loader.load_additional_plugin_modules"
-        ) as mock_load, patch(
-            f"{_ENGINE_MODULE}.discover_plugins"
-        ) as mock_discover:
-            ScanExecutionEngine(
-                context=_make_context(tmp_path), show_progress=False
-            )
+        with (
+            patch("automated_security_helper.plugins.loader.load_internal_plugins"),
+            patch(
+                "automated_security_helper.plugins.loader.load_additional_plugin_modules"
+            ) as mock_load,
+            patch(f"{_ENGINE_MODULE}.discover_plugins") as mock_discover,
+        ):
+            ScanExecutionEngine(context=_make_context(tmp_path), show_progress=False)
 
         mock_load.assert_not_called()
         mock_discover.assert_not_called()
@@ -142,10 +137,11 @@ class TestEngineConstruction:
             captured.update(kwargs)
             return MagicMock()
 
-        with patch(
-            "automated_security_helper.plugins.loader.load_internal_plugins"
-        ), patch(
-            f"{_ENGINE_MODULE}.LiveProgressDisplay", side_effect=_capture_display
+        with (
+            patch("automated_security_helper.plugins.loader.load_internal_plugins"),
+            patch(
+                f"{_ENGINE_MODULE}.LiveProgressDisplay", side_effect=_capture_display
+            ),
         ):
             ScanExecutionEngine(
                 context=_make_context(tmp_path, config),
@@ -165,9 +161,10 @@ class TestEngineConstruction:
             if isinstance(msg, str) and msg.startswith("Source directory:"):
                 raise RuntimeError("logging backend unavailable")
 
-        with patch(
-            "automated_security_helper.plugins.loader.load_internal_plugins"
-        ), patch(f"{_ENGINE_MODULE}.ASH_LOGGER") as mock_logger:
+        with (
+            patch("automated_security_helper.plugins.loader.load_internal_plugins"),
+            patch(f"{_ENGINE_MODULE}.ASH_LOGGER") as mock_logger,
+        ):
             mock_logger.debug.side_effect = _explode_on_source_dir_log
             with pytest.raises(RuntimeError, match="logging backend unavailable"):
                 ScanExecutionEngine(context=ctx, show_progress=False)
@@ -286,15 +283,22 @@ class TestExecutePhases:
             "ReportPhase": stubs.get("report", _phase_stub_factory()),
             "InspectPhase": stubs.get("inspect", _phase_stub_factory()),
         }
-        with patch(f"{_ENGINE_MODULE}.ConvertPhase", patches["ConvertPhase"]), patch(
-            f"{_ENGINE_MODULE}.ScanPhase", patches["ScanPhase"]
-        ), patch(f"{_ENGINE_MODULE}.ReportPhase", patches["ReportPhase"]), patch(
-            f"{_ENGINE_MODULE}.InspectPhase", patches["InspectPhase"]
-        ), patch(
-            f"{_ENGINE_MODULE}.populate_metrics_from_unified_source",
-            side_effect=lambda aggregated_results: aggregated_results,
-        ), patch(f"{_ENGINE_MODULE}.display_metrics_table") as mock_table:
-            result = engine.execute_phases(phases=phases) if phases is not None else engine.execute_phases()
+        with (
+            patch(f"{_ENGINE_MODULE}.ConvertPhase", patches["ConvertPhase"]),
+            patch(f"{_ENGINE_MODULE}.ScanPhase", patches["ScanPhase"]),
+            patch(f"{_ENGINE_MODULE}.ReportPhase", patches["ReportPhase"]),
+            patch(f"{_ENGINE_MODULE}.InspectPhase", patches["InspectPhase"]),
+            patch(
+                f"{_ENGINE_MODULE}.populate_metrics_from_unified_source",
+                side_effect=lambda aggregated_results: aggregated_results,
+            ),
+            patch(f"{_ENGINE_MODULE}.display_metrics_table") as mock_table,
+        ):
+            result = (
+                engine.execute_phases(phases=phases)
+                if phases is not None
+                else engine.execute_phases()
+            )
         return result, patches, mock_table
 
     def test_default_phases_run_convert_scan_report(self, engine):
@@ -378,9 +382,8 @@ class TestExecutePhases:
         with patch(
             "automated_security_helper.plugins.ash_plugin_manager.notify",
             side_effect=_record,
-        ):
-            with pytest.raises(RuntimeError, match="scan phase exploded"):
-                self._run(engine, ["scan"], phase_stubs={"scan": failing})
+        ), pytest.raises(RuntimeError, match="scan phase exploded"):
+            self._run(engine, ["scan"], phase_stubs={"scan": failing})
 
         from automated_security_helper.plugins.events import AshEventType
 
@@ -401,9 +404,8 @@ class TestExecutePhases:
         with patch(
             "automated_security_helper.plugins.ash_plugin_manager.notify",
             side_effect=RuntimeError("notify is broken too"),
-        ):
-            with pytest.raises(RuntimeError, match="original failure"):
-                self._run(engine, ["scan"], phase_stubs={"scan": failing})
+        ), pytest.raises(RuntimeError, match="original failure"):
+            self._run(engine, ["scan"], phase_stubs={"scan": failing})
 
     def test_completion_notification_failure_does_not_abort(self, engine):
         """A broken EXECUTION_COMPLETE subscriber does not fail the run."""
@@ -420,7 +422,9 @@ class TestExecutePhases:
             result, _, mock_table = self._run(engine, ["report"])
 
         assert isinstance(result, AshAggregatedResults)
-        assert mock_table.called, "metrics table must still render after a failed notify"
+        assert mock_table.called, (
+            "metrics table must still render after a failed notify"
+        )
 
     def test_live_progress_display_is_stopped(self, engine):
         """A running live display is stopped in the finally block."""
@@ -452,16 +456,19 @@ class TestExecutePhasesDuration:
         clock.now.side_effect = [start, end]
 
         stub = _phase_stub_factory()
-        with patch(f"{_ENGINE_MODULE}.ConvertPhase", _phase_stub_factory()), patch(
-            f"{_ENGINE_MODULE}.ScanPhase", _phase_stub_factory()
-        ), patch(f"{_ENGINE_MODULE}.ReportPhase", stub), patch(
-            f"{_ENGINE_MODULE}.InspectPhase", _phase_stub_factory()
-        ), patch(
-            f"{_ENGINE_MODULE}.populate_metrics_from_unified_source",
-            side_effect=lambda aggregated_results: aggregated_results,
-        ), patch(f"{_ENGINE_MODULE}.display_metrics_table"), patch(
-            f"{_ENGINE_MODULE}.datetime", clock
-        ), patch(f"{_ENGINE_MODULE}.ASH_LOGGER") as mock_logger:
+        with (
+            patch(f"{_ENGINE_MODULE}.ConvertPhase", _phase_stub_factory()),
+            patch(f"{_ENGINE_MODULE}.ScanPhase", _phase_stub_factory()),
+            patch(f"{_ENGINE_MODULE}.ReportPhase", stub),
+            patch(f"{_ENGINE_MODULE}.InspectPhase", _phase_stub_factory()),
+            patch(
+                f"{_ENGINE_MODULE}.populate_metrics_from_unified_source",
+                side_effect=lambda aggregated_results: aggregated_results,
+            ),
+            patch(f"{_ENGINE_MODULE}.display_metrics_table"),
+            patch(f"{_ENGINE_MODULE}.datetime", clock),
+            patch(f"{_ENGINE_MODULE}.ASH_LOGGER") as mock_logger,
+        ):
             result = engine.execute_phases(phases=["report"])
 
         completion = [

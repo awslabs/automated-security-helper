@@ -60,12 +60,15 @@ def _initialized(source_dir, output_dir, engine, config=None, **overrides):
     """Construct and initialize with resolution and engine construction stubbed."""
     cfg = config if config is not None else AshConfig(project_name="test")
     orch = _bare(source_dir, output_dir, **overrides)
-    with patch(
-        "automated_security_helper.core.orchestrator.resolve_config",
-        return_value=cfg,
-    ), patch(
-        "automated_security_helper.core.orchestrator.ScanExecutionEngine",
-        return_value=engine,
+    with (
+        patch(
+            "automated_security_helper.core.orchestrator.resolve_config",
+            return_value=cfg,
+        ),
+        patch(
+            "automated_security_helper.core.orchestrator.ScanExecutionEngine",
+            return_value=engine,
+        ),
     ):
         orch.initialize()
     return orch
@@ -160,9 +163,7 @@ class TestInitialize:
         stale = out / "ash_aggregated_results.json"
         stale.write_text("{}")
 
-        with patch.object(
-            Path, "unlink", side_effect=PermissionError("locked")
-        ):
+        with patch.object(Path, "unlink", side_effect=PermissionError("locked")):
             orch = _initialized(src, out, _EngineStub())
 
         assert orch._initialized is True
@@ -186,12 +187,15 @@ class TestInitialize:
             return _EngineStub()
 
         orch = _bare(src, out, existing_results_path=existing)
-        with patch(
-            "automated_security_helper.core.orchestrator.resolve_config",
-            return_value=AshConfig(project_name="test"),
-        ), patch(
-            "automated_security_helper.core.orchestrator.ScanExecutionEngine",
-            side_effect=_capture,
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.resolve_config",
+                return_value=AshConfig(project_name="test"),
+            ),
+            patch(
+                "automated_security_helper.core.orchestrator.ScanExecutionEngine",
+                side_effect=_capture,
+            ),
         ):
             orch.initialize()
 
@@ -254,7 +258,9 @@ class TestEnsureDirectories:
         orch = _bare(tmp_path / "src", tmp_path / "out")
 
         with patch.object(Path, "mkdir", side_effect=OSError("read-only fs")):
-            with pytest.raises(ASHValidationError, match="Failed to ensure directories"):
+            with pytest.raises(
+                ASHValidationError, match="Failed to ensure directories"
+            ):
                 orch.ensure_directories()
 
 
@@ -342,9 +348,7 @@ class TestExecuteScan:
         # failure lands in execute_scan rather than in initialize.
         existing.write_text("{ not json")
 
-        with pytest.raises(
-            ASHValidationError, match="Failed to load existing results"
-        ):
+        with pytest.raises(ASHValidationError, match="Failed to load existing results"):
             orch.execute_scan(phases=["report"])
 
     def test_config_warnings_become_validation_checkpoints(self, tmp_path):

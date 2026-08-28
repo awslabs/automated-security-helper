@@ -69,7 +69,14 @@ def _make_phase(tmp_path, plugins=None, validation_manager=None):
     return phase
 
 
-def _checkpoint(name="cp", expected=None, actual=None, discrepancies=None, errors=None, metadata=None):
+def _checkpoint(
+    name="cp",
+    expected=None,
+    actual=None,
+    discrepancies=None,
+    errors=None,
+    metadata=None,
+):
     return ValidationCheckpoint(
         checkpoint_name=name,
         expected_scanners=list(expected or []),
@@ -118,7 +125,9 @@ class TestValidateScannerTasks:
         assert summary["missing_count"] == 1
         assert summary["successfully_retried"] == 0
         assert summary["has_issues"] is True
-        assert aggregated.validation_checkpoints[-1]["checkpoint_name"] == "scanner_tasks"
+        assert (
+            aggregated.validation_checkpoints[-1]["checkpoint_name"] == "scanner_tasks"
+        )
 
     def test_successful_retry_is_recorded_in_the_summary(self, tmp_path):
         """A non-empty retry result is counted, with the known re-add limitation logged."""
@@ -381,8 +390,9 @@ class TestValidateResultCompleteness:
         phase = _make_phase(tmp_path, validation_manager=manager)
         aggregated = AshAggregatedResults()
 
-        with patch(f"{_PHASE_MODULE}.ASH_LOGGER") as mock_logger, patch.object(
-            phase, "notify_event", side_effect=_raising_notify()
+        with (
+            patch(f"{_PHASE_MODULE}.ASH_LOGGER") as mock_logger,
+            patch.object(phase, "notify_event", side_effect=_raising_notify()),
         ):
             phase._validate_result_completeness(aggregated)
 
@@ -503,9 +513,12 @@ class TestSafeExecuteScannerStub:
         """A raising notify_event does not lose the failure container."""
         phase = _make_phase(tmp_path)
 
-        with patch.object(
-            phase, "_execute_scanner", side_effect=RuntimeError("delegate failed")
-        ), patch.object(phase, "notify_event", side_effect=_raising_notify()):
+        with (
+            patch.object(
+                phase, "_execute_scanner", side_effect=RuntimeError("delegate failed")
+            ),
+            patch.object(phase, "notify_event", side_effect=_raising_notify()),
+        ):
             results = phase._safe_execute_scanner("bandit", MagicMock(), [])
 
         assert len(results) == 1
@@ -527,7 +540,11 @@ class TestExecuteScannersSequentialStub:
     def _prepare(self, tmp_path, names):
         phase = _make_phase(tmp_path)
         phase._scanner_tasks = [
-            (name, _NamedPlugin(), [{"path": phase.plugin_context.source_dir, "type": "source"}])
+            (
+                name,
+                _NamedPlugin(),
+                [{"path": phase.plugin_context.source_dir, "type": "source"}],
+            )
             for name in names
         ]
         phase._max_workers = 2
@@ -539,12 +556,13 @@ class TestExecuteScannersSequentialStub:
         aggregated = AshAggregatedResults()
         processed = []
 
-        with patch.object(
-            phase, "_safe_execute_scanner", return_value=None
-        ), patch.object(
-            phase,
-            "_process_results",
-            side_effect=lambda c, a: processed.append(c) or a,
+        with (
+            patch.object(phase, "_safe_execute_scanner", return_value=None),
+            patch.object(
+                phase,
+                "_process_results",
+                side_effect=lambda c, a: processed.append(c) or a,
+            ),
         ):
             result = phase._execute_scanners_sequential(aggregated)
 
@@ -558,11 +576,11 @@ class TestExecuteScannersSequentialStub:
         aggregated = AshAggregatedResults()
         container = MagicMock()
 
-        with patch.object(
-            phase, "_safe_execute_scanner", return_value=[container]
-        ), patch.object(
-            phase, "_process_results", return_value=aggregated
-        ), patch.object(phase, "notify_event", side_effect=_raising_notify()):
+        with (
+            patch.object(phase, "_safe_execute_scanner", return_value=[container]),
+            patch.object(phase, "_process_results", return_value=aggregated),
+            patch.object(phase, "notify_event", side_effect=_raising_notify()),
+        ):
             result = phase._execute_scanners_sequential(aggregated)
 
         assert result is aggregated
@@ -577,11 +595,13 @@ class TestExecuteScannersSequentialStub:
             seen.append(name)
             raise RuntimeError(f"{name} exploded")
 
-        with patch.object(
-            phase, "_safe_execute_scanner", side_effect=_boom
-        ), patch.object(
-            phase, "_process_results", side_effect=RuntimeError("processor down")
-        ), patch(f"{_PHASE_MODULE}.ASH_LOGGER") as mock_logger:
+        with (
+            patch.object(phase, "_safe_execute_scanner", side_effect=_boom),
+            patch.object(
+                phase, "_process_results", side_effect=RuntimeError("processor down")
+            ),
+            patch(f"{_PHASE_MODULE}.ASH_LOGGER") as mock_logger,
+        ):
             result = phase._execute_scanners_sequential(aggregated)
 
         assert seen == ["bandit", "semgrep"]
@@ -596,7 +616,11 @@ class TestExecuteScannersParallelStub:
     def _prepare(self, tmp_path, names):
         phase = _make_phase(tmp_path)
         phase._scanner_tasks = [
-            (name, _NamedPlugin(), [{"path": phase.plugin_context.source_dir, "type": "source"}])
+            (
+                name,
+                _NamedPlugin(),
+                [{"path": phase.plugin_context.source_dir, "type": "source"}],
+            )
             for name in names
         ]
         phase._max_workers = 2
@@ -620,12 +644,13 @@ class TestExecuteScannersParallelStub:
         aggregated = AshAggregatedResults()
         processed = []
 
-        with patch.object(
-            phase, "_safe_execute_scanner", return_value=None
-        ), patch.object(
-            phase,
-            "_process_results",
-            side_effect=lambda c, a: processed.append(c) or a,
+        with (
+            patch.object(phase, "_safe_execute_scanner", return_value=None),
+            patch.object(
+                phase,
+                "_process_results",
+                side_effect=lambda c, a: processed.append(c) or a,
+            ),
         ):
             result = phase._execute_scanners_parallel(aggregated)
 
@@ -642,11 +667,11 @@ class TestExecuteScannersParallelStub:
         phase = self._prepare(tmp_path, ["bandit", "semgrep"])
         aggregated = AshAggregatedResults()
 
-        with patch.object(
-            phase, "_safe_execute_scanner", return_value=[MagicMock()]
-        ), patch.object(
-            phase, "_process_results", return_value=aggregated
-        ), patch.object(phase, "notify_event", side_effect=_raising_notify()):
+        with (
+            patch.object(phase, "_safe_execute_scanner", return_value=[MagicMock()]),
+            patch.object(phase, "_process_results", return_value=aggregated),
+            patch.object(phase, "notify_event", side_effect=_raising_notify()),
+        ):
             result = phase._execute_scanners_parallel(aggregated)
 
         assert result is aggregated
@@ -659,11 +684,17 @@ class TestExecuteScannersParallelStub:
         phase = self._prepare(tmp_path, ["bandit", "semgrep"])
         aggregated = AshAggregatedResults()
 
-        with patch.object(
-            phase, "_safe_execute_scanner", side_effect=RuntimeError("thread exploded")
-        ), patch.object(
-            phase, "_process_results", side_effect=RuntimeError("processor down")
-        ), patch(f"{_PHASE_MODULE}.ASH_LOGGER") as mock_logger:
+        with (
+            patch.object(
+                phase,
+                "_safe_execute_scanner",
+                side_effect=RuntimeError("thread exploded"),
+            ),
+            patch.object(
+                phase, "_process_results", side_effect=RuntimeError("processor down")
+            ),
+            patch(f"{_PHASE_MODULE}.ASH_LOGGER") as mock_logger,
+        ):
             result = phase._execute_scanners_parallel(aggregated)
 
         assert result is aggregated
