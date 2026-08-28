@@ -20,6 +20,7 @@ env:
   variables:
     ASH_SOURCE_DIR: '.'
     ASH_OUTPUT_DIR: '.ash/ash_output'
+    ASH_VERSION: v3.7.0
     ASH_SHARD_INDEX: '0'
     ASH_SHARD_COUNT: '1'
 phases:
@@ -27,7 +28,7 @@ phases:
     runtime-versions:
       python: '3.12'
     commands:
-      - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "automated-security-helper"'
+      - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"'
   build:
     commands:
       - 'ash scan --source-dir "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" --min-severity low --no-fail-on-findings'

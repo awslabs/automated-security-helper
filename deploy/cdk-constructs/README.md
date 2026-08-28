@@ -187,9 +187,9 @@ Windows for a file nobody edited.
 | --- | --- | --- | --- |
 | `input` | `IFileSetProducer` | required | the file set to scan |
 | `shardCount` | `number` | `1` | `1`–`50`; above 1 adds the merge action |
-| `installMode` | `ASHInstallMode` | `PIP` | `PIP`, `UVX`, `GIT`, `PREINSTALLED` |
-| `version` | `string` | latest release | a release for `PIP`/`UVX`, a git ref for `GIT` |
-| `sourceRepository` | `string` | upstream ASH repo | `https://` only; `GIT` mode |
+| `installMode` | `ASHInstallMode` | `PIP` | `PIP`, `UVX`, `PREINSTALLED` |
+| `version` | `string` | pinned release tag | a git ref: tag, branch or commit |
+| `sourceRepository` | `string` | upstream ASH repo | `https://` only |
 | `severityThreshold` | `ASHSeverityThreshold` | `LOW` | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `NONE` |
 | `outputDirectory` | `string` | `.ash/ash_output` | |
 | `buildImage` | `IBuildImage` | `LinuxBuildImage.STANDARD_7_0` | |
@@ -201,9 +201,42 @@ Windows for a file nobody edited.
 `CRITICAL` and `HIGH` are equivalent: SARIF does not distinguish the two levels,
 so ASH treats them as one.
 
-Leaving `version` unset installs the latest ASH release, which means the same
-pipeline definition can scan with different ASH versions over time. Pin it if you
-need reproducible results.
+`version` is a git ref, not a distribution version, because ASH is installed from
+its repository. It defaults to a pinned release tag, so two runs of the same
+pipeline definition scan with the same ASH; pointing it at a branch gives that up.
+
+## How ASH gets installed
+
+Every install mode fetches ASH from its git repository. None installs by
+distribution name, and that is deliberate:
+
+- ASH is **not published to PyPI**. The name `automated-security-helper` on PyPI
+  is an unrelated single-release placeholder package with no connection to this
+  project. Installing it would succeed, leave no `ash` on `PATH` so every build
+  would fail at the scan step, and pull a third party's code into the container
+  running your security scan.
+- `aws-automated-security-helper` and `awslabs-automated-security-helper` do not
+  exist on PyPI at all.
+
+So the install is what this repository documents for CI:
+
+```console
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+```
+
+If ASH is ever published to PyPI under a name the project controls, installing by
+name becomes preferable and a mode for it is worth adding. Until then there isn't
+one, and a name-based install should not be introduced on the assumption that it
+might get published later.
+
+In the generated buildspecs the ref comes from an `ASH_VERSION` environment
+variable defaulting to the pinned tag, so a consumer can scan with a different
+ASH release by overriding one variable rather than editing a generated file:
+
+```console
+aws codebuild start-build --project-name my-scan \
+  --environment-variables-override name=ASH_VERSION,value=v3.6.0,type=PLAINTEXT
+```
 
 ## Development
 

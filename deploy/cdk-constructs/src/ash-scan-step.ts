@@ -8,7 +8,9 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as pipelines from 'aws-cdk-lib/pipelines';
 import { Construct } from 'constructs';
 import {
+  DEFAULT_ASH_REPOSITORY,
   installCommands,
+  InstallOptions,
   mergeCommands,
   scanCommands,
   shardOutputDirectory,
@@ -57,23 +59,26 @@ export interface ASHScanStepProps {
   readonly installMode?: ASHInstallMode;
 
   /**
-   * Version of ASH to install.
+   * Git ref of ASH to install: a release tag such as `v3.7.0`, a branch, or a
+   * commit.
    *
-   * A released version for `PIP` and `UVX`; a git ref for `GIT`. Ignored by
-   * `PREINSTALLED`, where the image already decides.
+   * A git ref rather than a distribution version because ASH is installed from
+   * its repository, not from PyPI. Ignored by `PREINSTALLED`, where the image
+   * already decides.
    *
-   * Leaving this unset installs the latest release, which means the same
-   * pipeline definition can scan with different ASH versions over time. Pin it
-   * for reproducible results.
+   * The default is a pinned release tag, so two runs of the same pipeline
+   * definition scan with the same ASH. Pointing this at a branch gives up that
+   * property.
    *
-   * @default - the latest release
+   * @default - a pinned ASH release tag
    */
   readonly version?: string;
 
   /**
-   * Repository to install ASH from when `installMode` is `GIT`.
+   * Repository to install ASH from.
    *
-   * Must be an `https://` URL. Ignored by every other install mode.
+   * Must be an `https://` URL. Used by `PIP` and `UVX`; ignored by
+   * `PREINSTALLED`, which installs nothing.
    *
    * @default - the upstream ASH repository
    */
@@ -220,7 +225,7 @@ export class ASHScanStep extends pipelines.Step implements pipelines.ICodePipeli
     this.outputDirectory = props.outputDirectory ?? '.ash/ash_output';
     this.version = props.version;
     this.sourceRepository =
-      props.sourceRepository ?? 'https://github.com/awslabs/automated-security-helper';
+      props.sourceRepository ?? DEFAULT_ASH_REPOSITORY;
     this.extraScanArguments = props.extraScanArguments ?? [];
 
     this.validateShardCount();
@@ -373,8 +378,7 @@ export class ASHScanStep extends pipelines.Step implements pipelines.ICodePipeli
               severityThreshold: this.severityThreshold,
               extraScanArguments: this.extraScanArguments,
             },
-            this.installMode,
-            this.version,
+            this.installOptions(),
           ),
         },
       },
@@ -411,8 +415,7 @@ export class ASHScanStep extends pipelines.Step implements pipelines.ICodePipeli
               severityThreshold: this.severityThreshold,
               extraScanArguments: this.extraScanArguments,
             },
-            this.installMode,
-            this.version,
+            this.installOptions(),
           ),
         },
       },
@@ -435,8 +438,7 @@ export class ASHScanStep extends pipelines.Step implements pipelines.ICodePipeli
           commands: mergeCommands(
             resultsPaths,
             this.outputDirectory,
-            this.installMode,
-            this.version,
+            this.installOptions(),
           ),
         },
       },
@@ -447,8 +449,17 @@ export class ASHScanStep extends pipelines.Step implements pipelines.ICodePipeli
     });
   }
 
+  /** Where ASH comes from, shared by every command this step renders. */
+  private installOptions(): InstallOptions {
+    return {
+      mode: this.installMode,
+      version: this.version,
+      sourceRepository: this.sourceRepository,
+    };
+  }
+
   private installCommandList(): string[] {
-    return installCommands(this.installMode, this.version, this.sourceRepository);
+    return installCommands(this.installOptions());
   }
 
   /** Create one CodeBuild project for a scan, shard or merge action. */

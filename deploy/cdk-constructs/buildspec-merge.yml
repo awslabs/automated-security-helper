@@ -18,13 +18,14 @@ version: 0.2
 env:
   variables:
     ASH_OUTPUT_DIR: '.ash/ash_output'
+    ASH_VERSION: v3.7.0
     ASH_SHARD_RESULTS: ''
 phases:
   install:
     runtime-versions:
       python: '3.12'
     commands:
-      - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "automated-security-helper"'
+      - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"'
   build:
     commands:
       - 'if [ -z "$ASH_SHARD_RESULTS" ]; then echo "ASH_SHARD_RESULTS is empty; refusing to report a verdict for zero shards." >&2; exit 1; fi'

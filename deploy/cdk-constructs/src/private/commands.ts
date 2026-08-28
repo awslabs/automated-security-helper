@@ -70,43 +70,75 @@ export interface ShardCommandOptions extends CommonCommandOptions {
 }
 
 /**
+ * Where ASH comes from, for every command that has to name it.
+ *
+ * Grouped rather than passed as three positional arguments because all three
+ * renderers need all three values, and a caller that swapped two strings would
+ * still compile.
+ */
+export interface InstallOptions {
+  /** How ASH is provisioned into the build container. */
+  readonly mode: ASHInstallMode;
+  /** Git ref to install, or an `$ENV_VAR` reference. Defaults to `DEFAULT_ASH_REF`. */
+  readonly version?: string;
+  /** Repository to install from. */
+  readonly sourceRepository: string;
+}
+
+/**
+ * Default git ref installed when the caller does not pin one.
+ *
+ * A tag rather than a branch, so two runs of the same pipeline definition scan
+ * with the same ASH. Bumping this is a deliberate step at release time; the
+ * buildspec drift gate will fail until the generated files are regenerated,
+ * which is the reminder.
+ */
+export const DEFAULT_ASH_REF = 'v3.7.0';
+
+/** Default repository ASH is installed from. */
+export const DEFAULT_ASH_REPOSITORY =
+  'https://github.com/awslabs/automated-security-helper.git';
+
+/**
+ * Build the `git+https://...@ref` requirement specifier, quoted for the shell.
+ *
+ * Composed here rather than through `shellArg` because the ref may legitimately
+ * be an `$ENV_VAR` reference embedded mid-string, which `shellArg` only accepts
+ * as a whole value. Both halves are validated instead, so nothing unvalidated
+ * reaches the command either way.
+ */
+function gitRequirement(sourceRepository: string, ref: string): string {
+  return `"git+${assertGitUrl(sourceRepository)}@${assertGitRef(ref)}"`;
+}
+
+/**
  * Render the commands that put an `ash` executable on `PATH`.
  *
+ * Nothing here installs by distribution name. ASH is not published to PyPI, and
+ * the name `automated-security-helper` there is an unrelated placeholder
+ * package, so a name-based install would silently succeed, leave no `ash` on
+ * `PATH`, and put a third party's code in the scan container. Installing from
+ * the git repository at a pinned ref is what this repository documents for CI.
+ *
  * Returns an empty list for `PREINSTALLED`, where the consumer's own image
- * already provides ASH.
+ * already provides ASH, and for `UVX`, which resolves the repository as part of
+ * the scan invocation instead.
  */
-export function installCommands(
-  mode: ASHInstallMode,
-  version: string | undefined,
-  sourceRepository: string,
-): string[] {
-  switch (mode) {
+export function installCommands(install: InstallOptions): string[] {
+  switch (install.mode) {
     case ASHInstallMode.PREINSTALLED:
       return [];
 
-    case ASHInstallMode.PIP: {
-      const spec = version === undefined
-        ? 'automated-security-helper'
-        : `automated-security-helper==${version}`;
-      return [`python3 -m pip install --no-cache-dir --disable-pip-version-check ${shellArg(spec)}`];
-    }
+    case ASHInstallMode.UVX:
+      // uvx resolves and runs in one step, so there is nothing to install ahead
+      // of the scan. See ashInvocation.
+      return [];
 
-    case ASHInstallMode.UVX: {
-      // uvx resolves the distribution per invocation, so there is nothing to
-      // install. Pinning here only records the resolved version in the log.
-      const spec = version === undefined
-        ? 'automated-security-helper'
-        : `automated-security-helper==${version}`;
-      return [`uvx --from ${shellArg(spec)} ash --version`];
-    }
-
-    case ASHInstallMode.GIT: {
-      const ref = version === undefined ? 'main' : version;
+    case ASHInstallMode.PIP:
       return [
-        `python3 -m pip install --no-cache-dir --disable-pip-version-check ` +
-          `"git+${assertGitUrl(sourceRepository)}@${assertGitRef(ref)}"`,
+        'python3 -m pip install --no-cache-dir --disable-pip-version-check ' +
+          gitRequirement(install.sourceRepository, install.version ?? DEFAULT_ASH_REF),
       ];
-    }
   }
 }
 
@@ -117,14 +149,28 @@ function assertGitUrl(url: string): string {
       `sourceRepository must be an https:// URL, got ${JSON.stringify(url)}.`,
     );
   }
+  if (/["`\\]/.test(url)) {
+    throw new Error(
+      `sourceRepository must not contain shell metacharacters, got ${JSON.stringify(url)}.`,
+    );
+  }
   return url;
 }
 
-/** Reject a git ref that could break out of the pip argument. */
+/**
+ * Reject a git ref that could break out of the pip argument.
+ *
+ * A bare `$NAME` is allowed so the generated buildspecs can defer the ref to an
+ * `ASH_VERSION` build environment variable.
+ */
 function assertGitRef(ref: string): string {
+  if (ENV_REFERENCE.test(ref)) {
+    return ref;
+  }
   if (!/^[A-Za-z0-9._/-]+$/.test(ref)) {
     throw new Error(
-      `version must be a plain git ref when installMode is GIT, got ${JSON.stringify(ref)}.`,
+      'version must be a plain git ref (tag, branch or commit) or a bare ' +
+        `$ENVIRONMENT_VARIABLE reference, got ${JSON.stringify(ref)}.`,
     );
   }
   return ref;
@@ -133,16 +179,20 @@ function assertGitRef(ref: string): string {
 /**
  * Render the command that invokes `ash` itself, honouring the install mode.
  *
- * `UVX` has no persistent executable, so its scan runs through `uvx --from`.
+ * `UVX` has no installed executable, so its scan resolves the repository through
+ * `uvx --from`. The explicit `--from` form is used rather than `uvx <spec>`
+ * because the executable is named `ash` while the distribution is named
+ * `automated-security-helper`, and `--from` is what states that difference.
  */
-function ashInvocation(mode: ASHInstallMode, version: string | undefined): string {
-  if (mode !== ASHInstallMode.UVX) {
+function ashInvocation(install: InstallOptions): string {
+  if (install.mode !== ASHInstallMode.UVX) {
     return 'ash';
   }
-  const spec = version === undefined
-    ? 'automated-security-helper'
-    : `automated-security-helper==${version}`;
-  return `uvx --from ${shellArg(spec)} ash`;
+  const requirement = gitRequirement(
+    install.sourceRepository,
+    install.version ?? DEFAULT_ASH_REF,
+  );
+  return `uvx --from ${requirement} ash`;
 }
 
 /**
@@ -155,11 +205,10 @@ function ashInvocation(mode: ASHInstallMode, version: string | undefined): strin
  */
 export function scanCommands(
   options: CommonCommandOptions,
-  mode: ASHInstallMode,
-  version: string | undefined,
+  install: InstallOptions,
 ): string[] {
   const argv = [
-    ashInvocation(mode, version),
+    ashInvocation(install),
     'scan',
     '--source-dir',
     shellArg(options.sourceDirectory),
@@ -185,11 +234,10 @@ export function scanCommands(
  */
 export function shardScanCommands(
   options: ShardCommandOptions,
-  mode: ASHInstallMode,
-  version: string | undefined,
+  install: InstallOptions,
 ): string[] {
   const argv = [
-    ashInvocation(mode, version),
+    ashInvocation(install),
     'scan',
     '--source-dir',
     shellArg(options.sourceDirectory),
@@ -218,13 +266,12 @@ export function shardScanCommands(
 export function mergeCommands(
   resultsPaths: string[],
   outputDirectory: string,
-  mode: ASHInstallMode,
-  version: string | undefined,
+  install: InstallOptions,
 ): string[] {
   if (resultsPaths.length === 0) {
     throw new Error('mergeCommands requires at least one results path.');
   }
-  const argv = [ashInvocation(mode, version), 'merge'];
+  const argv = [ashInvocation(install), 'merge'];
   for (const results of resultsPaths) {
     argv.push('--results', shellArg(results));
   }

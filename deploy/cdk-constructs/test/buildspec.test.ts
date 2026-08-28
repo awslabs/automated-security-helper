@@ -4,11 +4,23 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { generatedBuildspecs, mergeLoopCommands } from '../src/private/buildspec';
-import { mergeCommands, shellArg } from '../src/private/commands';
+import {
+  DEFAULT_ASH_REF,
+  DEFAULT_ASH_REPOSITORY,
+  InstallOptions,
+  mergeCommands,
+  shellArg,
+} from '../src/private/commands';
 import { ASHInstallMode } from '../src';
 import { scalar, toYaml } from '../src/private/yaml';
 
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
+
+/** pip install from the default repository, the shape the buildspecs use. */
+const PIP_INSTALL: InstallOptions = {
+  mode: ASHInstallMode.PIP,
+  sourceRepository: DEFAULT_ASH_REPOSITORY,
+};
 
 describe('generated buildspecs are deterministic', () => {
   test('rendering twice produces byte-identical output', () => {
@@ -63,6 +75,49 @@ describe('committed buildspecs match the source of truth', () => {
     // This is the assertion the CI drift gate makes. It failing here means the
     // generator changed and `npm run buildspec` was not re-run.
     expect(onDisk.equals(Buffer.from(spec.contents, 'utf8'))).toBe(true);
+  });
+});
+
+describe('generated buildspecs install ASH from git, not by name', () => {
+  function contentsOf(filename: string): string {
+    return generatedBuildspecs().find((s) => s.filename === filename)!.contents;
+  }
+
+  test.each(generatedBuildspecs().map((s) => s.filename))(
+    '%s installs from the git repository',
+    (filename) => {
+      expect(contentsOf(filename)).toContain(
+        'pip install --no-cache-dir --disable-pip-version-check ' +
+          '"git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"',
+      );
+    },
+  );
+
+  test.each(generatedBuildspecs().map((s) => s.filename))(
+    '%s never installs by distribution name',
+    (filename) => {
+      // ASH is not on PyPI; that name belongs to an unrelated placeholder
+      // package. A name-based install would succeed and leave no `ash` on PATH.
+      const contents = contentsOf(filename);
+      expect(contents).not.toMatch(/install\s+"?automated-security-helper"?[\s"]/);
+      expect(contents).not.toMatch(/automated-security-helper==/);
+    },
+  );
+
+  test.each(generatedBuildspecs().map((s) => s.filename))(
+    '%s defaults ASH_VERSION to the pinned ref',
+    (filename) => {
+      // Declared as an env default rather than baked into the command, so a
+      // consumer retargets ASH by overriding one variable, not by editing a
+      // generated file.
+      expect(contentsOf(filename)).toContain(`ASH_VERSION: ${DEFAULT_ASH_REF}`);
+    },
+  );
+
+  test('the pinned default ref is a release tag, not a branch', () => {
+    // A branch default would make two runs of one pipeline definition scan with
+    // different ASH versions.
+    expect(DEFAULT_ASH_REF).toMatch(/^v\d+\.\d+\.\d+$/);
   });
 });
 
@@ -128,8 +183,7 @@ describe('the env-driven merge loop matches the literal merge command', () => {
     const literal = mergeCommands(
       ['out/shard-0', 'out/shard-1', 'out/shard-2'],
       '.ash/ash_output',
-      ASHInstallMode.PIP,
-      undefined,
+      { mode: ASHInstallMode.PIP, sourceRepository: DEFAULT_ASH_REPOSITORY },
     )[0];
 
     expect(literal).toBe(
@@ -143,7 +197,7 @@ describe('the env-driven merge loop matches the literal merge command', () => {
   });
 
   test('mergeCommands refuses an empty results list', () => {
-    expect(() => mergeCommands([], 'out', ASHInstallMode.PIP, undefined)).toThrow(
+    expect(() => mergeCommands([], 'out', PIP_INSTALL)).toThrow(
       /at least one results path/,
     );
   });
@@ -170,7 +224,7 @@ describe('shellArg', () => {
 
   test('a rejected value cannot reach the rendered command', () => {
     expect(() =>
-      mergeCommands(['out; rm -rf $HOME'], 'out', ASHInstallMode.PIP, undefined),
+      mergeCommands(['out; rm -rf $HOME'], 'out', PIP_INSTALL),
     ).toThrow(/Refusing to build a shell command/);
   });
 });

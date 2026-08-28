@@ -3,7 +3,7 @@
 
 import { Match } from 'aws-cdk-lib/assertions';
 import { ASHInstallMode, ASHSeverityThreshold } from '../src';
-import { buildStep, synthesizeWithStep, SynthesizedAction } from './helpers';
+import { ashBuildSpec, buildStep, synthesizeWithStep, SynthesizedAction } from './helpers';
 
 /** Actions this step created, i.e. everything except the pipeline's own steps. */
 function ashActions(actions: SynthesizedAction[]): SynthesizedAction[] {
@@ -240,27 +240,41 @@ describe('severityThreshold', () => {
 });
 
 describe('install modes', () => {
-  test('PIP installs the published distribution', () => {
+  test('PIP installs from the git repository, not by distribution name', () => {
     const { template } = synthesizeWithStep({ installMode: ASHInstallMode.PIP });
+    const spec = ashBuildSpec(template);
+
+    expect(spec.phases.install.commands.join('\n')).toContain(
+      'pip install --no-cache-dir --disable-pip-version-check ' +
+        '"git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"',
+    );
+  });
+
+  test('PIP pins the given git ref', () => {
+    const { template } = synthesizeWithStep({
+      installMode: ASHInstallMode.PIP,
+      version: 'v3.6.0',
+    });
 
     template.hasResourceProperties('AWS::CodeBuild::Project', {
       Source: Match.objectLike({
-        BuildSpec: Match.stringLikeRegexp('pip install .*automated-security-helper'),
+        BuildSpec: Match.stringLikeRegexp(
+          'git\\+https://github.com/awslabs/automated-security-helper.git@v3.6.0',
+        ),
       }),
     });
   });
 
-  test('PIP pins the version when one is given', () => {
+  test('PIP installs from a custom repository when given one', () => {
     const { template } = synthesizeWithStep({
       installMode: ASHInstallMode.PIP,
-      version: '3.7.0',
+      sourceRepository: 'https://github.com/my-org/my-ash-fork.git',
+      version: 'my-branch',
     });
 
-    template.hasResourceProperties('AWS::CodeBuild::Project', {
-      Source: Match.objectLike({
-        BuildSpec: Match.stringLikeRegexp('automated-security-helper==3.7.0'),
-      }),
-    });
+    expect(ashBuildSpec(template).phases.install.commands.join('\n')).toContain(
+      '"git+https://github.com/my-org/my-ash-fork.git@my-branch"',
+    );
   });
 
   test('PREINSTALLED emits no install commands', () => {
@@ -277,42 +291,53 @@ describe('install modes', () => {
     expect(spec.phases.build.commands.join('\n')).toContain('ash scan');
   });
 
-  test('UVX runs ash through uvx rather than installing it', () => {
-    const { actions } = synthesizeWithStep({ installMode: ASHInstallMode.UVX });
-    const commands = ashActions(actions)[0].commands.join('\n');
+  test('UVX resolves the git repository at scan time, installing nothing first', () => {
+    const { template } = synthesizeWithStep({ installMode: ASHInstallMode.UVX });
+    const spec = ashBuildSpec(template);
 
-    expect(commands).toContain('uvx --from "automated-security-helper" ash scan');
+    expect(spec.phases.install.commands).toEqual([]);
+    expect(spec.phases.build.commands.join('\n')).toContain(
+      'uvx --from "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0" ash scan',
+    );
   });
 
-  test('GIT installs from the given ref', () => {
-    const { template } = synthesizeWithStep({
-      installMode: ASHInstallMode.GIT,
-      version: 'feature/some-branch',
-    });
-
-    template.hasResourceProperties('AWS::CodeBuild::Project', {
-      Source: Match.objectLike({
-        BuildSpec: Match.stringLikeRegexp('git\\+https://github.com/awslabs/automated-security-helper@feature/some-branch'),
-      }),
-    });
-  });
-
-  test('GIT rejects a non-https repository at synth', () => {
+  test('rejects a non-https repository at synth', () => {
     expect(() =>
-      synthesizeWithStep({
-        installMode: ASHInstallMode.GIT,
-        sourceRepository: 'file:///etc/passwd',
-      }),
+      synthesizeWithStep({ sourceRepository: 'file:///etc/passwd' }),
     ).toThrow(/must be an https:\/\/ URL/);
   });
 
-  test('GIT rejects a ref containing shell metacharacters at synth', () => {
-    expect(() =>
-      synthesizeWithStep({
-        installMode: ASHInstallMode.GIT,
-        version: 'main; rm -rf /',
-      }),
-    ).toThrow(/plain git ref/);
+  test('rejects a ref containing shell metacharacters at synth', () => {
+    expect(() => synthesizeWithStep({ version: 'main; rm -rf /' })).toThrow(
+      /plain git ref/,
+    );
+  });
+
+  test.each([
+    ASHInstallMode.PIP,
+    ASHInstallMode.UVX,
+    ASHInstallMode.PREINSTALLED,
+  ])('%s never installs ASH by distribution name', (installMode) => {
+    // ASH is not published to PyPI. The name `automated-security-helper` there is
+    // an unrelated placeholder package, so a name-based install would succeed,
+    // leave no `ash` on PATH, and pull a third party's code into the scan
+    // container. Every install has to name the git repository.
+    const { template } = synthesizeWithStep({ installMode, shardCount: 2 });
+    const projects = template.findResources('AWS::CodeBuild::Project');
+
+    const specs = Object.entries(projects)
+      .filter(([id]) => id.includes('SecurityScan'))
+      .map(([, r]) => (r as any).Properties.Source.BuildSpec as string);
+
+    expect(specs).toHaveLength(3);
+    for (const spec of specs) {
+      // A pip/uvx argument naming the distribution without a git+ prefix.
+      expect(spec).not.toMatch(/(install|--from)\s+\\?"?automated-security-helper/);
+      expect(spec).not.toMatch(/automated-security-helper==/);
+      if (/pip install|uvx --from/.test(spec)) {
+        expect(spec).toMatch(/git\+https:\/\//);
+      }
+    }
   });
 });
 

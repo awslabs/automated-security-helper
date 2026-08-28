@@ -74,6 +74,23 @@ export function buildStep(
   return new ASHScanStep(stepId, { input: source, ...props });
 }
 
+/**
+ * Parsed buildspec of the first CodeBuild project this step created.
+ *
+ * Filters on the step id appearing anywhere in the logical id, because CDK
+ * prefixes logical ids with the construct path.
+ */
+export function ashBuildSpec(template: Template, stepId: string = 'SecurityScan'): any {
+  const projects = template.findResources('AWS::CodeBuild::Project');
+  const match = Object.entries(projects).find(([id]) => id.includes(stepId));
+  if (!match) {
+    throw new Error(
+      `no CodeBuild project for step ${stepId}; found ${Object.keys(projects).join(', ')}`,
+    );
+  }
+  return JSON.parse((match[1] as any).Properties.Source.BuildSpec);
+}
+
 /** Read the actions of one pipeline stage, resolving each one's buildspec. */
 function readActions(template: Template, stageName: string): SynthesizedAction[] {
   const pipelines_ = template.findResources('AWS::CodePipeline::Pipeline');

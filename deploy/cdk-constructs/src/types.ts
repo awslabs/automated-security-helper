@@ -4,43 +4,43 @@
 /**
  * How the ASH CLI is made available to the build container.
  *
- * ASH does not publish a container image to any public registry, so there is
- * no prebuilt image to pull. Every mode here either installs ASH into a
- * generic build image or assumes the consumer supplied an image that already
- * contains it.
+ * Every mode installs from the ASH git repository, or expects an image that
+ * already contains ASH. None installs by distribution name, because ASH is not
+ * distributed on PyPI: the name `automated-security-helper` there belongs to an
+ * unrelated single-release placeholder package, so installing it would both fail
+ * to provide an `ash` executable and pull a third party's code into a security
+ * pipeline. If ASH is published to PyPI under a name the project controls, a
+ * mode that installs by name becomes worth adding; until then there isn't one.
+ *
+ * ASH also publishes no container image to any public registry, so there is no
+ * prebuilt image to pull either.
  */
 export enum ASHInstallMode {
   /**
-   * Install the published `automated-security-helper` distribution with `pip`
-   * into the build image's Python environment.
+   * Install from the ASH git repository with `pip`.
    *
-   * The default, and the mode with the fewest moving parts.
+   * The default, and the method this repository documents for CI. Installs
+   * `git+<sourceRepository>@<version>` into the build image's Python
+   * environment.
    */
   PIP = 'pip',
 
   /**
-   * Run ASH through `uvx`, which resolves the distribution into a throwaway
+   * Run ASH through `uvx`, which resolves the repository into a throwaway
    * environment on each invocation.
    *
-   * Faster cold starts than `PIP` when the build image already ships `uv`.
+   * Nothing is installed ahead of the scan, so this needs a build image that
+   * already ships `uv`.
    */
   UVX = 'uvx',
-
-  /**
-   * Install ASH from a git reference rather than a released distribution.
-   *
-   * Use this to run an unreleased revision. `ASHScanStepProps.sourceRepository`
-   * and `ASHScanStepProps.version` select the repository and the ref.
-   */
-  GIT = 'git',
 
   /**
    * Emit no install commands at all, because the build image already provides
    * an `ash` executable on `PATH`.
    *
    * This is the mode to pair with an image built from the ASH `Dockerfile` in
-   * a registry the consumer controls. ASH ships no public image, so this mode
-   * requires an image the consumer built themselves.
+   * this repository. ASH ships no public image, so an image used here has to be
+   * one the consumer built and hosts themselves.
    */
   PREINSTALLED = 'preinstalled',
 }

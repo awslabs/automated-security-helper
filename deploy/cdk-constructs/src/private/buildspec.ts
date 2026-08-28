@@ -11,7 +11,10 @@
  */
 
 import {
+  DEFAULT_ASH_REF,
+  DEFAULT_ASH_REPOSITORY,
   installCommands,
+  InstallOptions,
   scanCommands,
   shardScanCommands,
   shellArg,
@@ -34,14 +37,26 @@ const OUTPUT_DIR_VAR = 'ASH_OUTPUT_DIR';
 const SHARD_INDEX_VAR = 'ASH_SHARD_INDEX';
 const SHARD_COUNT_VAR = 'ASH_SHARD_COUNT';
 const SHARD_RESULTS_VAR = 'ASH_SHARD_RESULTS';
+const VERSION_VAR = 'ASH_VERSION';
+
+/**
+ * How the standalone buildspecs install ASH.
+ *
+ * The ref is deferred to the `ASH_VERSION` build environment variable rather
+ * than baked in, so a consumer can scan with a different ASH release by
+ * overriding one variable instead of editing a generated file. The variable's
+ * default, declared in each document's `env.variables`, is the pinned
+ * `DEFAULT_ASH_REF`.
+ */
+const STANDALONE_INSTALL: InstallOptions = {
+  mode: ASHInstallMode.PIP,
+  version: `$${VERSION_VAR}`,
+  sourceRepository: DEFAULT_ASH_REPOSITORY,
+};
 
 /** Install commands for the standalone buildspecs, which use pip. */
 function standaloneInstall(): string[] {
-  return installCommands(
-    ASHInstallMode.PIP,
-    undefined,
-    'https://github.com/awslabs/automated-security-helper',
-  );
+  return installCommands(STANDALONE_INSTALL);
 }
 
 /**
@@ -79,6 +94,7 @@ export function scanBuildspec(): YamlMap {
       variables: {
         [SOURCE_DIR_VAR]: '.',
         [OUTPUT_DIR_VAR]: '.ash/ash_output',
+        [VERSION_VAR]: DEFAULT_ASH_REF,
       },
     },
     phases: {
@@ -94,8 +110,7 @@ export function scanBuildspec(): YamlMap {
             severityThreshold: ASHSeverityThreshold.LOW,
             extraScanArguments: [],
           },
-          ASHInstallMode.PIP,
-          undefined,
+          STANDALONE_INSTALL,
         ),
       },
     },
@@ -121,6 +136,7 @@ export function shardBuildspec(): YamlMap {
       variables: {
         [SOURCE_DIR_VAR]: '.',
         [OUTPUT_DIR_VAR]: '.ash/ash_output',
+        [VERSION_VAR]: DEFAULT_ASH_REF,
         [SHARD_INDEX_VAR]: '0',
         [SHARD_COUNT_VAR]: '1',
       },
@@ -140,8 +156,7 @@ export function shardBuildspec(): YamlMap {
             severityThreshold: ASHSeverityThreshold.LOW,
             extraScanArguments: [],
           },
-          ASHInstallMode.PIP,
-          undefined,
+          STANDALONE_INSTALL,
         ),
       },
     },
@@ -168,6 +183,7 @@ export function mergeBuildspec(): YamlMap {
     env: {
       variables: {
         [OUTPUT_DIR_VAR]: '.ash/ash_output',
+        [VERSION_VAR]: DEFAULT_ASH_REF,
         [SHARD_RESULTS_VAR]: '',
       },
     },
