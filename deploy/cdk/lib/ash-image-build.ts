@@ -524,18 +524,22 @@ export class AshImageBuild extends Construct {
           '# system interpreter, while `ash` runs from its own environment.',
           'RUN python3 -m pip install --no-cache-dir --break-system-packages \\',
           '      awslambdaric boto3 git-remote-codecommit',
-          '# Lambda requires the image to run on a READ-ONLY root filesystem with only',
-          '# /tmp writable, and it also sets its own PATH',
-          '# (/usr/local/bin:/usr/bin/:/bin:/opt/bin), shadowing the one the ASH stages',
-          '# built up. Both break the scanners, so the handler has to undo them at scan',
-          '# time — see `_scan_env` in ash_gate_handler.py. It cannot reconstruct these',
-          '# two values on its own, because by the time it runs, Lambda has already',
-          '# replaced PATH and nothing records where ASH put its uv tools. So capture',
-          '# both here, at build time, under names Lambda does not touch.',
+          // Lambda requires the image to run on a READ-ONLY root filesystem with only
+          // /tmp writable, and it also sets its own PATH
+          // (/usr/local/bin:/usr/bin/:/bin:/opt/bin), shadowing the one the ASH stages
+          // built up. Both break the scanners, so the handler undoes them at scan time
+          // -- see the note above CODECOMMIT_GATE_HANDLER in ash-container-scripts.ts.
+          // The handler cannot reconstruct these two values itself: by the time it
+          // runs, Lambda has already replaced PATH, and nothing records where ASH put
+          // its uv tools. So capture both here, at build time, under names Lambda does
+          // not touch. The `ci` stage runs as root, which is why the tool dir is under
+          // /root; recorded here rather than hardcoded in the handler so a change to
+          // the ASH stage layout shows up next to the FROM that selected it.
+          //
+          // Deliberately TypeScript comments, not Dockerfile `#` ones: this body is
+          // copied verbatim into the synthesized template, and AshCodeCommitGate is
+          // launched inline against CloudFormation's 51,200-byte TemplateBody cap.
           'ENV ASH_IMAGE_PATH="${PATH}"',
-          '# The `ci` stage runs as root, so uv installed bandit, checkov and semgrep',
-          '# under /root. Recorded rather than hardcoded in the handler so that a change',
-          '# to the ASH stage layout shows up next to the FROM that selected it.',
           'ENV ASH_BAKED_UV_TOOL_DIR="/root/.local/share/uv/tools"',
           'COPY ash_gate_handler.py /var/task/ash_gate_handler.py',
           'WORKDIR /var/task',
