@@ -102,6 +102,13 @@ variable "min_severity" {
   # therefore produce a working pipeline gating at a threshold nobody chose. This
   # validation is what turns that into an error.
   #
+  # Worth knowing which way that fails: rank 1 is "low", the strictest setting, so
+  # the silent substitution errs toward failing builds rather than passing them. A
+  # fat-fingered "hihg" gets a pipeline that fails on medium findings with no
+  # explanation -- irritating and hard to diagnose, but it cannot quietly weaken a
+  # gate. That is why this is a correctness-and-clarity fix rather than a
+  # vulnerability.
+  #
   # "info" is deliberately not accepted: ASH has no such rank, so it would be
   # silently reinterpreted as "low". "none" is not accepted either, because rank 0
   # skips the severity filter path entirely rather than meaning "everything".
