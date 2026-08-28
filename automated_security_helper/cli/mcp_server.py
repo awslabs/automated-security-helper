@@ -711,10 +711,20 @@ def list_scanners() -> list:
 
     Returns one entry per scanner with:
       name: scanner config name (e.g. "bandit", "checkov")
-      version: detected version string, or null if unavailable
-      dependencies_satisfied: whether the scanner's runtime dependencies are met
+      version: detected version string, or null when the scanner reports none.
+        The format is whatever each scanner reports and is not consistent between
+        them -- bandit reports "bandit 1.9.4" where checkov reports "3.3.11".
+      dependencies_satisfied: true, false, or null when it could not be
+        determined, which happens when a scanner cannot be constructed or its own
+        dependency check raises. Treat null as "unknown", not as "not met": a
+        scanner reporting null may well run.
       offline_strategy: one of "bundled", "cache_flags", "skip_offline", "unknown"
       enabled: whether the scanner is enabled in the default ASH config
+
+    dependencies_satisfied describes this deployment's environment at the moment of
+    the call. It is not a prediction about a scan: a scanner reporting true can
+    still fail on a given target, and a scan may skip a scanner for reasons of
+    configuration rather than dependencies.
     """
     try:
         return mcp_list_scanners()
