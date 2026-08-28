@@ -161,9 +161,30 @@ terraform init -backend=false
 terraform validate
 ```
 
-No module or example was applied, and nothing here has been run against a real
-account. `terraform validate` checks syntax, provider schema, and references; note
-that it does **not** evaluate variable validation rules, which fire at plan time.
+`terraform validate` checks syntax, provider schema, and references. It does
+**not** evaluate variable validation rules, so a module whose validation condition
+is wrong — including a cross-variable rule — passes validate and only errors at
+plan time. A green fmt-and-validate run says the configuration parses, not that its
+input contracts work.
+
+That gap is covered separately, and without an AWS account:
+
+```console
+deploy/terraform/tests/validate-inputs.sh
+```
+
+Variable validation is evaluated *before* Terraform initializes the provider or
+needs credentials, so a plan carrying a deliberately invalid value fails on the
+rule's own `error_message` and never reaches AWS. The script exercises 17 cases
+across all five modules in **both** directions — an invalid value must produce the
+message, and a valid one must not — because a check that only ever feeds in the
+failing value cannot tell "the rule fired" apart from "plan failed for an unrelated
+reason and the grep happened to match". In the passing direction the plan still
+fails, on credentials, and that later failure is the evidence that validation was
+passed rather than skipped.
+
+No module or example has been applied, and nothing here has been run against a real
+account.
 
 Do not run `terraform apply` from an example without reading its README first —
 several create NAT gateways, load balancers, and CodeBuild projects that cost money
