@@ -21,10 +21,20 @@ import { ASHInstallMode, ASHSeverityThreshold } from './types';
 /**
  * Upper bound on `shardCount`.
  *
- * Not a service limit. Sharding splits the scanner list, so once the shard count
- * passes the number of scanners the extra shards have nothing to run and cost a
- * CodeBuild start each. A typo like `shardCount: 300` should fail loudly rather
- * than bill for 300 empty builds.
+ * Not a service limit, and not a correctness limit either. Sharding splits the
+ * scanner list, so once the shard count passes the number of scanners the extra
+ * shards are assigned nothing. They still record shard provenance and still
+ * merge -- measured at 50 shards over a 5-scanner tree, where 45 shards came
+ * back with an empty assignment and the merged findings were identical to one
+ * unsharded scan. So an over-large count is wasteful, not broken: it costs a
+ * CodeBuild start per surplus shard. This bound exists so a typo like
+ * `shardCount: 300` fails loudly instead of billing for 300 empty builds.
+ *
+ * The value is load-bearing outside this package: `ash merge` has a regression
+ * test (`test_a_shard_count_far_above_the_scanner_count_still_merges`) pinned at
+ * this exact ceiling, guarding against a future coverage check deciding an empty
+ * assignment is suspicious and refusing it. Raising this bound breaks nothing on
+ * the merge side, but it does move the ceiling out of what that test covers.
  */
 const MAX_SHARD_COUNT = 50;
 
