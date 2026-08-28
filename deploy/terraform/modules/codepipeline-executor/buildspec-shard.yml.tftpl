@@ -1,0 +1,97 @@
+version: 0.2
+
+# One shard of a sharded ASH scan.
+#
+# Runs `ash scan --shard-index <i> --shard-count <n>` over the source artifact and
+# uploads this shard's output to a per-execution S3 prefix. The merge action
+# collects all of them.
+#
+# Two things this buildspec must get right:
+#
+#   1. Findings must not fail the action. A shard that owns no findings exits 0,
+#      so shard exit codes carry no information about the scan as a whole, and
+#      failing here would stop the pipeline before the merge action could form a
+#      verdict. Hence --no-fail-on-findings.
+#   2. A scan that *crashes* must fail the action. With --no-fail-on-findings, a
+#      non-zero exit means a real failure rather than findings, so it is safe to
+#      propagate. Failing here stops the pipeline rather than letting the merge
+#      action produce a clean-looking verdict from incomplete data.
+#
+# The build runs inside the ASH image, so `ash` is on PATH directly. That image
+# carries no AWS CLI, so S3 transfers go through a small boto3 helper.
+#
+# Shell variables use the $NAME form so the template renderer and the shell cannot
+# be confused for one another.
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -eu
+        : "$SHARD_INDEX"
+        : "$SHARD_COUNT"
+        : "$PIPELINE_EXECUTION_ID"
+        : "$RESULTS_BUCKET"
+        : "$RESULTS_PREFIX"
+        echo "ASH scan shard $SHARD_INDEX of $SHARD_COUNT"
+        echo "  execution: $PIPELINE_EXECUTION_ID"
+      - |
+        set -eu
+        printf '%s' '${s3_sync_b64}' | base64 -d > ash_s3_sync.py
+
+  build:
+    commands:
+      # errexit is deliberately disabled around this one command so the exit code
+      # can be inspected. Using `if ! ash ...` instead would disable errexit for
+      # the whole compound statement, including anything it called.
+      # ash-container-init is invoked explicitly rather than relied on as the
+      # image ENTRYPOINT. CodeBuild runs buildspec commands through its own agent
+      # and does not execute the image's entrypoint — a custom image whose
+      # entrypoint took over would never run a buildspec at all. Without this,
+      # the base config in SSM would never be written to disk and every shard
+      # would silently scan with ASH's defaults instead.
+      #
+      # It materializes the config, then execs the rest of the argv, so it is
+      # correct even if a future CodeBuild release did run the entrypoint: the
+      # work is idempotent.
+      - |
+        set -eu
+        mkdir -p ash_output
+        set +e
+        /usr/local/bin/ash-container-init ash scan \
+          --source-dir . \
+          --output-dir ash_output \
+          --shard-index "$SHARD_INDEX" \
+          --shard-count "$SHARD_COUNT" \
+          --no-fail-on-findings
+        ASH_EXIT=$?
+        set -e
+        echo "ash scan exited $ASH_EXIT"
+
+        # With --no-fail-on-findings, a non-zero exit is a genuine failure, not a
+        # report of findings. Stop now: a silently missing shard would let the
+        # merge action call the whole scan clean.
+        if [ "$ASH_EXIT" -ne 0 ]; then
+          echo "shard $SHARD_INDEX failed to complete its scan; failing the action" >&2
+          exit "$ASH_EXIT"
+        fi
+
+        if [ ! -f ash_output/ash_aggregated_results.json ]; then
+          echo "shard $SHARD_INDEX produced no ash_aggregated_results.json; failing the action" >&2
+          exit 1
+        fi
+
+  post_build:
+    commands:
+      - |
+        set -eu
+        KEY_PREFIX="$RESULTS_PREFIX/$PIPELINE_EXECUTION_ID/shard-$SHARD_INDEX"
+        python3 ash_s3_sync.py upload ash_output "$RESULTS_BUCKET" "$KEY_PREFIX"
+
+        # A marker written last, after the results are already uploaded. The merge
+        # action requires one marker per shard, so a partial upload cannot pass
+        # for a complete shard.
+        mkdir -p marker
+        printf 'shard=%s count=%s exit=0\n' "$SHARD_INDEX" "$SHARD_COUNT" > marker/shard.complete
+        python3 ash_s3_sync.py upload marker "$RESULTS_BUCKET" "$KEY_PREFIX"
+        echo "uploaded shard $SHARD_INDEX to s3://$RESULTS_BUCKET/$KEY_PREFIX/"

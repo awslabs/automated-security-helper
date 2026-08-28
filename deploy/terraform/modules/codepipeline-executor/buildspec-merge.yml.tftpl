@@ -1,0 +1,106 @@
+version: 0.2
+
+# Collect action: merge every shard's results and form the pipeline's verdict.
+#
+# This action owns the verdict. The shard actions deliberately do not, because a
+# shard that happens to own no findings exits 0 — so a shard's exit code says
+# nothing about the scan as a whole, and reading it as a verdict would report a
+# clean scan whenever the findings landed in some other shard.
+#
+# Results travel through S3 rather than as pipeline artifacts because a CodeBuild
+# action accepts only 1 to 5 input artifacts. That caps artifact fan-in at five
+# shards, whereas a stage may hold up to 100 parallel actions, so S3 is what lets
+# shard_count exceed five.
+#
+# The build runs inside the ASH image, so `ash` is on PATH directly. That image
+# carries no AWS CLI, so S3 transfers go through a small boto3 helper.
+#
+# Shell variables use the $NAME form so the template renderer and the shell cannot
+# be confused for one another.
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -eu
+        : "$SHARD_COUNT"
+        : "$PIPELINE_EXECUTION_ID"
+        : "$RESULTS_BUCKET"
+        : "$RESULTS_PREFIX"
+        : "$BLOCKING_SEVERITIES"
+        echo "Merging $SHARD_COUNT shard(s) for execution $PIPELINE_EXECUTION_ID"
+      - |
+        set -eu
+        printf '%s' '${s3_sync_b64}' | base64 -d > ash_s3_sync.py
+        printf '%s' '${verdict_script_b64}' | base64 -d > ash_merge_verdict.py
+
+  build:
+    commands:
+      - |
+        set -eu
+        rm -rf shard-results merged
+        mkdir -p shard-results merged
+        python3 ash_s3_sync.py download \
+          "$RESULTS_BUCKET" \
+          "$RESULTS_PREFIX/$PIPELINE_EXECUTION_ID" \
+          shard-results
+
+      # Completeness check before merging. Without it, a shard whose upload never
+      # landed would simply be absent, and merging the remainder would produce a
+      # confident verdict over part of the codebase.
+      - |
+        set -eu
+        MISSING=""
+        i=0
+        while [ "$i" -lt "$SHARD_COUNT" ]; do
+          if [ ! -f "shard-results/shard-$i/shard.complete" ]; then
+            MISSING="$MISSING $i"
+          fi
+          i=$((i + 1))
+        done
+
+        if [ -n "$MISSING" ]; then
+          echo "missing completion markers for shard(s):$MISSING" >&2
+          echo "refusing to merge a partial result set: a verdict over some of the" >&2
+          echo "shards would look identical to a verdict over all of them." >&2
+          exit 1
+        fi
+        echo "all $SHARD_COUNT shard(s) present"
+
+      # --results is repeatable and accepts a file or a directory. One flag per
+      # shard directory rather than a single parent directory, so the invocation
+      # states how many shards it expects.
+      #
+      # ash-container-init is invoked explicitly for the same reason as in the
+      # shard buildspec: CodeBuild runs buildspec commands through its own agent
+      # rather than the image ENTRYPOINT, so the base config would otherwise
+      # never reach disk and the merge would run against different configuration
+      # than the shards did.
+      - |
+        set -eu
+        set -- /usr/local/bin/ash-container-init ash merge --output-dir merged
+        i=0
+        while [ "$i" -lt "$SHARD_COUNT" ]; do
+          set -- "$@" --results "shard-results/shard-$i"
+          i=$((i + 1))
+        done
+        echo "running: $*"
+        "$@"
+
+  post_build:
+    commands:
+      - |
+        set -eu
+        python3 ash_s3_sync.py upload merged "$RESULTS_BUCKET" \
+          "$RESULTS_PREFIX/$PIPELINE_EXECUTION_ID/merged"
+        echo "merged results at s3://$RESULTS_BUCKET/$RESULTS_PREFIX/$PIPELINE_EXECUTION_ID/merged/"
+
+      # The verdict is computed from the merged results, not from `ash merge`'s
+      # exit code. The shard flag contract fixes --shard-index, --shard-count,
+      # --results, and --output-dir; it does not specify a gating flag on merge,
+      # so relying on one would be relying on behavior nobody promised.
+      - |
+        set -eu
+        python3 ash_merge_verdict.py \
+          --results merged/ash_aggregated_results.json \
+          --blocking "$BLOCKING_SEVERITIES"

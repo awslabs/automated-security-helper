@@ -1,0 +1,98 @@
+version: 0.2
+
+# Builds the ASH container image into the customer's own ECR repository.
+#
+# ASH publishes no image to any public registry, so this build is the bootstrap
+# for every deployment target, not merely a freshness mechanism. Nothing can be
+# deployed until it has succeeded at least once.
+#
+# Shell variables below use the $NAME form rather than $${NAME} so that the
+# Terraform template renderer and the shell cannot be confused for one another.
+# The three base64 blobs are the only rendered values.
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -eu
+        echo "ASH image build"
+        echo "  source ref  : $ASH_VERSION"
+        echo "  source repo : $ASH_REPO_CLONE_URL"
+        echo "  build target: $ASH_IMAGE_TARGET"
+        echo "  offline mode: $ASH_OFFLINE"
+        echo "  architecture: $TARGET_ARCH"
+        echo "  destination : $IMAGE_URI"
+      - |
+        set -eu
+        aws ecr get-login-password --region "$AWS_REGION" \
+          | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+  build:
+    commands:
+      # Fetch the pinned revision. `git fetch <ref>` accepts a tag, a branch, or
+      # a full commit SHA; `git clone --branch` rejects a SHA outright, which
+      # would make it impossible to pin a deployment to an exact commit.
+      - |
+        set -eu
+        rm -rf ash-src
+        mkdir -p ash-src
+        (
+          cd ash-src
+          git init -q
+          git remote add origin "$ASH_REPO_CLONE_URL"
+          git fetch -q --depth 1 origin "$ASH_VERSION"
+          git checkout -q FETCH_HEAD
+          echo "resolved $ASH_VERSION to $(git rev-parse HEAD)"
+        )
+
+      # INSTALL_ASH_REVISION=LOCAL builds from the context we just checked out.
+      # The Dockerfile's own non-LOCAL path would re-clone using
+      # `git clone --branch`, which cannot resolve a commit SHA, so doing the
+      # fetch here and handing over a local tree is what makes SHA pinning work.
+      - |
+        set -eu
+        export DOCKER_BUILDKIT=1
+        (
+          cd ash-src
+          docker build \
+            --target "$ASH_IMAGE_TARGET" \
+            --build-arg INSTALL_ASH_REVISION=LOCAL \
+            --build-arg OFFLINE="$ASH_OFFLINE" \
+            --build-arg BUILD_DATE_EPOCH="$(date +%s)" \
+            -t ash-base:build \
+            .
+        )
+
+      # Layer the deploy-time entrypoint and MCP launcher onto the ASH image.
+      - |
+        set -eu
+        export DOCKER_BUILDKIT=1
+        printf '%s' '${wrapper_dockerfile_b64}' | base64 -d > wrapper.Dockerfile
+        printf '%s' '${init_script_b64}' | base64 -d > ash-container-init
+        printf '%s' '${serve_script_b64}' | base64 -d > ash-mcp-serve
+
+        # A git ref may contain characters a Docker tag may not (a slash in a
+        # branch name, for one), and a tag may not lead with '.' or '-'.
+        SAFE_REF="$(printf '%s' "$ASH_VERSION" | sed 's/[^A-Za-z0-9._-]/-/g' | cut -c1-90)"
+        VERSIONED_TAG="$ASH_VERSION_TAG_PREFIX$SAFE_REF"
+        echo "immutable audit tag: $VERSIONED_TAG"
+
+        docker build \
+          -f wrapper.Dockerfile \
+          --build-arg ASH_BASE_IMAGE=ash-base:build \
+          -t "$IMAGE_URI" \
+          -t "$ECR_REPOSITORY_URL:$VERSIONED_TAG" \
+          .
+
+        # Hand the computed tag to post_build without recomputing it.
+        printf '%s' "$VERSIONED_TAG" > versioned_tag.txt
+
+  post_build:
+    commands:
+      - |
+        set -eu
+        VERSIONED_TAG="$(cat versioned_tag.txt)"
+        docker push "$IMAGE_URI"
+        docker push "$ECR_REPOSITORY_URL:$VERSIONED_TAG"
+        echo "pushed $IMAGE_URI"
+        echo "pushed $ECR_REPOSITORY_URL:$VERSIONED_TAG"
