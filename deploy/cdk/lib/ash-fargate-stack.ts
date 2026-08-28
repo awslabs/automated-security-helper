@@ -276,6 +276,34 @@ export class AshFargateStack extends Stack {
     // The image must exist before the service tries to place a task.
     service.node.addDependency(image.bootstrap!);
 
+    /**
+     * `open: false`, so this stack adds NO ingress rule and the endpoint starts
+     * unreachable — from outside the VPC and from inside it.
+     *
+     * That is deliberate, and the outputs below say so rather than implying the
+     * endpoint is usable on deployment. An observed stack had exactly one rule on
+     * this security group, allow-all egress, while the `McpEndpoint` output
+     * described the endpoint as "reachable from inside the VPC or over a
+     * peered/VPN path". It was reachable from nowhere.
+     *
+     * WHAT WAS REJECTED, AND WHY NOT JUST OPEN IT TO THE VPC
+     * ----------------------------------------------------
+     * - Ingress from this VPC's CIDR: rejected as the appearance of a fix. This
+     *   stack creates its OWN VPC and puts nothing in it but the ASH tasks, so
+     *   that rule would admit a range containing no clients. Every real consumer
+     *   arrives from somewhere else — a peered VPC, a VPN, a transit gateway —
+     *   and none of those are inside this CIDR. It would widen access without
+     *   making the endpoint usable.
+     * - A new `McpIngressCidr` parameter: rejected here, though it is the right
+     *   shape eventually. The parameter surface in `ash-config.ts` is a contract
+     *   shared with the Terraform mirror under `deploy/terraform/`, and adding a
+     *   name on one side only desynchronizes the two. That is a change to make
+     *   across both implementations at once, not half of one.
+     *
+     * So the posture stays closed and the stack instead tells the adopter exactly
+     * what to run, via the `McpSecurityGroupId` output. Being closed is
+     * defensible; being closed while claiming otherwise is not.
+     */
     const listener = loadBalancer.addListener('Listener', {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
@@ -333,9 +361,23 @@ export class AshFargateStack extends Stack {
 
     new CfnOutput(this, 'McpEndpoint', {
       description:
-        'MCP endpoint. Internal by default, so reachable from inside the VPC or over a ' +
-        'peered/VPN path. Append the McpMountPath value.',
+        'MCP endpoint, once you allow traffic to it. The load balancer is internal AND ' +
+        'its security group has no ingress rule on deployment, so this address is not ' +
+        'reachable from anywhere yet — see McpSecurityGroupId. Append the McpMountPath ' +
+        'value. The listener is plain HTTP.',
       value: Fn.join('', ['http://', loadBalancer.loadBalancerDnsName]),
+    });
+    new CfnOutput(this, 'McpSecurityGroupId', {
+      description:
+        "The load balancer's security group, which starts with no ingress rule. Authorize " +
+        'the range your MCP clients come from, for example: aws ec2 ' +
+        'authorize-security-group-ingress --group-id <this> --protocol tcp --port 80 ' +
+        '--cidr <your-client-cidr>. Prefer --source-group over --cidr where the client ' +
+        'has its own security group.',
+      // The ALB L2 creates exactly one security group, and this stack adds none,
+      // so indexing it is a synth-time fact rather than an assumption about
+      // deploy-time ordering. It is asserted in ash-fargate-stack.test.ts.
+      value: loadBalancer.connections.securityGroups[0].securityGroupId,
     });
     new CfnOutput(this, 'LoadBalancerDnsName', {
       description:

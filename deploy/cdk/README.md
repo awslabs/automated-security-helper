@@ -324,6 +324,24 @@ first:
 - **The Fargate listener is HTTP, not HTTPS.** A certificate ARN would be needed,
   and the shared parameter surface has no slot for one. The load balancer is
   internal by default to match.
+- **The Fargate endpoint is unreachable until you open it.** The listener is created
+  closed, so the load balancer's security group has allow-all egress and **no
+  ingress rule at all** — the endpoint is reachable from nowhere on deployment, not
+  even from inside the VPC. This is deliberate for an endpoint that accepts source
+  code and returns findings about it, but it does mean the stack is not usable the
+  moment it finishes. The `McpSecurityGroupId` output names the group to authorize:
+
+  ```sh
+  aws ec2 authorize-security-group-ingress --group-id <McpSecurityGroupId> \
+    --protocol tcp --port 80 --cidr <your-client-cidr>
+  ```
+
+  Prefer `--source-group` over `--cidr` when the client has its own security group.
+  Opening the stack's own VPC CIDR instead was rejected: this stack creates its own
+  VPC and puts nothing in it but the ASH tasks, so that rule would admit a range
+  with no clients in it while still widening access. A parameter for the allowed
+  CIDR is the right long-term shape, but it belongs to the shared parameter contract
+  and has to land in the Terraform mirror at the same time.
 - **An unused Secrets Manager secret is created even with auth disabled.** The
   alternative was a CloudFormation Condition gating the resource, which makes every
   IAM grant that mentions its ARN an invalid template. Costs a few cents a month.

@@ -2189,7 +2189,7 @@
  },
  "Outputs": {
   "McpEndpoint": {
-   "Description": "MCP endpoint. Internal by default, so reachable from inside the VPC or over a peered/VPN path. Append the McpMountPath value.",
+   "Description": "MCP endpoint, once you allow traffic to it. The load balancer is internal AND its security group has no ingress rule on deployment, so this address is not reachable from anywhere yet — see McpSecurityGroupId. Append the McpMountPath value. The listener is plain HTTP.",
    "Value": {
     "Fn::Join": [
      "",
@@ -2202,6 +2202,15 @@
        ]
       }
      ]
+    ]
+   }
+  },
+  "McpSecurityGroupId": {
+   "Description": "The load balancer's security group, which starts with no ingress rule. Authorize the range your MCP clients come from, for example: aws ec2 authorize-security-group-ingress --group-id <this> --protocol tcp --port 80 --cidr <your-client-cidr>. Prefer --source-group over --cidr where the client has its own security group.",
+   "Value": {
+    "Fn::GetAtt": [
+     "LoadBalancerSecurityGroupA28D6DD7",
+     "GroupId"
     ]
    }
   },
