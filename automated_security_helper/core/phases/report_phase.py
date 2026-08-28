@@ -2,10 +2,117 @@
 
 from pathlib import Path
 import traceback
+from typing import Dict, Iterable, List, Sequence
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.base.reporter_plugin import (
+    reporter_format_name,
+    reporter_matches_requested_formats,
+)
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
+
+#: A reporter for this format exists but was not selected -- it is disabled in
+#: config, its dependencies are unsatisfied, or ``--python-based-plugins-only``
+#: excluded it. Distinguished from :data:`FORMAT_NO_REPORTER` because the two send
+#: the operator somewhere different: this one is a config or environment change,
+#: and the other will not work however it is configured.
+FORMAT_REPORTER_UNAVAILABLE = "reporter-unavailable"
+
+#: No reporter produces this format at all. ``ExportFormat`` carries members that
+#: name no reporter -- ``aggregated`` and ``dict`` are internal result shapes
+#: rather than report formats, ``asff`` is the Security Hub reporter's payload but
+#: that reporter is named ``aws-security-hub``, and ``custom`` is a placeholder --
+#: so the CLI accepts all of them and only this check tells the operator that
+#: asking for one produces nothing.
+FORMAT_NO_REPORTER = "no-reporter"
+
+
+def unsatisfied_output_formats(
+    output_formats: Iterable[object],
+    selected_instances: Sequence[object],
+    all_instances: Sequence[object],
+) -> Dict[str, str]:
+    """Requested formats that will produce no report, and why.
+
+    Why this exists
+    ---------------
+    ``--output-formats`` is validated against ``ExportFormat`` at the CLI, so a
+    typo fails loudly. What did *not* fail loudly was naming a perfectly valid
+    format that no reporter would answer: the run selected zero reporters, wrote
+    nothing, and exited 0. An empty ``reports/`` directory was the operator's only
+    signal, and the closing scan summary still pointed at report paths that were
+    never written. Silence was the defect; the mismatched comparison in
+    :func:`~automated_security_helper.base.reporter_plugin.reporter_matches_requested_formats`
+    was merely its most common cause.
+
+    The two reasons are reported separately on purpose. Collapsing them into one
+    "no report for X" message would tell an operator who asked for ``yaml`` --
+    which ships ``enabled: False`` -- that ASH cannot produce yaml, when in fact
+    they need one line of config. Naming the cause is the difference between an
+    actionable message and a misleading one.
+
+    Args:
+        output_formats: What the operator asked for. Empty yields an empty result:
+            no explicit request means nothing was asked for and denied.
+        selected_instances: Reporters that survived every filter and will run.
+        all_instances: Every reporter that could be constructed, before the
+            enabled/dependency/python-only filters. Supplies the evidence that a
+            format's reporter exists but was excluded.
+
+    Returns:
+        Format name -> one of :data:`FORMAT_REPORTER_UNAVAILABLE` or
+        :data:`FORMAT_NO_REPORTER`. Empty when every requested format will be
+        produced, which is the normal case.
+    """
+    requested = [str(getattr(fmt, "value", fmt)) for fmt in output_formats or []]
+    if not requested:
+        return {}
+
+    def names(instances: Sequence[object]) -> set:
+        return {
+            str(name)
+            for name in (reporter_format_name(inst) for inst in instances)
+            if name is not None
+        }
+
+    selected_names = names(selected_instances)
+    known_names = names(all_instances)
+
+    unsatisfied: Dict[str, str] = {}
+    for fmt in requested:
+        if fmt in selected_names:
+            continue
+        unsatisfied[fmt] = (
+            FORMAT_REPORTER_UNAVAILABLE if fmt in known_names else FORMAT_NO_REPORTER
+        )
+    return unsatisfied
+
+
+def _log_unsatisfied_output_formats(unsatisfied: Dict[str, str]) -> None:
+    """Warn, once per format, that a requested format produces nothing.
+
+    Warning rather than raising. A run that was asked for ``markdown,asff`` must
+    still write the markdown report; failing the whole scan over one unproducible
+    format would cost the operator every other report and, for ``ash scan``, the
+    findings verdict along with it. The case where *nothing* was produced is
+    additionally reported by the caller's existing "no enabled reporters" warning.
+    """
+    for fmt, reason in sorted(unsatisfied.items()):
+        if reason == FORMAT_REPORTER_UNAVAILABLE:
+            ASH_LOGGER.warning(
+                f"No report will be written for requested format '{fmt}': its "
+                f"reporter is present but not active. It is disabled in the "
+                f"configuration, its dependencies are unsatisfied, or "
+                f"--python-based-plugins-only excluded it. Enable it under "
+                f"'reporters' in the ASH config to get this report."
+            )
+        else:
+            ASH_LOGGER.warning(
+                f"No report will be written for requested format '{fmt}': no "
+                f"reporter produces it. The format is accepted by --output-formats "
+                f"but has no reporter behind it."
+            )
 
 
 class ReportPhase(EnginePhase):
@@ -87,7 +194,14 @@ class ReportPhase(EnginePhase):
         )
 
         # Apply the format filter on top of the base enabled/deps/python check.
-        enabled_reporters = []
+        #
+        # Matched on the reporter's configured name, not on its extension. The
+        # extension is a filename suffix and the requested formats are format
+        # names; comparing them matched only the four reporters where the two
+        # strings coincide and silently skipped the rest. See
+        # reporter_matches_requested_formats for the full account and for why
+        # renaming the extensions instead was rejected.
+        enabled_reporters: List[object] = []
         enabled_reporter_names = []
         for plugin_instance in base_filtered:
             display_name = plugin_instance.__class__.__name__
@@ -96,23 +210,31 @@ class ReportPhase(EnginePhase):
             ):
                 display_name = plugin_instance.config.name
 
-            if (
-                output_formats
-                and hasattr(plugin_instance, "config")
-                and hasattr(plugin_instance.config, "extension")
-            ):
-                extension = plugin_instance.config.extension
-                if extension not in output_formats:
-                    ASH_LOGGER.debug(
-                        f"Reporter {display_name} format '{extension}' not in requested formats {output_formats}, skipping"
-                    )
-                    continue
+            if not reporter_matches_requested_formats(plugin_instance, output_formats):
+                ASH_LOGGER.debug(
+                    f"Reporter {display_name} format "
+                    f"'{reporter_format_name(plugin_instance)}' not in requested "
+                    f"formats {output_formats}, skipping"
+                )
+                continue
 
             enabled_reporters.append(plugin_instance)
             enabled_reporter_names.append(display_name)
 
         ASH_LOGGER.verbose(
             f"Prepared {len(enabled_reporter_names)} enabled reporters: {enabled_reporter_names}"
+        )
+
+        # Account for every requested format that will produce nothing. Checked
+        # against all_reporter_instances rather than base_filtered so that a
+        # reporter which exists but is disabled is reported as disabled instead of
+        # as nonexistent.
+        _log_unsatisfied_output_formats(
+            unsatisfied_output_formats(
+                output_formats=output_formats,
+                selected_instances=enabled_reporters,
+                all_instances=all_reporter_instances,
+            )
         )
 
         # Create the main report task with initial progress
