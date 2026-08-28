@@ -453,6 +453,105 @@ def _verify_scanner_union(
     return owner_by_scanner
 
 
+def _completed(entry: Any) -> bool:
+    """Whether one ``scanner_results`` entry represents a scanner that ran.
+
+    ERROR and MISSING are the two statuses that mean it did not. Everything else
+    -- including SKIPPED, which is how a run-wide exclusion is recorded -- counts
+    as completed, because the scanner either produced a result or was never
+    supposed to.
+
+    The status set is imported from ``run_ash_scan`` rather than re-listed, so
+    this and ``ash scan``'s gate cannot drift apart. Imported inside the function
+    for the same reason :func:`_merged_exit_code` imports from there lazily:
+    ``run_ash_scan`` pulls in ``run_ash_container`` at module scope, and there is
+    no reason for a command that does not scan to carry that import graph. There
+    is no cycle between the two modules -- ``run_ash_scan`` does not import this
+    one -- so the laziness is about cost, not about breaking a loop.
+    """
+    from automated_security_helper.interactions.run_ash_scan import (
+        _INCOMPLETE_SCANNER_STATUSES,
+    )
+
+    status = getattr(entry, "status", None)
+    status_value = getattr(status, "value", status)
+    return status_value not in _INCOMPLETE_SCANNER_STATUSES
+
+
+def _verify_shard_contributions(
+    shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
+) -> None:
+    """Refuse a merge where a shard owned scanners but completed none of them.
+
+    The distributed shape of the false-green exit code, and the one thing the
+    checks above cannot see. ``verify_shard_coverage`` reads shard *indices*;
+    :func:`_verify_scanner_union` reads which scanner *names* appear. Neither
+    reads a status. So a shard whose every scanner came back MISSING satisfies
+    both and merges into a report that reads as a complete scan of the whole tree,
+    a fraction of which never ran -- and because that fraction produced no
+    findings, the merged verdict is the same 0 a genuinely clean scan produces.
+
+    Also catches the case a status check structurally cannot: an owned scanner
+    with no entry at all, where there is no status to inspect.
+    :func:`_verify_scanner_union` catches that only when some *other* shard left a
+    skip marker under the same name, which is the usual but not the only shape.
+
+    A shard that owns nothing is not an offender. A shard count above the scanner
+    count leaves surplus shards with an empty assignment, which
+    :mod:`automated_security_helper.core.sharding` calls wasteful rather than
+    wrong; reading an empty assignment as a failure would turn an over-large
+    shard count into a pipeline that cannot merge at all.
+
+    Gated by the caller rather than unconditional, unlike every other refusal in
+    this module. Those all describe a set of shards that cannot reconstruct one
+    scan whatever the environment. This one describes an environment: four of the
+    ten default scanners are MISSING on a machine without cdk-nag, cfn-nag, grype
+    and syft installed, and refusing by default would break merges that have
+    nothing wrong with them.
+
+    Args:
+        shards: Verified shard results, with assignments, in index order.
+
+    Raises:
+        ShardCoverageError: If any shard that owned at least one scanner completed
+            none of them.
+    """
+    offenders: List[str] = []
+    for _, results, assignment in shards:
+        owned = [_normalized(name) for name in assignment.assigned_scanners]
+        if not owned:
+            continue
+
+        entries = {
+            _normalized(name): entry for name, entry in results.scanner_results.items()
+        }
+        if any(name in entries and _completed(entries[name]) for name in owned):
+            continue
+
+        detail = []
+        for name in owned:
+            entry = entries.get(name)
+            if entry is None:
+                detail.append(f"{name} (no result recorded)")
+            else:
+                status = getattr(entry, "status", None)
+                detail.append(f"{name} ({getattr(status, 'value', status)})")
+        offenders.append(
+            f"shard {assignment.shard_index} of {assignment.shard_count}: "
+            f"{', '.join(detail)}"
+        )
+
+    if offenders:
+        listed = "\n  ".join(offenders)
+        raise ShardCoverageError(
+            f"These shards completed none of the scanners they owned:\n  {listed}\n"
+            f"Their scanners contributed no findings because they did not run, not "
+            f"because there was nothing to find, so merging would report a partial "
+            f"scan as a whole one. Check whether those CI jobs had the scanners' "
+            f"tools available. Drop --fail-on-incomplete-scanners to merge anyway."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Merging
 # ---------------------------------------------------------------------------
@@ -544,6 +643,7 @@ def _merge_timing(
 
 def merge_shard_results(
     loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+    require_scanner_completion: bool = False,
 ) -> AshAggregatedResults:
     """Merge every shard's results into one report covering the whole scan.
 
@@ -559,6 +659,10 @@ def merge_shard_results(
 
     Args:
         loaded: (path, results) pairs, in any order.
+        require_scanner_completion: When True, also refuse a set where some shard
+            owned scanners and completed none of them. Off by default; see
+            :func:`_verify_shard_contributions` for why this one refusal is opted
+            into while the rest are unconditional.
 
     Returns:
         One merged ``AshAggregatedResults`` with recomputed statistics.
@@ -576,6 +680,8 @@ def merge_shard_results(
     # make the output impossible to diff across CI runs.
     shards.sort(key=lambda entry: entry[2].shard_index)
     owner_by_scanner = _verify_scanner_union(shards)
+    if require_scanner_completion:
+        _verify_shard_contributions(shards)
 
     merged = shards[0][1].model_copy(deep=True)
 
@@ -783,6 +889,20 @@ def merge_command(
             ),
         ),
     ] = None,
+    fail_on_incomplete_scanners: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--fail-on-incomplete-scanners/--no-fail-on-incomplete-scanners",
+            help=(
+                "Refuse the merge when a shard completed none of the scanners it "
+                "owned, and exit 1 when any scanner in the union is ERROR or "
+                "MISSING. Without this, a shard whose scanners never ran "
+                "contributes no findings and the merged report reads as a "
+                "complete, clean scan. Defaults to the scan configuration's "
+                "value, then to false."
+            ),
+        ),
+    ] = None,
     log_level: Annotated[
         AshLogLevel, typer.Option("--log-level", help="Set the log level.")
     ] = AshLogLevel.INFO,
@@ -828,7 +948,20 @@ def merge_command(
     parsed_formats = _parse_output_formats(output_formats)
 
     try:
-        merged = merge_shard_results(load_shard_results(results))
+        loaded = load_shard_results(results)
+        # Resolved before merging, because the contribution refusal has to happen
+        # before a merged report exists on disk. Read from the shard results' own
+        # config for the same reason the verdict is: a collector job need not have
+        # the source tree checked out, and a config file found on this host could
+        # disagree with the one the shards scanned under. The lowest-indexed shard
+        # supplies the report's identity elsewhere in this module, so it supplies
+        # this too.
+        require_completion = _resolve_require_scanner_completion(
+            loaded, fail_on_incomplete_scanners
+        )
+        merged = merge_shard_results(
+            loaded, require_scanner_completion=require_completion
+        )
     except ShardCoverageError as exc:
         # Printed rather than raised as a traceback: every one of these is an
         # operator-actionable statement about their CI matrix or artifacts, and
@@ -875,11 +1008,41 @@ def merge_command(
     )
 
     exit_code = _merged_exit_code(
-        merged, output_dir_path, min_severity, fail_on_findings
+        merged,
+        output_dir_path,
+        min_severity,
+        fail_on_findings,
+        fail_on_incomplete_scanners,
     )
     _print_merge_summary(merged, merged_file, exit_code)
     if exit_code != 0:
         raise typer.Exit(exit_code)
+
+
+def _resolve_require_scanner_completion(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+    cli_value: Optional[bool],
+) -> bool:
+    """Whether to refuse a merge whose shards completed nothing.
+
+    The CLI flag wins; otherwise the scan's own ``fail_on_incomplete_scanners``,
+    carried in the shard results; otherwise off. The same precedence
+    ``fail_on_findings`` follows, so an operator does not have to remember which
+    of the two knobs reads the config first.
+
+    Called before coverage has been verified, so the shards are in whatever order
+    ``--results`` listed them and any of them may be unstamped. Every shard of one
+    run carries the same config, so the first that carries one is as good as any;
+    reading them all would only matter for a set that is about to be refused for
+    disagreeing anyway.
+    """
+    if cli_value is not None:
+        return cli_value
+    for _, results in loaded:
+        value = getattr(results.ash_config, "fail_on_incomplete_scanners", None)
+        if isinstance(value, bool):
+            return value
+    return False
 
 
 def _merged_exit_code(
@@ -887,6 +1050,7 @@ def _merged_exit_code(
     output_dir: Path,
     min_severity: str,
     fail_on_findings: Optional[bool],
+    fail_on_incomplete_scanners: Optional[bool] = None,
 ) -> int:
     """Compute the verdict for the union using the scan's own exit-code rules.
 
@@ -901,6 +1065,12 @@ def _merged_exit_code(
     written by the SARIF reporter. When no SARIF report was requested it falls
     back to the in-memory unified metrics -- the same fallback a single scan with
     the SARIF reporter disabled takes, so parity holds either way.
+
+    Delegating also means the completeness gate is inherited rather than
+    reimplemented. It answers a narrower question than the pre-merge contribution
+    refusal: a shard that ran two of its three scanners contributed something, so
+    it is not refused, but the union is still short one scanner and this reports
+    it.
     """
     from automated_security_helper.interactions.run_ash_scan import (
         ScanOptions,
@@ -912,11 +1082,17 @@ def _merged_exit_code(
         output_dir=output_dir,
         min_severity=min_severity,
         fail_on_findings=fail_on_findings,
+        fail_on_incomplete_scanners=fail_on_incomplete_scanners,
         show_summary=False,
         progress=False,
     )
     config_fail_on_findings = getattr(merged.ash_config, "fail_on_findings", None)
-    return _compute_exit_code(merged, options, config_fail_on_findings)
+    config_fail_on_incomplete = getattr(
+        merged.ash_config, "fail_on_incomplete_scanners", None
+    )
+    return _compute_exit_code(
+        merged, options, config_fail_on_findings, config_fail_on_incomplete
+    )
 
 
 def _print_merge_summary(
@@ -941,3 +1117,20 @@ def _print_merge_summary(
             f"[bold red]ERROR (2) Exiting due to {stats.actionable} actionable "
             f"findings across the merged shards[/bold red]"
         )
+    elif exit_code == 1:
+        # Reached when the union carries an ERROR or MISSING scanner but no shard
+        # was empty enough to be refused outright. Naming the scanners matters
+        # more here than in a single scan: the operator has n CI jobs and no other
+        # way to tell which one to look at.
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+        )
+
+        incomplete = incomplete_scanners(merged)
+        if incomplete:
+            print(
+                f"[bold red]ERROR (1) Exiting because {len(incomplete)} scanner(s) "
+                f"in the merged scan did not complete[/bold red]"
+            )
+            for name, status in incomplete:
+                print(f"  [red]{name}: {status}[/red]")

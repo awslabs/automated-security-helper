@@ -115,10 +115,16 @@ class TestContainerModeConfigFailOnFindings:
 
         original_compute = mod._compute_exit_code
 
-        def spy_compute(results, opts, config_fail_on_findings=None):
+        # *args/**kwargs rather than a fixed signature: _compute_exit_code has
+        # grown a fourth argument once (config_fail_on_incomplete_scanners) and a
+        # spy that mirrors the signature exactly turns any future addition into a
+        # TypeError in a test that is not about the new argument at all.
+        def spy_compute(results, opts, config_fail_on_findings=None, *args, **kwargs):
             captured["results_type"] = type(results)
             captured["config_fof"] = config_fail_on_findings
-            return original_compute(results, opts, config_fail_on_findings)
+            return original_compute(
+                results, opts, config_fail_on_findings, *args, **kwargs
+            )
 
         mock_metric = MagicMock()
         mock_metric.actionable = 0

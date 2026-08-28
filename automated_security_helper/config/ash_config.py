@@ -466,6 +466,9 @@ class RuntimeOverridesConfig(BaseModel):
     ] = [
         # Top-level safety: never let a runtime patch flip the failure semantics.
         "/fail_on_findings",
+        # Same class of field, same reason: a client that could turn the
+        # completeness gate off could make a scan where nothing ran report clean.
+        "/fail_on_incomplete_scanners",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
@@ -713,6 +716,22 @@ class AshConfig(BaseModel):
             description="Whether to exit with non-zero code if findings are detected"
         ),
     ] = True
+
+    fail_on_incomplete_scanners: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether to exit with a non-zero code when a selected scanner did "
+                "not complete -- status ERROR (ran and failed) or MISSING "
+                "(dependencies unavailable, never ran). SKIPPED scanners are not "
+                "selected and never trip this. Independent of fail_on_findings: "
+                "one answers 'was anything found', this one answers 'did what I "
+                "asked for actually run'. Defaults to False so that environments "
+                "legitimately lacking a scanner's tool keep their current exit "
+                "codes."
+            )
+        ),
+    ] = False
 
     ash_plugin_modules: Annotated[
         List[str],

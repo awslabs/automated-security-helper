@@ -331,6 +331,25 @@ def run_ash_scan_cli_command(
             help="Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value."
         ),
     ] = None,
+    fail_on_incomplete_scanners: Annotated[
+        bool | None,
+        typer.Option(
+            help=(
+                "Exit 1 when a selected scanner did not complete -- ERROR (ran and "
+                "failed) or MISSING (dependencies unavailable, so it never ran). "
+                "Without this, a run where nothing ran exits 0, the same code as a "
+                "clean scan, because no scanner produced any finding. SKIPPED "
+                "scanners are ones you did not select and never trip it. "
+                "Independent of --fail-on-findings, and takes precedence over it "
+                "when both would fail: a partial scan's findings are real but its "
+                "clean bill of health is not. Defaults to unset, which prefers the "
+                "configuration value and then off. Note that --scanners does not "
+                "mark the scanners it leaves out as excluded, so one whose tool is "
+                "absent still reports MISSING; use --exclude-scanners to narrow a "
+                "run you intend to gate this way."
+            )
+        ),
+    ] = None,
     simple: Annotated[
         bool,
         typer.Option(
@@ -669,6 +688,7 @@ def run_ash_scan_cli_command(
         debug=debug,
         color=color,
         fail_on_findings=fail_on_findings,
+        fail_on_incomplete_scanners=fail_on_incomplete_scanners,
         ignore_suppressions=ignore_suppressions,
         min_severity=min_severity,
         changed_files_only=changed_files_only,

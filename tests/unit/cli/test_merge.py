@@ -999,6 +999,52 @@ class TestMergeCli:
         assert "Refusing to merge" in result.output
         assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
 
+    def test_the_flag_refuses_a_shard_that_completed_nothing(self, tmp_path):
+        """Through typer, so the option name itself is exercised.
+
+        A unit call to ``merge_shard_results(require_scanner_completion=True)``
+        cannot catch a misspelled option: the flag would simply never be parsed
+        and every merge would run with the gate off, which looks exactly like a
+        healthy default.
+        """
+        shards = build_shards(3)
+        _make_shard_contribute_nothing(shards[1])
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += [
+            "--output-dir",
+            str(tmp_path / "merged"),
+            "--fail-on-incomplete-scanners",
+        ]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 1, result.output
+        assert "Refusing to merge" in result.output
+        assert "completed none" in result.output
+        # No artifact at all, so a downstream job cannot consume a report that
+        # reads as a complete scan.
+        assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
+
+    def test_the_same_shards_merge_without_the_flag(self, tmp_path):
+        """The default half of the pair, through the same CLI path."""
+        shards = build_shards(3)
+        _make_shard_contribute_nothing(shards[1])
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(tmp_path / "merged"), "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        # 2 for the other shards' findings, and the merged report exists. This is
+        # today's behaviour and it stays.
+        assert result.exit_code == 2, result.output
+        assert (tmp_path / "merged" / RESULTS_FILE_NAME).is_file()
+
     def test_an_invalid_output_format_is_rejected(self, tmp_path):
         shard_paths = write_shards(tmp_path / "artifacts", build_shards(1))
 
@@ -1015,3 +1061,249 @@ class TestMergeCli:
 
         assert result.exit_code != 0
         assert "not a valid format" in result.output
+
+
+def _incomplete_entries(
+    model: AshAggregatedResults, scanner: str, status: ScannerStatus
+) -> None:
+    """Record *scanner* the way a shard records one it owned that did not run.
+
+    The mirror of :func:`_skipped_entries`, and the distinction that matters:
+    ``_skipped_entries`` writes ``excluded=True``, which is what a shard records
+    for a scanner *another* shard owns. This writes no exclusion, so the scanner
+    was this shard's to run and produced no usable result. Both halves are
+    written for the same reason ``_skipped_entries`` writes both -- the
+    ``additional_reports[name]["None"]`` marker is consulted first, so a fixture
+    that wrote only ``scanner_results`` would exercise a shape no real scan
+    produces.
+    """
+    model.scanner_results[scanner] = ScannerStatusInfo(
+        status=status,
+        excluded=False,
+        dependencies_satisfied=status is not ScannerStatus.MISSING,
+    )
+    marker = {"scanner_name": scanner, "status": status.value}
+    if status is ScannerStatus.MISSING:
+        marker["dependencies_satisfied"] = False
+    model.additional_reports[scanner] = {"None": marker}
+
+
+def _make_shard_contribute_nothing(
+    model: AshAggregatedResults, status: ScannerStatus = ScannerStatus.MISSING
+) -> List[str]:
+    """Turn every scanner *model* owns into one that did not complete.
+
+    Returns the owned scanner names, so a test can assert the refusal names them.
+    """
+    owned = list(read_shard_assignment(model).assigned_scanners)
+    model.sarif.runs[0].results = []
+    for scanner in owned:
+        _incomplete_entries(model, scanner, status)
+    return owned
+
+
+class TestShardContributionIsRefused:
+    """A present shard that completed none of its scanners is the distributed
+    shape of the false-green exit code.
+
+    ``verify_shard_coverage`` and ``_verify_scanner_union`` both pass here: the
+    index is present, exactly one shard claims each scanner, and the owning
+    shard's results do mention them. Neither looks at the *status*. So a shard
+    whose every scanner came back MISSING merges into a report that reads as a
+    complete scan of the whole tree, one third of which never ran.
+
+    Gated behind ``--fail-on-incomplete-scanners`` for the same reason the scan
+    side's gate is: four of this tree's ten default scanners are MISSING on a
+    stock workstation, so refusing by default would break merges that have
+    nothing wrong with them.
+
+    Refused before merging rather than reported afterwards. ``merge_command``
+    writes ``ash_aggregated_results.json`` and every report *before* it computes
+    an exit code, so a downstream job that consumes the artifact instead of the
+    exit code would ingest a report that reads as complete. Refusing early means
+    the file never exists.
+    """
+
+    def test_a_shard_that_completed_nothing_is_refused(self):
+        shards = build_shards(3)
+        owned = _make_shard_contribute_nothing(shards[1])
+        assert owned, "fixture must give shard 1 something to fail at"
+
+        with pytest.raises(ShardCoverageError, match=r"completed none"):
+            merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+    def test_the_refusal_names_the_shard_and_its_scanners(self):
+        shards = build_shards(3)
+        owned = _make_shard_contribute_nothing(shards[2])
+
+        with pytest.raises(ShardCoverageError) as excinfo:
+            merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+        message = str(excinfo.value)
+        assert "shard 2" in message
+        for scanner in owned:
+            assert scanner in message, (
+                f"{scanner} is one of the scanners that never ran; without it in "
+                f"the message the operator cannot tell what to look at"
+            )
+
+    def test_an_errored_shard_is_refused_too(self):
+        # ERROR (ran and failed) and MISSING (never started) are both "did not
+        # complete"; only the remedy differs.
+        shards = build_shards(3)
+        _make_shard_contribute_nothing(shards[0], status=ScannerStatus.ERROR)
+
+        with pytest.raises(ShardCoverageError, match=r"completed none"):
+            merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+    def test_a_scanner_absent_from_its_owners_results_is_refused(self):
+        # The case a status-based check structurally cannot see: the owning shard
+        # recorded no entry at all, so there is no status to inspect. Reproduced
+        # with a single shard because with two or more, another shard's skip
+        # marker puts the name in _verify_scanner_union's `seen` set and that
+        # check catches it first.
+        shard = build_shard(0, 1, SCANNERS)
+        for scanner in SCANNERS:
+            shard.scanner_results.pop(scanner, None)
+            shard.additional_reports.pop(scanner, None)
+
+        with pytest.raises(ShardCoverageError, match=r"completed none"):
+            merge_shard_results(as_loaded([shard]), require_scanner_completion=True)
+
+    def test_the_default_still_merges_a_shard_that_completed_nothing(self, tmp_path):
+        """The defect, and the behaviour the default has to preserve.
+
+        Every finding is stripped so the only signal left is completeness. One of
+        three shards ran nothing, and the merge reports a clean scan -- exit 0,
+        the same code a genuinely clean three-shard scan produces. That is the
+        distributed false green, and it is what the gate has to be *opt-in*
+        against: refusing here by default would break merges in every
+        environment that legitimately lacks a scanner's tool.
+        """
+        shards = build_shards(3)
+        for model in shards:
+            model.sarif.runs[0].results = []
+            for scanner in read_shard_assignment(model).assigned_scanners:
+                model.scanner_results[scanner] = ScannerTargetStatusInfo(
+                    status=ScannerStatus.PASSED, excluded=False
+                )
+        _make_shard_contribute_nothing(shards[1])
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert _merged_exit_code(merged, tmp_path, "low", None) == 0
+
+    def test_the_same_merge_exits_one_with_the_gate_on(self, tmp_path):
+        """The counterpart: identical fixture, gate on, verdict 1 instead of 0."""
+        shards = build_shards(3)
+        for model in shards:
+            model.sarif.runs[0].results = []
+            for scanner in read_shard_assignment(model).assigned_scanners:
+                model.scanner_results[scanner] = ScannerTargetStatusInfo(
+                    status=ScannerStatus.PASSED, excluded=False
+                )
+        _make_shard_contribute_nothing(shards[1])
+
+        # Refused before a merged report exists at all, so there is no verdict to
+        # compute -- the refusal *is* the verdict.
+        with pytest.raises(ShardCoverageError, match=r"completed none"):
+            merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+    def test_a_shard_that_owns_nothing_is_not_an_offender(self):
+        # A shard count above the scanner count leaves surplus shards with an
+        # empty assignment. core/sharding calls that wasteful rather than wrong,
+        # and TestShardedEqualsUnsharded pins that it still merges. A shard asked
+        # to run nothing cannot have failed to complete anything, so the check
+        # must not read an empty assignment as a failure -- doing so would turn an
+        # over-large shard count into a pipeline that cannot merge at all.
+        shard_count = 8
+        shards = build_shards(shard_count)
+        surplus = [
+            model
+            for model in shards
+            if not read_shard_assignment(model).assigned_scanners
+        ]
+        assert surplus, "fixture must produce at least one shard owning nothing"
+
+        merged = merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+        assert finding_keys(merged) == finding_keys(build_unsharded())
+
+    def test_a_globally_excluded_scanner_is_not_an_offender(self):
+        # A scanner the operator excluded for the whole run still has one owning
+        # shard, and that shard's SKIPPED entry is the true one (see
+        # _adopt_owning_shard_results). A shard whose only scanners were excluded
+        # run-wide completed everything it was actually asked to run.
+        shards = build_shards(3)
+        owned = list(read_shard_assignment(shards[1]).assigned_scanners)
+        shards[1].sarif.runs[0].results = []
+        for scanner in owned:
+            _skipped_entries(shards[1], scanner)
+
+        merged = merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+        assert merged is not None
+
+    def test_a_healthy_sharded_scan_is_unaffected(self):
+        merged = merge_shard_results(
+            as_loaded(build_shards(3)), require_scanner_completion=True
+        )
+
+        assert finding_keys(merged) == finding_keys(build_unsharded())
+
+
+class TestMergedExitCodeIncompleteScanners:
+    """``ash merge`` inherits the scan side's completeness gate.
+
+    The pre-merge refusal above answers "did a whole shard contribute nothing".
+    This answers the narrower question the scan side asks: is any single scanner
+    in the union incomplete? A shard that ran two scanners and lost a third
+    passes the contribution check and still merged an incomplete scan.
+    """
+
+    @staticmethod
+    def _shards_with_one_incomplete_scanner():
+        shards = build_shards(3)
+        owner = next(
+            index
+            for index, model in enumerate(shards)
+            if "grype" in read_shard_assignment(model).assigned_scanners
+        )
+        _incomplete_entries(shards[owner], "grype", ScannerStatus.MISSING)
+        return shards
+
+    def test_an_incomplete_scanner_in_the_union_exits_one(self, tmp_path):
+        merged = merge_shard_results(
+            as_loaded(self._shards_with_one_incomplete_scanner())
+        )
+
+        assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
+
+    def test_the_default_is_unchanged_by_an_incomplete_scanner(self, tmp_path):
+        merged = merge_shard_results(
+            as_loaded(self._shards_with_one_incomplete_scanner())
+        )
+
+        # 2 for the findings the other scanners did report; the incomplete grype
+        # is invisible to the default verdict, exactly as it was before.
+        assert _merged_exit_code(merged, tmp_path, "low", None, None) == 2
+
+    def test_the_scans_own_config_enables_the_gate(self, tmp_path):
+        shards = self._shards_with_one_incomplete_scanner()
+        for model in shards:
+            model.ash_config = _build_config()
+            model.ash_config.fail_on_incomplete_scanners = True
+        merged = merge_shard_results(as_loaded(shards))
+
+        # None means no CLI override, so the config carried in the shard results
+        # decides -- the same rule fail_on_findings follows.
+        assert _merged_exit_code(merged, tmp_path, "low", None, None) == 1
+
+    def test_a_cli_false_beats_a_config_true(self, tmp_path):
+        shards = self._shards_with_one_incomplete_scanner()
+        for model in shards:
+            model.ash_config = _build_config()
+            model.ash_config.fail_on_incomplete_scanners = True
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert _merged_exit_code(merged, tmp_path, "low", None, False) == 2

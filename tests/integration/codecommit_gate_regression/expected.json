@@ -1,0 +1,236 @@
+{
+  "_comment": [
+    "Expectations for the ASH CodeCommit pull-request gate regression fixture.",
+    "",
+    "Each expectation carries a 'provenance' field. 'measured' means this exact",
+    "value was observed during the 2026-08-28 deploy-validation and is quoted from",
+    "real output. 'specified' means it is the behaviour a correct gate must have",
+    "but has NOT yet been observed passing - it is the assertion, not a recording.",
+    "Do not silently promote a 'specified' value to 'measured'; re-run and record."
+  ],
+
+  "verdict_mapping": {
+    "_comment": [
+      "The gate's own exit-code-to-verdict mapping, from _verdict() in",
+      "deploy/cdk/lib/ash-container-scripts.ts. Duplicated here so the harness",
+      "derives verdicts exactly as the gate does rather than inventing its own."
+    ],
+    "0": "passed",
+    "1": "errored",
+    "2": "failed",
+    "3": "errored"
+  },
+
+  "scan_flags": {
+    "_comment": "The gate's exact flag set, from CODECOMMIT_GATE_HANDLER.",
+    "base": ["scan", "--no-progress", "--simple", "--compact-report"],
+    "changed_files_only": ["--changed-files-only", "--base-ref", "<destination-commit>"],
+    "min_severity": ["--min-severity", "medium"]
+  },
+
+  "integrity_invariants": {
+    "_comment": [
+      "These are what turn a passing verdict into trustworthy evidence. The gate",
+      "defect this fixture exists to catch produced the RIGHT verdict on the clean",
+      "case for the WRONG reason - no scanner ran. A verdict assertion alone",
+      "cannot distinguish those two states; these can.",
+      "",
+      "CRITICAL: assert on 'missing', never on 'skipped'. SKIPPED means a scanner",
+      "was deliberately not selected, which is the mechanism sharding uses to",
+      "exclude scanners (core/phases/scan_phase.py). A fixture that required",
+      "skipped == 0 would break every sharded run. MISSING means selected but its",
+      "dependencies were absent; ERROR means it ran and failed. Only those two are",
+      "faults."
+    ],
+    "summary_stats_missing_must_equal": 0,
+    "required_scanner_status_must_not_be": ["MISSING", "ERROR"],
+    "required_scanner_dependencies_satisfied": true,
+    "skipped_is_tolerated": true,
+
+    "_do_not_key_on_has_issues": [
+      "validation_summary.*.has_issues LOOKS like the signal for this and is NOT.",
+      "MEASURED 2026-08-28, on a run with four scanner tools absent:",
+      "  summary_stats                     -> missing: 4",
+      "  execution_completion_validation   -> {expected_count: 1, completed_count: 1,",
+      "                                        missing_count: 0, completion_rate: 1.0,",
+      "                                        has_issues: false}",
+      "False, with four selected scanners that never ran. 'expected' counts only",
+      "scanners actually DISPATCHED, so a MISSING scanner never enters the expected",
+      "set and cannot register as missing from it. The field under-reports exactly",
+      "the condition it appears to report.",
+      "",
+      "A fix keyed on has_issues would review well, pass a test written against the",
+      "same assumption, and do nothing. Key on the per-scanner status and on the",
+      "per-scanner status. has_issues is checked here as an ADVISORY line only and",
+      "never as a reason a case fails; assert_case.py --selftest has a dedicated",
+      "case that fails if it ever becomes load-bearing.",
+      "",
+      "Why this was nearly missed: the first run to examine this had missing=0, so",
+      "both fields agreed and the data could not distinguish them. Two signals that",
+      "agree on the run in front of you tell you nothing about whether they are",
+      "interchangeable."
+    ],
+    "validation_summary_has_issues_must_be": false,
+    "validation_summary_has_issues_is_advisory_only": true
+  },
+
+  "cases": [
+    {
+      "name": "vulnerable",
+      "description": "Adds src/vulnerable.py with bandit HIGH findings. Must be blocked.",
+      "branch": "feat/unsafe-subprocess",
+      "expected_verdict": "failed",
+      "expected_ash_exit_code": 2,
+      "provenance": "measured",
+      "required_scanners": ["bandit"],
+      "expected_bandit": {
+        "status": "FAILED",
+        "dependencies_satisfied": true,
+        "severity_counts": {
+          "critical": 0,
+          "high": 2,
+          "medium": 1,
+          "low": 1,
+          "info": 0,
+          "suppressed": 0
+        },
+        "finding_count": 4,
+        "actionable_finding_count": 3,
+        "provenance": "measured"
+      },
+      "expected_sarif_rule_ids": {
+        "_comment": "Rule id -> SARIF level, as observed. B404 is note/LOW and is below the MEDIUM threshold, so it is reported but not actionable.",
+        "B602": "error",
+        "B605": "error",
+        "B307": "error",
+        "B404": "note"
+      },
+      "measured_on": {
+        "date": "2026-08-28",
+        "where": "locally, in the deployed gate image, all filesystems writable",
+        "ash_version": "v3.7.0",
+        "image_digest": "sha256:5898cea9c3e298dc8dea5638f86a0ee9c13f37768890807987206776bc8abf07",
+        "scan_duration_seconds": 78.34,
+        "scanners_run": 10,
+        "note": "In Lambda the SAME image and flags produced exit 0 and verdict 'passed' with 5 of 10 scanners MISSING/ERROR. That is the defect."
+      }
+    },
+    {
+      "name": "clean",
+      "description": "Adds src/safe_math.py with no findings. Must pass, and must pass for the right reason.",
+      "branch": "feat/safe-math",
+      "expected_verdict": "passed",
+      "expected_ash_exit_code": 0,
+      "provenance": "specified",
+      "required_scanners": ["bandit"],
+      "expected_bandit": {
+        "status": "PASSED",
+        "dependencies_satisfied": true,
+        "actionable_finding_count": 0,
+        "provenance": "specified"
+      },
+      "expected_sarif_rule_ids": {},
+      "not_measured_because": [
+        "The local run of this case was blocked by the operator's permission",
+        "system during the 2026-08-28 validation, so its local exit code was never",
+        "observed. In Lambda it returned verdict 'passed' - but so did the",
+        "vulnerable case, with an identical all-MISSING/ERROR scanner table, so",
+        "that observation is worthless as confirmation. Run the harness to record",
+        "a real value."
+      ]
+    }
+  ],
+
+  "verdict_integrity_invariant": {
+    "_comment": [
+      "The conjunction that pins the defect: a passing verdict is legitimate ONLY",
+      "when no scanner is MISSING or ERROR. Checkable against any",
+      "(verdict, scanner-table) pair, so it needs no AWS, no Docker and no working",
+      "scanner set -- it replays a recorded observation.",
+      "",
+      "This is deliberately NOT the same assertion as integrity_invariants above.",
+      "That one says 'the scanners must have run'; it can only be evaluated on a",
+      "live scan. This one says 'if they did not run, do not claim green', which is",
+      "evaluable on a record and is the property the gate actually violated.",
+      "",
+      "WHY IT SURVIVES THE FIX: post-fix, the same scanner table must produce a",
+      "non-passing verdict. Only expected_verdict_after_fix below changes; the",
+      "invariant, the recorded table and the harness all stay as they are."
+    ],
+    "passing_verdicts": ["passed"],
+    "fault_statuses": ["MISSING", "ERROR"],
+    "a_passing_verdict_requires_zero_faulted_scanners": true,
+    "expected_verdict_after_fix": "errored",
+    "known_defect": {
+      "_comment": [
+        "Until the exit-code fix lands this replay is EXPECTED TO FAIL, and the",
+        "harness reports it as XFAIL rather than as a red test, so it does not read",
+        "as noise and get muted. When it starts passing, that is the signal the fix",
+        "landed -- the harness reports XPASS and tells you to flip this flag.",
+        "Do not delete the case at that point; flipping the flag keeps it guarding",
+        "against a re-regression."
+      ],
+      "expected_to_fail": true,
+      "tracking": "ASH _compute_exit_code derives the exit code from finding counts only and never reads scanner status; core/unified_metrics.py treats MISSING as passed",
+      "fix_must_key_on": "Iterate per-scanner scanner_results[*].status and treat both ERROR and MISSING as verdict-affecting. NOT validation_summary.*.has_issues, and NOT any summary_stats counter -- see _do_not_key_on_summary_stats_alone and _do_not_key_on_has_issues above",
+      "_do_not_key_on_summary_stats_alone": [
+        "An earlier revision of this field said to key on metadata.summary_stats.missing.",
+        "That is WRONG for ERROR scanners and would pass the case this fixture exists",
+        "to close. ERROR scanners are absent from EVERY summary_stats counter -- not",
+        "failed, not passed, not missing, not skipped -- so a verdict keyed on any of",
+        "them cannot see a scanner that ran and failed.",
+        "",
+        "MEASURED, 4-shard CodePipeline over one fixture, two arms, one variable",
+        "changed (shard 3's two scanners forced into ERROR):",
+        "  arm A (control): merge exit 2  actionable=16 total=16 failed=1 passed=9 missing=0 skipped=0",
+        "  arm B (broken):  merge exit 0  actionable=0  total=0  failed=0 passed=8 missing=0 skipped=0",
+        "Arm A proves the tree genuinely holds 16 critical findings, so arm B's zero",
+        "is a loss rather than an uninteresting empty scan. Count the scanners: arm A",
+        "failed+passed = 10, all accounted for; arm B = 8. The two ERROR scanners are",
+        "in no counter at all, and missing reads 0.",
+        "",
+        "REPRODUCED locally by a different mechanism, confirming it is not specific to",
+        "CodeBuild: UV_CACHE_DIR=/dev/null/<name> makes uv tool installs fail with",
+        "'Not a directory (os error 20)'.",
+        "  scanner_results: bandit=ERROR checkov=ERROR, 8 SKIPPED",
+        "  summary_stats:   passed=0 failed=0 missing=0 skipped=8",
+        "  ash scan default            -> exit 0   (the false green, with ERROR)",
+        "  ash scan --fail-on-incomplete-scanners -> exit 1, naming both ERROR scanners",
+        "A read-only mount gives errno 30 instead; either produces ERROR. Note chmod",
+        "500 does NOT work when the process runs as root, which CodeBuild does -- root",
+        "bypasses ordinary permission bits and the arm silently becomes a no-op, which",
+        "is a measurement trap rather than a result.",
+        "",
+        "What DOES survive is the per-scanner status: scanner_results[*].status still",
+        "reads ERROR in the merged model. So the information exists; it is simply not",
+        "in summary_stats. summary_stats.missing remains a correct signal for MISSING",
+        "and is fine as a corroborating check -- it is just not sufficient.",
+        "",
+        "Why this was nearly missed, and it is the same shape as the has_issues trap:",
+        "every local run available when the earlier guidance was written had MISSING",
+        "scanners and no ERROR ones, so summary_stats.missing agreed with the right",
+        "answer on all the data in hand. Two signals that agree on the run in front of",
+        "you tell you nothing about whether either is sufficient. --selftest has a",
+        "dedicated case with a scanner in ERROR while summary_stats.missing is 0, which",
+        "a summary_stats-keyed checker cannot pass."
+      ]
+    }
+  },
+
+  "cross_case_invariant": {
+    "_comment": [
+      "The single most important assertion. During validation BOTH cases reported",
+      "'passed'. A gate that returns one verdict for all inputs is broken",
+      "regardless of which verdict it picks, and only comparing the two cases",
+      "reveals it. Neither case alone can."
+    ],
+    "verdicts_must_differ": true,
+    "observed_broken_state": {
+      "date": "2026-08-28",
+      "vulnerable_verdict": "passed",
+      "clean_verdict": "passed",
+      "diverged": false,
+      "scanner_table": "bandit MISSING, checkov MISSING, detect-secrets ERROR, opengrep ERROR, semgrep MISSING"
+    }
+  }
+}
