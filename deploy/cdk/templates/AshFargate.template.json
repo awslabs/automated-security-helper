@@ -25,8 +25,8 @@
   "McpIngressCidr": {
    "Type": "String",
    "Default": "",
-   "AllowedPattern": "^$|^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$",
-   "Description": "CIDR allowed to reach the MCP load balancer on port 80. Leave empty and NO ingress rule is created, so the endpoint is reachable from nowhere — the default, and unchanged from before this parameter existed. Set it to the range your MCP clients come from, for example 10.1.0.0/16, or x.x.x.x/32 for one host. A CIDR is required; a bare address is rejected."
+   "AllowedPattern": "^$|^(\\d{1,3}\\.){3}\\d{1,3}/([1-9]|[12]\\d|3[0-2])$",
+   "Description": "CIDR allowed to reach the MCP load balancer on port 80. Leave empty and NO ingress rule is created, so the endpoint is reachable from nowhere — the default, and unchanged from before this parameter existed. Set it to the range your MCP clients come from, for example 10.1.0.0/16, or x.x.x.x/32 for one host. A CIDR is required, and 0.0.0.0/0 is rejected; to grant more broadly, authorize the McpSecurityGroupId output directly."
   },
   "AshBaseConfigYaml": {
    "Type": "String",
@@ -2248,7 +2248,16 @@
     "ToPort": 80
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/McpIngress"
+    "aws:cdk:path": "AshFargate/McpIngress",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "QXdzU29sdXRpb25zLUVDMjMgY2Fubm90IGV2YWx1YXRlIENpZHJJcCBiZWNhdXNlIGl0IGlzIGFuIEZuOjpSZWYgdG8gdGhlIE1jcEluZ3Jlc3NDaWRyIHBhcmFtZXRlciwgc28gaXQgcmVzb2x2ZXMgdG8gYSBub24tcHJpbWl0aXZlLiBUaGUgcnVsZSBkaWQgbm90IHJ1biDigJQgaXQgbmVpdGhlciBwYXNzZWQgbm9yIGZhaWxlZC4gVGhlIHByb3BlcnR5IGl0IGNoZWNrcyBpcyBlbmZvcmNlZCBpbnN0ZWFkIGJ5IHRoYXQgcGFyYW1ldGVyJ3MgQWxsb3dlZFBhdHRlcm4sIHdoaWNoIHJlamVjdHMgYSAvMCBwcmVmaXgsIHNvIGFuIG9wZW4tdG8tdGhlLXdvcmxkIENJRFIgaXMgcmVmdXNlZCBhdCBwYXJhbWV0ZXIgdmFsaWRhdGlvbiByYXRoZXIgdGhhbiByZWFjaGluZyB0aGlzIHJlc291cmNlLiBHcmFudGluZyBtb3JlIGJyb2FkbHkgaXMgZG9uZSBkZWxpYmVyYXRlbHkgYWdhaW5zdCB0aGUgTWNwU2VjdXJpdHlHcm91cElkIG91dHB1dC4=",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
    },
    "Condition": "McpIngressCidrSupplied"
   }

@@ -193,14 +193,28 @@ describe('the MCP endpoint is closed until the adopter opens it', () => {
     // for an update of an already-deployed stack.
     expect(param.Default).toBe('');
 
-    // A bare address silently becoming a /32 nobody intended is the mistake the
-    // pattern exists to stop.
     const pattern = new RegExp(param.AllowedPattern);
     expect(pattern.test('')).toBe(true);
     expect(pattern.test('10.1.0.0/16')).toBe(true);
     expect(pattern.test('10.0.0.5/32')).toBe(true);
+    expect(pattern.test('10.0.0.0/8')).toBe(true);
+
+    // A bare address silently becoming a /32 nobody intended.
     expect(pattern.test('10.0.0.5')).toBe(false);
     expect(pattern.test('not-a-cidr')).toBe(false);
+
+    /*
+     * /0 is every address there is, and this is the assertion that carries real
+     * weight: cdk-nag's AwsSolutions-EC23 exists to catch exactly that, and it
+     * CANNOT run on this resource because CidrIp is an Fn::Ref. The check was moved
+     * into the pattern rather than suppressed away, so if this line ever goes green
+     * on 0.0.0.0/0 the guard is gone entirely and nothing else is looking.
+     */
+    expect(pattern.test('0.0.0.0/0')).toBe(false);
+    expect(pattern.test('10.0.0.0/0')).toBe(false);
+    // A prefix length a plain \d{1,2} bound would have let through.
+    expect(pattern.test('10.0.0.0/99')).toBe(false);
+    expect(pattern.test('10.0.0.0/33')).toBe(false);
   });
 
   test('McpEndpoint does not claim to be reachable, and points at the fix', () => {
