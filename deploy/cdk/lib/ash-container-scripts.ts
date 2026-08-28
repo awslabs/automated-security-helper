@@ -172,6 +172,87 @@ def _run(argv, **kwargs):
     return subprocess.run(argv, capture_output=True, text=True, **kwargs)
 
 
+def _scan_env(workdir):
+    """Environment for the \`ash\` subprocess, undoing two Lambda constraints.
+
+    WHY THIS EXISTS — A MEASURED FAILURE, NOT A PRECAUTION
+    -----------------------------------------------------
+    Lambda requires a container image to run on a READ-ONLY root filesystem with
+    only /tmp writable, and it sets its own PATH. Deployed without this function,
+    a real scan of a three-file repository reported bandit, checkov and semgrep as
+    MISSING, opengrep as ERROR, and — worst of the four — grype as PASSED with
+    zero findings, because ASH's scanner toolchain writes to the root filesystem
+    at scan time:
+
+      /root/.cache/uv/.tmpXXXX               uv's lock (bandit, checkov, semgrep)
+      /root/.local/share/uv/tools/.tmpXXXX   uv's tool dir, same three
+      /root/.cache/opengrep/<ver>/*.bin      opengrep extracts its binary
+      /root/.opengrep                        opengrep state
+      /deps/.grype                           grype's vulnerability database
+
+    Every one of those raised "Read-only file system (os error 30)". The scan
+    finished in 9.9s instead of ~80s and the gate reported "passed", so a
+    pull request could be approved by a gate that had scanned nothing. Redirecting
+    these into /tmp restores all ten scanners and every finding.
+
+    WHY THE uv TOOL DIR IS SYMLINKED RATHER THAN COPIED
+    ---------------------------------------------------
+    uv needs to write a lock INSIDE its tool dir, but the tools themselves are
+    already baked into the image. Pointing UV_TOOL_DIR at an empty /tmp path makes
+    uv reinstall all three from PyPI, which happens to work today only because this
+    function is not attached to a VPC and therefore has internet egress — it fails
+    outright with no network, and would fail in an OFFLINE=YES image. Copying the
+    baked tree instead costs 506 MB of the same ephemeral storage the clone and
+    ASH's output draw on. Symlinking each entry gives uv a writable parent while
+    the tools resolve to the baked copies: no network, no bytes. Verified against
+    the deployed image with the root filesystem read-only and networking disabled.
+
+    Failure modes. If ASH_IMAGE_PATH is absent the current PATH is kept, so a
+    locally-run handler behaves normally. If the baked tool dir is absent, seeding
+    is skipped rather than fatal, and the affected scanners degrade to MISSING as
+    they did before — visibly, in the report. Seeding is idempotent, so a warm
+    invocation re-uses what the cold one linked.
+    """
+    env = dict(os.environ)
+    cache = os.path.join(workdir, "cache")
+    tool_dir = os.path.join(workdir, "uv-tools")
+
+    # HOME last: several tools derive their own paths from it, and /root is not
+    # writable. Everything here is under the per-invocation workdir in /tmp.
+    env["HOME"] = workdir
+    env["XDG_CACHE_HOME"] = cache
+    env["XDG_DATA_HOME"] = os.path.join(workdir, "share")
+    env["UV_CACHE_DIR"] = os.path.join(cache, "uv")
+    env["UV_TOOL_DIR"] = tool_dir
+    env["GRYPE_DB_CACHE_DIR"] = os.path.join(cache, "grype")
+    env["SEMGREP_RULES_CACHE_DIR"] = os.path.join(cache, "semgrep")
+    env["OPENGREP_RULES_CACHE_DIR"] = os.path.join(cache, "opengrep")
+
+    image_path = os.environ.get("ASH_IMAGE_PATH")
+    if image_path:
+        env["PATH"] = image_path
+
+    for path in (cache, tool_dir, env["XDG_DATA_HOME"]):
+        os.makedirs(path, exist_ok=True)
+
+    baked = os.environ.get("ASH_BAKED_UV_TOOL_DIR")
+    if baked and os.path.isdir(baked):
+        for name in os.listdir(baked):
+            target = os.path.join(baked, name)
+            # Directories only. The baked tree also holds uv's own .lock and a
+            # .gitignore, and linking .lock would point uv's lock at a file on the
+            # read-only root filesystem — reintroducing the exact failure this
+            # function exists to prevent, while looking seeded. uv creates its own
+            # lock in the writable directory when none is linked.
+            if not os.path.isdir(target):
+                continue
+            link = os.path.join(tool_dir, name)
+            if not os.path.lexists(link):
+                os.symlink(target, link)
+
+    return env
+
+
 def _scan_summary(output_dir):
     """Prefer ASH's own markdown report; fall back to something truthful."""
     report = pathlib.Path(output_dir) / "reports" / "ash.summary.md"
@@ -237,7 +318,9 @@ def handler(event, context):
     if min_severity:
         argv += ["--min-severity", min_severity]
 
-    scan = _run(argv, cwd=source_dir)
+    # env= is load-bearing: inheriting Lambda's environment unchanged is what made
+    # the scanners fail. See _scan_env.
+    scan = _run(argv, cwd=source_dir, env=_scan_env(workdir))
     verdict, explanation = _verdict(scan.returncode)
 
     summary = _scan_summary(output_dir)
