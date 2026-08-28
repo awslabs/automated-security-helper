@@ -462,39 +462,59 @@ jobs:
           fi
           echo "regenerating with: npm run $script"
 
-          # Delete the generated file first, for the same reason the CDK job
+          # Delete the generated files first, for the same reason the CDK job
           # clears its templates: a generator that stops emitting a file leaves
           # a stale committed copy that is tracked and unmodified, and nothing
           # reports it until it is missing.
-          rm -f buildspec.yml
+          #
+          # buildspec*.yml, not buildspec.yml. One generator run emits several --
+          # the top-level spec, a per-shard spec, and the merge spec that owns the
+          # pass/fail verdict -- and checking only the first would let the other
+          # two drift silently. The glob also covers a sibling added later without
+          # this workflow being edited.
+          rm -f buildspec*.yml
           npm run "$script"
 
+          # buildspec.yml specifically, because that is the name deploy/README.md
+          # documents and the one the glob above is anchored on. A generator that
+          # emitted only its siblings would otherwise look like a success.
           if [ ! -f buildspec.yml ]; then
             echo "::error::npm run $script did not produce deploy/cdk-constructs/buildspec.yml. Nothing was compared, so this gate proved nothing."
+            echo "files matching buildspec*.yml after the run:"
+            find . -maxdepth 1 -name 'buildspec*.yml' -print || true
             exit 1
           fi
+          echo "regenerated: $(find . -maxdepth 1 -name 'buildspec*.yml' -printf '%f ' 2>/dev/null)"
 
-      - name: Check the committed buildspec matches the construct
+      - name: Check the committed buildspecs match the construct
         shell: bash
         run: |
           set -euo pipefail
 
-          GEN_DIR=deploy/cdk-constructs
+          PATHSPEC='deploy/cdk-constructs/buildspec*.yml'
 
-          # Scoped to the generated file rather than the whole package, so an
+          # Scoped to the generated files rather than the whole package, so an
           # unrelated dirty file in the package -- a build artifact npm ci or the
-          # generator dropped -- cannot masquerade as buildspec drift.
-          changed="$(git status --porcelain --untracked-files=all -- "$GEN_DIR/buildspec.yml")"
+          # generator dropped, or the lib/ tree the generator builds first --
+          # cannot masquerade as buildspec drift.
+          #
+          # The pathspec is quoted so git does the glob rather than the shell.
+          # That is what lets it match a generated file that is not in the index
+          # yet: the shell would expand against the working tree and silently
+          # drop a name git has never heard of, which is the whole failure this
+          # gate exists to catch.
+          changed="$(git status --porcelain --untracked-files=all -- "$PATHSPEC")"
           if [ -z "$changed" ]; then
-            echo "Committed buildspec.yml matches what the construct generates."
+            echo "Committed buildspecs match what the construct generates:"
+            git ls-files -- "$PATHSPEC" | sed 's/^/  /'
             exit 0
           fi
 
-          echo "::error::deploy/cdk-constructs/buildspec.yml is out of date. Regenerate it and commit the result: cd deploy/cdk-constructs && npm ci && npm run <generator>"
-          echo "git status --porcelain -- $GEN_DIR/buildspec.yml"
+          echo "::error::The committed buildspecs are out of date. Regenerate them and commit the result: cd deploy/cdk-constructs && npm ci && npm run generate:buildspec"
+          echo "git status --porcelain -- $PATHSPEC"
           echo "$changed"
           echo "::group::diff"
-          git diff -- "$GEN_DIR/buildspec.yml"
+          git diff -- "$PATHSPEC"
           echo "::endgroup::"
           exit 1
 

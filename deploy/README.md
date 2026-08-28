@@ -90,7 +90,12 @@ cost of a file that can go stale against the code that produces it.
 | Artifact | Generated from | Regenerate with |
 | --- | --- | --- |
 | `cdk/templates/<StackName>.template.json` | the CDK app in `cdk/` | `cd deploy/cdk && npm ci && rm -rf cdk.out && npx cdk synth --all --output cdk.out --no-lookups --quiet && find templates -type f -name '*.template.json' -delete && cp cdk.out/*.template.json templates/` |
-| `cdk-constructs/buildspec.yml` | the construct in `cdk-constructs/` | `cd deploy/cdk-constructs && npm ci && npm run generate:buildspec` |
+| `cdk-constructs/buildspec*.yml` | the construct in `cdk-constructs/` | `cd deploy/cdk-constructs && npm ci && npm run generate:buildspec` |
+
+One generator run emits several buildspecs, not one: the top-level spec, the
+per-shard spec, and the merge spec that owns the pass/fail verdict for a sharded
+scan. All of them are checked, so drift confined to a sibling file is caught
+rather than passing because the top-level spec happened not to move.
 
 Neither is edited by hand. `.github/workflows/ash-iac-drift.yml` regenerates both on
 every pull request and fails if the result differs from what is committed, so a stale
