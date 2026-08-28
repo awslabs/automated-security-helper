@@ -700,51 +700,113 @@ jobs:
           fi
           echo "All ${#dirs[@]} Terraform directory(ies) initialized and validated."
 
+      # terraform validate does not evaluate variable validation rules -- a
+      # validation block whose condition is wrong passes it cleanly -- so the
+      # step above says nothing about whether the modules' input contracts work.
+      #
+      # This closes that gap without credentials, which is possible because
+      # Terraform evaluates input variable validation BEFORE it initializes the
+      # provider. Measured with every AWS_* variable unset and
+      # AWS_EC2_METADATA_DISABLED=true: a plan carrying an invalid value fails on
+      # the rule's own error_message, while the same plan with valid values fails
+      # later on "No valid credential sources found" and emits no validation
+      # message at all. The second direction is the one that matters -- it
+      # separates a rule that ran and passed from one that was never reached.
+      #
+      # Runs after the init loop because plan needs the provider schema that init
+      # writes into each module's .terraform/. The script is bash rather than a
+      # .tf directory, so the discovery above cannot find it and it needs naming
+      # explicitly. Invoked through bash rather than executed directly, so a
+      # missing exec bit on the committed file is not a failure mode.
+      - name: Verify the modules' input validation rules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SCRIPT=deploy/terraform/tests/validate-inputs.sh
+
+          if [ ! -f "$SCRIPT" ]; then
+            echo "$SCRIPT is not present on this ref, so the modules' variable validation rules were NOT exercised."
+            echo "terraform validate does not cover them, so nothing in this run checked them."
+            {
+              echo "### Terraform input validation: not checked"
+              echo
+              echo "\`$SCRIPT\` is absent on this ref. \`terraform validate\` does not evaluate"
+              echo "variable validation rules, so no check in this run covered them. This is a"
+              echo "gap, not a pass."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # No credentials are configured on this runner, and the assertion is
+          # that none are needed. Making that explicit rather than incidental
+          # means the script cannot start passing for the wrong reason if a
+          # credential ever leaks into the environment.
+          export AWS_EC2_METADATA_DISABLED=true
+          unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN || true
+
+          bash "$SCRIPT"
+
   # ---------------------------------------------------------------------------
   # cdk-nag, failing on any unsuppressed finding.
   #
-  # cdk-nag runs inside the CDK app's own synth, as an aws-cdk-lib validation
-  # plugin, and this job asserts on the report that synth leaves behind. It does
-  # NOT re-scan the committed templates from the outside, and that is a measured
-  # decision rather than a preference:
+  # cdk-nag runs inside the CDK app's own synth, and this job asserts on what
+  # that synth leaves behind. It does NOT re-scan the committed templates from
+  # the outside, which is a measured decision: cdk-nag 3.x acknowledgements do
+  # not serialize into the emitted CloudFormation, so an external re-scan
+  # re-reports every finding the app legitimately acknowledged with no way to
+  # silence it. A gate nobody can suppress is a gate somebody deletes.
   #
-  #   * cdk-nag 3.x suppressions are "acknowledgements", declared in the app with
-  #     Validations.of(scope).acknowledge(). They do NOT serialize into the
-  #     emitted CloudFormation -- a synthesized template of an app with every
-  #     finding acknowledged contains no trace of the acknowledgement. So an
-  #     external re-scan of a committed template re-reports every finding the app
-  #     legitimately acknowledged, with no way to silence it. A gate nobody can
-  #     suppress is a gate somebody deletes.
-  #   * Running cdk-nag inside synth also means the suppression lives in exactly
-  #     one place -- the construct -- instead of being mirrored into a second
-  #     allowlist that drifts from it.
+  # cdk-nag ships two mutually exclusive registration models and this job accepts
+  # either, because which one to use is the CDK app's call and not this gate's:
   #
-  # What the three states look like, measured on cdk-nag 3.0.2 with the CDK CLI:
+  #   2.x  Aspects.of(scope).add(new AwsSolutionsChecks())
+  #        Suppressions via NagSuppressions.addResourceSuppressions().
+  #   3.x  Validations.of(scope).addPlugins(new AwsSolutionsChecks())
+  #        Suppressions via Validations.of(scope).acknowledge().
+  #        3.x removed visit(), so a 3.x pack cannot be added as an Aspect --
+  #        it fails with "aspectApplication.aspect.visit is not a function".
   #
-  #   plugin registered, finding unacknowledged -> synth exits 1, report lists
-  #                                               the plugin and 1 violation
-  #   plugin registered, all acknowledged       -> synth exits 0, report lists
-  #                                               the plugin and 0 violations
-  #   plugin NOT registered                     -> synth exits 0, report lists
-  #                                               NO plugin and 0 violations
+  # Each model leaves a different fingerprint, which is what makes detecting
+  # them apart possible. Measured on aws-cdk-lib 2.267.0:
   #
-  # The last row is why this job parses the report instead of trusting synth's
-  # exit code. An app that never registers cdk-nag synthesizes cleanly, and a
-  # gate that only checked the exit code would pass unscanned infrastructure
-  # forever. pluginReports naming the pack is the positive control: it appears
-  # even on a clean run, so "scanned and clean" and "never scanned" are
-  # distinguishable. Nothing else in the report distinguishes them.
+  #                                    validation-report     cdk_nag metadata
+  #                                    pluginReports         in the template
+  #   3.x plugin registered            names the pack        absent
+  #   2.x Aspect registered            empty                 present, if the
+  #                                                          app suppresses
+  #                                                          anything
+  #   nothing registered               empty                 absent
   #
-  # Requires of deploy/cdk: depend on cdk-nag and register at least one pack,
-  #   Validations.of(app).addPlugins(new AwsSolutionsChecks())
-  # Keep the aws-cdk CLI and aws-cdk-lib compatible while doing it -- a CLI too
-  # old to read the library's cloud-assembly schema fails synth with a schema
-  # version mismatch, which this job reports as a synth failure.
+  # Rows 2 and 3 are why this job cannot rely on synth's exit code alone. In both
+  # of them synth exits 0 on a clean app, so an app that quietly stopped
+  # registering cdk-nag looks exactly like one that ran and found nothing. Each
+  # model therefore gets a positive control:
   #
-  # ASH's own Python cdk-nag wrapper is deliberately not used here. On the
-  # versions this repo pins it raises before producing a finding, and its caller
-  # swallows that at trace level, so it yields zero findings for every template.
-  # See the note in the report accompanying this workflow.
+  #   plugin model: the validation report naming the pack. It appears even on a
+  #     clean run, so "scanned and clean" and "never scanned" are distinguishable.
+  #   Aspect model: a canary. A deliberately non-compliant stack is synthesized
+  #     against the app's OWN installed cdk-nag, and must fail. That proves the
+  #     installed pack still produces findings, so a green run means something.
+  #     Plus at least one of: cdk_nag metadata in a committed template, which is
+  #     positive proof the pack participated in the synth, or a registration in
+  #     the app source. The metadata is the stronger signal but only exists once
+  #     the app suppresses something, so the source check is the fallback.
+  #
+  # The source check is static and a determined person could satisfy it with a
+  # comment. It is not load-bearing on its own; the canary and synth's exit code
+  # are the behavioral parts.
+  #
+  # Requires of deploy/cdk: depend on cdk-nag and register at least one pack.
+  # Keep the aws-cdk CLI and aws-cdk-lib compatible -- a CLI too old to read the
+  # library's cloud-assembly schema fails synth with a schema version mismatch,
+  # which this job reports as a synth failure.
+  #
+  # ASH's own Python cdk-nag wrapper is deliberately not used here. Against the
+  # cdk-nag 3.0.2 pinned by this repo's [cdk] extra it raises before producing a
+  # finding, and its caller swallows that at trace level, so it yields zero
+  # findings for every template. That is a separate defect from anything in
+  # deploy/cdk, which pins its own cdk-nag through npm.
   # ---------------------------------------------------------------------------
   cdk-nag:
     name: cdk-nag
@@ -760,15 +822,13 @@ jobs:
       # setup-node's npm cache fails with "Some specified paths were not
       # resolved" when the lockfile is missing, which reads like a CI problem
       # rather than a missing file. This names the file and the reason before
-      # that happens. The lockfile is not optional here: these comparisons are
-      # byte-exact, and an unpinned install moves the Analytics string in
-      # AWS::CDK::Metadata on its own.
+      # that happens.
       - name: Require a committed lockfile
         shell: bash
         run: |
           set -euo pipefail
           if [ ! -f deploy/cdk/package-lock.json ]; then
-            echo "::error file=deploy/cdk/package-lock.json::deploy/cdk/package-lock.json is missing. Run 'npm install' in deploy/cdk and commit the lockfile; this gate installs with 'npm ci' so the toolchain is pinned and the generated output is reproducible."
+            echo "::error file=deploy/cdk/package-lock.json::deploy/cdk/package-lock.json is missing. Run 'npm install' in deploy/cdk and commit the lockfile; this gate installs with 'npm ci' so the toolchain is pinned."
             exit 1
           fi
           echo "deploy/cdk/package-lock.json present"
@@ -783,13 +843,13 @@ jobs:
         shell: bash
         run: npm ci --prefix deploy/cdk
 
-      - name: Synthesize with the app's validation plugins
+      - name: Synthesize with the app's own cdk-nag registration
         shell: bash
         working-directory: deploy/cdk
         run: |
           # Note the absence of -e: synth exits non-zero when cdk-nag reports an
-          # unacknowledged finding, and that status has to reach the next step
-          # rather than end this one. It is captured to a file instead of being
+          # unsuppressed finding, and that status has to reach the assert step
+          # rather than end this one. It is written to a file instead of being
           # discarded, which is the difference between a gate and a coin flip.
           set -uo pipefail
           rm -rf cdk.out
@@ -800,6 +860,79 @@ jobs:
           echo "$synth_rc" > "${RUNNER_TEMP}/cdk-nag-synth-rc"
           echo "cdk synth exit code: $synth_rc"
 
+      # The Aspect model's positive control. A deliberately non-compliant bucket,
+      # synthesized against the app's OWN node_modules, must produce findings. If
+      # it does not, the installed cdk-nag is not working and a clean run of the
+      # real app proves nothing.
+      #
+      # Modules are required by absolute path rather than by name: this script
+      # lives outside the app, and node resolves bare requires from the script's
+      # own directory, so a plain require('aws-cdk-lib') fails here. Getting that
+      # wrong makes the canary fail for the wrong reason and look like a working
+      # control -- its own no-aspect control below is what rules that out.
+      - name: Verify the installed cdk-nag still produces findings
+        shell: bash
+        working-directory: deploy/cdk
+        run: |
+          set -uo pipefail
+
+          if [ ! -d node_modules/cdk-nag ]; then
+            echo "cdk-nag is not installed in deploy/cdk/node_modules; the assert step reports this."
+            echo "unavailable" > "${RUNNER_TEMP}/cdk-nag-canary"
+            exit 0
+          fi
+
+          cat > "${RUNNER_TEMP}/canary.js" <<'CANARY'
+          const M = process.env.CANARY_MODULES;
+          const { App, Aspects, Stack } = require(M + '/aws-cdk-lib');
+          const s3 = require(M + '/aws-cdk-lib/aws-s3');
+
+          const app = new App();
+          class CanaryStack extends Stack {
+            constructor(scope, id) {
+              super(scope, id);
+              // A bare bucket is non-compliant for AwsSolutions-S1 and -S10.
+              new s3.CfnBucket(this, 'DeliberatelyNonCompliantBucket');
+            }
+          }
+          new CanaryStack(app, 'AshCdkNagCanary');
+          if (process.env.CANARY_APPLY_PACK === 'yes') {
+            const { AwsSolutionsChecks } = require(M + '/cdk-nag');
+            Aspects.of(app).add(new AwsSolutionsChecks());
+          }
+          CANARY
+
+          export CANARY_MODULES="${PWD}/node_modules"
+
+          set +e
+          CANARY_APPLY_PACK=yes npx cdk synth --all --app "node ${RUNNER_TEMP}/canary.js" \
+            --output "${RUNNER_TEMP}/canary-out-pack" --no-lookups --quiet > "${RUNNER_TEMP}/canary-pack.log" 2>&1
+          with_pack=$?
+          CANARY_APPLY_PACK=no npx cdk synth --all --app "node ${RUNNER_TEMP}/canary.js" \
+            --output "${RUNNER_TEMP}/canary-out-nopack" --no-lookups --quiet > "${RUNNER_TEMP}/canary-nopack.log" 2>&1
+          without_pack=$?
+          set -e
+
+          echo "canary with the pack applied:  exit $with_pack (expected non-zero)"
+          echo "canary with no pack applied:   exit $without_pack (expected zero)"
+
+          # The second run is the canary's own control. Without it, a canary that
+          # failed for an unrelated reason -- a module it cannot resolve, a broken
+          # CLI -- would look like a pack that works.
+          if [ "$with_pack" -ne 0 ] && [ "$without_pack" -eq 0 ]; then
+            echo "discriminates" > "${RUNNER_TEMP}/cdk-nag-canary"
+            echo "The installed cdk-nag produces findings, and the same stack without it does not."
+            grep -oE 'AwsSolutions-[A-Za-z0-9]+' "${RUNNER_TEMP}/canary-pack.log" | sort -u | head -5 || true
+          else
+            echo "broken" > "${RUNNER_TEMP}/cdk-nag-canary"
+            echo "::group::canary output, pack applied"
+            cat "${RUNNER_TEMP}/canary-pack.log"
+            echo "::endgroup::"
+            echo "::group::canary output, no pack"
+            cat "${RUNNER_TEMP}/canary-nopack.log"
+            echo "::endgroup::"
+          fi
+
       - name: Assert cdk-nag ran and reported no unsuppressed finding
         shell: bash
         run: |
@@ -807,99 +940,171 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import re
           import sys
           from pathlib import Path
 
-          REPORT = Path("deploy/cdk/cdk.out/validation-report.json")
-          synth_rc = int(Path(os.environ["RUNNER_TEMP"], "cdk-nag-synth-rc").read_text().strip())
+          APP = Path("deploy/cdk")
+          REPORT = APP / "cdk.out" / "validation-report.json"
+          TEMPLATES = APP / "templates"
+          runner_temp = Path(os.environ["RUNNER_TEMP"])
+          synth_rc = int((runner_temp / "cdk-nag-synth-rc").read_text().strip())
+          canary = (runner_temp / "cdk-nag-canary").read_text().strip()
 
-          # No report means no validation plugin ever ran -- not that the
-          # templates are clean. Inferring "clean" from a missing measurement is
-          # the whole failure mode this job is built to avoid.
-          if not REPORT.exists():
-              print(
-                  f"::error::{REPORT} was not written, so no validation plugin ran and "
-                  "nothing was scanned. Register cdk-nag in the CDK app with "
-                  "Validations.of(app).addPlugins(new AwsSolutionsChecks())."
-              )
+          def fail(message: str) -> None:
+              print(f"::error::{message}")
               sys.exit(1)
 
-          report = json.loads(REPORT.read_text())
-          plugin_reports = report.get("pluginReports") or []
-          plugin_names = [p.get("pluginName") for p in plugin_reports]
+          # --- which registration model, if any, is in play -------------------
+          plugin_names = []
+          if REPORT.exists():
+              report = json.loads(REPORT.read_text())
+              for plugin in report.get("pluginReports") or []:
+                  plugin_names.append(plugin.get("pluginName"))
+          plugin_names = [n for n in plugin_names if n]
 
-          # The positive control. A clean scan still names its plugin here, so an
-          # empty list can only mean the app registered none -- which synth
-          # reports as success, with every template unscanned.
-          if not plugin_names:
-              print(
-                  "::error::The validation report names no plugin, so cdk-nag never ran and "
-                  "every template went unscanned. synth exits 0 in this state, which is why "
-                  "its exit code alone cannot be trusted. Register cdk-nag in the CDK app with "
-                  "Validations.of(app).addPlugins(new AwsSolutionsChecks())."
-              )
-              sys.exit(1)
+          package_json = json.loads((APP / "package.json").read_text())
+          declared = {
+              **(package_json.get("dependencies") or {}),
+              **(package_json.get("devDependencies") or {}),
+          }
+          cdk_nag_version = declared.get("cdk-nag")
 
-          # cdk-nag 3.0.2 leaves violatingResources empty in the JSON report even
-          # though it names the construct path on the console, so the per-finding
-          # line below often has no resource to attribute. The rule id and the
-          # description are always present, which is what points a developer at
-          # the right construct.
-          violations = []
-          for plugin in plugin_reports:
-              for violation in plugin.get("violations") or []:
-                  resources = [
-                      r.get("resourceLogicalId") or r.get("constructPath") or "?"
-                      for r in violation.get("violatingResources") or []
-                  ]
-                  violations.append(
-                      (
-                          plugin.get("pluginName"),
-                          violation.get("ruleName"),
-                          violation.get("severity"),
-                          violation.get("description"),
-                          resources,
+          # ------------------------------- 3.x plugin model -------------------
+          if plugin_names:
+              print(f"registration model: validation plugin (cdk-nag {cdk_nag_version or 'unpinned'})")
+              print(f"validation plugins that ran: {', '.join(plugin_names)}")
+
+              violations = []
+              report = json.loads(REPORT.read_text())
+              for plugin in report.get("pluginReports") or []:
+                  for violation in plugin.get("violations") or []:
+                      # cdk-nag leaves violatingResources empty in the JSON report
+                      # even though it names the construct path on the console, so
+                      # a finding often has no resource to attribute. The rule id
+                      # and description are always there.
+                      resources = [
+                          r.get("resourceLogicalId") or r.get("constructPath") or "?"
+                          for r in violation.get("violatingResources") or []
+                      ]
+                      violations.append(
+                          (plugin.get("pluginName"), violation.get("ruleName"),
+                           violation.get("severity"), violation.get("description"),
+                           resources)
                       )
-                  )
 
-          print(f"validation plugins that ran: {', '.join(str(n) for n in plugin_names)}")
-          print(f"unsuppressed violations: {len(violations)}")
-
-          if violations:
-              print(f"::error::cdk-nag reported {len(violations)} unsuppressed finding(s).")
-              for plugin_name, rule, severity, description, resources in violations:
-                  where = ", ".join(resources) if resources else "stack"
+              if violations:
+                  print(f"::error::cdk-nag reported {len(violations)} unsuppressed finding(s).")
+                  for name, rule, severity, description, resources in violations:
+                      where = ", ".join(resources) if resources else "stack"
+                      print(f"::error title={rule}::[{severity}] {name} {rule} on {where}: {description}")
                   print(
-                      f"::error title={rule}::[{severity}] {plugin_name} {rule} on {where}: {description}"
+                      "Fix the resource, or acknowledge the rule in the construct with a reason: "
+                      "Validations.of(scope).acknowledge({ id: 'AwsSolutions::<RuleId>', reason: '...' })."
                   )
-              print(
-                  "Fix the resource, or acknowledge the rule in the construct with a reason: "
-                  "Validations.of(scope).acknowledge({ id: 'AwsSolutions::<RuleId>', reason: '...' }). "
-                  "An acknowledged rule is not reported and does not fail this gate."
-              )
-              sys.exit(1)
+                  sys.exit(1)
 
-          # Zero violations and a named plugin means the scan really ran and found
-          # nothing. Any remaining non-zero synth status is a different failure --
-          # a schema mismatch between the CLI and aws-cdk-lib, a broken app -- and
-          # must not be reported as a clean cdk-nag run.
+              if synth_rc != 0:
+                  fail(
+                      f"cdk synth exited {synth_rc} while the validation report shows no violation, "
+                      "so synth failed for some reason other than a cdk-nag finding. Read the synth log."
+                  )
+              print("cdk-nag ran as a validation plugin and reported no unsuppressed findings.")
+              sys.exit(0)
+
+          # ------------------------------- 2.x Aspect model -------------------
+          if not cdk_nag_version:
+              fail(
+                  "deploy/cdk/package.json declares no cdk-nag dependency and the validation "
+                  "report names no plugin, so nothing scanned these templates. Add cdk-nag and "
+                  "register a pack, either Aspects.of(app).add(new AwsSolutionsChecks()) for 2.x "
+                  "or Validations.of(app).addPlugins(new AwsSolutionsChecks()) for 3.x."
+              )
+
+          print(f"registration model: Aspect (cdk-nag {cdk_nag_version})")
+
+          if canary == "unavailable":
+              fail(
+                  f"deploy/cdk/package.json declares cdk-nag {cdk_nag_version} but it is not "
+                  "installed, so the canary could not run and nothing here proves the templates "
+                  "were scanned."
+              )
+          if canary != "discriminates":
+              fail(
+                  "The canary did not discriminate: a deliberately non-compliant stack "
+                  "synthesized against this app's own cdk-nag did not produce findings, or the "
+                  "same stack without the pack also failed. Either way the installed cdk-nag is "
+                  "not working, so a clean run of the real app proves nothing. See the canary step."
+              )
+          print("canary: the installed cdk-nag produces findings on a non-compliant stack.")
+
+          # Positive proof the pack participated in the app's synth: 2.x
+          # suppressions serialize into the template as cdk_nag metadata. Only
+          # present once the app suppresses something, hence the source fallback.
+          metadata_templates = []
+          if TEMPLATES.is_dir():
+              for template in sorted(TEMPLATES.rglob("*.template.json")):
+                  if "cdk_nag" in template.read_text():
+                      metadata_templates.append(template.name)
+
+          # Static fallback. Three co-occurring signals rather than one, but still
+          # static -- a comment could satisfy it. The canary above and synth's
+          # exit code are what actually bind.
+          sources = [
+              p for p in APP.rglob("*")
+              if p.is_file()
+              and p.suffix in {".ts", ".js", ".mjs", ".cjs"}
+              and "node_modules" not in p.parts
+              and "cdk.out" not in p.parts
+              and "dist" not in p.parts
+          ]
+          pack = re.compile(r"new\s+(AwsSolutions|HIPAASecurity|NIST80053R4|NIST80053R5|PCIDSS321)Checks\s*\(")
+          registered = []
+          for source in sources:
+              text = source.read_text(errors="replace")
+              if "cdk-nag" in text and pack.search(text) and "Aspects.of" in text:
+                  registered.append(str(source))
+
+          if metadata_templates:
+              print(f"cdk_nag metadata present in committed template(s): {', '.join(metadata_templates)}")
+          elif registered:
+              print(f"cdk-nag pack registered as an Aspect in: {', '.join(registered)}")
+              print(
+                  "note: no committed template carries cdk_nag metadata, which is expected only "
+                  "while the app suppresses nothing. This check is static; the canary above is "
+                  "the behavioral one."
+              )
+          else:
+              fail(
+                  f"deploy/cdk depends on cdk-nag {cdk_nag_version}, but no committed template "
+                  "carries cdk_nag metadata and no app source both constructs a pack and calls "
+                  "Aspects.of, so nothing indicates the pack is registered. An unregistered pack "
+                  "makes synth exit 0 with every template unscanned."
+              )
+
+          # In the Aspect model an unsuppressed error-level finding makes synth
+          # exit non-zero -- measured -- so with the registration established a
+          # zero exit is the finding verdict.
           if synth_rc != 0:
-              print(
-                  f"::error::cdk synth exited {synth_rc} while the validation report shows no "
-                  "violation, so synth failed for some reason other than a cdk-nag finding. "
-                  "Read the synth step's log above."
+              fail(
+                  f"cdk synth exited {synth_rc}. In the Aspect model that is how an unsuppressed "
+                  "cdk-nag finding surfaces, so read the synth step's log for the rule id. Fix the "
+                  "resource, or suppress it with a reason via "
+                  "NagSuppressions.addResourceSuppressions(scope, [{ id, reason }])."
               )
-              sys.exit(1)
 
-          print("cdk-nag ran and reported no unsuppressed findings.")
+          print("cdk-nag ran as an Aspect and synth reported no unsuppressed findings.")
           PY
 
-      - name: Collect the validation report
+      - name: Collect the validation report and canary output
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: cdk-nag-validation-report
-          path: deploy/cdk/cdk.out/validation-report.json
+          name: cdk-nag-evidence
+          path: |
+            deploy/cdk/cdk.out/validation-report.json
+            ${{ runner.temp }}/canary-pack.log
+            ${{ runner.temp }}/canary-nopack.log
           retention-days: 7
           if-no-files-found: warn
   # ---------------------------------------------------------------------------
