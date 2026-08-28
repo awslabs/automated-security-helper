@@ -28,6 +28,25 @@ phases:
         : "$RESULTS_BUCKET"
         : "$RESULTS_PREFIX"
         : "$BLOCKING_SEVERITIES"
+
+        # Refuse to run against zero shards. The Terraform variable validates
+        # shard_count >= 1, but SHARD_COUNT arrives here as an environment
+        # variable and can be overridden at the project or action level. With a
+        # count of zero the marker loop below would check nothing, `ash merge`
+        # would receive no --results at all, and the verdict step would report a
+        # clean scan for a scan that never ran.
+        case "$SHARD_COUNT" in
+          ''|*[!0-9]*)
+            echo "SHARD_COUNT=$SHARD_COUNT is not a non-negative integer" >&2
+            exit 1
+            ;;
+        esac
+        if [ "$SHARD_COUNT" -lt 1 ]; then
+          echo "SHARD_COUNT=$SHARD_COUNT: refusing to merge zero shards." >&2
+          echo "Reporting a verdict over no results would look identical to a clean scan." >&2
+          exit 1
+        fi
+
         echo "Merging $SHARD_COUNT shard(s) for execution $PIPELINE_EXECUTION_ID"
       - |
         set -eu

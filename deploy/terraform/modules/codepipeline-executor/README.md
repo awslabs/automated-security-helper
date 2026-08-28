@@ -51,6 +51,14 @@ requires one marker per shard and fails loudly if any is missing. Without that
 check, a shard whose upload never landed would simply be absent, and a verdict
 over some of the shards would look identical to a verdict over all of them.
 
+It **refuses to run on zero shards** as well. `shard_count` is validated at
+`>= 1` in Terraform, but `SHARD_COUNT` reaches the buildspec as an environment
+variable and can be overridden at the project or action level. At zero the marker
+loop would check nothing, `ash merge` would receive no `--results` at all, and the
+verdict step would report a clean scan for a scan that never ran. The merge
+buildspec therefore validates the value is a positive integer before doing
+anything else.
+
 The verdict itself is computed by a small script from the merged results file,
 not from `ash merge`'s exit code. The shard flag contract fixes `--shard-index`,
 `--shard-count`, `--results`, and `--output-dir`; it does not specify a gating
