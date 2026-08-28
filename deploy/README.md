@@ -37,16 +37,22 @@ pull. See [Trust and the container image](#trust-and-the-container-image).
 
 ## Shared parameters
 
-Identical across the CDK stacks and the Terraform modules. The CDK parameter names
-are given here; the Terraform variables are the same names in snake case, so
-`AshOfflineMode` is `ash_offline_mode`.
+The CDK parameter names are given here. Terraform uses the same names in snake
+case, so `AshOfflineMode` is `ash_offline_mode` — with one spelling exception and
+one structural one, both of which will cost you a failed plan if you guess:
+
+- `CodeCommitRepositoryArn` is `codecommit_repository_arn`, not
+  `code_commit_repository_arn`. CodeCommit is one word in AWS's own naming, so
+  splitting it mechanically produces a variable that does not exist.
+- Three parameters are not accepted by the four target modules at all. See
+  [Where the Terraform surface differs](#where-the-terraform-surface-differs).
 
 | Parameter | Applies to | Meaning |
 | --- | --- | --- |
 | `AshOfflineMode` | all | Run ASH with no network egress at scan time. Scanner vulnerability databases and rulesets are baked into the image at build time instead of fetched per scan. Trades image size and rebuild frequency for a scan that cannot fail on a network problem and cannot reach out from inside your account. |
-| `AshBaseConfigYaml` | all | The contents of the `.ash.yaml` the deployment scans with, as a string, so the deployed configuration is part of the stack rather than something baked into the image. A repository's own `.ash.yaml` still applies on top of it. |
-| `AshVersion` | all | The ASH version the image is built from. Pin it, so a rebuild reproduces the same scanner set rather than silently moving to whatever is newest. |
-| `RebuildSchedule` | all | How often the image is rebuilt. An image built once and never rebuilt ages, and the scanners inside it age with it — the tradeoff called out in the trust note below. Offline deployments need this most, because their vulnerability databases are only as fresh as the last build. |
+| `AshBaseConfigYaml` | image build | The contents of the `.ash.yaml` the deployment scans with, as a string, so the deployed configuration is part of the stack rather than something baked into the image. A repository's own `.ash.yaml` still applies on top of it. |
+| `AshVersion` | image build | The ASH version the image is built from. Pin it, so a rebuild reproduces the same scanner set rather than silently moving to whatever is newest. |
+| `RebuildSchedule` | image build | How often the image is rebuilt. An image built once and never rebuilt ages, and the scanners inside it age with it — the tradeoff called out in the trust note below. Offline deployments need this most, because their vulnerability databases are only as fresh as the last build. |
 | `McpStatelessHttp` | MCP-serving targets | Whether the MCP server runs stateless. Defaults to true on AgentCore, and that default is not cosmetic — see [Why `McpStatelessHttp` defaults to true on AgentCore](#why-mcpstatelesshttp-defaults-to-true-on-agentcore). |
 | `McpAuthHeaderName` | MCP-serving targets | The header the MCP server requires on every request. Names the header only; the value is separate so the two can be rotated independently. |
 | `McpAuthHeaderValue` | MCP-serving targets | The expected value of that header. Supply it from a secret rather than a literal — it is a bearer credential, and a stack parameter is visible to anyone who can describe the stack. |
@@ -54,6 +60,25 @@ are given here; the Terraform variables are the same names in snake case, so
 | `McpAllowedHost` | MCP-serving targets | The `Host` value the server accepts, which is what stops a request that arrives with someone else's `Host` header from being served. |
 | `ShardCount` | CodePipeline distributed executor | How many parallel shards one logical scan is split into. Higher is faster up to the point where per-shard startup dominates; a shard still pays image pull and scanner initialization before it scans anything. |
 | `CodeCommitRepositoryArn` | Lambda CodeCommit gate | The repository the gate watches. |
+
+## Where the Terraform surface differs
+
+`AshBaseConfigYaml`, `AshVersion`, and `RebuildSchedule` take effect where the
+image is built, so in Terraform they are variables on the `ash-image-pipeline`
+module and the four target modules do not accept them. Passing
+`ash_base_config_yaml` to the fargate or agentcore module will not plan.
+
+The targets consume the base config indirectly, through
+`base_config_ssm_parameter_name` and `base_config_ssm_parameter_arn`. The value is
+a whole `.ash.yaml` document, so it is stored in an SSM parameter at the
+image-build layer and the container entrypoint materializes it to
+`.ash/.ash.yaml` at startup. It travels that way because AgentCore Runtime
+exposes only a flat environment map, which a real configuration file does not fit
+into.
+
+The full per-module variable matrix is in `terraform/README.md` under "Variable
+contract". Where this table and that one disagree, that one is authoritative for
+Terraform.
 
 ## Why `McpStatelessHttp` defaults to true on AgentCore
 
@@ -144,3 +169,9 @@ the template is not the place to look for them.
 - `McpAuthHeaderValue` is a single shared credential. It authenticates the caller as
   "someone who holds the header value" and nothing more, so it does not distinguish
   between agents and it does not expire on its own.
+- The CI gate's `terraform validate` does not evaluate variable validation rules.
+  A `validation` block whose condition is wrong — including a cross-variable rule
+  that should reject its input — passes `validate` and only errors at plan time.
+  So a green Terraform gate means the configuration parses and its references
+  resolve; it does not mean the input contracts work. Nothing in CI covers that,
+  because `plan` needs AWS credentials and this gate deliberately has none.
