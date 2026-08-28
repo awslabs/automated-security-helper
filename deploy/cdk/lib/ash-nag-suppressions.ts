@@ -132,6 +132,36 @@ export function suppressUnevaluableRules(scope: IConstruct, ruleIds: string[]): 
 }
 
 /**
+ * `AwsSolutions-EC23` on the MCP ingress rule, whose CIDR is a parameter.
+ *
+ * Separate from `suppressUnevaluableRules` on purpose: that helper's reason names
+ * ECR image URIs and pseudo-parameter ARNs, and reusing it here would attach a
+ * false explanation to a real gap.
+ *
+ * EC23 exists to catch a security group opened to `0.0.0.0/0`. It cannot run on
+ * this rule, because `CidrIp` is an `Fn::Ref` to `McpIngressCidr` and the rule
+ * reports a validation failure rather than a verdict. What makes suppressing it
+ * honest is that the constraint has not been dropped — `mcpIngressCidr` rejects a
+ * `/0` prefix at parameter validation, which is where a deploy-time value is
+ * actually available. So the check moved rather than disappeared.
+ */
+export function suppressParameterizedIngressRule(scope: IConstruct): void {
+  NagSuppressions.addResourceSuppressions(scope, [
+    {
+      id: 'CdkNagValidationFailure',
+      reason:
+        'AwsSolutions-EC23 cannot evaluate CidrIp because it is an Fn::Ref to the ' +
+        'McpIngressCidr parameter, so it resolves to a non-primitive. The rule did not ' +
+        'run — it neither passed nor failed. The property it checks is enforced instead ' +
+        'by that parameter\'s AllowedPattern, which rejects a /0 prefix, so an ' +
+        'open-to-the-world CIDR is refused at parameter validation rather than reaching ' +
+        'this resource. Granting more broadly is done deliberately against the ' +
+        'McpSecurityGroupId output.',
+    },
+  ]);
+}
+
+/**
  * The Secrets Manager secret that holds the MCP shared secret.
  *
  * Rotation is not merely unconfigured; it would be actively wrong here. ASH reads

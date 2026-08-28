@@ -418,21 +418,34 @@ export function mcpAllowedHost(scope: Stack): CfnParameter {
  * CONTRACT NOTE: this is a new name in the shared parameter surface, so the
  * Terraform mirror under `deploy/terraform/` needs the same one to stay in step.
  *
- * The pattern permits only a CIDR, not a bare address, so `10.0.0.5` is rejected
- * at parameter validation rather than silently becoming a /32 nobody intended.
- * Use `x.x.x.x/32` to admit a single host.
+ * WHAT THE PATTERN ENFORCES, AND WHY IT ENFORCES IT HERE
+ * ----------------------------------------------------
+ * - A CIDR, not a bare address. `10.0.0.5` is rejected rather than silently
+ *   becoming a `/32` nobody intended; write `10.0.0.5/32` to mean one host.
+ * - A prefix length of 1 to 32. That rejects `/0`, which is every address there
+ *   is, and also rejects nonsense like `/99` that a `\d{1,2}` bound would accept.
+ *
+ * The `/0` rule is doing a specific job. cdk-nag's `AwsSolutions-EC23` exists to
+ * catch a security group opened to `0.0.0.0/0`, and it CANNOT run here: the CIDR
+ * is an `Fn::Ref` to this parameter, so the rule resolves to a non-primitive and
+ * reports a validation failure instead of a verdict. Rather than suppress the
+ * check and hope, the constraint it wanted is enforced at parameter validation,
+ * where a deploy-time value is actually available. An adopter who genuinely wants
+ * a wider grant authorizes the `McpSecurityGroupId` output directly, which is
+ * documented and deliberate rather than a typo in a template parameter.
  */
 export function mcpIngressCidr(scope: Stack): CfnParameter {
   return new CfnParameter(scope, ASH_PARAMETER_NAMES.mcpIngressCidr, {
     type: 'String',
     default: '',
-    allowedPattern: '^$|^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$',
+    allowedPattern: '^$|^(\\d{1,3}\\.){3}\\d{1,3}/([1-9]|[12]\\d|3[0-2])$',
     description:
       'CIDR allowed to reach the MCP load balancer on port 80. Leave empty and NO ' +
       'ingress rule is created, so the endpoint is reachable from nowhere — the ' +
       'default, and unchanged from before this parameter existed. Set it to the range ' +
       'your MCP clients come from, for example 10.1.0.0/16, or x.x.x.x/32 for one ' +
-      'host. A CIDR is required; a bare address is rejected.',
+      'host. A CIDR is required, and 0.0.0.0/0 is rejected; to grant more broadly, ' +
+      'authorize the McpSecurityGroupId output directly.',
   });
 }
 

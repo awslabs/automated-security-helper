@@ -64,6 +64,7 @@ import { AshImageBuild } from './ash-image-build';
 import {
   suppressCodeBuildRoleWildcards,
   suppressLogBucketSelfLogging,
+  suppressParameterizedIngressRule,
   suppressSecretRotation,
   suppressTaskDefinitionEnvironment,
 } from './ash-nag-suppressions';
@@ -347,6 +348,7 @@ export class AshFargateStack extends Stack {
       description: 'MCP clients allowed by McpIngressCidr.',
     });
     ingressRule.cfnOptions.condition = ingressSupplied;
+    suppressParameterizedIngressRule(ingressRule);
 
     listener.addTargets('Mcp', {
       port: MCP_PORT,
